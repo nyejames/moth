@@ -1,0 +1,18 @@
+-- A loop body that redefines its map alias before mutating the map. The alias reaching the
+-- mutation is dead on every path, including the one that arrives over the back-edge.
+
+accumulate |keys {String}| -> {String = Int}, Error!:
+    totals ~{String = Int} = {}
+    loop keys |key|:
+        current = totals.get(key) catch then 0
+        next = current + 1
+        ~totals.set(key, next)!
+    ;
+    return totals
+;
+
+result = accumulate({"a", "b", "a"}) catch then {}
+distinct_keys = result.length
+count_for_a = result.get("a") catch then 0
+
+[: loop_rebound_alias_allows_source_mutation distinct=[distinct_keys] a=[count_for_a]]

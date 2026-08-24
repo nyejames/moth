@@ -29,6 +29,47 @@ use crate::compiler_frontend::public_call_summary::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// Per-block liveness facts for one function.
+///
+/// WHAT: the locals a block reads before redefining them, and the locals it redefines outright.
+/// WHY: future-use propagation is a liveness problem. Without the definition kill it collapses into
+/// "used anywhere reachable from here", which keeps a rebound alias active across a loop back-edge
+/// even though every path redefines it before the next read.
+struct BlockLiveness {
+    upward_exposed_reads: RootSet,
+    definitions: RootSet,
+}
+
+impl BlockLiveness {
+    fn new(local_count: usize) -> Self {
+        Self {
+            upward_exposed_reads: RootSet::empty(local_count),
+            definitions: RootSet::empty(local_count),
+        }
+    }
+
+    fn record_read(&mut self, local_index: usize) {
+        // A read that follows a definition in the same block observes the new value, so it says
+        // nothing about whether the value arriving at block entry is still needed.
+        if !self.definitions.contains(local_index) {
+            self.upward_exposed_reads.insert(local_index);
+        }
+    }
+
+    fn record_definition(&mut self, local_index: usize) {
+        self.definitions.insert(local_index);
+    }
+}
+
+/// Selects how a block combines the liveness facts of its successors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuccessorCombine {
+    /// MAY future use: a root survives when any successor still reads it.
+    AnyPath,
+    /// MUST future use: a root survives only when every successor still reads it.
+    EveryPath,
+}
+
 /// Immutable inputs for projecting one callee return-alias summary through a caller.
 struct AliasProjectionContext<'a> {
     function: &'a HirFunction,
@@ -1496,11 +1537,13 @@ impl<'a> BorrowChecker<'a> {
         let mut terminator_order_by_block = FxHashMap::default();
         let mut block_successors = FxHashMap::default();
         let mut block_local_max_use_order = FxHashMap::default();
+        let mut block_liveness = FxHashMap::default();
         let mut next_order_key = 0i32;
 
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             let mut max_use_order = vec![-1; local_ids.len()];
+            let mut liveness = BlockLiveness::new(local_ids.len());
 
             for statement in &block.statements {
                 // WHAT: assign a deterministic ordinal key for this statement.
@@ -1526,6 +1569,8 @@ impl<'a> BorrowChecker<'a> {
                         max_use_order[index] = max_use_order[index].max(order_key);
                     }
                 });
+
+                record_statement_liveness(statement, &local_index_by_id, &mut liveness);
             }
 
             for (target_index, source_roots) in
@@ -1553,9 +1598,22 @@ impl<'a> BorrowChecker<'a> {
                 if let Some(index) = local_index_by_id.get(&local_id).copied() {
                     local_last_use_order[index] = local_last_use_order[index].max(terminator_order);
                     max_use_order[index] = max_use_order[index].max(terminator_order);
+                    liveness.record_read(index);
                 }
             });
 
+            // A read of a direct alias carrier is a read of the roots it carries. Union the source
+            // roots in unconditionally: an in-block definition of a source root cannot be proven to
+            // precede the carrier read here, and over-approximating liveness is the safe direction.
+            for (carrier_index, source_roots) in
+                compiler_alias_source_roots_by_local.iter().enumerate()
+            {
+                if liveness.upward_exposed_reads.contains(carrier_index) {
+                    liveness.upward_exposed_reads.union_with(source_roots);
+                }
+            }
+
+            block_liveness.insert(*block_id, liveness);
             block_local_max_use_order.insert(*block_id, max_use_order);
             block_successors.insert(
                 *block_id,
@@ -1570,7 +1628,7 @@ impl<'a> BorrowChecker<'a> {
             local_ids.len(),
             reachable_blocks,
             &block_successors,
-            &block_local_max_use_order,
+            &block_liveness,
         );
 
         Ok(FunctionLayout::new(FunctionLayoutInputs {
@@ -1746,106 +1804,189 @@ fn compute_future_use_sets(
     local_count: usize,
     reachable_blocks: &[BlockId],
     block_successors: &FxHashMap<BlockId, Vec<BlockId>>,
-    block_local_max_use_order: &FxHashMap<BlockId, Vec<i32>>,
+    block_liveness: &FxHashMap<BlockId, BlockLiveness>,
 ) -> (FxHashMap<BlockId, RootSet>, FxHashMap<BlockId, RootSet>) {
-    // WHAT: derives per-block MAY/MUST future-use summaries by fixed-point propagation.
-    // WHY: transfer needs O(1) future-use classification when deciding borrow vs move.
-    let mut block_use_sets = FxHashMap::default();
-    for block_id in reachable_blocks {
-        let mut uses = RootSet::empty(local_count);
-        if let Some(max_use_order) = block_local_max_use_order.get(block_id) {
-            for (local_index, order_key) in max_use_order.iter().enumerate() {
-                if *order_key >= 0 {
-                    uses.insert(local_index);
-                }
-            }
-        }
-        block_use_sets.insert(*block_id, uses);
-    }
+    // WHAT: derives per-block MAY/MUST future-use summaries by backward liveness propagation.
+    // WHY: transfer needs O(1) future-use classification when deciding borrow versus move, and
+    //      alias-conflict checks need to know whether the value arriving at a block is still
+    //      required. Both are liveness questions, so the definition kill is what stops a rebound
+    //      local from looking used forever once a loop back-edge makes its own body reachable.
+    //
+    //      live_in[b]  = upward_exposed_reads[b] | (live_out[b] & !definitions[b])
+    //      live_out[b] = combine over successors: union for MAY, intersection for MUST
+    let may_use_from_block = propagate_block_liveness(
+        local_count,
+        reachable_blocks,
+        block_successors,
+        block_liveness,
+        SuccessorCombine::AnyPath,
+    );
 
-    let mut may_use_from_block = FxHashMap::default();
+    let must_use_from_block = propagate_block_liveness(
+        local_count,
+        reachable_blocks,
+        block_successors,
+        block_liveness,
+        SuccessorCombine::EveryPath,
+    );
+
+    (may_use_from_block, must_use_from_block)
+}
+
+fn propagate_block_liveness(
+    local_count: usize,
+    reachable_blocks: &[BlockId],
+    block_successors: &FxHashMap<BlockId, Vec<BlockId>>,
+    block_liveness: &FxHashMap<BlockId, BlockLiveness>,
+    combine: SuccessorCombine,
+) -> FxHashMap<BlockId, RootSet> {
+    // MAY grows from nothing; MUST shrinks from everything so loops converge on the roots that
+    // survive on every path rather than on the first path visited.
+    let seed = match combine {
+        SuccessorCombine::AnyPath => RootSet::empty(local_count),
+        SuccessorCombine::EveryPath => RootSet::full(local_count),
+    };
+
+    let mut live_in = FxHashMap::default();
     for block_id in reachable_blocks {
-        may_use_from_block.insert(*block_id, RootSet::empty(local_count));
+        live_in.insert(*block_id, seed.clone());
     }
 
     let mut changed = true;
     while changed {
         changed = false;
+
         for block_id in reachable_blocks.iter().rev() {
-            let mut next = block_use_sets
-                .get(block_id)
-                .cloned()
-                .unwrap_or_else(|| RootSet::empty(local_count));
-
-            if let Some(successors) = block_successors.get(block_id) {
-                for successor in successors {
-                    if let Some(successor_may) = may_use_from_block.get(successor) {
-                        next.union_with(successor_may);
-                    }
-                }
-            }
-
-            let should_update = may_use_from_block
-                .get(block_id)
-                .map(|existing| existing != &next)
-                .unwrap_or(true);
-
-            if should_update {
-                may_use_from_block.insert(*block_id, next);
-                changed = true;
-            }
-        }
-    }
-
-    let mut must_use_from_block = FxHashMap::default();
-    for block_id in reachable_blocks {
-        must_use_from_block.insert(*block_id, RootSet::full(local_count));
-    }
-
-    changed = true;
-    while changed {
-        changed = false;
-        for block_id in reachable_blocks.iter().rev() {
-            let mut next = block_use_sets
-                .get(block_id)
-                .cloned()
-                .unwrap_or_else(|| RootSet::empty(local_count));
-
             let successors = block_successors
                 .get(block_id)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
 
-            let successor_must = if successors.is_empty() {
-                RootSet::empty(local_count)
-            } else {
-                let mut intersection = RootSet::full(local_count);
-                for successor in successors {
-                    if let Some(must_set) = must_use_from_block.get(successor) {
-                        intersection.intersect_with(must_set);
-                    } else {
-                        intersection = RootSet::empty(local_count);
-                        break;
-                    }
-                }
-                intersection
-            };
+            let mut next = combine_successor_liveness(local_count, successors, &live_in, combine);
 
-            next.union_with(&successor_must);
+            if let Some(liveness) = block_liveness.get(block_id) {
+                next.subtract_with(&liveness.definitions);
+                next.union_with(&liveness.upward_exposed_reads);
+            }
 
-            let should_update = must_use_from_block
+            let should_update = live_in
                 .get(block_id)
                 .map(|existing| existing != &next)
                 .unwrap_or(true);
 
             if should_update {
-                must_use_from_block.insert(*block_id, next);
+                live_in.insert(*block_id, next);
                 changed = true;
             }
         }
     }
 
-    (may_use_from_block, must_use_from_block)
+    live_in
+}
+
+fn combine_successor_liveness(
+    local_count: usize,
+    successors: &[BlockId],
+    live_in: &FxHashMap<BlockId, RootSet>,
+    combine: SuccessorCombine,
+) -> RootSet {
+    // An exit block has no successor, so nothing is required after it on either lattice.
+    if successors.is_empty() {
+        return RootSet::empty(local_count);
+    }
+
+    match combine {
+        SuccessorCombine::AnyPath => {
+            let mut union = RootSet::empty(local_count);
+            for successor in successors {
+                if let Some(successor_live_in) = live_in.get(successor) {
+                    union.union_with(successor_live_in);
+                }
+            }
+            union
+        }
+
+        SuccessorCombine::EveryPath => {
+            let mut intersection = RootSet::full(local_count);
+            for successor in successors {
+                match live_in.get(successor) {
+                    Some(successor_live_in) => intersection.intersect_with(successor_live_in),
+                    // An unreachable successor contributes no guaranteed future use.
+                    None => return RootSet::empty(local_count),
+                }
+            }
+            intersection
+        }
+    }
+}
+
+// WHAT: records one statement's contribution to its block's liveness facts.
+// WHY: operands are read before the result is written, so a self-referential rebind such as
+//      `total = total + 1` still exposes a read at block entry while ending the old value's life.
+fn record_statement_liveness(
+    statement: &HirStatement,
+    local_index_by_id: &FxHashMap<LocalId, usize>,
+    liveness: &mut BlockLiveness,
+) {
+    let defined_local = statement_defined_local(statement);
+
+    collect_statement_loaded_locals(statement, &mut |local_id| {
+        if let Some(index) = local_index_by_id.get(&local_id).copied() {
+            liveness.record_read(index);
+        }
+    });
+
+    // A write through a projection updates part of the base and leaves the rest observable, so the
+    // base counts as a read and never kills.
+    collect_statement_written_locals(statement, &mut |local_id| {
+        if Some(local_id) == defined_local {
+            return;
+        }
+        if let Some(index) = local_index_by_id.get(&local_id).copied() {
+            liveness.record_read(index);
+        }
+    });
+
+    if let Some(local_id) = defined_local
+        && let Some(index) = local_index_by_id.get(&local_id).copied()
+    {
+        liveness.record_definition(index);
+    }
+}
+
+// WHAT: reports the local this statement redefines outright, if any.
+// WHY: only a whole-local write ends the previous value's life. Field and index writes reach the
+//      same root through `collect_statement_written_locals` but leave the surrounding value intact.
+fn statement_defined_local(statement: &HirStatement) -> Option<LocalId> {
+    match &statement.kind {
+        HirStatementKind::Assign {
+            target: HirPlace::Local(local),
+            ..
+        } => Some(*local),
+        HirStatementKind::Call {
+            result: Some(local),
+            ..
+        }
+        | HirStatementKind::MapOp {
+            result: Some(local),
+            ..
+        }
+        | HirStatementKind::CastOp {
+            result: Some(local),
+            ..
+        } => Some(*local),
+        HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::FormatFloat { result, .. }
+        | HirStatementKind::ValidateFloat { result, .. } => Some(*result),
+
+        HirStatementKind::Assign { .. }
+        | HirStatementKind::Call { result: None, .. }
+        | HirStatementKind::MapOp { result: None, .. }
+        | HirStatementKind::CastOp { result: None, .. }
+        | HirStatementKind::Expr(_)
+        | HirStatementKind::Drop(_)
+        | HirStatementKind::PushRuntimeFragment { .. } => None,
+    }
 }
 
 fn merge_return_alias(

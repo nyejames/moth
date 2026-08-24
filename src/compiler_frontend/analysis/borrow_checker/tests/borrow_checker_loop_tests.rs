@@ -2,7 +2,8 @@
 //!
 //! WHAT: protects CFG-carried aliases, projected access actors and independent collection roots.
 //! WHY: linear last-use order must defer to CFG future use for source locals without extending
-//! compiler-temporary aliases beyond their intended expiry.
+//! compiler-temporary aliases beyond their intended expiry, and CFG future use must stay a
+//! liveness fact so a rebound alias stops blocking mutation once every path redefines it first.
 
 use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
@@ -287,6 +288,47 @@ loop copied |item|:
 ;
 "#,
     );
+}
+
+#[test]
+fn loop_body_rebinding_its_alias_allows_source_mutation() {
+    // The map alias is redefined at the top of every iteration, so the value that reaches the
+    // mutation is dead on every path, including the one that arrives over the back-edge.
+    borrow_check_source(
+        r#"
+accumulate |keys {String}| -> {String = Int}, Error!:
+    totals ~{String = Int} = {}
+    loop keys |key|:
+        current = totals.get(key) catch then 0
+        next = current + 1
+        ~totals.set(key, next)!
+    ;
+    return totals
+;
+"#,
+    );
+}
+
+#[test]
+fn loop_body_alias_live_across_back_edge_blocks_source_mutation() {
+    // Same back-edge, but the alias is issued once before the loop and read again on every later
+    // iteration. Killing a redefined alias must not also release a genuinely live one.
+    let source = r#"
+items ~{String} = {"a"}
+shared = items
+loop 0 to 2 |round|:
+    first = shared.get(0) catch then "missing"
+    ~items.push(first) catch:
+    ;
+;
+"#;
+    let (ast, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &string_table)
+        .expect_err("an alias read on every iteration should block mutating its source");
+    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
 }
 
 #[test]

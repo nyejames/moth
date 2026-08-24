@@ -464,6 +464,12 @@ impl RootSet {
         }
     }
 
+    pub(super) fn subtract_with(&mut self, other: &Self) {
+        for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
+            *left &= !*right;
+        }
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
     }

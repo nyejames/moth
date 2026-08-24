@@ -4164,6 +4164,13 @@ contract = "language.loops.iterable_mutation_exclusivity"
 role = "primary"
 
 [[case]]
+id = "loop_rebound_alias_allows_source_mutation"
+path = "loop_rebound_alias_allows_source_mutation"
+tags = ["integration", "control-flow", "borrows", "hashmaps"]
+contract = "language.bindings.loop_alias_redefinition_allows_mutable_access"
+role = "primary"
+
+[[case]]
 id = "loop_borrow_independent_roots"
 path = "loop_borrow_independent_roots"
 tags = ["integration","control-flow","borrows","collections"]

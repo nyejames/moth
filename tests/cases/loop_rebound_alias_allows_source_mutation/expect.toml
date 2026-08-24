@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "loop_rebound_alias_allows_source_mutation distinct=2 a=2",
+]
