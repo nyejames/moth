@@ -25,7 +25,7 @@ Read the selected heading through the next heading of the same or higher level. 
 - **General Moth language understanding or source authoring:** read `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/src/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
 - **Exact language syntax or user-visible semantic work:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
 - **Tests:** read relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
-- **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, the chosen scope in `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
+- **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. This is the explicitly invoked audit framework, not the Slice review. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
 - **Final validation:** read `docs/src/docs/codebase/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
@@ -34,8 +34,8 @@ Before changing tokenization, parsing, type checking, language semantics, diagno
 Use:
 - `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for compact accepted end-state language orientation and ordinary Moth source authoring
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
-- `docs/roadmap/roadmap.md` for sequencing, active plans and genuinely deferred design
-- `docs/roadmap/audit-log.md` for registered audit scopes and freshness
+- `docs/roadmap/roadmap.md` for sequencing, active plans, genuinely deferred design, and the rules for adding and maintaining plans
+- `docs/roadmap/audit-log.md` for what has been audited, when, and what has never been audited
 - `index.md` only as a file and module locator
 
 The public unsuffixed files under `docs/src/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
@@ -84,9 +84,9 @@ Required workflow:
 4. Decide whether to extend, consolidate, replace or remove the existing path.
 5. Implement the smallest coherent slice without transitional duplication.
 6. Add or update tests when behaviour or a real internal invariant changed.
-7. Review progress, index and audit-freshness update rules, run the correct final gate and perform the Final audit.
+7. Review progress, index and audit-log update rules, run the correct final gate and perform the Slice review.
 
-For multi-phase work, re-check ownership, duplication, stale paths and test gaps after each phase. Every non-trivial implementation plan must end with the Final audit. If the user changes accepted behaviour, treat that request as authoritative for the task and call out implementation conflicts.
+For multi-phase work, re-check ownership, duplication, stale paths and test gaps after each phase. Every non-trivial implementation plan must end with the Slice review. If the user changes accepted behaviour, treat that request as authoritative for the task and call out implementation conflicts.
 
 ## Testing
 
@@ -106,8 +106,9 @@ Do not modify documentation unless the user explicitly requests it or approves i
 Exceptions:
 - Update the progress matrix when implementation status, rejection behaviour, backend coverage or test coverage changes. Do not edit it for a pure refactor or prose-only correction.
 - Update `index.md` when modules, files or folders move, are renamed or fundamentally change behaviour.
-- Structured audit tasks update their report, open-findings index and audit-log cell as required by `docs/roadmap/audit-guide.md`.
-- Implementation and verification tasks review affected audit-log cells and mark materially invalidated coverage stale. Only a complete audit may promote freshness.
+- Delete a plan under `docs/roadmap/plans/` in the same commit that completes it, and remove its roadmap entry. Do not mark it complete and commit that state. See `Adding and maintaining plans` in `docs/roadmap/roadmap.md`.
+- Structured audit tasks update their report, the open-findings index and the audit log as required by `docs/roadmap/audit-guide.md`.
+- Implementation and verification tasks mark an audit-log row stale when they materially change what it records. Only an audit run may record new coverage.
 
 Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/release/**` directly. Rebuild them through the compiler.
 
@@ -124,9 +125,11 @@ Code-bearing work ends with `just validate`. Documentation-only work uses the do
 
 After compaction, reread `AGENTS.md`, reclassify the active task and reload the routed material and required canonical sections. Do not continue from compressed recollection of project contracts.
 
-## Final audit
+## Slice review
 
-Before reporting a non-trivial slice complete or reviewing changes, audit in this order:
+Every non-trivial slice ends with this review. It is a self-review checklist, not a structured audit: it needs no registered scope, produces no report and never updates the audit log. The structured audit framework under `docs/roadmap/` is a separate, explicitly invoked activity - see `docs/roadmap/audit-guide.md`. Do not block a slice review on anything that framework requires.
+
+Review in this order:
 
 1. Re-check the relevant architecture, language, memory, style and build contracts.
 2. Read each changed module from its entry point. Confirm one clear owner. File documentation should state ownership and important exclusions, and the main flow should read as named steps.
@@ -135,5 +138,5 @@ Before reporting a non-trivial slice complete or reviewing changes, audit in thi
 5. Review local readability. Keep imports readable, group matches by meaning, space unrelated blocks and give complex code concise non-local WHAT/WHY comments. Remove stale comments and justify every lint suppression.
 6. Review diagnostics. Use the correct lane, preserve source context, avoid user-input panics and centralise repeated diagnostic construction.
 7. Review tests. Protect observable behaviour or real invariants, keep each test under the correct owner and remove redundant or implementation-shaped coverage.
-8. Review progress, index, audit freshness and documentation effects under their update rules.
+8. Review progress, index and documentation effects under their update rules. Mark an audit-log row stale if this slice materially changed an area it records.
 9. Confirm the correct validation path ran and report exactly what was and was not validated.

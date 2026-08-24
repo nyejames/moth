@@ -10,7 +10,6 @@ Implement anonymous compile-time records as a small field-access-only value surf
 ACTIVE_PLAN: docs/roadmap/plans/anonymous-const-records-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh const-record parsing, folding, projection and interface owners
-REVIEW_BASELINE: 47dbf3fd1dfa3e8df3d02cef05001de695ea80ee
 LAST_GOOD_COMMIT: none until the first implementation slice is accepted
 BRANCH: main
 IMPLEMENTATION_SCOPE: AST constant expressions, folded values, const-record field projection, public folded interfaces

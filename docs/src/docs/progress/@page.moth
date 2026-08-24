@@ -753,6 +753,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
+            [: [$html:<code>Range</code>] values outside loop headers]
+            [: Deferred]
+            [: Loop-header ranges are covered with the loop surface. One targeted case pins that a folded [$html:<code>Range</code>] constant survives to HIR; the operations a range would need are not covered because they do not exist yet.]
+            [: [$html:<code>start to end</code>] is a loop-header form today. A [$html:<code>Range</code>] can be bound - including as a [$html:<code>#</code>] constant, which folds and lowers - but the bound value is inert: it is not a collection-loop source, exposes no [$html:<code>start</code>] / [$html:<code>end</code>] members and is not renderable in a template head. First-class range values are intended but not designed or implemented, so do not add coverage for range operations until the surface is shaped.]
+        ]
+
+        [data:
             [: Choice payload field access]
             [: Deferred]
             [: Targeted direct-field-access diagnostic coverage.]

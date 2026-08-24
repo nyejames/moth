@@ -1162,6 +1162,13 @@ td {
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> <code>Range</code> values outside loop headers</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Loop-header ranges are covered with the loop surface. One targeted case pins that a folded <code>Range</code> constant survives to HIR; the operations a range would need are not covered because they do not exist yet.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>start to end</code> is a loop-header form today. A <code>Range</code> can be bound - including as a <code>#</code> constant, which folds and lowers - but the bound value is inert: it is not a collection-loop source, exposes no <code>start</code> / <code>end</code> members and is not renderable in a template head. First-class range values are intended but not designed or implemented, so do not add coverage for range operations until the surface is shaped.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Choice payload field access</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> Targeted direct-field-access diagnostic coverage.</td>

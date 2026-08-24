@@ -18,7 +18,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 
 ## Hard prerequisites
 
-- final TIR one-store/exact-view architecture and post-TIR roadmap review accepted at `1298da468`
+- delivered final TIR one-store/exact-view architecture, with the post-TIR roadmap review accepted
 - canonical modules
 - project config and `@project`
 - section-aware builder schemas
@@ -33,7 +33,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - `docs/src/docs/codebase/language/overview.mtf` and its project-structure references for source syntax
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
-- `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for the module graph
+- delivered canonical module compilation and scoped packages, for the module graph
 - `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md` for config schemas
 - `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md` for build configuration values and `@project`
 

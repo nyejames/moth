@@ -7,13 +7,10 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Queued and blocked on completion of
-> `docs/roadmap/plans/compiler-test-suite-hardening-and-integration-coverage-plan.md`.
+> Queued. Blocked on delivered compiler test-suite hardening and integration coverage - the
+> hardened suite is the semantic safety net this migration is measured against.
 >
-> **Planning snapshot:**
-> remote `main` at `97d3174fd3ef0d78c44265f07b2fd541ecfa9671`
-> (`docs: refresh test hardening resume state`). This is not the activation commit. Phase 0 must
-> replace every snapshot-specific fact after Test Suite Hardening reaches its final accepted commit.
+> Phase 0 establishes the baseline at activation. Do not record one here.
 
 ## Purpose
 
@@ -80,10 +77,10 @@ CURRENT_SLICE:
 - Non-goals: no Rust migration, no roadmap activation and no diagnostic wording work before the prerequisite completes
 
 LAST_GOOD_COMMIT:
-- `none` — replace with the final accepted Test Suite Hardening completion commit at activation
+- `none` until the first implementation slice is accepted
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: remote `main` was inspected at `97d3174fd3ef0d78c44265f07b2fd541ecfa9671`; local state is unknown
+- Clean / known changes: establish at activation
 - Branch: expected `main`; confirm at activation
 - Dedicated worker worktrees: inspect and record before creating or reusing one
 
@@ -97,9 +94,7 @@ RELEVANT_DOCS_THIS_SLICE:
 - `docs/src/docs/codebase/style-guide/validation.mtf`
 - `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
-- `docs/roadmap/plans/compiler-test-suite-hardening-and-integration-coverage-plan.md`
-- `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`
-- `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`
+- delivered compiler diagnostics improvements, and the frontend arena and semantic-invariant work
 - `benchmarks/frontend-optimization-results.md`
 - the relevant canonical unsuffixed language references selected by `docs/src/docs/codebase/language/overview.mtf` only when source-visible diagnostic or span assertions change
 - `docs/src/docs/codebase/memory-management/overview.mtf` only when borrow facts or tooling worker lifetimes change
@@ -239,13 +234,12 @@ Additional hard rules:
 - exact sizes and alignments use dependency-free const assertions compiled by native and cross-target CI, plus focused semantic/layout tests
 - temporary migration adapters are private, named as migration code and deleted at their recorded boundary
 
-## Current repository shape at the planning snapshot
+## Repository shape to establish at activation
 
-The latest visible `main` is `97d3174fd3ef0d78c44265f07b2fd541ecfa9671`. Test Suite
-Hardening is active in Phase 2B11d. Diagnostics implementation is serialized at accepted commit
-`d7fb3654f`, although its plan capsule and the roadmap still label it active. Phase 0 must make that
-parking explicit. Commits after the previous source audit changed test-hardening infrastructure,
-fixtures and documentation, not the source/token/diagnostic owners listed below.
+Phase 0 records the current shape of the source, token and diagnostic owners listed below. Do not
+carry a shape recorded before activation - it will be stale, and the owners move under ordinary
+work. Confirm at that point whether diagnostics implementation is parked or active, and make the
+answer explicit rather than inheriting it.
 
 Current pressure points:
 
@@ -497,11 +491,10 @@ comparison impossible. It changes no compiler semantics.
 
 ### Slice 0A — Activate from the final hardening commit
 
-- [ ] fetch remote `main` and record the final Test Suite Hardening completion SHA
-- [ ] read the hardening plan's final capsule, audit and accepted commits
+- [ ] confirm test-suite hardening and integration coverage is delivered
 - [ ] confirm the parent worktree is clean and inventory all worker worktrees
 - [ ] create or reuse one dedicated implementation worktree according to current repository policy
-- [ ] compare `97d3174fd3ef0d78c44265f07b2fd541ecfa9671..HEAD`
+- [ ] record the activation baseline and inventory what changed under the owners below
 - [ ] refresh every path and symbol in the active context capsule
 - [ ] re-read the progress matrix and all authority documents
 

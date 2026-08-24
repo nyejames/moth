@@ -5,12 +5,11 @@
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Activation branch:** `main`  
 **Activation HEAD:** `357dbab3190f1d7160488479ac7cf246d569fded` (squash-merged upstream as `03168082de813b9ce060a9cceb1667f8ea8e1fa1`)  
-**Proposed repository path:** `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`  
-**Primary companion plan:** `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`  
+**Primary companion work:** Retained Edge Counting, whose canonical authority is `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`  
 **Required final code gate:** `just validate`  
 **Required documentation-only gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 
-This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review; a second audit corrected REC effects, public retained-edge teaching, summary ownership and implementation-debt wording; and a final closure, owned by `docs/roadmap/plans/final-memory-model-closure-plan.md`, encoded the multi-edge REC obligation algebra, direct-edge resolution and target-aware physical planning order.
+This plan is the parent roadmap for Moth's final memory-management model. It replaces the old GC-fallback direction with mandatory static lifetime topology and a hard collector-free release guarantee for capable backends. The initial Phase 1 migration reopened for one focused consistency pass after review; a second audit corrected REC effects, public retained-edge teaching, summary ownership and implementation-debt wording; and a final consistency closure encoded the multi-edge REC obligation algebra, direct-edge resolution and target-aware physical planning order across the canonical memory pages.
 
 Milestone A is closed after the final multi-edge REC and target-aware physical-planning consistency closure.
 

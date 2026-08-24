@@ -17,27 +17,22 @@ The target is:
 - no compiler or builder scans arbitrary strings to rediscover assets
 - the old `RenderedPathUsage` and HTML-specific reconstruction lane are deleted
 
-This plan does not own dependency-clause grammar. It consumes the accepted result of:
-
-- `docs/roadmap/plans/dependency-clauses-and-path-syntax-plan.md`
-
-It also requires the accepted TIR cleanup result before adding resource nodes.
+This plan does not own dependency-clause grammar. It consumes the delivered dependency-clause and path-syntax result, whose accepted contract now lives in `docs/src/docs/packages/dependency-clauses.mtf` and `dependency-paths.mtf`. It also builds on the completed TIR corrections.
 
 ## Current state
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/path-values-and-resource-linking-plan.md
-PLAN_ADOPTION_BASELINE: bfaacd54227811f9e2b279d5a24e3df84dc381c2
-STATUS: queued - blocked by dependency-plan acceptance and the TIR prerequisite
-CURRENT_SLICE: Phase 0A - plan adoption and design correction
-PREREQUISITES:
-1. canonical-module-compilation-and-scoped-packages-plan.md Gate D - complete
-2. dependency-clauses-and-path-syntax-plan.md completion - implementation present, final acceptance pending
-3. tir-corrections-and-simplification-plan.md completion - pending
-BLOCKERS:
-- dependency-clause plan final acceptance is pending
-- TIR correction owners are not accepted yet
-NEXT_RESUME_ACTION: after prerequisites, refresh all owners and execute Phase 0B
+STATUS: queued - prerequisites complete, not yet started
+CURRENT_SLICE: Phase 0B - activation review
+PREREQUISITES: all complete
+1. canonical module compilation and scoped packages, Gate D
+2. dependency clauses and path syntax
+3. TIR corrections and simplification
+   Each plan file was removed on completion; Git history is the record.
+BLOCKERS: none
+NEXT_RESUME_ACTION: execute Phase 0B - refresh owners, tests and benchmark baseline against
+  current `main`, reconcile the moved TIR and preparation owners, then stop for activation review
 DEFERRED_FOLLOW_UP: resource-only dev fast path and watch-state optimisation
 ```
 
@@ -53,7 +48,7 @@ Keep this block concise. Git history is the implementation record.
 - TIR architecture and accepted cleanup plan
 - style, testing and validation guides
 - progress matrix and roadmap
-- predecessor dependency-clause plan
+- `docs/src/docs/packages/dependency-clauses.mtf` and `dependency-paths.mtf` - the delivered dependency-clause contract
 
 ## Locked language contract
 
@@ -515,9 +510,6 @@ Stop when:
 
 ### Phase 0B - activate after prerequisites
 
-- verify canonical Phase 5 Gate D
-- verify dependency-clause plan completion
-- verify TIR correction-plan acceptance
 - refresh `main`, code owners, tests and benchmark baseline
 - reconcile moved TIR and preparation owners
 - update language, compiler and build authorities with final Path/resource semantics

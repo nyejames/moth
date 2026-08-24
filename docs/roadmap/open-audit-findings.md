@@ -1,6 +1,6 @@
 # Open Audit Findings
 
-This is the live index of unresolved audit work. Each entry links to its owning report under [audits](./audits/README.md). Evidence and analysis stay in the report. Closed, rejected, duplicate and superseded findings leave this index but remain in report and Git history.
+Unresolved audit work. Evidence stays in the owning report under [audits](./audits/README.md). Rejected, superseded and closed findings leave this index but remain in their report and in Git history.
 
 - [Audit guide](./audit-guide.md)
 - [Audit log](./audit-log.md)
@@ -12,21 +12,25 @@ None.
 
 ## Candidate findings
 
-None.
-
-## Accepted and queued findings
+Filed, not yet triaged.
 
 None.
 
-## Active fixes
+## Accepted
+
+Triaged and authorised. Not yet fixed.
 
 None.
 
-## Blocked or design-gated findings
+## In progress
+
+Being fixed now.
 
 None.
 
-## Awaiting verification
+## Blocked
+
+Waiting on a design decision.
 
 None.
 
@@ -67,3 +71,13 @@ None.
 - AUD-0001-F01, AUD-0001-F02 and AUD-0001-F03 were corrected on branch `test-suite-honesty`. See each finding's triage record in [AUD-0001](./audits/AUD-0001-test-support-redundancy.md).
 - AUD-0001-F04 was resolved in Phase 11 of the test-suite-honesty campaign, and its design gate turned out not to apply: the evidence recorded two `build_ast` implementations with different semantics, but there was one implementation reached through four names, so no consumer could have selected the wrong one. Corrected as a pure rename to `build_ast_with_registered_types`, `immutable_reference_expr` and `inferred_type_reference_expr`, with the bare forward deleted. See the resolution note in [AUD-0001](./audits/AUD-0001-test-support-redundancy.md#aud-0001-f04-sibling-fixture-supports-export-colliding-names-with-different-semantics).
 - AUD-0001-F05 was resolved in the same phase: Phase 7 decided retire rather than adopt, and Phase 11 deleted `assert_diagnostic_reason` and `error_code_counts`. No token caller was added.
+
+- AUD-0004-F01 and AUD-0004-F02 were accepted and resolved by simplifying the audit framework rather
+  than by extending the registry. The scope registry is now a coverage ledger: an audit adds the row
+  for the area it covers as part of its run, so there is no longer a registration step that can
+  deadlock, and no scope taxonomy to satisfy before inspection. A `Never audited` section makes the
+  unowned surface visible, which is the signal F01 showed the old two-table registry could not give.
+  See the [report](./audits/AUD-0004-audit-scope-registry-coverage.md).
+- AUD-0004-F03 was accepted and fixed. `tests.harness` now cites
+  `src/compiler_frontend/tests/frontend_pipeline_tests.rs` at its real path.
+

@@ -13,11 +13,12 @@ second template representation, preparation pass, fold entry or AST-to-HIR bound
 ACTIVE_PLAN: docs/roadmap/plans/post-tir-template-parser-optimization-plan.md
 STATUS: queued and deferred; non-blocking for the canonical implementation chain
 CURRENT_SLICE: Phase 0 - capture fresh profiles and attribute one actionable owner
+CARRIED_EVIDENCE: template construction is 67% of frontend.ast.environment on docs; see **Evidence carried in from the constant-folding plan**. Narrows Phase 0; does not satisfy the activation gate
 FINAL_TIR_REVIEW_COMMIT: 1298da468
 LAST_GOOD_COMMIT: none until the first profiling or implementation slice is accepted
 BRANCH: main
 IMPLEMENTATION_SCOPE: Moth Templates preparation, template parser/formatter, TIR fold scheduling, cache prerequisites and backend string assembly
-ACTIVATION_GATE: representative profiling or counters must identify a material bottleneck in one named owner
+ACTIVATION_GATE: representative profiling or counters must identify a material bottleneck in one named owner. Partially evidenced: one owner (template construction) is attributed on one project and one stage; the fixture coverage Phase 0 lists is still owed
 ```
 
 ## Required authority documents
@@ -30,7 +31,7 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
 - `docs/src/docs/codebase/memory-management/overview.mtf` and selected leaves when source slices,
   arenas or borrowed storage change lifetime or ownership
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
-- `docs/roadmap/plans/canonical-module-compilation-and-scoped-packages-plan.md` for stable source and
+- delivered canonical module compilation and scoped packages, for stable source and
   module identities required by persistent reuse
 - `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` for backend output and
   runtime-string ownership
@@ -72,11 +73,10 @@ are written and reviewed.
   - `src/compiler_frontend/ast/templates/formatter_contract.rs`
   - `src/compiler_frontend/ast/templates/tir/formatter_view.rs`
   - `src/compiler_frontend/ast/templates/styles/markdown/`
-- TIR view, preparation, folding and cache:
+- TIR view, preparation and folding:
   - `src/compiler_frontend/ast/templates/tir/view.rs`
   - `src/compiler_frontend/ast/templates/tir/preparation.rs`
   - `src/compiler_frontend/ast/templates/tir/fold.rs`
-  - `src/compiler_frontend/ast/templates/tir/fold_cache.rs`
 - Neutral runtime handoff and HIR string append:
   - `src/compiler_frontend/ast/templates/tir/handoff_materialization.rs`
   - `src/compiler_frontend/ast/templates/runtime_handoff.rs`
@@ -100,6 +100,86 @@ Earlier frontend-arena evidence found the template-render-plan fixture near 7ms 
 emit/finalize pressure, but it did not isolate template clone or render-plan allocation pressure.
 That evidence defers broad arena conversion; it is not permission to implement this plan without a
 fresh profile.
+
+## Evidence carried in from the constant-folding plan (2026-08-24)
+
+Recorded here so Phase 0 does not have to rediscover it. Source:
+`docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`, findings 13-15,
+and `benchmarks/frontend-optimization-results.md`. Measured at commit `19340ca29`,
+`--profile profiling`, `RAYON_NUM_THREADS=1`, on the `docs` project (`73` modules, `545` constant
+headers). Attribution used a per-pass probe of `34` marks whose total measured overhead was `0.25%`
+of the stage (`94.15ms` probed against `93.92ms` unprobed).
+
+**This is not a Phase 0 baseline and does not satisfy the activation gate on its own.** It attributes
+one stage - `frontend.ast.environment` - on one project. Phase 0 still owes the fixture coverage it
+lists (template stress, wrapper/slot churn, control-flow templates, collection templates, Moth
+Templates preparation) and the separation of preparation, parsing, formatting, folding, HIR append
+and backend assembly. What follows narrows where that work should start.
+
+### Template construction owns two thirds of the AST environment stage
+
+| | ms | share of the `94ms` stage |
+| --- | --- | --- |
+| `resolve_nominal_members_and_constants` | 84.16 | 89.5% |
+| ↳ `resolve_declaration_syntax` (545 calls) | 71.27 | 75.8% |
+| ↳ initializer expression parse | 69.47 | 73.9% |
+| ↳ `parse_template_expression` (331 calls) | 69.13 | 73.5% |
+| ↳ **`Template::new_const_required_with_type_interner`** | **62.99** | **67.0%** |
+| ↳ `prepare_tir_view` in `Value` mode (325 calls) | 3.13 | 3.3% |
+| ↳ `fold_prepared_template` (284 calls) | 2.89 | 3.1% |
+
+`190us` per template constant, in TIR construction. The owner is **template construction and body
+parsing** in this plan's owner map - `create_template_node.rs`, `template_body_parser.rs` and the
+focused parser modules - reached through
+`src/compiler_frontend/ast/expressions/parse_expression_templates.rs`.
+
+Three things this narrows for Phase 0:
+
+1. **Preparation and folding are not the cost, at least on this path.** `prepare_tir_view` and
+   `fold_prepared_template` are `3.3%` and `3.1%` of the stage. A slice aimed at fold scheduling
+   (Phase 5) has no support from this evidence; a slice aimed at parse (Phases 1-2) does.
+2. **The documented double preparation is not the cost either.**
+   `parse_template_expression` builds the template with `new_const_required_with_type_interner`
+   and then, in its `TemplateType::String` arm, deliberately prepares the same view again in
+   `Value` mode - the comment there records this as intentional. That second preparation is the
+   `3.3%` row. This was the leading hypothesis before measuring and it was wrong; recorded so it is
+   not re-proposed as an easy win.
+3. **This cost is paid during constant-header resolution, before body emission.** It is not the
+   already-known `AST const-template parse ~316ms` figure from `just bench-report`, which lands in
+   `frontend.ast.emit`. Both exist; Phase 0 should attribute them separately rather than assuming
+   one number.
+
+### Per-constant cost is what separates a template project from an ordinary one
+
+`resolve_nominal_members_and_constants` as a share of the probed environment total, with the
+per-constant cost of `resolve_declaration_syntax`:
+
+| fixture | modules | constants | share of stage | per constant |
+| --- | --- | --- | --- | --- |
+| `docs` | 73 | 545 | 89% | 130us |
+| `module-graph` | 3 | 40 | 45% | 20.5us |
+| `import-fanout` | 3 | 42 | 45% | 14.5us |
+
+The shape is identical everywhere; `docs` constants cost `7-9x` more each, and the difference is
+that they are templates. A Phase 0 fixture set that does not include a template-dense multi-module
+project will not see this.
+
+### Two methodological findings worth inheriting
+
+- **A probe whose per-call cost is a significant fraction of the function it measures corrupts the
+  denominator as well as the numerator.** The constant-folding plan recorded a stage at `38.68ms`
+  that was really `12.28ms`; the difference was the measuring probe, called `13924` times. Place
+  attribution probes per-pass, not per-call, unless the per-call cost has been shown negligible
+  against the callee.
+- **Validate before believing.** A change in that plan first read as a `2.7x` win; the binary had
+  `53` failing tests and was erroring out early, skipping most of the stage. A large unexplained
+  win is evidence of a bug before it is evidence of a win.
+
+### Non-goal reaffirmed
+
+The constant-folding plan does not take this work. Its remaining phases address none of the `67%`,
+and it says so explicitly rather than letting phase order imply otherwise. This plan remains the
+owner, and remains queued until its own Phase 0 runs.
 
 ## Cache and reuse key requirements
 
@@ -197,8 +277,11 @@ beat the current implementation on representative profiles.
   build system; do not recreate them in templates.
 - Define invalidation for source edits, imported constants, imported directives, project/builder
   config, parser/formatter/compiler versions and target-relevant output inputs.
-- Keep AST-local fold caches module/build scoped unless a complete persistent value format and key
-  are separately accepted.
+- Do not reintroduce an AST-local fold cache. The previous `tir/fold_cache.rs` was deleted after
+  measurement: across every committed template workload it took `1` hit in `11275` fold attempts,
+  because real source almost never folds the same exact `TirViewIdentity` twice. Any persistent
+  cache here needs a complete value format and key accepted separately, and evidence that repeated
+  keys actually occur.
 - Test direct and transitive invalidation, unchanged-source hits, deletion/rename, configuration
   changes and diagnostic replay.
 

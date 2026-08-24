@@ -1,46 +1,41 @@
 # Audit Kinds
 
-These documents define the focused procedures for structured codebase audits. Read the [Codebase Audit Guide](../audit-guide.md) first. It owns scope selection, authority, preservation, report lifecycle, triage, freshness and verification.
+One audit run covers one kind. Read the [audit guide](../audit-guide.md) first - it owns scope, recording, findings, preservation and validation. These files own only **what to look for**.
 
-The documents in this directory are repository policy, not agent skills. An audit skill may select a kind and scope, then route to these files. It must not copy or replace their rules.
+| Kind | Looking for |
+|---|---|
+| [Correctness](./correctness.md) | Wrong acceptance, rejection, panic, invariant or handoff |
+| [Diagnostics](./diagnostics.md) | Right legality, wrong error identity, context, wording or recovery |
+| [Performance](./performance.md) | Measured time or memory cost |
+| [Redundancy](./redundancy.md) | Duplicated ownership, obsolete paths, unearned layers |
+| [Tests](./tests.md) | Missing, misplaced or weak coverage of a real contract |
+| [Style](./style.md) | Code that is correct but hard to read, review or extend |
+| [Comments](./comments.md) | Missing, stale or noisy local intent |
+| [Documentation](./documentation.md) | Inaccurate public, canonical, status or routing prose |
 
-Implementation-facing audits prefer explicit data ownership, stage-local passes, tables, arenas, side tables and immutable artefacts over object-style hierarchies. Do not force a data-layout change when it weakens readability, ownership or measured performance.
+## Picking the kind
 
-| Kind | Guide | Default complete scope | Required evidence |
-|---|---|---|---|
-| Style | [style.md](./style.md) | Leaf | Concrete readability, API or data-shape cost against the style guide |
-| Comments | [comments.md](./comments.md) | File for partial coverage, leaf for complete coverage | Missing, stale, misleading or noisy local intent |
-| Correctness | [correctness.md](./correctness.md) | Leaf or contract | Exact supported contract or invariant plus a violating path or state trace |
-| Diagnostics | [diagnostics.md](./diagnostics.md) | Diagnostic-owning leaf, composite or contract | Diagnostic identity, context, propagation, rendering or recovery evidence |
-| Tests | [tests.md](./tests.md) | Behaviour owner plus every test surface | Contract-to-test ownership and assertion evidence |
-| Redundancy | [redundancy.md](./redundancy.md) | Composite or comparison | Equivalent ownership or behaviour, not textual similarity alone |
-| Performance | [performance.md](./performance.md) | Measured call path, leaf or composite | Metric, workload, baseline and attribution evidence |
-| Documentation | [documentation.md](./documentation.md) | Authority plus its dependent documents | Exact authority, status, routing, example or terminology conflict |
+Choose by the **observed problem**, not the likely patch:
 
-## Choosing the primary kind
+- wrong result, panic or broken invariant → Correctness
+- correct result, poor error → Diagnostics
+- measured cost → Performance
+- unmeasured repeated work or dead structure → Redundancy
+- a contract nothing protects → Tests
+- unclear code → Style
+- unclear intent around clear code → Comments
+- prose that misleads → Documentation
 
-Each finding has one primary kind. Use the observed failure, not the likely patch shape. These rules control when a focused guide discovers an issue owned by another lane:
+A finding discovered under one kind that belongs to another becomes a **linked finding** in that lane. It does not expand the current run or record coverage for the other kind.
 
-- wrong acceptance, rejection, panic or invariant state -> Correctness
-- correct legality but wrong diagnostic identity, source context, wording or recovery quality -> Diagnostics
-- correct behaviour but duplicate ownership, legacy structure or unnecessary layers -> Redundancy
-- correct structure but poor local readability -> Style
-- missing or weak regression protection -> Tests
-- measured time or memory cost -> Performance
-- inaccurate public, status or canonical prose -> Documentation
-- missing, stale or noisy implementation comments -> Comments
+A broad sweep is several separate runs, not one mixed report.
 
-Create linked findings for secondary lanes. A broad codebase sweep is a campaign of separate kind-and-scope reports, not one mixed report.
+## Before filing under any kind
 
-## Shared finding threshold
+1. Check the canonical owner and the progress-matrix status. Deferred is not broken.
+2. Inspect the whole path, not the first suspicious line.
+3. State the strongest counter-explanation and why it fails.
+4. Check open findings and active plans for the same root cause.
+5. Name what would disprove the finding.
 
-Before filing under any kind:
-
-1. Check the canonical owner and current support status.
-2. Inspect the complete primary path and required context.
-3. Test the strongest reasonable counter-explanation.
-4. Check open findings, recent reports and active plans for the same root cause.
-5. Name the evidence that proves the concern and what would disprove it.
-6. Keep unavailable evidence as a limitation and mark coverage partial where required.
-
-The focused guides add kind-specific checks and evidence requirements.
+Each checklist adds kind-specific evidence requirements on top of these.

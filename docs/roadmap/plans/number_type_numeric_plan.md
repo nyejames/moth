@@ -18,7 +18,7 @@ IMPLEMENTATION_SCOPE: frontend types, AST folding, HIR numeric ops, JS lowering,
 
 ## Hard prerequisites
 
-- final TIR one-store/exact-view architecture and post-TIR roadmap review accepted at `1298da468`
+- delivered final TIR one-store/exact-view architecture, with the post-TIR roadmap review accepted
 - canonical module artefacts so per-function link facts and target validation roots exist
 
 ## Required authority documents

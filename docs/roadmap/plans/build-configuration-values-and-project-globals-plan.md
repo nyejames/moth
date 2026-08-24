@@ -19,7 +19,6 @@ conditional-compilation system.
 ACTIVE_PLAN: docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh CLI, config-field, header-contract and synthetic-interface owners
-REVIEW_BASELINE: 9ff5c3c48ce17d6633ef000b01a34824b7de0f49
 LAST_GOOD_COMMIT: none until the first implementation slice is accepted
 BRANCH: main
 IMPLEMENTATION_SCOPE: CLI, config folding, header syntax, Stage 0 contract barrier, synthetic project interface
@@ -30,10 +29,9 @@ Keep this block concise. Git history is the implementation record.
 ## Hard prerequisites
 
 - accepted canonical module Phase 5 closeout
-- `docs/roadmap/plans/anonymous-const-records-plan.md`
-- `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md`
-- accepted Stage 4 static Bool `if` specialisation from
-  `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
+- anonymous const records, folded and projected through public interfaces
+- grouped project config and recursive builder schemas
+- Stage 4 static Bool `if` specialisation, selecting one branch before HIR
 - stable public-interface provenance and package-boundary ownership
 
 This plan must complete before entry-local config blocks.
@@ -44,7 +42,7 @@ This plan must complete before entry-local config blocks.
 - `docs/build-system-design.md`
 - `docs/src/docs/design-scope/design-principles.mtf`
 - `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
-- `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`
+- delivered Stage 4 static Bool `if` specialisation and folded-constant ownership
 - `docs/src/docs/codebase/style-guide/style-guide.mtf`
 - `docs/src/docs/codebase/style-guide/testing.mtf`
 - `docs/src/docs/codebase/style-guide/validation.mtf`

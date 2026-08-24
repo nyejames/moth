@@ -10,7 +10,6 @@ Replace the transitional flat project config with one grouped, self-contained `c
 ACTIVE_PLAN: docs/roadmap/plans/project-config-and-recursive-schemas-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh config bootstrap, flat registry, builder schema and output owners
-REVIEW_BASELINE: 47dbf3fd1dfa3e8df3d02cef05001de695ea80ee
 LAST_GOOD_COMMIT: none until the first implementation slice is accepted
 BRANCH: main
 IMPLEMENTATION_SCOPE: build-system config bootstrap, folded config values, recursive schemas, builder-owned settings
@@ -21,7 +20,7 @@ Keep this block concise. Git history is the implementation record.
 ## Hard prerequisites
 
 - accepted canonical module Phase 5 closeout
-- `docs/roadmap/plans/anonymous-const-records-plan.md`
+- anonymous const records, folded and projected through public interfaces
 - command-selected builder capability surface
 
 This plan must complete before build configuration values, `@project` and entry-local config blocks.

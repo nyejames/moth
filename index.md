@@ -122,7 +122,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [slot_layout.rs](src/compiler_frontend/ast/templates/tir/slot_layout.rs), [slot_plan.rs](src/compiler_frontend/ast/templates/tir/slot_plan.rs), [slot_composition/](src/compiler_frontend/ast/templates/tir/slot_composition/), [wrapper_sets.rs](src/compiler_frontend/ast/templates/tir/wrapper_sets.rs): slot layout, routing and wrapper reuse.
         - [handoff_materialization.rs](src/compiler_frontend/ast/templates/tir/handoff_materialization.rs): owned runtime-template trees for HIR lowering.
 - [generic_functions](src/compiler_frontend/ast/generic_functions/): generic templates, calls, inference, instances, diagnostics.
-- [const_values](src/compiler_frontend/ast/const_values/): const fact resolver.
+- [const_values](src/compiler_frontend/ast/const_values/): module-local folded-value store, its borrowed row/value views, and the advisory const fact resolver.
 - [generic_bounds.rs](src/compiler_frontend/ast/generic_bounds.rs): static bound evidence checks.
 
 ## HIR + analysis
@@ -176,7 +176,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [integration fixtures](tests/cases/): expect.toml backend matrices.
 - [subsystem unit tests](src/): `*/tests` and module tests throughout src/.
 - [in-process compiler benchmark API](src/benchmarking/): for xtask/dev tooling.
-- [benchmark/report/check/profile tooling](xtask/), including the [repeat and thread-count stress lanes](xtask/src/stress.rs).
+- [benchmark/report/check/profile tooling](xtask/), including the [repeat and thread-count stress lanes](xtask/src/stress.rs) and the [scaling-series growth-exponent lane](xtask/src/bench_scaling.rs).
 - [perf cases/data/summaries](benchmarks/): local-data ignored.
 
 ## Docs

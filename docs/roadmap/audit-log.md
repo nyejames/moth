@@ -1,58 +1,57 @@
 # Audit Log
 
-This file is the concise coverage database for structured codebase audits. It defines stable scopes and records rough freshness by audit kind. It does not store findings or process rules.
+What has been audited, where, and when. This is a record, not a permission list.
 
 - [Audit guide](./audit-guide.md)
 - [Audit-kind index](./audit-kinds/README.md)
 - [Open audit findings](./open-audit-findings.md)
 - [Audit reports](./audits/README.md)
 
-## Freshness markers
+## How to use this
 
-| Marker | Meaning |
+**Looking for work?** Scan for areas with no entry for a kind, or an old one. Never-audited code is the best default target.
+
+**Finished an audit?** Add or update the row for the area you covered. Record only the kind you ran.
+
+**Area not listed?** Add it. An audit registers the area it needs as part of its run - see the audit guide. Do not stop because a row is missing.
+
+**Changed code materially?** Mark the affected row stale. Ordinary implementation never records new coverage.
+
+## Entry format
+
+Each entry is `Kind YYYY-MM AUD-####`, optionally followed by a qualifier:
+
+| Qualifier | Meaning |
 |---|---|
-| `N` | No complete audit is recorded. |
-| `P YYYY-MM AUD-####` | The report covered only part of the declared scope. |
-| `C YYYY-MM AUD-####` | The report covered the complete scope and has no known material invalidation. |
-| `S YYYY-MM AUD-####` | The audit was complete when recorded but material changes have made it stale. |
-| `-` | This audit kind is not applicable to the scope. |
+| *(none)* | The whole area was inspected for that kind. |
+| `partial` | Only part of the area was inspected. The report says which part. |
+| `stale` | Was complete when recorded, but the area has changed materially since. |
 
-Freshness describes inspection coverage, not code quality. A current scope may still have open findings.
+Coverage is not quality. An audited area may still have open findings.
 
-## Scope registry
+## Audited areas
 
-Scope kinds, completeness and boundary rules are defined in the [audit guide](./audit-guide.md). `Default context` applies to every kind unless `Kind-specific context or exclusions` supplies a compact override such as `Correctness: frontend.ast`.
+| Area | Covers | Audited |
+|---|---|---|
+| `tests.harness` | `src/compiler_tests/integration_test_runner/**`, `src/compiler_tests/{test_support,test_fs,test_diagnostics}.rs`, `src/compiler_frontend/tests/frontend_pipeline_tests.rs`. Excludes the fixture directories, which `tests.cases` owns. | — |
+| `tests.support` | Test-only support and helper modules under `src/**/tests/` and `src/**/test_support.rs` | Redundancy 2026-08 AUD-0001 `partial` |
+| `tests.cases` | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture | — |
+| `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` |
+| `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 |
+| `docs.audit_framework` | This file, `audit-guide.md`, `audit-kinds/**`, `open-audit-findings.md` and `audits/**` | Documentation 2026-08 AUD-0004 `partial` |
 
-Use stable conceptual IDs. Leaf scopes own maintained implementation exactly once. Composite, contract and comparison scopes reference existing scope IDs where possible.
+## Never audited
 
-| Scope ID | Name | Kind | Primary coverage | Default context | Kind-specific context or exclusions |
-|---|---|---|---|---|---|
-| `tests.harness` | Integration test harness | Leaf | `src/compiler_tests/integration_test_runner/**` implementation plus `src/compiler_tests/{test_support,test_fs,test_diagnostics}.rs` and `frontend_pipeline_tests.rs` | `docs/src/docs/codebase/style-guide/testing.mtf`, `tests/cases/manifest.toml` | Excludes the 1,700 fixture directories under `tests/cases/*/`, which are data owned by `tests.cases` |
-| `tests.support` | Unit test support modules | Comparison | Every test-only support/helper module under `src/**/tests/` and `src/**/test_support.rs`, compared against the `tests.harness` shared helpers | `docs/src/docs/codebase/style-guide/testing.mtf`, the consuming test modules in each subsystem | Compares independent per-subsystem owners for repeated machinery. Comparison does not imply the helpers should be merged. |
-| `tests.cases` | Canonical integration fixtures | Leaf | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture directory | `tests.harness`, `docs/src/docs/codebase/style-guide/testing.mtf` | `Redundancy: duplicate coverage between fixtures routes to Tests, not Redundancy` |
-| `build.stage0.discovery` | Stage 0 source discovery and inventory | Leaf | `src/build_system/create_project_modules/{source_tree_index,source_discovery,source_package_discovery,project_roots,module_inventory,project_structure_diagnostics,source_discovery_error}.rs` | `docs/build-system-design.md` (`Source indexing and source sets`, `Prepared-source orchestration`), `build.stage0.graph`, `build.stage0.scheduling` | `Performance: build.stage0.preparation, plus the single-file synthetic path in compilation.rs, which owns divergent scheduling for the same work` |
-| `build.stage0.preparation` | Stage 0 source preparation and handoff | Leaf | `src/build_system/create_project_modules/{module_preparation,source_preparation,source_loading,prepared_source,prepared_module}.rs` | `docs/compiler-design-overview.md` (`Compiler input and result boundary`), `src/compiler_frontend/headers/parse_file_headers.rs`, `src/compiler_frontend/symbols/string_interning.rs` | `Performance: build.stage0.discovery; string-table fork and merge cost is owned here, not by string_interning.rs` |
-| `build.stage0.graph` | Stage 0 module identity, namespace and graph | Leaf | `src/build_system/create_project_modules/{module_identity,module_namespace,project_module_graph}.rs` | `docs/build-system-design.md` (`Project and package topology`), `build.stage0.discovery` | — |
-| `build.stage0.scheduling` | Stage 0 wave scheduling and publication | Leaf | `src/build_system/create_project_modules/{mod,compilation,compiled_boundary,module_artifact_store,generated_store}.rs` | `docs/build-system-design.md` (`Deterministic scheduling and graph outcomes`), `src/compiler_frontend/module_compilation/**` | `Performance: both single-file and directory flows live in compilation.rs and must be measured separately` |
-| `build.stage0` | Stage 0 end to end | Composite | `build.stage0.discovery`, `build.stage0.preparation`, `build.stage0.graph`, `build.stage0.scheduling` | `docs/build-system-design.md` opening authority text and `Architectural invariants` | Use for end-to-end Stage 0 cost or cross-leaf duplication. A finding owned by one leaf is recorded against that leaf, not here. |
-| `contract.assertion_message_runtime_handoff` | Assertion message AST-to-backend handoff | Contract | `src/compiler_frontend/ast/module_ast/finalization/{finalizer.rs,normalize_ast.rs,validate_types.rs,const_fact_collection.rs}` -> `src/compiler_frontend/hir/{hir_statement.rs,reachability.rs,validation/**}` -> `src/backends/{backend_feature_validation.rs,js/js_statement.rs,wasm/hir_to_lir/terminator.rs}` | `docs/compiler-design-overview.md` (`Generated concrete functions`, `Frontend stages > Stage 4: AST semantics`, `Templates and TIR`, `Stage 5: HIR and validation`), `docs/build-system-design.md` (`Generated-function boundary`, target/link planning) | Audits the assertion-message producer/consumer contract, including effect classification, generic/reactive/link/target facts, diagnostics and backend consumers. Test fixtures and generated documentation are attached evidence, not alternate semantic owners. |
-| `contract.assertion_call_argument_handoff` | Shared assertion call-argument and retained-slot handoff | Contract | `src/compiler_frontend/ast/expressions/{call_arguments.rs,call_argument.rs,call_validation.rs}` -> `src/compiler_frontend/ast/statements/asserts.rs` and all call-shaped consumers | `docs/compiler-design-overview.md` (`Generated concrete functions`, `Frontend stages > Stage 4: AST semantics`), `docs/src/docs/codebase/style-guide/style-guide.mtf` | Audits one shared delimiter parser, retained parameter-slot routing and final validation across assertion, source/host functions, constructors, receiver calls, builtins and generic calls. It excludes unrelated expression-parser architecture. |
-| `feature.runtime_assertion_messages_call_arguments` | Runtime assertion messages and call-argument consolidation | Composite | `contract.assertion_message_runtime_handoff`, `contract.assertion_call_argument_handoff` | Both contract entries, `docs/compiler-design-overview.md` and `docs/build-system-design.md` opening authority text and `Architectural invariants` | End-to-end correctness review for the active feature plan. Integration fixtures, diagnostics, canonical/teaching/status documentation, generated release docs and the implementation plan are attached review surfaces. Use the contract reports for findings owned by one boundary. |
+Areas with no row above and no coverage of any kind. This list is deliberately coarse - it exists so the gap is visible, not to partition the codebase in advance. Take one, name the part you can actually cover, and add a row.
 
-## Audit freshness
+AUD-0004 measured 771 of 791 production `.rs` files as having no owner under the registry taxonomy that preceded this log. That figure is a historical ownership measurement, not a recount of the areas below under the current model.
 
-Skip `-` cells during automatic selection.
-
-| Scope ID | Style | Comments | Correctness | Diagnostics | Tests | Redundancy | Performance | Documentation |
-|---|---|---|---|---|---|---|---|---|
-| `tests.harness` | `N` | `N` | `N` | `N` | `N` | `N` | `N` | `-` |
-| `tests.support` | `N` | `N` | `-` | `-` | `N` | `P 2026-08 AUD-0001` | `-` | `-` |
-| `tests.cases` | `-` | `-` | `-` | `-` | `N` | `N` | `-` | `-` |
-| `build.stage0.discovery` | `N` | `N` | `N` | `N` | `N` | `N` | `P 2026-08 AUD-0002` | `-` |
-| `build.stage0.preparation` | `N` | `N` | `N` | `N` | `N` | `N` | `P 2026-08 AUD-0002` | `-` |
-| `build.stage0.graph` | `N` | `N` | `N` | `N` | `N` | `N` | `N` | `-` |
-| `build.stage0.scheduling` | `N` | `N` | `N` | `N` | `N` | `N` | `N` | `-` |
-| `build.stage0` | `-` | `-` | `N` | `N` | `-` | `N` | `N` | `-` |
-| `contract.assertion_message_runtime_handoff` | `-` | `-` | `N` | `-` | `-` | `-` | `-` | `-` |
-| `contract.assertion_call_argument_handoff` | `-` | `-` | `N` | `-` | `-` | `-` | `-` | `-` |
-| `feature.runtime_assertion_messages_call_arguments` | `-` | `-` | `C 2026-08 AUD-0003` | `-` | `-` | `-` | `-` | `-` |
+- `src/compiler_frontend/tokenizer/**` - tokenization
+- `src/compiler_frontend/ast/**` - AST semantics, constant folding, templates and TIR
+- `src/compiler_frontend/hir/**` - HIR lowering and validation
+- `src/compiler_frontend/headers/**`, `symbols/**`, `module_compilation/**`
+- `src/compiler_frontend/compiler_messages/**` - diagnostic construction and rendering
+- `src/backends/**` - JS and Wasm lowering, backend feature validation
+- `src/build_system/**` outside `create_project_modules/`
+- `src/projects/**`
+- `docs/roadmap/**` outside `docs.audit_framework` - plans, the roadmap and benchmark records

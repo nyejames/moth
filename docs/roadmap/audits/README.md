@@ -1,43 +1,32 @@
 # Audit Reports
 
-This directory stores durable reports from structured codebase audits. Read the [Codebase Audit Guide](../audit-guide.md), the selected [audit-kind guide](../audit-kinds/README.md), the [audit log](../audit-log.md) and [open findings](../open-audit-findings.md) before creating a report.
-
-## Naming and identity
-
-One report represents one audit run over one primary kind and one registered scope:
+One report per audit run: one kind, one area. Read the [audit guide](../audit-guide.md) first.
 
 ```text
 AUD-0001-short-description.md
 ```
 
-Findings inside that report use stable IDs:
+Findings inside use stable IDs: `AUD-0001-F01`, `AUD-0001-F02`.
 
-```text
-AUD-0001-F01
-AUD-0001-F02
-```
+Create the skeleton and add it under `Audits in progress` **before** inspecting anything. This reserves the ID and makes concurrent runs collide visibly.
 
-Create the report skeleton and add it under `Audits in progress` before inspecting implementation. This reserves the ID and exposes concurrent work.
+Rejected, superseded and closed findings stay in their report. Only unresolved work stays in the [open-findings index](../open-audit-findings.md). Do not store raw profiles or generated inventories here - summarise, and name the command that reproduces them.
 
-Closed, rejected, duplicate and superseded findings remain in their reports. Only unresolved work stays in the open-findings index. Do not store raw profiles, generated inventories or large machine output here. Summarise the evidence and link or name the reproducible command.
-
-## Report skeleton
+## Skeleton
 
 ```markdown
-# AUD-####: Audit title
+# AUD-####: Title
 
-- State: `in progress` or `complete`
+- State: `in progress` | `complete`
 - Kind: `<kind>`
-- Primary scope: `<scope-id>`
-- Required context: `<scope IDs or paths>`
-- Coverage: `partial` or `complete`
+- Area: `<area>` - one line on what it covers
+- Coverage: `complete` | `partial`
 - Reviewed: `YYYY-MM`
-- Baseline: `<known validation and performance state>`
-- Revision: `<optional revision>`
+- Baseline: `<validation state, known failures, anything limiting confidence>`
 
-## Scope, context and exclusions
+## What was inspected
 
-## Coverage inventory
+Every file and surface actually read, plus context read but not audited.
 
 ## Authorities read
 
@@ -45,55 +34,45 @@ Closed, rejected, duplicate and superseded findings remain in their reports. Onl
 
 ## Findings
 
-### AUD-####-F01: Finding title
+### AUD-####-F01: Title
 
 - State: `candidate`
 - Kind: `<kind>`
-- Scope: `<scope-id>`
-- Priority: `unassigned`
 
 #### Evidence
 
-#### Counter-evidence checked
+#### Counter-explanation tested
+
+What would make this finding wrong, and why it does not.
 
 #### Violated contract or cost
-
-#### Impact
 
 #### Root owner
 
 #### Suggested correction
 
-#### Allowed fix scope
+Non-authorising. Seeds later work; does not approve a design or patch shape.
 
-#### Read-only context
+#### Fix scope and preserved invariants
 
-#### Must preserve
+#### Required validation
 
-#### Forbidden fix forms
+#### Linked findings
 
-#### Required validation or measurement
+## Checked and clean
 
-#### Dependencies and related findings
-
-#### Triage record
-
-## No-finding checks
+What was inspected and found sound. This is what makes a no-findings run useful.
 
 ## Limitations
 
-## Freshness update
+What was not covered and why.
 ```
-
-A suggested correction seeds later planning. It does not approve a design, exact patch shape or broader write scope.
 
 ## Open-findings entry
 
-Keep the live index concise and link to the report that owns the evidence:
-
 ```markdown
-- [AUD-####-F##: Finding title](./audits/AUD-####-short-description.md#finding-anchor)
-  - `<kind>` | `<scope-id>`
+- [AUD-####-F##: Title](./audits/AUD-####-short-description.md#anchor)
+  - `<kind>` | `<area>`
 ```
 
-An audit in progress links to the report as a whole. An active-fix entry also links to the owning implementation plan, branch or pull request when one exists. Do not copy evidence or patch plans into the index.
+Link to the report. Do not copy evidence into the index.

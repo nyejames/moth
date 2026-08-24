@@ -27,11 +27,10 @@ CURRENT_SLICE:
 - Non-goals: no implementation edits before the current branch, local documentation work and baseline failures are understood
 
 LAST_GOOD_COMMIT:
-- `none` for task-specific validation
-- GitHub planning snapshot: `ec8480a57b0bd650adecc41aa76e3445f1524599`
+- `none` until the first implementation slice is accepted
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: unknown from GitHub. Preserve and classify all local changes before editing, especially the user's documentation review
+- Clean / known changes: establish at activation. Preserve and classify all local changes before editing, especially the user's documentation review
 - Branch: GitHub `main` at the planning snapshot. Replace with the active local branch
 - Dedicated worker worktrees: none known from GitHub. Record every active worker worktree before implementation
 
@@ -127,12 +126,12 @@ BLOCKERS / RISKS:
 VALIDATION_STATE:
 - last command: none run for this planning artifact
 - result: not validated locally
-- known unrelated failures: none identified from GitHub
-- latest reported repository gate: commit `541c8f9a971df5ccb7b827d7de7ce7e251bb3261` reports a passing full gate, but this is not task-specific validation and later documentation commits exist
+- known unrelated failures: establish at activation
+- latest reported repository gate: establish at activation; a repository-wide gate is not task-specific validation
 
 DOCS_IMPACT:
 - progress matrix needed: yes, update the existing Collections row rather than adding a new row
-- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure (`docs/roadmap/plans/final-memory-model-closure-plan.md`). Binding examples were already correct. The only remaining stale output is any generated page under `docs/release/**` not yet rebuilt
+- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure. Binding examples were already correct. The only remaining stale output is any generated page under `docs/release/**` not yet rebuilt
 - authorized docs updates: yes, explicitly requested by the user
 
 NEXT_ACTION:
@@ -141,7 +140,7 @@ NEXT_ACTION:
 
 ## Reviewed current state
 
-The GitHub snapshot remained at `ec8480a57b0bd650adecc41aa76e3445f1524599` when this plan was written.
+Recorded when this plan was written. Re-verify at activation.
 
 Current implementation facts:
 

@@ -35,7 +35,21 @@ The package dependency plan is design-gated. Its implementation remains blocked 
 
 Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
 
-Do not mark a plan active unless its current-state capsule says it is active.
+Do not mark a plan active unless its own status block says it is active.
+
+## Adding and maintaining plans
+
+This roadmap owns the order. A plan owns its own work and nothing else.
+
+**Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life; the capability it delivers is durable. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
+
+**Do not pin a commit before work starts.** No baseline SHA in a status block. A plan that has not begun has nothing to be a baseline for, and the pin is stale by the time anyone reads it. Establish the baseline when the plan activates and keep it in the working notes, not the committed file. Referring to a specific commit is fine once work is underway or complete, where it records what actually happened.
+
+**Keep the status block small.** Status, current slice, blockers, next action. Blockers name the missing work, using the same capability wording as the prerequisites. Everything else belongs in Git history.
+
+**Delete a plan in the commit that completes it.** Do not mark it complete and commit that, then delete it later - the intermediate state is a file that claims to be work and is not. Removing it in the completion commit means the commit that finished the work is also the commit that retired the plan, so Git history alone answers "when did this land". A deleted plan is recoverable if it is genuinely needed again.
+
+**Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/src/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
 
 ---
 
@@ -53,14 +67,6 @@ Two plans own this work:
 
 - [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) is the parent authority for source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, physical memory planning and backend parity.
 - [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) is the sole detailed owner of REC analysis, the two-bit handle ABI, counters and lowering.
-
-One subordinate closure plan is complete:
-
-- [Final memory model consistency closure](./plans/final-memory-model-closure-plan.md) was a documentation-only prerequisite before parent Phase 2 could activate. It encoded the multi-edge REC obligation algebra, direct-edge resolution, discharge-versus-destruction wording, group-to-external REC cleanup and the target-aware physical-planning order across the canonical memory pages, the compiler and build authorities, the teaching pages, the public collection contracts and the owning plans. It changed no source, tests or implementation status and is now complete. It does not enter the queued implementation chain.
-
-Milestone A of the parent plan (documentation authority migration) is complete, including that consistency closure. Every implementation phase from Phase 2 onward remains deferred and is not automatically active or queued merely because the design is accepted. Declared groups, lifetime topology, cleanup frontiers, REC and collector-free verification each advance as separate progress-matrix rows.
-
-Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
 
 ## Post-TIR template performance follow-ups
 

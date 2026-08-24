@@ -16,7 +16,7 @@ FileDependencyClause
 
 The file-local grammar is owned by:
 
-- `docs/roadmap/plans/dependency-clauses-and-path-syntax-plan.md`
+- delivered dependency clauses and path syntax, whose accepted contract is canonical in `docs/src/docs/packages/dependency-clauses.mtf` and `dependency-paths.mtf`
 
 Source clauses never add an undeclared external package implicitly.
 
@@ -26,7 +26,6 @@ Remote registries, fetching, version solving, publishing and package-manager pol
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/package-dependency-declarations-and-manager-foundations-plan.md
-PLAN_REVISION_BASELINE: bfaacd54227811f9e2b279d5a24e3df84dc381c2
 STATUS: queued-design - implementation blocked until declaration and resolver design is accepted
 CURRENT_SLICE: Design Phase 0 - audit project dependency availability and package boundary inputs
 LAST_GOOD_COMMIT: none until the design checkpoint and first implementation slice are accepted
@@ -54,7 +53,7 @@ Do not infer activation from the presence of this file.
 ## Required authorities
 
 - `docs/compiler-design-overview.md`
-- `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md`
+- delivered build configuration values and project-boundary isolation
 - `docs/build-system-design.md`
 - `docs/src/docs/codebase/language/overview.mtf`
 - canonical package and project-configuration references

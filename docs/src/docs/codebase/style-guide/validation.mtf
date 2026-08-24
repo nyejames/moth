@@ -192,6 +192,13 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
+        [: Complexity budgets]
+        [: `cargo run --package xtask --bin xtask -- bench-scaling`]
+        [: Fits the growth exponent of every declared scaling series against
+        its declared input sizes and fails when one exceeds its budget]
+    ]
+
+    [td:
         [: Source audit]
         [: `just source-audit`]
         [: The one broad-source architecture audit: `cfg!` timer checks, direct
@@ -222,6 +229,11 @@ Before declaring a non-trivial code-bearing slice complete, run:
 - `bench-ci` preflights every benchmark manifest case once, then measures only the quick CLI and
   frontend subsets with three iterations.
 - `bench-ci` does not update local history or tracked benchmark summaries.
+- `bench-scaling` answers the question history cannot. Every other benchmark mode compares a case
+  against its own recorded past, so it detects change; a cost that has been superlinear since the
+  day it was written never changes and never reports. The scaling lane measures the same metric at
+  several declared input sizes and holds the fitted exponent to a budget. It writes no history
+  either. `benchmarks/README.md > Scaling Series` owns the authoring rules.
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
@@ -362,6 +374,11 @@ another from reporting:
     [td:
         [: `benchmarks`]
         [: `just ci-gate-benchmarks`]
+    ]
+
+    [td:
+        [: `scaling`]
+        [: `just ci-gate-scaling`]
     ]
 
     [td:

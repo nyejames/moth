@@ -2,8 +2,6 @@
 
 Status: accepted final design; the multi-edge obligation algebra, direct-edge resolution and target/profile physical-planning consistency closure are complete. REC implementation remains deferred.
 
-Repository baseline: `nyejames/moth` `main` at `356d0666fa16507a5690aa8451f8c5616d01d00c`
-
 Repository path:
 
 ```text
