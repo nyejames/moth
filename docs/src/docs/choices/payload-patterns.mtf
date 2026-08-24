@@ -34,6 +34,18 @@ Pattern matching inspects choice payloads.
     ;
 ]
 
+Payload captures also work in inline and block single-predicate value matches:
+
+[codeblock, $code("moth"):
+    message = if response is Failed(message) then message else "ok"
+
+    message = if response is Failed(message):
+        then message
+    else
+        then "ok"
+    ;
+]
+
 ### Deferred and rejected forms
 
 Direct payload field access is deferred:

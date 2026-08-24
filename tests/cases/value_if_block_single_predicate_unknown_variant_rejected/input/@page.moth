@@ -1,0 +1,13 @@
+Status ::
+    Ready,
+    Waiting,
+;
+
+score_for |status Status| -> Int:
+    score = if status is Unknown:
+        then 1
+    else
+        then 0
+    ;
+    return score
+;

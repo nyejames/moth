@@ -1,22 +1,19 @@
-//! Narrow `if` header parsing shared by statements and template control-flow syntax.
+//! Structural `if` header classification shared by statements, templates and
+//! value receivers.
 //!
-//! WHAT: disambiguates the header after an `if` keyword into a boolean condition,
-//! single-predicate option-present capture, or full match-style `if value is:`.
-//! WHY: template control-flow parsing uses the first two forms and match-style
-//! detection without exposing full match-arm parsing outside `branching.rs`.
+//! WHAT: one nesting-aware scan after `if`, plus statement/template header parsing
+//! into Bool, option present-capture, or full-match `is:`.
+//! WHY: value receivers reuse these structural facts rather than scanning `is`
+//! again. This file does not own choice-predicate value matching.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::ast::expressions::parse_expression::{
-    create_expression, create_expression_until,
-};
-use crate::compiler_frontend::ast::expressions::parse_expression_input::{
-    ExpressionParseInput, ExpressionParseResources,
-};
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
+};
+use crate::compiler_frontend::ast::statements::match_headers::{
+    build_option_present_capture_scope_and_pattern, parse_scrutinee_until_is,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, parse_option_pattern,
@@ -26,14 +23,10 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
-use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use crate::compiler_frontend::utilities::token_scan::{NestingDepth, find_expression_end_index};
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[allow(clippy::large_enum_variant)]
@@ -51,6 +44,84 @@ pub(crate) enum ParsedIfHeader {
     },
 }
 
+/// Syntax-only shape of tokens after `if`.
+///
+/// WHAT: distinguishes Bool conditions, full-match `is:`, and potential single-predicate
+/// headers without inspecting types.
+/// WHY: statement, template, receiver and multi-bind parsers must share one scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IfHeaderShape {
+    OrdinaryBool,
+    FullMatch,
+    PotentialInlineSinglePredicate,
+    PotentialBlockSinglePredicate,
+}
+
+/// Body delimiter found by the structural `if` header scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IfHeaderDelimiter {
+    Colon,
+    InlineThen,
+    TemplateBody,
+    TemplateClose,
+    None,
+}
+
+/// Structural facts from one nesting-aware `if` header scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct IfHeaderClassification {
+    pub shape: IfHeaderShape,
+    pub is_index: Option<usize>,
+    pub token_after_is: Option<usize>,
+    pub body_delimiter: IfHeaderDelimiter,
+    pub delimiter_index: Option<usize>,
+}
+
+impl IfHeaderClassification {
+    /// Returns true when the classified `then` sits on the same logical line as
+    /// `token_index`.
+    ///
+    /// WHY: receiver option-literal diagnostics must not fire when `then` is on
+    /// a later line; that malformed form stays `InlineValueIfMultiline`.
+    pub(crate) fn inline_then_is_on_same_line_as(
+        self,
+        token_stream: &FileTokens,
+        token_index: usize,
+    ) -> bool {
+        if self.body_delimiter != IfHeaderDelimiter::InlineThen {
+            return false;
+        }
+
+        let Some(delimiter_index) = self.delimiter_index else {
+            return false;
+        };
+        let Some(token) = token_stream.tokens.get(token_index) else {
+            return false;
+        };
+        let Some(delimiter) = token_stream.tokens.get(delimiter_index) else {
+            return false;
+        };
+
+        token.location.start_pos.line_number == delimiter.location.start_pos.line_number
+    }
+
+    /// Returns true when `|` is the raw next token after `is`.
+    ///
+    /// WHY: statement, template and value-receiver option capture all commit
+    /// only on that adjacency. `token_after_is` skips newlines and must not be
+    /// used for this commitment.
+    pub(crate) fn option_present_capture_candidate(self, token_stream: &FileTokens) -> bool {
+        let Some(is_index) = self.is_index else {
+            return false;
+        };
+
+        token_stream
+            .tokens
+            .get(is_index + 1)
+            .is_some_and(|token| token.kind == TokenKind::TypeParameterBracket)
+    }
+}
+
 /// Stage-local result for `if` header parsing and option-present capture helpers.
 ///
 /// WHY: `CompilerDiagnostic` is large enough that returning it directly inside a
@@ -65,9 +136,11 @@ pub(crate) fn parse_if_header(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> IfHeaderResult<ParsedIfHeader> {
-    // Single-predicate option match: `if option is |name|:`.
-    // Detected before normal expression parsing because `|name|` is not a valid expression.
-    if is_single_predicate_option_capture(token_stream) {
+    let classification = classify_if_header(token_stream);
+
+    // `|name|` is not a valid expression, so option present-capture must be committed
+    // before ordinary condition parsing. Choice-shaped headers stay Bool here.
+    if classification.option_present_capture_candidate(token_stream) {
         return parse_option_present_capture_if_header(
             token_stream,
             context,
@@ -76,7 +149,7 @@ pub(crate) fn parse_if_header(
         );
     }
 
-    if is_full_match_style_header(token_stream) {
+    if classification.shape == IfHeaderShape::FullMatch {
         return parse_match_style_if_header(token_stream, context, type_interner, string_table);
     }
 
@@ -112,47 +185,151 @@ pub(crate) fn parse_if_header(
     Ok(ParsedIfHeader::BoolCondition { condition })
 }
 
-fn is_full_match_style_header(token_stream: &FileTokens) -> bool {
+/// Classify the token stream after `if` with one nesting-aware scan.
+pub(crate) fn classify_if_header(token_stream: &FileTokens) -> IfHeaderClassification {
     let mut nesting_depth = NestingDepth::default();
     let mut index = token_stream.index;
 
     while index < token_stream.length {
-        let token = &token_stream.tokens[index];
+        let token_kind = &token_stream.tokens[index].kind;
 
         if nesting_depth.is_top_level() {
-            match token.kind {
-                TokenKind::Is => {
-                    return next_meaningful_token_is_header_boundary(token_stream, index + 1);
+            match token_kind {
+                TokenKind::Is => return classify_from_is(token_stream, index),
+                TokenKind::Colon => {
+                    return ordinary_bool_header(IfHeaderDelimiter::Colon, Some(index));
                 }
-                TokenKind::Colon
-                | TokenKind::StartTemplateBody
-                | TokenKind::TemplateClose
-                | TokenKind::Eof => return false,
+                TokenKind::Then => {
+                    return ordinary_bool_header(IfHeaderDelimiter::InlineThen, Some(index));
+                }
+                TokenKind::StartTemplateBody => {
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateBody, Some(index));
+                }
+                TokenKind::TemplateClose => {
+                    return ordinary_bool_header(IfHeaderDelimiter::TemplateClose, Some(index));
+                }
+                TokenKind::Eof => break,
                 _ => {}
             }
         }
 
-        nesting_depth.step(&token.kind);
+        nesting_depth.step(token_kind);
         index += 1;
     }
 
-    false
+    ordinary_bool_header(IfHeaderDelimiter::None, None)
 }
 
-fn next_meaningful_token_is_header_boundary(token_stream: &FileTokens, start_index: usize) -> bool {
+fn classify_from_is(token_stream: &FileTokens, is_index: usize) -> IfHeaderClassification {
+    let token_after_is = next_meaningful_token_index(token_stream, is_index + 1);
+    let Some(after_is) = token_after_is else {
+        return IfHeaderClassification {
+            shape: IfHeaderShape::OrdinaryBool,
+            is_index: Some(is_index),
+            token_after_is: None,
+            body_delimiter: IfHeaderDelimiter::None,
+            delimiter_index: None,
+        };
+    };
+
+    if let Some(delimiter) = full_match_delimiter(&token_stream.tokens[after_is].kind) {
+        return IfHeaderClassification {
+            shape: IfHeaderShape::FullMatch,
+            is_index: Some(is_index),
+            token_after_is: Some(after_is),
+            body_delimiter: delimiter,
+            delimiter_index: Some(after_is),
+        };
+    }
+
+    classify_single_predicate_after_pattern(token_stream, is_index, after_is)
+}
+
+fn classify_single_predicate_after_pattern(
+    token_stream: &FileTokens,
+    is_index: usize,
+    pattern_start: usize,
+) -> IfHeaderClassification {
+    let mut nesting_depth = NestingDepth::default();
+    let mut index = pattern_start;
+
+    while index < token_stream.length {
+        let token_kind = &token_stream.tokens[index].kind;
+
+        if nesting_depth.is_top_level()
+            && let Some(delimiter) = predicate_body_delimiter(token_kind)
+        {
+            let shape = match delimiter {
+                IfHeaderDelimiter::InlineThen => IfHeaderShape::PotentialInlineSinglePredicate,
+                IfHeaderDelimiter::Colon
+                | IfHeaderDelimiter::TemplateBody
+                | IfHeaderDelimiter::TemplateClose => IfHeaderShape::PotentialBlockSinglePredicate,
+                IfHeaderDelimiter::None => IfHeaderShape::OrdinaryBool,
+            };
+
+            return IfHeaderClassification {
+                shape,
+                is_index: Some(is_index),
+                token_after_is: Some(pattern_start),
+                body_delimiter: delimiter,
+                delimiter_index: Some(index),
+            };
+        }
+
+        nesting_depth.step(token_kind);
+        index += 1;
+    }
+
+    IfHeaderClassification {
+        shape: IfHeaderShape::OrdinaryBool,
+        is_index: Some(is_index),
+        token_after_is: Some(pattern_start),
+        body_delimiter: IfHeaderDelimiter::None,
+        delimiter_index: None,
+    }
+}
+
+fn full_match_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
+    match token_kind {
+        TokenKind::Colon => Some(IfHeaderDelimiter::Colon),
+        TokenKind::StartTemplateBody => Some(IfHeaderDelimiter::TemplateBody),
+        TokenKind::TemplateClose => Some(IfHeaderDelimiter::TemplateClose),
+        _ => None,
+    }
+}
+
+fn predicate_body_delimiter(token_kind: &TokenKind) -> Option<IfHeaderDelimiter> {
+    match token_kind {
+        TokenKind::Then => Some(IfHeaderDelimiter::InlineThen),
+        other => full_match_delimiter(other),
+    }
+}
+
+fn ordinary_bool_header(
+    body_delimiter: IfHeaderDelimiter,
+    delimiter_index: Option<usize>,
+) -> IfHeaderClassification {
+    IfHeaderClassification {
+        shape: IfHeaderShape::OrdinaryBool,
+        is_index: None,
+        token_after_is: None,
+        body_delimiter,
+        delimiter_index,
+    }
+}
+
+fn next_meaningful_token_index(token_stream: &FileTokens, start_index: usize) -> Option<usize> {
     let mut index = start_index;
 
     while index < token_stream.length {
         match token_stream.tokens[index].kind {
             TokenKind::Newline => index += 1,
-            TokenKind::Colon | TokenKind::StartTemplateBody | TokenKind::TemplateClose => {
-                return true;
-            }
-            _ => return false,
+            TokenKind::Eof => return None,
+            _ => return Some(index),
         }
     }
 
-    false
+    None
 }
 
 fn parse_match_style_if_header(
@@ -162,50 +339,15 @@ fn parse_match_style_if_header(
     string_table: &mut StringTable,
 ) -> IfHeaderResult<ParsedIfHeader> {
     let condition_context = if_condition_parse_context(context, string_table);
-    let mut condition_type = ExpectedType::Infer;
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::until(ExpressionParseResources {
+    let scrutinee = parse_scrutinee_until_is(
         token_stream,
-        scope_context: &condition_context,
+        &condition_context,
         type_interner,
-        expected_type: &mut condition_type,
-        cast_target_context: &mut cast_target_context,
-        value_mode: &ValueMode::ImmutableOwned,
         string_table,
-    });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
+    )?;
     token_stream.advance(); // consume `is`
 
     Ok(ParsedIfHeader::MatchStyle { scrutinee })
-}
-
-/// Check whether the upcoming tokens form `if <expr> is |...|:`.
-///
-/// WHAT: scans for a top-level `is` before a top-level colon. If `is` exists and
-/// the next token is `|`, this is a single-predicate option-present capture.
-/// WHY: `|name|` is not a valid expression, so the normal expression parser would
-/// fail. Detecting the shape early lets callers parse the scrutinee and pattern separately.
-fn is_single_predicate_option_capture(token_stream: &FileTokens) -> bool {
-    let is_index = find_expression_end_index(
-        &token_stream.tokens,
-        token_stream.index,
-        &[
-            TokenKind::Is,
-            TokenKind::Colon,
-            TokenKind::StartTemplateBody,
-            TokenKind::TemplateClose,
-        ],
-    );
-    if is_index >= token_stream.length {
-        return false;
-    }
-    if token_stream.tokens[is_index].kind != TokenKind::Is {
-        return false;
-    }
-    token_stream
-        .tokens
-        .get(is_index + 1)
-        .is_some_and(|t| t.kind == TokenKind::TypeParameterBracket)
 }
 
 fn parse_option_present_capture_if_header(
@@ -215,18 +357,12 @@ fn parse_option_present_capture_if_header(
     string_table: &mut StringTable,
 ) -> IfHeaderResult<ParsedIfHeader> {
     let condition_context = if_condition_parse_context(context, string_table);
-    let mut condition_type = ExpectedType::Infer;
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::until(ExpressionParseResources {
+    let scrutinee = parse_scrutinee_until_is(
         token_stream,
-        scope_context: &condition_context,
+        &condition_context,
         type_interner,
-        expected_type: &mut condition_type,
-        cast_target_context: &mut cast_target_context,
-        value_mode: &ValueMode::ImmutableOwned,
         string_table,
-    });
-    let scrutinee = create_expression_until(input, &[TokenKind::Is])?;
+    )?;
     token_stream.advance(); // consume `is`
 
     let type_environment = type_interner.environment();
@@ -281,63 +417,4 @@ fn if_condition_parse_context(
     string_table: &mut StringTable,
 ) -> ScopeContext {
     context.new_child_control_flow(ContextKind::Condition, string_table)
-}
-
-/// Build an option-present capture arm scope and pattern.
-///
-/// WHAT: clones the parent branch/match context and adds a `Declaration` entry
-/// for the inner payload binding so the branch body can reference the unwrapped value.
-/// WHY: option present captures share one binding path construction rule across
-/// statement `if`, value `if`, full matches, and future template `if` suffixes.
-///
-/// Validates:
-/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
-pub(crate) fn build_option_present_capture_scope_and_pattern(
-    match_context: &ScopeContext,
-    capture_name: StringId,
-    binding_location: &SourceLocation,
-    inner_type_id: TypeId,
-    pattern_location: &SourceLocation,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-) -> IfHeaderResult<(ScopeContext, MatchPattern)> {
-    let mut arm_scope = match_context.clone();
-
-    if let Some(_existing) = arm_scope.get_reference(&capture_name) {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
-            InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-            None,
-            None,
-            binding_location.clone(),
-        )
-        .into());
-    }
-
-    let binding_name_str = string_table.resolve(capture_name).to_owned();
-    let binding_path = arm_scope.scope.join_str(&binding_name_str, string_table);
-
-    let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
-    let declaration = Declaration {
-        id: binding_path.clone(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            binding_location.clone(),
-            inner_type_id,
-            capture_data_type,
-            ValueMode::ImmutableOwned,
-        ),
-    };
-
-    let binding_location = declaration.value.location.clone();
-    arm_scope.add_var(declaration, binding_location.clone());
-
-    let pattern = MatchPattern::OptionPresentCapture {
-        name: capture_name,
-        binding_path,
-        inner_type_id,
-        location: pattern_location.clone(),
-        binding_location: binding_location.clone(),
-    };
-
-    Ok((arm_scope, pattern))
 }

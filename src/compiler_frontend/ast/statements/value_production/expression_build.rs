@@ -2,8 +2,8 @@
 //!
 //! WHAT: builds `ThenValue` nodes, `ValueIfBlock`, `ValueMatchBlock`, and the
 //! wrapping `ExpressionKind::ValueBlock` that HIR lowering consumes.
-//! WHY: centralising construction keeps the parser modules focused on parsing
-//! and ensures consistent `ValueMode::ImmutableOwned` and diagnostic spelling.
+//! WHY: receiver and multi-bind parsers share one construction owner so they do
+//! not build a temporary block and then overwrite its bodies.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -18,11 +18,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Builds a `ThenValue` AST node from produced branch expressions.
-///
-/// WHAT: wraps the expressions in a `NodeKind::ThenValue` with the correct scope.
-/// WHY: inline single-predicate matches use the arm-local capture scope for the
-/// then branch, while bool conditions use the outer scope for both branches.
-pub(super) fn then_value_node(
+pub(in crate::compiler_frontend::ast::statements::value_production) fn then_value_node(
     expressions: Vec<Expression>,
     location: SourceLocation,
     scope: InternedPath,
@@ -38,7 +34,11 @@ pub(super) fn then_value_node(
 }
 
 /// Builds a `ValueBlock::If` expression from a completed `ValueIfBlock`.
-pub(super) fn build_value_if_expression(
+///
+/// `value_if.result_type_ids` must already be the final inferred or explicit
+/// slot IDs. `result_type_id` is the expression type, including a tuple for
+/// multi-slot receivers. Mixed multi-bind must not call this until slots are final.
+pub(in crate::compiler_frontend::ast::statements::value_production) fn build_value_if_expression(
     value_if: ValueIfBlock,
     result_type_id: TypeId,
     type_environment: &TypeEnvironment,
@@ -57,7 +57,7 @@ pub(super) fn build_value_if_expression(
 }
 
 /// Builds a `ValueBlock::Match` expression from a completed `ValueMatchBlock`.
-pub(super) fn build_value_match_expression(
+pub(in crate::compiler_frontend::ast::statements::value_production) fn build_value_match_expression(
     value_match: ValueMatchBlock,
     result_type_id: TypeId,
     type_environment: &TypeEnvironment,

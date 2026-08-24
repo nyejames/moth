@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "value_if_block_nested_produce_and_return",
+    "returned",
+    "fallback",
+    "waiting",
+]

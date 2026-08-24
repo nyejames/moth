@@ -5,11 +5,14 @@
 //! then/else structural validation to `inline_then_else.rs`.
 
 use super::ValueIfParseInput;
-use super::expression_build::{build_value_if_expression, then_value_node};
 use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::statements::value_production::types::ValueIfBlock;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::{
+    build_value_if_expression, then_value_node,
+};
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ParsedReceiverValue, ValueBlock, ValueIfBlock,
+};
 
 /// Inline branch expression parsing can encounter a retained-data lifecycle failure, so this
 /// private join uses the AST expression error lane rather than pre-rendering it as a diagnostic.
@@ -23,13 +26,12 @@ type InlineIfResult<T> = Result<T, ExpressionParseError>;
 /// single-predicate matching.
 pub(super) fn parse_inline_value_if(
     input: ValueIfParseInput<'_, '_>,
-) -> InlineIfResult<Expression> {
+) -> InlineIfResult<ParsedReceiverValue> {
     let ValueIfParseInput {
         token_stream,
         context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
         condition,
         location,
@@ -40,8 +42,7 @@ pub(super) fn parse_inline_value_if(
         then_context: context,
         else_context: context,
         type_interner,
-        expected_result_type_ids,
-        receiver_kind,
+        target,
         string_table,
     })?;
 
@@ -60,13 +61,16 @@ pub(super) fn parse_inline_value_if(
         condition,
         then_body,
         else_body,
-        location: location.clone(),
+        location,
         result_type_ids: output.result_type_ids,
     };
 
-    Ok(build_value_if_expression(
-        value_if,
-        output.result_type_id,
-        type_interner.environment(),
-    ))
+    Ok(match output.result_type_id {
+        Some(result_type_id) => ParsedReceiverValue::Complete(build_value_if_expression(
+            value_if,
+            result_type_id,
+            type_interner.environment(),
+        )),
+        None => ParsedReceiverValue::NeedsSlotInference(ValueBlock::If(value_if)),
+    })
 }

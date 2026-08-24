@@ -34,7 +34,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///
 /// WHAT: avoids a long parameter list by grouping everything the parser needs.
 /// WHY: the caller already has all of these values on hand; a struct keeps call sites
-/// readable and makes future extension easier.
+/// readable.
 pub struct ProducedValuesParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
     pub context: &'a ScopeContext,
@@ -61,7 +61,7 @@ pub(crate) fn is_missing_produced_value_boundary(kind: &TokenKind) -> bool {
 ///
 /// WHAT: reads one or more expressions after `then`, validates that the count matches
 /// `target.result_type_ids`, and applies contextual coercion per position.
-/// WHY: every value-producing site (catch, future value `if`, match) needs identical
+/// WHY: every value-producing site (value `if`, match and catch) needs identical
 /// arity and coercion validation.
 pub fn parse_produced_values_typed<'a, 'b>(
     input: ProducedValuesParseInput<'a, 'b>,
@@ -92,6 +92,8 @@ pub fn parse_produced_values_typed<'a, 'b>(
                 type_interner,
                 arity,
                 string_table,
+                &target.known_slot_types,
+                target.receiver_kind,
             );
         }
 
@@ -173,10 +175,10 @@ pub fn parse_produced_values_typed<'a, 'b>(
     )
 }
 
-// WHAT: parses the Phase 4A single-result inferred declaration case.
-// WHY: block-form declaration initializers such as `value = if condition: then 1 ...`
-//      do not know their receiver type until the branch `then` values have been parsed.
-//      Multi-result inference stays out of this slice because no receiver arity exists yet.
+// WHAT: parses a single inferred produced value when the receiver has no known type.
+// WHY: inferred declaration initializers such as `value = if condition: then 1 ...`
+//      only learn their type from the authored `then` values. Known and mixed
+//      multi-slot receivers keep per-slot expected types instead.
 fn parse_single_inferred_declaration_value(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -216,23 +218,29 @@ fn parse_single_inferred_declaration_value(
     Ok(vec![expression])
 }
 
-/// Parses a fixed number of expressions after `then` when no expected types are known.
+/// Parses a fixed number of expressions after `then` for mixed or fully inferred slots.
 ///
-/// WHAT: reads exactly `arity` expressions, validating only that the count matches.
-/// WHY: multi-bind with inferred slot types needs to know how many values to read
-/// without knowing their types upfront.
+/// WHAT: reads exactly `arity` expressions. Known slots use their receiving type so
+/// forms such as `none` still parse; unknown slots stay inferred.
+/// WHY: mixed multi-bind must keep known-slot context at parse time even though
+/// unknown siblings are inferred later from every producing path.
 pub(crate) fn parse_fixed_arity_inferred_values(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     arity: usize,
     string_table: &mut StringTable,
+    slot_expected_types: &[Option<TypeId>],
+    receiver_kind: ValueReceiverKind,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let expression_context = context.new_child_expression(vec![]);
     let mut values = Vec::with_capacity(arity);
 
     for index in 0..arity {
-        let mut expected_type = ExpectedType::Infer;
+        let known_slot_type = slot_expected_types.get(index).copied().flatten();
+        let mut expected_type = known_slot_type
+            .map(ExpectedType::Known)
+            .unwrap_or(ExpectedType::Infer);
         let mut none_cast_target = CastTargetContext::None;
         let input = ExpressionParseInput::new(
             ExpressionParseResources {
@@ -251,7 +259,16 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 allow_expected_result_evidence: false,
             },
         );
-        let expression = create_expression_with_trailing_newline_policy(input)?;
+        let mut expression = create_expression_with_trailing_newline_policy(input)?;
+        if let Some(expected_type_id) = known_slot_type {
+            expression = coerce_expression_to_explicit_type_boundary(
+                expression,
+                expected_type_id,
+                type_interner.environment(),
+                context,
+                mismatch_context_for_receiver(receiver_kind),
+            )?;
+        }
         values.push(expression);
 
         if index + 1 < arity {
@@ -315,7 +332,6 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
         ValueReceiverKind::Return => TypeMismatchContext::ReturnValue,
         ValueReceiverKind::Assignment
         | ValueReceiverKind::MultiBind
-        | ValueReceiverKind::NestedThen
         | ValueReceiverKind::CatchHandler => TypeMismatchContext::General,
     }
 }

@@ -1,0 +1,34 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+rendered_output_contains = [
+    "value_if_block_single_predicate",
+    "present Priya",
+    "missing guest",
+    "bare ready 1",
+    "qualified waiting 0",
+    "payload bad",
+    "alias oops",
+    "alias else outer",
+    "pair Priya 1",
+    "logged Ada",
+    "returned",
+    "Priya",
+    "guest",
+]
+rendered_output_contains_in_order = [
+    "present Priya",
+    "missing guest",
+    "bare ready 1",
+    "qualified waiting 0",
+    "payload bad",
+    "alias oops",
+    "alias else outer",
+    "pair Priya 1",
+    "present",
+    "logged Ada",
+    "returned",
+    "Priya",
+    "guest",
+]

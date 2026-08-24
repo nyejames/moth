@@ -1,0 +1,35 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+rendered_output_contains = [
+    "value_if_multi_bind_inferred_single_predicate",
+    "inline present Priya 1",
+    "inline missing guest 0",
+    "block option Ada 1",
+    "inline ready 1 ready",
+    "inline waiting 0 other",
+    "payload bad 1",
+    "payload else complete 0",
+    "nested Priya 2",
+    "kept Priya 1",
+    "early returned 9",
+    "optional none 1",
+    "optional present Priya 1",
+    "optional missing 0",
+]
+rendered_output_contains_in_order = [
+    "inline present Priya 1",
+    "inline missing guest 0",
+    "block option Ada 1",
+    "inline ready 1 ready",
+    "inline waiting 0 other",
+    "payload bad 1",
+    "payload else complete 0",
+    "nested Priya 2",
+    "kept Priya 1",
+    "early returned 9",
+    "optional none 1",
+    "optional present Priya 1",
+    "optional missing 0",
+]

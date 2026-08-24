@@ -1,8 +1,8 @@
 //! Core types for the value-production subsystem.
 //!
 //! WHAT: defines the shapes that represent produced values, active production targets,
-//! and the results of branch-flow analysis.
-//! WHY: these types cross parser boundaries (dispatcher, catch handler, future value-block
+//! and all-path branch exit summaries.
+//! WHY: these types cross parser boundaries (dispatcher, catch handler and value
 //! receivers) and need one canonical definition.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
@@ -40,27 +40,61 @@ pub struct ActiveValueProductionTarget {
     /// number of produced values (e.g. multi-bind with some inferred slots), this
     /// tells `parse_produced_values_typed` how many expressions to read after `then`.
     pub expected_arity: Option<usize>,
+    /// Per-slot expected types for mixed known/inferred multi-bind.
+    ///
+    /// WHAT: empty when every slot is already in `result_type_ids`. Otherwise one
+    /// entry per target, with `Some` for slots that must be parsed in a known
+    /// receiving context such as `none`.
+    /// WHY: inferred multi-bind still has to type known optional slots at parse
+    /// time, even though unknown siblings are inferred later.
+    pub known_slot_types: Vec<Option<TypeId>>,
+}
+
+impl ActiveValueProductionTarget {
+    pub fn known(result_type_ids: Vec<TypeId>, receiver_kind: ValueReceiverKind) -> Self {
+        Self {
+            result_type_ids,
+            receiver_kind,
+            expected_arity: None,
+            known_slot_types: Vec::new(),
+        }
+    }
+
+    pub fn mixed(slot_types: &[Option<TypeId>], receiver_kind: ValueReceiverKind) -> Self {
+        if let Some(known) = slot_types.iter().copied().collect::<Option<Vec<_>>>() {
+            return Self::known(known, receiver_kind);
+        }
+
+        Self {
+            result_type_ids: Vec::new(),
+            receiver_kind,
+            expected_arity: Some(slot_types.len()),
+            known_slot_types: slot_types.to_vec(),
+        }
+    }
+
+    pub fn needs_slot_inference(&self) -> bool {
+        self.result_type_ids.is_empty() && self.expected_arity.is_some()
+    }
 }
 
 /// Classification of the site that receives produced values.
 ///
 /// WHAT: identifies why a value-production target was activated.
-/// WHY: future diagnostics and lowering may need to distinguish declarations from returns
-/// from nested `then` sites; keeping the kind explicit avoids boolean flags.
+/// WHY: type-mismatch diagnostics distinguish declarations and returns from
+/// assignment, multi-bind and catch receivers without boolean flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // NestedThen is planned but not yet constructed.
 pub enum ValueReceiverKind {
     Declaration,
     Assignment,
     Return,
     MultiBind,
-    NestedThen,
     CatchHandler,
 }
 
 /// A value-producing control-flow block used as an expression at closed receiving sites.
 ///
-/// WHAT: represents `if` and future `match` / `catch` shapes that produce values instead
+/// WHAT: represents `if`, `match` and `catch` shapes that produce values instead
 /// of executing statements for side effects.
 /// WHY: receiving sites need to distinguish value blocks from ordinary expressions so
 /// they can validate arity, type, and completeness before HIR lowering.
@@ -69,6 +103,18 @@ pub enum ValueBlock {
     If(ValueIfBlock),
     Match(ValueMatchBlock),
     Catch(ValueCatchBlock),
+}
+
+/// Shared receiver parse result.
+///
+/// WHAT: known and single-inferred receivers wrap a finished expression.
+/// Mixed multi-bind returns the structural block so slot inference can finish
+/// before construction wraps once.
+/// WHY: `expression_build` must only see final `result_type_ids`.
+#[derive(Debug)]
+pub enum ParsedReceiverValue {
+    Complete(Expression),
+    NeedsSlotInference(ValueBlock),
 }
 
 /// Single `if` value-producing block.
@@ -92,8 +138,9 @@ pub struct ValueIfBlock {
 
 /// Full value-producing match block.
 ///
-/// WHAT: `if value is:` used at a closed receiving site, with each reachable arm
-/// producing values via `then` or terminating.
+/// WHAT: `if value is:` or a one-arm option/choice predicate used at a closed
+/// receiving site, with each reachable arm producing values via `then` or
+/// terminating.
 /// WHY: this reuses statement match parsing and HIR match CFG lowering while keeping
 /// value-block result slots explicit for hidden result-local allocation.
 #[derive(Clone, Debug)]
@@ -119,18 +166,61 @@ pub struct ValueCatchBlock {
     pub result_type_ids: Vec<TypeId>,
 }
 
-/// Result of analyzing a body's control flow for value production.
+/// Independent all-path exit facts for a statement sequence.
 ///
-/// WHAT: tells a caller whether a sequence of AST nodes falls through, produces values,
-/// or terminates on all reachable paths.
-/// WHY: value-producing blocks require every path to either produce or terminate;
-/// `FallsThrough` indicates a completeness error.
+/// WHAT: records whether any reachable path can fall through, produce values, or
+/// terminate. These facts are independent: a body may produce on one path and
+/// terminate on another without falling through.
+/// WHY: a tri-state enum cannot represent mixed produce/terminate completeness,
+/// which the value-producing contract accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BranchFlow {
-    /// Body can reach the end without producing values or terminating.
-    FallsThrough,
-    /// Body contains at least one `then` on a reachable path.
-    ProducesValue,
-    /// Body guarantees termination (return, return!, panic) on all reachable paths.
-    Terminates,
+pub struct BranchExitSummary {
+    pub can_fall_through: bool,
+    pub produces_value: bool,
+    pub terminates: bool,
+}
+
+impl BranchExitSummary {
+    /// Empty or ordinary statement sequence: control continues.
+    pub const FALLS_THROUGH: Self = Self {
+        can_fall_through: true,
+        produces_value: false,
+        terminates: false,
+    };
+
+    /// `then` produces values and does not continue.
+    pub const PRODUCES: Self = Self {
+        can_fall_through: false,
+        produces_value: true,
+        terminates: false,
+    };
+
+    /// `return`, `return!` or a literal-false assertion stops the path.
+    pub const TERMINATES: Self = Self {
+        can_fall_through: false,
+        produces_value: false,
+        terminates: true,
+    };
+
+    /// Unions alternative branches such as `if`/`else` or match arms.
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            can_fall_through: self.can_fall_through || other.can_fall_through,
+            produces_value: self.produces_value || other.produces_value,
+            terminates: self.terminates || other.terminates,
+        }
+    }
+
+    /// Sequences the next statement onto paths that still fall through.
+    pub fn then_sequence(self, next: Self) -> Self {
+        if !self.can_fall_through {
+            return self;
+        }
+
+        Self {
+            can_fall_through: next.can_fall_through,
+            produces_value: self.produces_value || next.produces_value,
+            terminates: self.terminates || next.terminates,
+        }
+    }
 }

@@ -1,0 +1,9 @@
+display |maybe_name String?| -> String:
+    name = "outer"
+    label = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+    return label
+;

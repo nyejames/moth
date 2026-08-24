@@ -49,3 +49,28 @@ A match can produce values with `then` at a closed receiving site.
 
 Every selected value-producing arm must produce the receiver's required values
 or terminate.
+
+### Single-predicate value match
+
+A closed receiver can also use one option-present capture or one choice-variant
+predicate. The inline and block forms are equivalent one-arm matches with a
+required `else`. They are not full `if value is:` matches and do not use `=>`
+arms.
+
+[codeblock, $code("moth"):
+    label = if maybe_name is |name| then name else "guest"
+
+    label = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+
+    score = if status is Ready then 1 else 0
+
+    score = if status is Ready:
+        then 1
+    else
+        then 0
+    ;
+]

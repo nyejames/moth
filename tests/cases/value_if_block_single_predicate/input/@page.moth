@@ -1,0 +1,105 @@
+Status ::
+    Ready,
+    Waiting,
+;
+
+Response ::
+    Ok,
+    Err |
+        message String,
+    |,
+;
+
+display |maybe_name String?| -> String:
+    name = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+    return name
+;
+
+score_for |status Status| -> Int:
+    score = if status is Ready:
+        then 1
+    else
+        then 0
+    ;
+    return score
+;
+
+qualified_score_for |status Status| -> Int:
+    score ~= 0
+    score = if status is Status::Ready:
+        then 1
+    else
+        then 0
+    ;
+    return score
+;
+
+error_text |response Response| -> String:
+    return if response is Err(message):
+        then message
+    else
+        then "ok"
+    ;
+;
+
+aliased_error |response Response| -> String:
+    message = "outer"
+    return if response is Err(message as error_message):
+        then error_message
+    else
+        then message
+    ;
+;
+
+pair_for |maybe_name String?| -> String, Int:
+    label String, count Int = if maybe_name is |name|:
+        then name, 1
+    else
+        then "guest", 0
+    ;
+    return label, count
+;
+
+logged_display |maybe_name String?| -> String:
+    name = if maybe_name is |name|:
+        io.line("present")
+        then name
+    else
+        then "guest"
+    ;
+    return name
+;
+
+choose_label |maybe_name String?, use_fallback Bool| -> String:
+    label = if maybe_name is |name|:
+        if use_fallback:
+            then name
+        else
+            return "returned"
+        ;
+    else
+        then "guest"
+    ;
+    return label
+;
+
+maybe_missing String? = none
+
+io.line("value_if_block_single_predicate")
+io.line([:present [display("Priya")]])
+io.line([:missing [display(maybe_missing)]])
+io.line([:bare ready [score_for(Status::Ready)]])
+io.line([:qualified waiting [qualified_score_for(Status::Waiting)]])
+io.line([:payload [error_text(Response::Err("bad"))]])
+io.line([:alias [aliased_error(Response::Err("oops"))]])
+io.line([:alias else [aliased_error(Response::Ok)]])
+label, count = pair_for("Priya")
+io.line([:pair [label] [count]])
+io.line([:logged [logged_display("Ada")]])
+io.line(choose_label("Priya", false))
+io.line(choose_label("Priya", true))
+io.line(choose_label(maybe_missing, true))

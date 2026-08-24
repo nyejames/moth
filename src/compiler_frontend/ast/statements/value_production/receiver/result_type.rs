@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
-use crate::compiler_frontend::ast::statements::value_production::completeness::extract_single_produced_type;
+use crate::compiler_frontend::ast::statements::value_production::completeness::visit_reachable_then_values;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -88,13 +88,30 @@ pub(super) fn infer_inline_result_type(
     Ok(then_type)
 }
 
+/// Slot types stored on the finished value block for HIR result-local allocation.
+///
+/// WHAT: keeps explicit receiver slots when they exist and otherwise stores the
+/// inferred single result type.
+/// WHY: HIR allocates one local per `result_type_ids` entry and must not see an
+/// empty vector for an inferred block.
+pub(super) fn final_slot_type_ids(
+    expected_result_type_ids: &[TypeId],
+    inferred_expression_type: TypeId,
+) -> Vec<TypeId> {
+    if expected_result_type_ids.is_empty() {
+        vec![inferred_expression_type]
+    } else {
+        expected_result_type_ids.to_vec()
+    }
+}
+
 /// Infers the result type from block-form branch bodies.
 ///
 /// WHAT: when the receiver expects known types, returns the corresponding expression
 /// type (single type or internal tuple type for multi-value). For inferred single-value
-/// declarations, scans each branch for `ThenValue` nodes and returns the produced type.
-/// WHY: block bodies may contain nested control flow; this extracts the type from
-/// the first producing path it finds.
+/// declarations, inspects every reachable producing path.
+/// WHY: nested control flow can produce on several paths; the first `ThenValue` is not
+/// enough to prove the inferred type.
 pub(super) fn infer_block_if_result_type(
     then_body: &[AstNode],
     else_body: &[AstNode],
@@ -113,34 +130,15 @@ pub(super) fn infer_block_if_result_type(
         return Ok(expected);
     }
 
-    let then_type = extract_single_produced_type(then_body);
-    let else_type = extract_single_produced_type(else_body);
-
-    let context = receiver_type_mismatch_context(receiver_kind);
-    match (then_type, else_type) {
-        (Some(then_type_id), Some(else_type_id)) => {
-            if then_type_id != else_type_id {
-                return Err(Box::new(CompilerDiagnostic::type_mismatch(
-                    then_type_id,
-                    else_type_id,
-                    context,
-                    location.clone(),
-                )));
-            }
-
-            Ok(then_type_id)
-        }
-
-        (Some(then_type_id), None) => Ok(then_type_id),
-        (None, Some(else_type_id)) => Ok(else_type_id),
-
-        (None, None) => Err(Box::new(
-            CompilerDiagnostic::invalid_control_flow_statement(
-                InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                location.clone(),
-            ),
-        )),
-    }
+    unify_single_produced_types(
+        [
+            collect_reachable_single_produced_types(then_body),
+            collect_reachable_single_produced_types(else_body),
+        ]
+        .concat(),
+        location,
+        receiver_kind,
+    )
 }
 
 /// Infers the result type for a full value-producing match.
@@ -166,8 +164,37 @@ pub(super) fn infer_value_match_result_type(
         return Ok(expected);
     }
 
-    let produced_types = collect_value_match_single_produced_types(arms, default);
-    let Some(first_type) = produced_types.first().copied() else {
+    unify_single_produced_types(
+        collect_value_match_single_produced_types(arms, default),
+        location,
+        receiver_kind,
+    )
+}
+
+/// Collects the produced types from every reachable arm and optional default body.
+fn collect_value_match_single_produced_types(
+    arms: &[MatchArm],
+    default: Option<&[AstNode]>,
+) -> Vec<(TypeId, SourceLocation)> {
+    let mut produced_types = Vec::new();
+
+    for arm in arms {
+        produced_types.extend(collect_reachable_single_produced_types(&arm.body));
+    }
+
+    if let Some(default_body) = default {
+        produced_types.extend(collect_reachable_single_produced_types(default_body));
+    }
+
+    produced_types
+}
+
+fn unify_single_produced_types(
+    produced_types: Vec<(TypeId, SourceLocation)>,
+    location: &SourceLocation,
+    receiver_kind: ValueReceiverKind,
+) -> ResultTypeResult<TypeId> {
+    let Some((first_type, _)) = produced_types.first().cloned() else {
         return Err(Box::new(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ValueIfNoProducingPath,
@@ -177,13 +204,13 @@ pub(super) fn infer_value_match_result_type(
     };
 
     let context = receiver_type_mismatch_context(receiver_kind);
-    for produced_type in produced_types.iter().copied().skip(1) {
+    for (produced_type, produced_location) in produced_types.into_iter().skip(1) {
         if produced_type != first_type {
             return Err(Box::new(CompilerDiagnostic::type_mismatch(
                 first_type,
                 produced_type,
                 context,
-                location.clone(),
+                produced_location,
             )));
         }
     }
@@ -191,24 +218,19 @@ pub(super) fn infer_value_match_result_type(
     Ok(first_type)
 }
 
-/// Collects the produced types from every arm and optional default body.
-pub(super) fn collect_value_match_single_produced_types(
-    arms: &[MatchArm],
-    default: Option<&[AstNode]>,
-) -> Vec<TypeId> {
+fn collect_reachable_single_produced_types(body: &[AstNode]) -> Vec<(TypeId, SourceLocation)> {
     let mut produced_types = Vec::new();
 
-    for arm in arms {
-        if let Some(type_id) = extract_single_produced_type(&arm.body) {
-            produced_types.push(type_id);
+    visit_reachable_then_values::<()>(body, &mut |produced_values| {
+        if produced_values.expressions.len() == 1 {
+            produced_types.push((
+                produced_values.expressions[0].type_id,
+                produced_values.expressions[0].location.clone(),
+            ));
         }
-    }
-
-    if let Some(default_body) = default
-        && let Some(type_id) = extract_single_produced_type(default_body)
-    {
-        produced_types.push(type_id);
-    }
+        Ok(())
+    })
+    .expect("single-produced-type collection is infallible");
 
     produced_types
 }

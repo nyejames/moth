@@ -17,9 +17,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-use crate::compiler_frontend::ast::statements::value_production::{
-    BranchFlow, analyze_branch_flow,
-};
+use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
 
 /// Validates that a catch-handler binding name is legal and emits naming warnings.
 ///
@@ -80,15 +78,9 @@ pub(super) fn validate_catch_fallible_handler_value_requirement(
     handler_body: &[AstNode],
     location: SourceLocation,
 ) -> Result<(), ExpressionParseError> {
-    let body_flow = analyze_branch_flow(handler_body);
+    let body_exits = analyze_branch_exits(handler_body);
 
-    if value_required
-        && !success_result_type_ids.is_empty()
-        && !matches!(
-            body_flow,
-            BranchFlow::ProducesValue | BranchFlow::Terminates
-        )
-    {
+    if value_required && !success_result_type_ids.is_empty() && body_exits.can_fall_through {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
             location,

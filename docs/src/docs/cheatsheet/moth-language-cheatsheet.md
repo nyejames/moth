@@ -368,6 +368,12 @@ Inspect options explicitly:
 ```moth
 label = if maybe_name is |name| then name else "guest"
 
+label = if maybe_name is |name|:
+    then name
+else
+    then "guest"
+;
+
 if maybe_name is none:
     io.line("missing")
 ;
@@ -495,6 +501,12 @@ Value-producing forms send values with `then`:
 ```moth
 label = if ready then "ready" else "waiting"
 
+label = if maybe_name is |name|:
+    then name
+else
+    then "guest"
+;
+
 status = "ready"
 label = if status is:
     "ready" => then "ready"
@@ -503,7 +515,7 @@ label = if status is:
 ;
 ```
 
-They work only at closed receiving declarations, assignments, multi-binds, returns or nested `then`. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types.
+They work only at closed receiving declarations, assignments, multi-binds and returns. Nested `then` receivers are deferred. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types. Mixed producing and terminating paths are complete; a real fallthrough path is rejected.
 
 ## Loops
 

@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0042"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+reason = "invalid_control_flow_statement.value_if_no_producing_path"
+path = "input/@page.moth"
+line = 2
+count = 1

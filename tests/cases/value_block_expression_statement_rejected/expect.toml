@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0042"]
-message_contains = ["Value-producing blocks are only valid at declaration, assignment, return, multi-bind, catch, or `then` receiving sites."]
+message_contains = ["Value-producing blocks are only valid at declaration, assignment, return, multi-bind, or catch receiving sites."]

@@ -1,0 +1,18 @@
+get_values |ready Bool, use_fallback Bool| -> String, Int:
+    first, second Int = if ready:
+        if use_fallback:
+            then "fallback", 1
+        else
+            return "returned", 0
+        ;
+    else
+        then "waiting", 2
+    ;
+
+    return first, second
+;
+
+label, count = get_values(true, true)
+io.line("value_if_multi_bind_nested_produce_and_return")
+io.line([: [label]])
+io.line([: [count]])

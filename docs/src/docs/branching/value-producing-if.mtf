@@ -29,19 +29,38 @@ The inline form also supports option-present capture and choice-variant predicat
 
 `then` sends one or more values from the active branch to the receiver.
 
-The block form with `then` is supported at the same closed receiving sites as the inline form, including declarations, assignments, multi-bind and returns.
+The block form with `then` is supported at the same closed receiving sites as the inline form: declarations, assignments, multi-bind and returns.
+
+### Block option and choice predicates
+
+The block form also supports option-present capture and choice-variant predicates:
+
+[codeblock, $code("moth"):
+    label = if maybe_name is |name|:
+        then name
+    else
+        then "guest"
+    ;
+
+    score = if status is Ready:
+        then 1
+    else
+        then 0
+    ;
+]
+
+These are one-arm single-predicate value matches, not full `if value is:` matches. They require `else`.
 
 ### Receiving sites
 
-Value-producing control flow is accepted at closed receiving sites:
+Value-producing control flow is accepted only at these closed receiving sites:
 
 - declarations
 - assignments
 - multi-bind
 - returns
-- nested `then`
 
-It is not a general expression form.
+It is not a general expression form. Nested `then` receivers are deferred.
 
 A value-producing block is invalid directly inside:
 
@@ -56,6 +75,8 @@ A value-producing block is invalid directly inside:
 
 - A value-producing `if` requires `else`.
 - Every reachable branch must produce the required values or terminate.
+- Mixed producing and terminating paths are complete.
+- A real fallthrough path is rejected.
 - At least one reachable branch must produce values.
 - Every producing path must match the receiver's arity.
 - Produced values must be compatible with the receiver's types.
@@ -74,4 +95,4 @@ Both branches must satisfy normal completeness, receiving arity and type rules f
 
 Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.
 
-Option-present and choice-predicate inline forms use the same receiving-site model and are covered by the pattern references.
+Option-present and choice-predicate inline and block forms use the same receiving-site model and are covered by the pattern references.
