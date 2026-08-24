@@ -119,11 +119,11 @@ fn statement_exits(statement: &AstNode) -> BranchExitSummary {
 
         NodeKind::Return(_) | NodeKind::ReturnError(_) => BranchExitSummary::TERMINATES,
 
-        NodeKind::If(_, then_body, Some(else_body)) => {
+        NodeKind::If(_, then_body, Some(else_body), _) => {
             analyze_branch_exits(then_body).union(analyze_branch_exits(else_body))
         }
 
-        NodeKind::If(_, then_body, None) => {
+        NodeKind::If(_, then_body, None, _) => {
             analyze_branch_exits(then_body).union(BranchExitSummary::FALLS_THROUGH)
         }
 
@@ -173,12 +173,12 @@ fn visit_statement_then_values<E>(
     match &statement.kind {
         NodeKind::ThenValue(produced_values) => visitor(produced_values),
 
-        NodeKind::If(_, then_body, Some(else_body)) => {
+        NodeKind::If(_, then_body, Some(else_body), _) => {
             visit_reachable_then_values(then_body, visitor)?;
             visit_reachable_then_values(else_body, visitor)
         }
 
-        NodeKind::If(_, then_body, None) => visit_reachable_then_values(then_body, visitor),
+        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values(then_body, visitor),
 
         NodeKind::Match {
             arms,
@@ -207,12 +207,12 @@ fn visit_statement_then_values_mut<E>(
     match &mut statement.kind {
         NodeKind::ThenValue(produced_values) => visitor(produced_values),
 
-        NodeKind::If(_, then_body, Some(else_body)) => {
+        NodeKind::If(_, then_body, Some(else_body), _) => {
             visit_reachable_then_values_mut(then_body, visitor)?;
             visit_reachable_then_values_mut(else_body, visitor)
         }
 
-        NodeKind::If(_, then_body, None) => visit_reachable_then_values_mut(then_body, visitor),
+        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values_mut(then_body, visitor),
 
         NodeKind::Match {
             arms,

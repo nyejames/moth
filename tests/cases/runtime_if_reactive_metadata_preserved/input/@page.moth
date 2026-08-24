@@ -1,0 +1,10 @@
+render |enabled Bool| -> String:
+    count $Int = 1
+    if enabled:
+        return [:runtime-reactive-value [$(count)]]
+    else
+        return "plain"
+    ;
+;
+
+[:runtime_if_reactive_metadata_preserved [render(true)]]

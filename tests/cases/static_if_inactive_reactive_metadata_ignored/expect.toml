@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["static_if_inactive_reactive_metadata_ignored plain"]
+rendered_output_not_contains = ["inactive-reactive-value"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true

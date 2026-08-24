@@ -294,10 +294,12 @@ fn branch_join_future_use_preserves_alias_conflict_after_linear_expiry() {
     let source = r#"
 items ~{Int} = {1, 2, 3}
 alias = items
-if true:
+outer ~= true
+inner ~= true
+if outer:
     branch_marker = 0
 else
-    if true:
+    if inner:
         inner_marker = 0
     else
         ~items.push(4) catch:
@@ -343,10 +345,12 @@ Point = |
 |
 point ~= Point(1)
 alias = point
-if true:
+outer ~= true
+inner ~= true
+if outer:
     branch_marker = 0
 else
-    if true:
+    if inner:
         inner_marker = 0
     else
         point.value = 2

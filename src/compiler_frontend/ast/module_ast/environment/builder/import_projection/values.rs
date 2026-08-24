@@ -102,15 +102,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let declaration =
                 self.project_imported_constant(local_path, &constant, string_table)?;
-            let declaration_path = declaration.id.clone();
-            Rc::make_mut(&mut self.declaration_table)
-                .append_for_construction(declaration)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Imported constant declaration path was registered more than once",
-                    )
-                })?;
-            self.push_module_constant_path(declaration_path);
+            append_projected_constant(
+                &mut self.declaration_table,
+                &mut self.resolved_module_constants,
+                declaration,
+            )?;
         }
         Ok(())
     }
@@ -139,6 +135,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         materialize_public_folded_value(self, folded, expected_type_id, string_table)
     }
 }
+
+fn append_projected_constant(
+    declaration_table: &mut Rc<TopLevelDeclarationTable>,
+    resolved_constants: &mut Rc<ResolvedConstantSet>,
+    declaration: Declaration,
+) -> Result<DeclarationId, CompilerError> {
+    let declaration_id = Rc::make_mut(declaration_table)
+        .append_for_construction(declaration)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Imported constant declaration path was registered more than once",
+            )
+        })?;
+    Rc::make_mut(resolved_constants).insert(declaration_id);
+    Ok(declaration_id)
+}
+
+#[cfg(test)]
+#[path = "../../../../tests/imported_constant_projection_tests.rs"]
+mod tests;
 
 /// Rebuild one stable folded value in the active module-local type and TIR environment.
 pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(

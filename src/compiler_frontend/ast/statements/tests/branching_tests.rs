@@ -34,22 +34,31 @@ use crate::compiler_frontend::value_mode::ValueMode;
 #[test]
 fn parses_if_else_statements() {
     let (ast, string_table) = parse_single_file_ast(
-        "flag = true\nif flag:\n    io.line([: [\"yes\"]])\nelse\n    io.line([: [\"no\"]])\n;\n",
+        "flag ~= true\nif flag:\n    io.line([: [\"yes\"]])\nelse\n    io.line([: [\"no\"]])\n;\n",
     );
 
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, then_block, else_block) = &body[1].kind else {
+    let NodeKind::If(condition, then_block, else_block, metadata) = &body[1].kind else {
         panic!("expected if statement in start body");
     };
 
     assert_eq!(condition.diagnostic_type, DataType::Bool);
     assert_eq!(then_block.len(), 1);
+    assert_eq!(metadata.then_scope, then_block[0].scope);
     assert_eq!(
         else_block.as_ref().map(Vec::len),
         Some(1),
         "else block should contain one host call"
     );
+    assert_eq!(
+        metadata.else_scope.as_ref(),
+        else_block.as_ref().map(|body| &body[0].scope)
+    );
+    assert_eq!(metadata.request_ranges.then_branch.start, 0);
+    assert_eq!(metadata.request_ranges.then_branch.end, 0);
+    assert_eq!(metadata.request_ranges.else_branch.start, 0);
+    assert_eq!(metadata.request_ranges.else_branch.end, 0);
 }
 
 #[test]
@@ -132,14 +141,14 @@ fn runtime_operator_sequence(expression: &Expression) -> Vec<Operator> {
 #[test]
 fn parses_nested_if_else_statements() {
     let (ast, string_table) = parse_single_file_ast(
-        "outer = true\ninner = false\nif outer:\n    if inner:\n        io.line([: [\"inner\"]])\n    else\n        io.line([: [\"not inner\"]])\n    ;\nelse\n    io.line([: [\"outer false\"]])\n;\n",
+        "outer ~= true\ninner ~= false\nif outer:\n    if inner:\n        io.line([: [\"inner\"]])\n    else\n        io.line([: [\"not inner\"]])\n    ;\nelse\n    io.line([: [\"outer false\"]])\n;\n",
     );
 
     let body = start_function_body(&ast, &string_table);
-    let NodeKind::If(_, then_block, else_block) = &body[2].kind else {
+    let NodeKind::If(_, then_block, else_block, _) = &body[2].kind else {
         panic!("expected top-level if statement in start body");
     };
-    let NodeKind::If(_, nested_then, nested_else) = &then_block[0].kind else {
+    let NodeKind::If(_, nested_then, nested_else, _) = &then_block[0].kind else {
         panic!("expected nested if statement in top-level then block");
     };
 
@@ -194,11 +203,11 @@ fn rejects_string_if_condition_with_type_error_metadata() {
 #[test]
 fn precedence_not_binds_tighter_than_and_in_if_conditions() {
     let (ast, string_table) = parse_single_file_ast(
-        "a = true\nb = false\nif not a and b:\n    io.line([: [\"x\"]])\n;\n",
+        "a ~= true\nb ~= false\nif not a and b:\n    io.line([: [\"x\"]])\n;\n",
     );
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[2].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[2].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -211,11 +220,11 @@ fn precedence_not_binds_tighter_than_and_in_if_conditions() {
 #[test]
 fn precedence_and_binds_tighter_than_or_in_if_conditions() {
     let (ast, string_table) = parse_single_file_ast(
-        "a = true\nb = false\nc = false\nif a or b and c:\n    io.line([: [\"x\"]])\n;\n",
+        "a ~= true\nb ~= false\nc ~= false\nif a or b and c:\n    io.line([: [\"x\"]])\n;\n",
     );
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[3].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[3].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -228,11 +237,11 @@ fn precedence_and_binds_tighter_than_or_in_if_conditions() {
 #[test]
 fn parenthesized_grouping_overrides_default_logical_precedence() {
     let (ast, string_table) = parse_single_file_ast(
-        "a = true\nb = false\nc = false\nif (a or b) and c:\n    io.line([: [\"x\"]])\n;\n",
+        "a ~= true\nb ~= false\nc ~= false\nif (a or b) and c:\n    io.line([: [\"x\"]])\n;\n",
     );
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[3].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[3].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -245,11 +254,11 @@ fn parenthesized_grouping_overrides_default_logical_precedence() {
 #[test]
 fn comparisons_bind_tighter_than_and_in_if_conditions() {
     let (ast, string_table) = parse_single_file_ast(
-        "a = 1\nb = 2\nc = 3\nd = 4\nif a < b and c < d:\n    io.line([: [\"x\"]])\n;\n",
+        "a ~= 1\nb ~= 2\nc ~= 3\nd ~= 4\nif a < b and c < d:\n    io.line([: [\"x\"]])\n;\n",
     );
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[4].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[4].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -262,10 +271,10 @@ fn comparisons_bind_tighter_than_and_in_if_conditions() {
 #[test]
 fn parenthesized_comparison_can_be_negated_in_if_conditions() {
     let (ast, string_table) =
-        parse_single_file_ast("a = 1\nb = 2\nif not (a < b):\n    io.line([: [\"x\"]])\n;\n");
+        parse_single_file_ast("a ~= 1\nb ~= 2\nif not (a < b):\n    io.line([: [\"x\"]])\n;\n");
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[2].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[2].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -278,11 +287,11 @@ fn parenthesized_comparison_can_be_negated_in_if_conditions() {
 #[test]
 fn equality_and_or_precedence_stays_deterministic_in_if_conditions() {
     let (ast, string_table) = parse_single_file_ast(
-        "a = 1\nb = 1\nc = 2\nd = 2\nif a is b or c is d:\n    io.line([: [\"x\"]])\n;\n",
+        "a ~= 1\nb ~= 1\nc ~= 2\nd ~= 2\nif a is b or c is d:\n    io.line([: [\"x\"]])\n;\n",
     );
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::If(condition, _, _) = &body[4].kind else {
+    let NodeKind::If(condition, _, _, _) = &body[4].kind else {
         panic!("expected if statement in start body");
     };
 
@@ -726,10 +735,11 @@ fn rejects_semicolon_between_match_arms() {
 #[test]
 fn allows_semicolons_inside_nested_structures_within_match_arms() {
     let (ast, string_table) = parse_single_file_ast(
-        "value = 1\n\
+        "flag ~= true\n\
+         value = 1\n\
          if value is:\n\
              1 =>\n\
-                 if true:\n\
+                 if flag:\n\
                      io.line([: [\"nested\"]])\n\
                  ;\n\
              else => io.line([: [\"other\"]])\n\
@@ -738,13 +748,13 @@ fn allows_semicolons_inside_nested_structures_within_match_arms() {
 
     let body = start_function_body(&ast, &string_table);
 
-    let NodeKind::Match { arms, .. } = &body[1].kind else {
+    let NodeKind::Match { arms, .. } = &body[2].kind else {
         panic!("expected match statement in start body");
     };
 
     assert_eq!(arms.len(), 1);
     assert!(
-        matches!(arms[0].body[0].kind, NodeKind::If(_, _, _)),
+        matches!(arms[0].body[0].kind, NodeKind::If(..)),
         "nested if body inside a match arm should parse successfully"
     );
 }

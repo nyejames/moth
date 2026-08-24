@@ -427,7 +427,7 @@ fn register_collection_types_from_node(node: &mut AstNode, type_environment: &mu
         NodeKind::ReturnError(expr) => {
             register_collection_types_from_expression(expr, type_environment);
         }
-        NodeKind::If(condition, then_body, else_body) => {
+        NodeKind::If(condition, then_body, else_body, _) => {
             register_collection_types_from_expression(condition, type_environment);
             register_collection_types_from_nodes(then_body, type_environment);
             if let Some(else_nodes) = else_body {

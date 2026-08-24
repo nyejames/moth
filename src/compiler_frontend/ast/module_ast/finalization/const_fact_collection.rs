@@ -255,7 +255,7 @@ impl<'a> ConstFactCollector<'a> {
                 self.walk_body_local(body, &mut nested_env)?;
             }
 
-            NodeKind::If(condition, then_body, else_body) => {
+            NodeKind::If(condition, then_body, else_body, _) => {
                 self.walk_expression_for_body_local(condition, env)?;
 
                 let mut then_env = Self::scope_environment(env);
@@ -555,6 +555,10 @@ impl<'a> ConstFactCollector<'a> {
 
                     let mut else_env = Self::scope_environment(env);
                     self.walk_body_local(&value_if.else_body, &mut else_env)?;
+                }
+                ValueBlock::Scoped(value_scoped) => {
+                    let mut nested_env = Self::scope_environment(env);
+                    self.walk_body_local(&value_scoped.body, &mut nested_env)?;
                 }
                 ValueBlock::Match(value_match) => {
                     self.walk_expression_for_body_local(&value_match.scrutinee, env)?;

@@ -11,8 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Constant evaluation, static control-flow specialisation and type-system architecture](./plans/constant-folding-and-type-system-hot-path-optimization-plan.md)
-
 ## Queued implementation chain
 
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)

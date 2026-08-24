@@ -25,6 +25,7 @@ pub(crate) use diagnostics::{
 };
 pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
+    GenericRequestRange, IfGenericRequestRanges,
 };
 pub(crate) use materialisation::{
     MaterialisedGenericAst, ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,

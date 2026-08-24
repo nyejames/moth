@@ -323,7 +323,9 @@ pub fn fold_compile_time_expression(
                 )
             }
 
-            ValueBlock::If(_) | ValueBlock::Match(_) => Ok(expression.to_owned()),
+            ValueBlock::If(_) | ValueBlock::Scoped(_) | ValueBlock::Match(_) => {
+                Ok(expression.to_owned())
+            }
         },
         _ => Ok(expression.to_owned()),
     }

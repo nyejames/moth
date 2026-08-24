@@ -2810,3 +2810,39 @@ other. Do not read the absolute ms against the release table above.
 that should decide priority is `generic-trait-churn`: 181 lines, a handful of instantiations,
 nothing adversarial about it, already `35.9%`. A project that uses generics at all pays this
 immediately - it does not wait for `n=160`.
+
+## Generated materialisation prefix sharing (2026-08-24)
+
+Finding 23 was broader than its first string-table profile suggested. Removing full string-table
+merges exposed full `TypeEnvironment` clones and drops as the next dominant cost, followed by
+declaration-table cloning. Generated preparation now snapshots the requester type environment once,
+shares inherited `TypeId` and nominal prefixes through immutable storage and keeps only a local
+overlay. Top-level declaration tables form immutable inherited layers, with generated-local
+replacement and append maps instead of detaching or rebuilding inherited vectors. String tables use
+the existing fork-source and delta-merge contract in both Published and Preparing materialisation
+paths and when generated sidecars rejoin the owning compiler.
+
+The mechanism counters changed as intended on the four-point fixture:
+
+| counter | `n=20` | `n=160` | post-fix shape |
+| --- | --- | --- | --- |
+| `string_table_full_clones` | 0 | 0 | eliminated |
+| `string_table_merge_source_entries_scanned` | 476 | 3,416 | linear delta only |
+| `string_table_delta_merge_calls` | 203 | 1,603 | one per materialisation boundary |
+| `string_table_fork_source_base_copies` | 4 | 4 | constant per batch |
+| `generated_declaration_inherited_row_copies` | 0 | 0 | structurally eliminated |
+
+Release `profiling` profile, `RAYON_NUM_THREADS=1`, `MOTH_TIMERS=bench`, counters off, median of
+seven independent invocations per point:
+
+| metric | `n=20` | `n=40` | `n=80` | `n=160` | fitted |
+| --- | --- | --- | --- | --- | --- |
+| `frontend.generated.materialise` | 16.480 | 45.154 | 140.269 | 486.766 | `n^1.63` |
+
+The same release protocol measured `frontend.generated.materialise` at `2.240ms` on
+`generic-trait-churn` and `0.0021ms` on `docs`. The previous recorded figures used a debug build,
+so their absolute values are not used as an A/B comparison. The scaling fixture supplies the
+comparable before/after evidence: its endpoints fell from `41.20ms` / `1403.99ms` to
+`16.48ms` / `486.77ms`, while the fitted exponent fell from `n^1.70` to `n^1.63`. The development
+scaling gate fits `n^1.59`; its budget is tightened from `n^1.80` to `n^1.70` as a deliberately
+close ratchet, not headroom.

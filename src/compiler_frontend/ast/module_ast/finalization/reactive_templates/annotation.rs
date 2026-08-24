@@ -533,7 +533,7 @@ fn annotate_node(
             )?;
         }
 
-        NodeKind::If(condition, then_body, else_body) => {
+        NodeKind::If(condition, then_body, else_body, _) => {
             annotate_expression(condition, flows, value_environment, store)?;
             let mut then_environment = value_environment.clone();
             annotate_nodes(then_body, flows, &mut then_environment, store)?;
@@ -1040,6 +1040,15 @@ fn annotate_value_block(
             annotate_nodes(&mut value_if.then_body, flows, &mut then_environment, store)?;
             let mut else_environment = value_environment.clone();
             annotate_nodes(&mut value_if.else_body, flows, &mut else_environment, store)?;
+        }
+        ValueBlock::Scoped(value_scoped) => {
+            let mut scoped_environment = value_environment.clone();
+            annotate_nodes(
+                &mut value_scoped.body,
+                flows,
+                &mut scoped_environment,
+                store,
+            )?;
         }
         ValueBlock::Match(value_match) => {
             annotate_expression(&mut value_match.scrutinee, flows, value_environment, store)?;

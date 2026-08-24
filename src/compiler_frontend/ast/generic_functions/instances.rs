@@ -40,3 +40,33 @@ pub(crate) struct GenericFunctionInstantiationRequest {
     pub(crate) instance_path: InternedPath,
     pub(crate) call_location: SourceLocation,
 }
+
+/// Half-open slice of provisional generic requests emitted while parsing one branch body.
+///
+/// WHAT: records the shared request sink positions before and after a fully validated branch.
+/// WHY: static Bool specialisation happens after parsing and constant finalisation, so it needs
+/// to discard inactive branch work without rediscovering generic calls from the AST.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct GenericRequestRange {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+impl GenericRequestRange {
+    pub(crate) fn new(start: usize, end: usize) -> Self {
+        debug_assert!(start <= end, "generic request range must be ordered");
+        Self { start, end }
+    }
+
+    #[cfg(feature = "benchmark_counters")]
+    pub(crate) fn len(self) -> usize {
+        self.end.saturating_sub(self.start)
+    }
+}
+
+/// Provisional generic-request ownership for the two authored bodies of an `if`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct IfGenericRequestRanges {
+    pub(crate) then_branch: GenericRequestRange,
+    pub(crate) else_branch: GenericRequestRange,
+}

@@ -317,12 +317,16 @@ fn materialise_generated_request(
         exact_generated_sidecar_summary(&request.identity, &generated_module).map_err(|error| {
             CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
         })?;
-    let generated_remap = compiler
-        .string_table
-        .merge_from(&generated_compiler.string_table);
+    let generated_remap = requester_context.merge_materialisation_string_table_into(
+        &mut compiler.string_table,
+        &generated_compiler.string_table,
+    );
     if !generated_remap.is_identity() {
-        transaction.remap_sidecars_from(first_nested_sidecar, &generated_remap);
-        generated_module.remap_string_ids(&generated_remap);
+        transaction.remap_sidecars_and_module_from(
+            first_nested_sidecar,
+            &mut generated_module,
+            &generated_remap,
+        );
     }
     transaction
         .complete(

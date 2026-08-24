@@ -5,7 +5,7 @@
 //! WHY: late resolution lets signatures use named struct types and receiver syntax
 //! without adding a second nominal-type system just for headers.
 
-use super::builder::AstModuleEnvironmentBuilder;
+use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
@@ -53,11 +53,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// without adding a second nominal-type system just for headers.
     pub(in crate::compiler_frontend::ast) fn resolve_function_signatures(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.functions {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::Function {
                 generic_parameters,
                 signature,
@@ -120,9 +124,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let signature_context = self
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
-                    .with_explicit_compile_time_constants(Rc::clone(
-                        &self.resolved_module_constant_paths,
-                    ));
+                    .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -194,7 +196,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let update_result = match self.declaration_table_mut() {
                 Ok(declaration_table) => {
                     if let Some(function_declaration) =
-                        declaration_table.get_mut_by_path(&header.tokens.src_path)
+                        declaration_table.get_mut_by_id(declaration_id)
                     {
                         // Body parsing consults declaration-table placeholders before the
                         // function body expression exists. Keep receiver metadata on the

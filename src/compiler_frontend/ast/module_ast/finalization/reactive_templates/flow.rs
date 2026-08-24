@@ -66,7 +66,7 @@ fn collect_initial_function_flows_from_node(
             collect_initial_function_flows_from_declaration(declaration, flows);
         }
 
-        NodeKind::If(_, then_body, else_body) => {
+        NodeKind::If(_, then_body, else_body, _) => {
             collect_initial_function_flows_from_nodes(then_body, flows);
             if let Some(else_body) = else_body {
                 collect_initial_function_flows_from_nodes(else_body, flows);
@@ -119,7 +119,7 @@ fn empty_flow_for_signature(signature: &FunctionSignature) -> FunctionTemplateFl
             .returns
             .iter()
             .filter(|slot| slot.channel == ReturnChannel::Success)
-            .map(|slot| slot.reactive_template.clone())
+            .map(|_| None)
             .collect(),
     }
 }
@@ -147,7 +147,7 @@ fn refresh_function_template_flows_from_node(
             }
         }
 
-        NodeKind::If(_, then_body, else_body) => {
+        NodeKind::If(_, then_body, else_body, _) => {
             refresh_function_template_flows(then_body, current_flows, next_flows, store)?;
             if let Some(else_body) = else_body {
                 refresh_function_template_flows(else_body, current_flows, next_flows, store)?;
@@ -245,7 +245,7 @@ fn collect_return_metadata_from_node(
             }
         }
 
-        NodeKind::If(_, then_body, else_body) => {
+        NodeKind::If(_, then_body, else_body, _) => {
             let mut then_environment = value_environment.clone();
             collect_return_metadata_from_nodes(
                 then_body,

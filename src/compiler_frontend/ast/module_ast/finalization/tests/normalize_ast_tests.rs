@@ -8,13 +8,15 @@ use super::super::template_helpers::{
 };
 use super::*;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstTemplateValue, ConstValueStoreError,
+    ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
+use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -50,6 +52,9 @@ use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_IT
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    function_node as fixture_function_node, node, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -2904,6 +2909,228 @@ fn reactive_metadata_derived_from_nested_final_view() {
                 && matches!(sub.source.kind, ReactiveSourceKind::Declaration)
         }),
         "reactive metadata must contain the subscription from the final TIR view"
+    );
+}
+
+/// Pins the finalizer seam before durable reactive handoff annotation can repair it.
+#[test]
+fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
+    use super::super::reactive_templates::propagate_reactive_template_metadata_in_ast;
+    use super::super::static_if_specialization::StaticIfCandidate;
+
+    let mut string_table = StringTable::new();
+    let function_path = InternedPath::from_single_str("render_count", &mut string_table);
+    let parameter_path = InternedPath::from_single_str("source", &mut string_table);
+    let active_source_path = InternedPath::from_single_str("count", &mut string_table);
+    let inactive_source_path = InternedPath::from_single_str("inactive", &mut string_table);
+    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
+
+    let template_expression =
+        |store: &mut TemplateIrStore,
+         expression: Expression,
+         subscription: Option<ReactiveSubscription>| {
+            let location = test_source_location(2);
+            let mut builder = TemplateIrBuilder::new(store);
+            let dynamic = builder.push_dynamic_expression_node(
+                expression,
+                TemplateSegmentOrigin::Body,
+                subscription,
+                location.clone(),
+            );
+            let root = builder.push_sequence_node(vec![dynamic], location.clone());
+            let template_id = builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                location.clone(),
+            );
+            Expression::template(
+                template_with_reference(
+                    TemplateTirReference {
+                        root: template_id,
+                        phase: TemplateTirPhase::Composed,
+                        context: TemplateViewContext::default(),
+                    },
+                    location,
+                ),
+                ValueMode::ImmutableOwned,
+            )
+        };
+
+    let mut parameter = Declaration {
+        id: parameter_path.clone(),
+        value: Expression::no_value_with_type_id(
+            test_source_location(1),
+            DataType::Int,
+            builtin_type_ids::INT,
+            ValueMode::ImmutableReference,
+        ),
+    };
+    parameter.value.reactive_source = Some(ReactiveSource {
+        path: parameter_path.clone(),
+        kind: ReactiveSourceKind::Parameter,
+    });
+
+    let parameter_reference = Expression::reference_with_type_id(
+        parameter_path.clone(),
+        DataType::Int,
+        builtin_type_ids::INT,
+        test_source_location(2),
+        ValueMode::ImmutableReference,
+        ConstRecordState::RuntimeValue,
+    )
+    .with_reactive_source(ReactiveSource {
+        path: parameter_path.clone(),
+        kind: ReactiveSourceKind::Parameter,
+    });
+    let function_template = template_expression(
+        &mut template_ir_store.borrow_mut(),
+        parameter_reference,
+        Some(ReactiveSubscription {
+            source: ReactiveSource {
+                path: parameter_path,
+                kind: ReactiveSourceKind::Parameter,
+            },
+            type_id: builtin_type_ids::INT,
+            location: test_source_location(2),
+        }),
+    );
+    let function = fixture_function_node(
+        function_path.clone(),
+        FunctionSignature {
+            parameters: vec![parameter],
+            returns: vec![ReturnSlot {
+                value: DataType::StringSlice,
+                type_id: Some(builtin_type_ids::STRING),
+                reactive_template: None,
+                channel: ReturnChannel::Success,
+            }],
+        },
+        vec![node(
+            NodeKind::Return(vec![function_template]),
+            test_source_location(2),
+        )],
+        test_source_location(1),
+    );
+
+    let active_argument = Expression::reference_with_type_id(
+        active_source_path.clone(),
+        DataType::Int,
+        builtin_type_ids::INT,
+        test_source_location(3),
+        ValueMode::ImmutableReference,
+        ConstRecordState::RuntimeValue,
+    )
+    .with_reactive_source(ReactiveSource {
+        path: active_source_path.clone(),
+        kind: ReactiveSourceKind::Declaration,
+    });
+    let mut type_environment = TypeEnvironment::new();
+    let active_call = Expression::function_call_with_typed_arguments(
+        function_path,
+        vec![CallArgument::positional(
+            active_argument,
+            CallAccessMode::Shared,
+            test_source_location(3),
+        )],
+        vec![builtin_type_ids::STRING],
+        &mut type_environment,
+        test_source_location(3),
+    );
+    let active_template =
+        template_expression(&mut template_ir_store.borrow_mut(), active_call, None);
+
+    let inactive_reference = Expression::reference_with_type_id(
+        inactive_source_path.clone(),
+        DataType::Int,
+        builtin_type_ids::INT,
+        test_source_location(4),
+        ValueMode::ImmutableReference,
+        ConstRecordState::RuntimeValue,
+    );
+    let inactive_template = template_expression(
+        &mut template_ir_store.borrow_mut(),
+        inactive_reference,
+        Some(ReactiveSubscription {
+            source: ReactiveSource {
+                path: inactive_source_path.clone(),
+                kind: ReactiveSourceKind::Declaration,
+            },
+            type_id: builtin_type_ids::INT,
+            location: test_source_location(4),
+        }),
+    );
+
+    let mut ast = vec![
+        function,
+        node(
+            NodeKind::If(
+                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
+                vec![node(
+                    NodeKind::ExpressionStatement(active_template),
+                    test_source_location(3),
+                )],
+                Some(vec![node(
+                    NodeKind::ExpressionStatement(inactive_template),
+                    test_source_location(4),
+                )]),
+                test_if_branch_metadata(true),
+            ),
+            test_source_location(3),
+        ),
+    ];
+
+    let mut candidate = StaticIfCandidate::prepare(
+        &ast,
+        &ConstValueStore::default(),
+        Rc::clone(&template_ir_store),
+        &mut string_table,
+    )
+    .expect("static candidate specialization should succeed");
+    assert!(candidate.has_selections());
+
+    propagate_reactive_template_metadata_in_ast(
+        candidate.ast_mut(),
+        &mut template_ir_store.borrow_mut(),
+    )
+    .expect("candidate reactive propagation should succeed");
+
+    let mut normalization_context = TemplateNormalizationContext {
+        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        string_table: &mut string_table,
+        template_ir_store,
+    };
+    for ast_node in candidate.ast_mut() {
+        normalize_ast_node_templates(ast_node, &mut normalization_context)
+            .expect("candidate normalization should succeed");
+    }
+
+    candidate.publish(&mut ast);
+
+    let NodeKind::ScopedBlock { body } = &ast[1].kind else {
+        panic!("known Bool should publish one scoped active body");
+    };
+    let NodeKind::ExpressionStatement(expression) = &body[0].kind else {
+        panic!("selected body should retain its template expression");
+    };
+    assert!(matches!(
+        expression.kind,
+        ExpressionKind::RuntimeTemplateHandoff(_)
+    ));
+    let metadata = expression
+        .reactive_template
+        .as_ref()
+        .expect("handoff must retain candidate metadata before durable publication");
+    assert!(metadata.subscriptions.iter().any(|subscription| {
+        subscription.source.path == active_source_path
+            && subscription.source.kind == ReactiveSourceKind::Declaration
+    }));
+    assert!(
+        metadata
+            .subscriptions
+            .iter()
+            .all(|subscription| subscription.source.path != inactive_source_path)
     );
 }
 

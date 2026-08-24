@@ -17,7 +17,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
-use crate::compiler_frontend::ast::module_ast::environment::declaration_table::TopLevelDeclarationTable;
+use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
+    ResolvedConstantSet, TopLevelDeclarationTable,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -28,7 +30,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 #[cfg(test)]
 mod test_support;
@@ -214,7 +216,7 @@ impl ConstValueStore {
     /// of the exact TIR view/fold operation.  The store never reconstructs template identity.
     pub(crate) fn from_declaration_table(
         declaration_table: &TopLevelDeclarationTable,
-        module_constant_paths: &FxHashSet<InternedPath>,
+        resolved_module_constants: &ResolvedConstantSet,
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
             Option<&InternedPath>,
@@ -223,10 +225,12 @@ impl ConstValueStore {
     ) -> Result<Self, ConstValueStoreError> {
         let mut store = Self::default();
 
-        for declaration in declaration_table.iter() {
-            if !module_constant_paths.contains(&declaration.id) {
-                continue;
-            }
+        for declaration_id in resolved_module_constants.iter() {
+            let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Resolved module-constant ID had no declaration-table row.",
+                )
+            })?;
 
             let value = store.insert_expression(
                 &declaration.value,

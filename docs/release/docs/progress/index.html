@@ -1133,6 +1133,13 @@ td {
  <td style="padding: 0.1em 0.5em; "> Broad benchmark, profiling, adversarial-fixture, scope-frame, capacity-estimate, and validation coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Implemented pieces include frontend token/header stats, conservative capacity estimates, AST-owned scope-frame arenas, production scope-arena seeding, external package registry clone reduction, and adversarial benchmark fixtures. Broader expression, template/render-plan, HIR, bump-allocation, and persistent-cache migrations remain deferred until profiling justifies them.</td>
         </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Static Bool <code>if</code> specialisation</td>
+ <td style="padding: 0.1em 0.5em; "> Implemented</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend pipeline, HIR boundary, terminality, branch scope, inactive diagnostics and generated-request coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Both branches remain frontend-valid. A known Bool selects one scoped body before terminality, durable generated work and HIR. Runtime conditions retain ordinary branch lowering, and source structure never depends on the condition.</td>
+        </tr>
             
 
 </table></section>
@@ -1146,13 +1153,6 @@ td {
 
 
                 
-
-<tr style="border-bottom: 1px dotted grey;">
-             <td style="padding: 0.1em 0.5em; "> Static Bool <code>if</code> specialisation</td>
- <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> Current ordinary <code>if</code> parsing and HIR branch lowering are covered. The constant-evaluation plan owns intended-contract coverage for static branch removal.</td>
- <td style="padding: 0.1em 0.5em; "> Both branches remain frontend-valid. A known Bool will select one branch before HIR. This uses ordinary <code>if</code>, not <code>#Config if</code>, and does not condition source structure.</td>
-        </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Post-TIR template performance follow-ups</td>

@@ -36,12 +36,6 @@ pub(crate) struct DeclarationSemanticTable {
 }
 
 impl DeclarationSemanticTable {
-    pub(crate) fn empty() -> Self {
-        Self {
-            by_path: FxHashMap::default(),
-        }
-    }
-
     /// Build the semantic table from the resolved environment.
     ///
     /// WHAT: classifies every top-level declaration by inspecting resolved

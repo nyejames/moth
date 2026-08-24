@@ -92,7 +92,6 @@ pub(crate) enum AstCounter {
     VisibleSourceTypeLookupAttempts,
     ReceiverCatalogHeadersScanned,
     ReceiverMethodsRegistered,
-    DeclarationReplacementsByPath,
     PublicSurfaceValidationChecks,
 
     // Field/receiver lowering pressure.
@@ -272,7 +271,6 @@ mod detailed {
             AstCounter::VisibleSourceTypeLookupAttempts,
             AstCounter::ReceiverCatalogHeadersScanned,
             AstCounter::ReceiverMethodsRegistered,
-            AstCounter::DeclarationReplacementsByPath,
             AstCounter::PublicSurfaceValidationChecks,
             AstCounter::PostfixReceiverNodesCopied,
             AstCounter::TirTemplatesCreated,
@@ -392,7 +390,6 @@ mod detailed {
             }
             AstCounter::ReceiverCatalogHeadersScanned => "ast_receiver_catalog_headers_scanned",
             AstCounter::ReceiverMethodsRegistered => "ast_receiver_methods_registered",
-            AstCounter::DeclarationReplacementsByPath => "ast_declaration_replacements_by_path",
             AstCounter::PublicSurfaceValidationChecks => "ast_public_surface_validation_checks",
             AstCounter::PostfixReceiverNodesCopied => "ast_postfix_receiver_nodes_copied",
 

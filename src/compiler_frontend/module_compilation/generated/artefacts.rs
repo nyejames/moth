@@ -9,6 +9,7 @@
 //!       produces or mutates their semantic content.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
@@ -28,8 +29,13 @@ impl GeneratedFunctionSidecar {
         Self { identity, module }
     }
 
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.module.remap_string_ids(remap);
+    pub(crate) fn remap_string_ids_with_type_environment_cache(
+        &mut self,
+        remap: &StringIdRemap,
+        type_environment_cache: &mut TypeEnvironmentRemapCache,
+    ) {
+        self.module
+            .remap_string_ids_with_type_environment_cache(remap, type_environment_cache);
     }
 }
 
@@ -84,8 +90,11 @@ impl GeneratedFunctionDelta {
     }
 
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        let mut type_environment_cache = TypeEnvironmentRemapCache::default();
         for record in &mut self.records {
-            record.sidecar.remap_string_ids(remap);
+            record
+                .sidecar
+                .remap_string_ids_with_type_environment_cache(remap, &mut type_environment_cache);
         }
     }
 }

@@ -651,7 +651,7 @@ fn normalize_ast_node_templates(
     increment_ast_counter(AstCounter::TemplateNormalizationNodesVisited);
 
     match &mut node.kind {
-        NodeKind::If(_, _, _)
+        NodeKind::If(..)
         | NodeKind::Match { .. }
         | NodeKind::ScopedBlock { .. }
         | NodeKind::RangeLoop { .. }
@@ -736,7 +736,7 @@ fn normalize_control_flow_templates(
     context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
     match &mut node.kind {
-        NodeKind::If(condition, then_body, else_body) => {
+        NodeKind::If(condition, then_body, else_body, _) => {
             normalize_expression_templates(condition, context)?;
             normalize_nodes(then_body, context)?;
 
@@ -966,7 +966,7 @@ fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
             }
         }
 
-        NodeKind::If(condition, then_body, else_body) => {
+        NodeKind::If(condition, then_body, else_body, _) => {
             discard_inactive_assertion_messages_in_expression(condition);
             discard_inactive_assertion_messages(then_body);
             if let Some(else_body) = else_body {
@@ -1136,6 +1136,10 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
                 discard_inactive_assertion_messages_in_expression(&mut value_if.condition);
                 discard_inactive_assertion_messages(&mut value_if.then_body);
                 discard_inactive_assertion_messages(&mut value_if.else_body);
+            }
+
+            ValueBlock::Scoped(value_scoped) => {
+                discard_inactive_assertion_messages(&mut value_scoped.body);
             }
 
             ValueBlock::Match(value_match) => {
@@ -1543,6 +1547,9 @@ fn normalize_expression_templates_with_context(
                     )?;
                     normalize_nodes(&mut value_if.then_body, context)?;
                     normalize_nodes(&mut value_if.else_body, context)?;
+                }
+                ValueBlock::Scoped(value_scoped) => {
+                    normalize_nodes(&mut value_scoped.body, context)?;
                 }
                 ValueBlock::Match(value_match) => {
                     normalize_expression_templates_with_context(

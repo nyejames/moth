@@ -14,8 +14,9 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
-    DeclarationSemanticTable, ResolvedPublicTraitRoot, ResolvedPublicTypeRootTable,
-    TopLevelDeclarationTable, build_resolved_public_trait_roots, build_resolved_public_type_roots,
+    DeclarationId, DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
+    ResolvedPublicTypeRootTable, TopLevelDeclarationTable, build_resolved_public_trait_roots,
+    build_resolved_public_type_roots,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
@@ -66,10 +67,10 @@ use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment,
 };
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols,
+    GenericDeclarationMetadata, ModuleSymbols, OrderedSemanticDeclaration,
+    OrderedSemanticDeclarationKind,
 };
-use crate::compiler_frontend::headers::parse_file_headers::Header;
-use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
@@ -147,6 +148,153 @@ struct ResolvedPublicSurfaceOutputs {
     trait_roots: Vec<ResolvedPublicTraitRoot>,
 }
 
+/// Dense Stage 3 declaration lanes consumed by ordered AST environment passes.
+///
+/// The lanes contain only stable IDs. Header indexes are one lookup table keyed by those IDs, so
+/// pass order stays explicit without retaining a second set of header vectors.
+pub(crate) struct DeclarationPassLanes {
+    header_index_by_id: Vec<Option<usize>>,
+    pub(crate) ordered: Vec<DeclarationId>,
+    pub(crate) aliases: Vec<DeclarationId>,
+    pub(crate) nominals: Vec<DeclarationId>,
+    pub(crate) structs: Vec<DeclarationId>,
+    pub(crate) choices: Vec<DeclarationId>,
+    pub(crate) constants: Vec<DeclarationId>,
+    pub(crate) traits: Vec<DeclarationId>,
+    pub(crate) functions: Vec<DeclarationId>,
+}
+
+impl DeclarationPassLanes {
+    pub(crate) fn from_stage3_order(
+        sorted_headers: &[Header],
+        ordered_declarations: &[OrderedSemanticDeclaration],
+    ) -> Result<Self, CompilerError> {
+        let mut lanes = Self {
+            header_index_by_id: vec![None; ordered_declarations.len()],
+            ordered: Vec::new(),
+            aliases: Vec::new(),
+            nominals: Vec::new(),
+            structs: Vec::new(),
+            choices: Vec::new(),
+            constants: Vec::new(),
+            traits: Vec::new(),
+            functions: Vec::new(),
+        };
+        let mut covered_headers = vec![false; sorted_headers.len()];
+
+        for (expected_index, ordered) in ordered_declarations.iter().enumerate() {
+            if ordered.declaration_id.index() != expected_index {
+                return Err(missing_declaration_id());
+            }
+            let header = sorted_headers
+                .get(ordered.header_index)
+                .ok_or_else(missing_declaration_id)?;
+            if header.tokens.src_path != ordered.path
+                || !header_matches_ordered_kind(&header.kind, ordered.kind)
+                || covered_headers[ordered.header_index]
+            {
+                return Err(missing_declaration_id());
+            }
+            covered_headers[ordered.header_index] = true;
+            let declaration_id = ordered.declaration_id;
+            let lane = match ordered.kind {
+                OrderedSemanticDeclarationKind::TypeAlias => &mut lanes.aliases,
+                OrderedSemanticDeclarationKind::Struct => {
+                    lanes.nominals.push(declaration_id);
+                    lanes.structs.push(declaration_id);
+                    lanes.ordered.push(declaration_id);
+                    lanes.header_index_by_id[declaration_id.index()] = Some(ordered.header_index);
+                    continue;
+                }
+                OrderedSemanticDeclarationKind::Choice => {
+                    lanes.nominals.push(declaration_id);
+                    lanes.choices.push(declaration_id);
+                    lanes.ordered.push(declaration_id);
+                    lanes.header_index_by_id[declaration_id.index()] = Some(ordered.header_index);
+                    continue;
+                }
+                OrderedSemanticDeclarationKind::Constant => &mut lanes.constants,
+                OrderedSemanticDeclarationKind::Trait => &mut lanes.traits,
+                OrderedSemanticDeclarationKind::Function => &mut lanes.functions,
+            };
+
+            lane.push(declaration_id);
+            lanes.ordered.push(declaration_id);
+            lanes.header_index_by_id[declaration_id.index()] = Some(ordered.header_index);
+        }
+
+        for (header_index, header) in sorted_headers.iter().enumerate() {
+            if header_is_semantic(&header.kind) && !covered_headers[header_index] {
+                return Err(missing_declaration_id());
+            }
+        }
+
+        Ok(lanes)
+    }
+
+    pub(crate) fn header<'a>(
+        &self,
+        declaration_id: DeclarationId,
+        sorted_headers: &'a [Header],
+    ) -> Result<&'a Header, CompilerError> {
+        let header_index = self
+            .header_index_by_id
+            .get(declaration_id.index())
+            .copied()
+            .flatten()
+            .ok_or_else(missing_declaration_id)?;
+        sorted_headers
+            .get(header_index)
+            .ok_or_else(missing_declaration_id)
+    }
+}
+
+fn header_matches_ordered_kind(
+    header_kind: &HeaderKind,
+    ordered_kind: OrderedSemanticDeclarationKind,
+) -> bool {
+    matches!(
+        (header_kind, ordered_kind),
+        (
+            HeaderKind::TypeAlias { .. },
+            OrderedSemanticDeclarationKind::TypeAlias
+        ) | (
+            HeaderKind::Struct { .. },
+            OrderedSemanticDeclarationKind::Struct
+        ) | (
+            HeaderKind::Choice { .. },
+            OrderedSemanticDeclarationKind::Choice
+        ) | (
+            HeaderKind::Constant { .. },
+            OrderedSemanticDeclarationKind::Constant
+        ) | (
+            HeaderKind::Trait { .. },
+            OrderedSemanticDeclarationKind::Trait
+        ) | (
+            HeaderKind::Function { .. },
+            OrderedSemanticDeclarationKind::Function
+        )
+    )
+}
+
+fn header_is_semantic(header_kind: &HeaderKind) -> bool {
+    matches!(
+        header_kind,
+        HeaderKind::TypeAlias { .. }
+            | HeaderKind::Struct { .. }
+            | HeaderKind::Choice { .. }
+            | HeaderKind::Constant { .. }
+            | HeaderKind::Trait { .. }
+            | HeaderKind::Function { .. }
+    )
+}
+
+fn missing_declaration_id() -> CompilerError {
+    CompilerError::compiler_error(
+        "Stage 3 semantic declaration order did not match the AST declaration table.",
+    )
+}
+
 /// One imported generic list registered before provider trait identities receive local handles.
 #[derive(Clone)]
 struct ImportedGenericParameterRegistration {
@@ -172,7 +320,7 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHY: constant-header, nominal-member and function-signature parsing all need to know
     /// which visible declarations are explicit compile-time constants. Sharing one set means
     /// none of those passes copies it per declaration.
-    pub(crate) resolved_module_constant_paths: Rc<FxHashSet<InternedPath>>,
+    pub(crate) resolved_module_constants: Rc<ResolvedConstantSet>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
 
@@ -234,8 +382,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             module_symbols: ModuleSymbols::empty(),
             binding_environment: HeaderBindingEnvironment::default(),
             warnings: Vec::new(),
-            declaration_table: Rc::new(TopLevelDeclarationTable::new(Vec::new())),
-            resolved_module_constant_paths: Rc::new(FxHashSet::default()),
+            declaration_table: Rc::new(TopLevelDeclarationTable::empty()),
+            resolved_module_constants: Rc::new(ResolvedConstantSet::default()),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
@@ -272,7 +420,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         } = input;
 
         // Move header-owned data into the builder state.
-        let declarations = std::mem::take(&mut module_symbols.declarations);
+        let ordered_semantic_declarations =
+            std::mem::take(&mut module_symbols.ordered_semantic_declarations);
+        let compiler_owned_declarations =
+            std::mem::take(&mut module_symbols.compiler_owned_declarations);
         let builtin_struct_ast_nodes = std::mem::take(&mut module_symbols.builtin_struct_ast_nodes);
         let resolved_struct_fields_by_path =
             std::mem::take(&mut module_symbols.resolved_struct_fields_by_path);
@@ -287,7 +438,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.module_symbols = module_symbols;
         self.binding_environment = binding_environment;
         self.warnings = self.binding_environment.warnings.clone();
-        self.declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
+        let declaration_lanes =
+            DeclarationPassLanes::from_stage3_order(sorted_headers, &ordered_semantic_declarations)
+                .map_err(|error| self.error_messages(error, string_table))?;
+        let declaration_table = TopLevelDeclarationTable::from_stage3_order(
+            ordered_semantic_declarations,
+            compiler_owned_declarations,
+        )
+        .map_err(|error| self.error_messages(error, string_table))?;
+        self.declaration_table = Rc::new(declaration_table);
         self.builtin_struct_ast_nodes = builtin_struct_ast_nodes;
         self.resolved_struct_fields_by_path = Rc::new(resolved_struct_fields_by_path);
         self.generic_declarations_by_path = Rc::new(generic_declarations_by_path);
@@ -315,14 +474,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------
         //  Resolve type aliases
         // ----------------------
-        self.resolve_type_aliases(sorted_headers, string_table)?;
+        self.resolve_type_aliases(&declaration_lanes, sorted_headers, string_table)?;
 
         // --------------------------------------------
         //  Register nominal struct and choice shells
         // --------------------------------------------
         // WHAT: register identities early so trait requirement signatures and dynamic
         // trait annotations can reference nominal types before fields are resolved.
-        self.register_nominal_shells(sorted_headers, string_table)?;
+        self.register_nominal_shells(&declaration_lanes, sorted_headers, string_table)?;
 
         // --------------------------
         //  Resolve trait metadata
@@ -333,7 +492,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // type positions can be rejected with the trait-specific diagnostic.
         // Evidence validation stays after receiver catalog construction because it needs
         // resolved receiver methods.
-        let trait_environment = self.resolve_trait_definitions(sorted_headers, string_table)?;
+        let trait_environment =
+            self.resolve_trait_definitions(&declaration_lanes, sorted_headers, string_table)?;
         self.resolve_dependencyed_generic_parameter_bounds(&trait_environment)
             .map_err(|error| self.error_messages(error, string_table))?;
 
@@ -345,6 +505,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // WHY: static trait metadata must be available so ordinary type annotations can
         // reject trait names without falling through to an unknown-type diagnostic.
         self.resolve_nominal_members_and_constants(
+            &declaration_lanes,
             sorted_headers,
             &trait_environment,
             string_table,
@@ -353,12 +514,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // --------------------------------------
         //  Resolve nominal generic bound traits
         // --------------------------------------
-        self.resolve_nominal_generic_bounds(sorted_headers, &trait_environment, string_table)?;
+        self.resolve_nominal_generic_bounds(
+            &declaration_lanes,
+            sorted_headers,
+            &trait_environment,
+            string_table,
+        )?;
 
         // -----------------------------
         //  Resolve function signatures
         // -----------------------------
-        self.resolve_function_signatures(sorted_headers, &trait_environment, string_table)?;
+        self.resolve_function_signatures(
+            &declaration_lanes,
+            sorted_headers,
+            &trait_environment,
+            string_table,
+        )?;
 
         // ------------------------
         //  Build receiver catalog
@@ -408,6 +579,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Validate bounded nominal instantiations
         // -----------------------------------------
         self.validate_nominal_generic_bound_surfaces(
+            &declaration_lanes,
             sorted_headers,
             &trait_environment,
             &trait_evidence_environment,
@@ -516,7 +688,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 imported_functions_by_local_path: self.projected_imported_functions_by_local_path,
                 imported_struct_definitions: self.imported_struct_definitions,
                 imported_choice_definitions: self.imported_choice_definitions,
-                module_constant_paths: self.resolved_module_constant_paths,
+                resolved_module_constants: self.resolved_module_constants,
                 rendered_path_usages: self.rendered_path_usages,
                 builtin_struct_ast_nodes: self.builtin_struct_ast_nodes,
 
@@ -660,14 +832,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     pub(crate) fn replace_declaration(
         &mut self,
+        declaration_id: DeclarationId,
         declaration: Declaration,
     ) -> Result<(), CompilerError> {
-        increment_ast_counter(AstCounter::DeclarationReplacementsByPath);
-
-        if self
+        if !self
             .declaration_table_mut()?
-            .replace_by_path(declaration)
-            .is_none()
+            .replace_by_id(declaration_id, declaration)
         {
             return Err(CompilerError::compiler_error(
                 "Resolved top-level declaration was not registered before AST resolution.",
@@ -677,14 +847,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    /// Commit one resolved module constant and publish it to environment-time scopes.
-    ///
-    /// Publish one resolved module-constant path to environment-time scopes.
-    ///
-    /// The declaration itself remains owned by the indexed declaration table. Keeping only its
-    /// path here avoids a second declaration tree during environment construction.
-    pub(crate) fn push_module_constant_path(&mut self, path: InternedPath) {
-        Rc::make_mut(&mut self.resolved_module_constant_paths).insert(path);
+    /// Publish one dependency-ordered module constant to later environment passes.
+    pub(crate) fn publish_resolved_module_constant(&mut self, declaration_id: DeclarationId) {
+        Rc::make_mut(&mut self.resolved_module_constants).insert(declaration_id);
     }
 
     pub(crate) fn declaration_table_mut(
@@ -742,16 +907,30 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map(|field| field.value.location.clone())
                 .unwrap_or_default();
 
-            self.replace_declaration(Declaration {
-                id: path.clone(),
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    declaration_location,
-                    struct_type_id,
-                    DataType::runtime_struct(path.clone(), struct_type_id),
-                    ValueMode::ImmutableReference,
-                ),
-            })
+            let declaration_id = self
+                .declaration_table
+                .declaration_id_by_path(path)
+                .ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "Builtin declaration was not registered before type resolution.",
+                        ),
+                        string_table,
+                    )
+                })?;
+            self.replace_declaration(
+                declaration_id,
+                Declaration {
+                    id: path.clone(),
+                    value: Expression::new(
+                        ExpressionKind::NoValue,
+                        declaration_location,
+                        struct_type_id,
+                        DataType::runtime_struct(path.clone(), struct_type_id),
+                        ValueMode::ImmutableReference,
+                    ),
+                },
+            )
             .map_err(|error| self.error_messages(error, string_table))?;
         }
 

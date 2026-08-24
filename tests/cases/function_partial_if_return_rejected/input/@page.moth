@@ -1,7 +1,7 @@
--- non-unit function with only one branch returning must be rejected during AST emission
+-- non-unit function with only one runtime branch returning must be rejected during AST emission
 
-returns_int || -> Int:
-    if true:
+returns_int |condition Bool| -> Int:
+    if condition:
         return 1
     ;
 ;

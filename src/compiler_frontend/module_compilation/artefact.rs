@@ -12,7 +12,9 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::environment::{
+    TypeEnvironment, TypeEnvironmentRemapCache,
+};
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
@@ -41,9 +43,21 @@ pub(crate) struct Module {
 
 impl Module {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.remap_string_ids_with_type_environment_cache(
+            remap,
+            &mut TypeEnvironmentRemapCache::default(),
+        );
+    }
+
+    pub(crate) fn remap_string_ids_with_type_environment_cache(
+        &mut self,
+        remap: &StringIdRemap,
+        type_environment_cache: &mut TypeEnvironmentRemapCache,
+    ) {
         increment_frontend_counter(FrontendCounter::ModuleRemapStringIdsCalls);
 
-        self.executable.remap_string_ids(remap);
+        self.executable
+            .remap_string_ids_with_type_environment_cache(remap, type_environment_cache);
         self.link_facts.functions.remap_string_ids(remap);
         self.metadata.remap_string_ids(remap);
     }
@@ -79,9 +93,14 @@ impl ModuleExecutable {
     /// Remap interned string IDs after string-table merging.
     ///
     /// WHY: HIR, type identity and borrow-fact source locations remap exactly once here.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+    pub(crate) fn remap_string_ids_with_type_environment_cache(
+        &mut self,
+        remap: &StringIdRemap,
+        type_environment_cache: &mut TypeEnvironmentRemapCache,
+    ) {
         self.hir.remap_string_ids(remap);
-        self.type_environment.remap_string_ids(remap);
+        self.type_environment
+            .remap_string_ids_with_cache(remap, type_environment_cache);
         self.borrow_analysis.remap_string_ids(remap);
     }
 }

@@ -133,22 +133,12 @@ impl ScopeContext {
         self
     }
 
-    /// Seed the module's already-resolved explicit compile-time constants.
-    ///
-    /// WHAT: shares the environment builder's resolved-constant path set with this scope's frame.
-    /// WHY: constant-header, nominal-member and signature contexts run before the final
-    ///      final AST store is not available yet, but fixed-capacity type syntax still needs to
-    ///      distinguish explicit constants from merely foldable runtime bindings. The
-    ///      set is shared rather than copied so a module with many constants does not rebuild it
-    ///      for every declaration it parses.
-    pub(crate) fn with_explicit_compile_time_constants(
-        self,
-        constants: Rc<FxHashSet<InternedPath>>,
+    /// Seed the module's already-resolved explicit compile-time constants by stable declaration ID.
+    pub(crate) fn with_resolved_module_constants(
+        mut self,
+        constants: Rc<ResolvedConstantSet>,
     ) -> ScopeContext {
-        self.arena
-            .borrow_mut()
-            .frame_mut(self.current_frame_id)
-            .explicit_compile_time_constant_declarations = Some(constants);
+        Rc::make_mut(&mut self.shared).resolved_module_constants_override = Some(constants);
         self
     }
 
@@ -322,15 +312,17 @@ impl ScopeContext {
     //  Module lookups
     // --------------------------
 
-    /// Replace synthetic lookup services created by `new()` with the real immutable
-    /// module lookup package built before body emission.
+    /// Install the completed immutable module lookup package before body emission.
     pub(crate) fn with_lookups(mut self, lookups: Rc<AstModuleLookups>) -> ScopeContext {
         let shared = Rc::make_mut(&mut self.shared);
         shared.nominal_type_ids_by_path = Rc::clone(&lookups.nominal_type_ids_by_path);
         shared.choice_variant_shells_by_path =
             Some(Rc::clone(&lookups.choice_variant_shells_by_path));
         shared.resolved_type_aliases = Some(Rc::clone(&lookups.resolved_type_aliases_by_path));
-        shared.lookups = lookups;
+        shared.trait_environment = Rc::clone(&lookups.trait_environment);
+        shared.trait_evidence_environment = Rc::clone(&lookups.trait_evidence_environment);
+        shared.trait_environment_override = None;
+        shared.lookups = Some(lookups);
         self
     }
 
@@ -345,7 +337,9 @@ impl ScopeContext {
         mut self,
         trait_environment: Rc<TraitEnvironment>,
     ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).trait_environment_override = Some(trait_environment);
+        let shared = Rc::make_mut(&mut self.shared);
+        shared.trait_environment = Rc::clone(&trait_environment);
+        shared.trait_environment_override = Some(trait_environment);
         self
     }
 }

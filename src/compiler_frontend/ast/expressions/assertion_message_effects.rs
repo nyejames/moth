@@ -308,6 +308,9 @@ fn classify_value_block(
             }
             classify_nodes(&value_if.else_body, template_ir_store, state)
         }
+        ValueBlock::Scoped(value_scoped) => {
+            classify_nodes(&value_scoped.body, template_ir_store, state)
+        }
         ValueBlock::Match(value_match) => {
             if let Some(effect) =
                 classify_expression(&value_match.scrutinee, template_ir_store, state)?
@@ -397,7 +400,7 @@ fn classify_nodes(
                     "Assertion-message AST invariant: depth-zero `continue` cannot appear because assertion call arguments reject value-producing blocks.",
                 ));
             }
-            NodeKind::If(condition, then_body, else_body) => {
+            NodeKind::If(condition, then_body, else_body, _) => {
                 classify_expression(condition, template_ir_store, state)?
                     .or(classify_nodes(then_body, template_ir_store, state)?)
                     .or(match else_body.as_deref() {

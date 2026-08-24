@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_body_by_name, node, test_source_location,
+    function_body_by_name, node, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -74,11 +74,13 @@ fn assert_statement(condition: Expression, line: i32) -> AstNode {
 }
 
 fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, line: i32) -> AstNode {
+    let branch_metadata = test_if_branch_metadata(else_body.is_some());
     node(
         NodeKind::If(
             Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
             then_body,
             else_body,
+            branch_metadata,
         ),
         test_source_location(line),
     )

@@ -134,31 +134,101 @@ pub(crate) struct GenericDeclarationMetadata {
     pub(crate) declaration_location: SourceLocation,
 }
 
+/// Dense module-local identity assigned when Stage 3 finalises declaration order.
+///
+/// This identity never crosses a module interface. Compile-time-only aliases and traits receive
+/// IDs alongside value declarations so every ordered AST pass consumes the same Stage 3 order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DeclarationId(u32);
+
+impl DeclarationId {
+    pub(crate) fn from_index(index: usize) -> Self {
+        Self(index as u32)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// One identity-bearing declaration record in final Stage 3 order.
+#[derive(Clone, Debug)]
+pub(crate) struct OrderedSemanticDeclaration {
+    pub(crate) declaration_id: DeclarationId,
+    pub(crate) header_index: usize,
+    pub(crate) path: InternedPath,
+    pub(crate) kind: OrderedSemanticDeclarationKind,
+    pub(crate) declaration: Option<Declaration>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OrderedSemanticDeclarationKind {
+    TypeAlias,
+    Struct,
+    Choice,
+    Constant,
+    Trait,
+    Function,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CompilerOwnedDeclaration {
+    pub(crate) kind: CompilerOwnedDeclarationKind,
+    pub(crate) declaration: Declaration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompilerOwnedDeclarationKind {
+    Start,
+    Builtin,
+}
+
+impl CompilerOwnedDeclaration {
+    pub(crate) fn builtin(declaration: Declaration) -> Self {
+        Self {
+            kind: CompilerOwnedDeclarationKind::Builtin,
+            declaration,
+        }
+    }
+}
+
+impl OrderedSemanticDeclarationKind {
+    pub(crate) fn owns_value_row(self) -> bool {
+        !matches!(self, Self::TypeAlias | Self::Trait)
+    }
+}
+
 /// Header-owned module symbol package.
 ///
 /// WHAT: carries top-level declaration placeholders, per-file dependency/export metadata, and builtin
 /// type data needed by all AST passes.
 ///
-/// WHY: header parsing discovers top-level symbols once; dependency sorting finalises the
-/// `declarations` order; AST receives this as a complete, pre-built package and does not
-/// re-iterate headers to discover symbols.
+/// WHY: header parsing discovers top-level symbols once; dependency sorting finalises their
+/// identities, kinds, rows and order; AST receives this as a complete package and does not
+/// rediscover those facts from paths.
 ///
 /// ## Field lifetimes
 ///
 /// - All order-independent maps are populated by `prepare_header_syntax` and stay unchanged
 ///   thereafter.
 /// - `builtin_declarations` is populated by `prepare_header_syntax` and consumed (appended into
-///   `declarations`) by `resolve_module_dependencies`.
-/// - `declarations` is empty after `prepare_header_syntax` and filled by
-///   `resolve_module_dependencies`.
+///   `compiler_owned_declarations`) by `resolve_module_dependencies`.
+/// - `ordered_semantic_declarations` and `compiler_owned_declarations` are empty after
+///   `prepare_header_syntax` and filled by `resolve_module_dependencies`.
 #[derive(Debug, Clone)]
 pub(crate) struct ModuleSymbols {
-    // Declarations in sorted-header order.
-    // Empty until resolve_module_dependencies completes; do not read before sorting.
-    pub(crate) declarations: Vec<Declaration>,
+    /// Identity-bearing declaration-like headers in final Stage 3 order.
+    ///
+    /// This includes compile-time-only aliases and traits that do not own an AST `Declaration`
+    /// row. Stage 3 assigns their shared dense module-local `DeclarationId` namespace so AST can
+    /// consume final identity and order without reconstructing either fact from paths.
+    pub(crate) ordered_semantic_declarations: Vec<OrderedSemanticDeclaration>,
+
+    /// Synthetic start and builtin declarations appended after authored semantic slots.
+    pub(crate) compiler_owned_declarations: Vec<CompilerOwnedDeclaration>,
 
     // Staging: builtin declarations collected during header parsing.
-    // Consumed by resolve_module_dependencies (appended to declarations). Empty after sorting.
+    // Consumed by resolve_module_dependencies and appended to compiler-owned rows after sorting.
     pub(crate) builtin_declarations: Vec<Declaration>,
 
     // Order-independent maps built during header parsing.
@@ -249,7 +319,8 @@ impl ModuleSymbols {
 
     pub(crate) fn empty() -> Self {
         Self {
-            declarations: Vec::new(),
+            ordered_semantic_declarations: Vec::new(),
+            compiler_owned_declarations: Vec::new(),
             builtin_declarations: Vec::new(),
             canonical_source_by_symbol_path: FxHashMap::default(),
             declaration_locations_by_symbol_path: FxHashMap::default(),
@@ -281,31 +352,66 @@ impl ModuleSymbols {
         }
     }
 
-    /// Build the complete sorted declaration placeholder list from topologically ordered headers
-    /// and append staged builtin declarations.
+    /// Build final identity-bearing semantic records from topologically ordered headers.
     ///
-    /// WHAT: iterates the already-sorted headers to create `Declaration` placeholders for every
-    /// top-level header kind (except ConstTemplate), then appends the builtin declarations that
-    /// were staged during header parsing.
+    /// WHAT: assigns one dense ID and typed optional value row to each semantic header, separates
+    /// synthetic start rows, then appends the builtins staged during header parsing.
     ///
     /// WHY: declarations must be in the same topological order as the sorted headers so that
     /// all AST passes see dependencies before dependents. The order-independent maps were already
-    /// built during `prepare_header_syntax`; only this Vec requires sorted input.
+    /// built during `prepare_header_syntax`; only these ordered records require sorted input.
     pub(crate) fn build_sorted_declarations(
         &mut self,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) {
-        self.declarations.clear();
+        self.ordered_semantic_declarations.clear();
+        self.compiler_owned_declarations.clear();
 
-        for header in sorted_headers {
-            if let Some(declaration) = declaration_from_header(header, string_table) {
-                self.declarations.push(declaration);
+        for (header_index, header) in sorted_headers.iter().enumerate() {
+            if let Some(kind) = ordered_semantic_declaration_kind(&header.kind) {
+                self.ordered_semantic_declarations
+                    .push(OrderedSemanticDeclaration {
+                        declaration_id: DeclarationId::from_index(
+                            self.ordered_semantic_declarations.len(),
+                        ),
+                        header_index,
+                        path: header.tokens.src_path.clone(),
+                        kind,
+                        declaration: declaration_from_header(header, string_table),
+                    });
+            } else if let Some(declaration) = declaration_from_header(header, string_table) {
+                self.compiler_owned_declarations
+                    .push(CompilerOwnedDeclaration {
+                        kind: CompilerOwnedDeclarationKind::Start,
+                        declaration,
+                    });
             }
         }
 
         // Append staged builtin declarations after all user-defined declarations.
-        self.declarations.append(&mut self.builtin_declarations);
+        self.compiler_owned_declarations.extend(
+            self.builtin_declarations
+                .drain(..)
+                .map(CompilerOwnedDeclaration::builtin),
+        );
+    }
+}
+
+fn ordered_semantic_declaration_kind(
+    header_kind: &HeaderKind,
+) -> Option<OrderedSemanticDeclarationKind> {
+    match header_kind {
+        HeaderKind::TypeAlias { .. } => Some(OrderedSemanticDeclarationKind::TypeAlias),
+        HeaderKind::Struct { .. } => Some(OrderedSemanticDeclarationKind::Struct),
+        HeaderKind::Choice { .. } => Some(OrderedSemanticDeclarationKind::Choice),
+        HeaderKind::Constant { .. } => Some(OrderedSemanticDeclarationKind::Constant),
+        HeaderKind::Trait { .. } => Some(OrderedSemanticDeclarationKind::Trait),
+        HeaderKind::Function { .. } => Some(OrderedSemanticDeclarationKind::Function),
+        HeaderKind::ConstTemplate { .. }
+        | HeaderKind::StartFunction
+        | HeaderKind::TraitConformance { .. }
+        | HeaderKind::TraitIncompatibility { .. } => None,
     }
 }
 

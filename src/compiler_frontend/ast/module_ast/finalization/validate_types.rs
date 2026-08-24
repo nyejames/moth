@@ -90,7 +90,7 @@ impl AstFinalizer<'_, '_> {
 fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), CompilerError> {
     match &node.kind {
         // Control flow with nested statement bodies.
-        NodeKind::If(condition, then_body, else_body) => {
+        NodeKind::If(condition, then_body, else_body, _) => {
             validate_expression(condition, context)?;
             validate_nodes(then_body, context)?;
             if let Some(else_body) = else_body {
@@ -328,6 +328,7 @@ fn validate_expression(
                 validate_nodes(&value_if.then_body, context)?;
                 validate_nodes(&value_if.else_body, context)
             }
+            ValueBlock::Scoped(value_scoped) => validate_nodes(&value_scoped.body, context),
             ValueBlock::Match(value_match) => {
                 validate_expression(&value_match.scrutinee, context)?;
                 for arm in &value_match.arms {

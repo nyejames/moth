@@ -1,0 +1,12 @@
+-- Static selection happens only after both authored branches finish frontend validation.
+
+enabled #= true
+value ~= 0
+
+if enabled:
+    value = 1
+else
+    value = "still type checked"
+;
+
+[: [value]]

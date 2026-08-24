@@ -1,0 +1,12 @@
+enabled #= false
+
+render || -> String:
+    count $Int = 1
+    if enabled:
+        return [:inactive-reactive-value [$(count)]]
+    else
+        return "plain"
+    ;
+;
+
+[:static_if_inactive_reactive_metadata_ignored [render()]]

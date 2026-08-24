@@ -6,13 +6,11 @@
 //! has proven it does not depend on behavior that unconstrained generic parameters cannot
 //! guarantee before trait bounds exist.
 
+use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
-use crate::compiler_frontend::ast::statements::terminality::{
-    terminality_policy_for_signature, validate_function_body_terminality,
-};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -36,13 +34,14 @@ pub(crate) struct GenericFunctionBodyValidationInput<'a, 'environment> {
     pub(crate) string_table: &'a mut StringTable,
 }
 
-/// Parses the generic function template body for validation only.
+/// Parses and retains a generic function template body for final frontend validation.
 ///
-/// The parsed nodes are intentionally discarded. Concrete instance emission reparses the same
-/// immutable template after call-site inference succeeds.
+/// Static selection and terminality consume the retained typed AST before it is discarded.
+/// Concrete instance emission still reparses the immutable template after call-site inference
+/// succeeds because unresolved generic parameter types cannot enter executable HIR.
 pub(crate) fn validate_generic_function_body(
     input: GenericFunctionBodyValidationInput<'_, '_>,
-) -> GenericFunctionBodyValidationResult<()> {
+) -> GenericFunctionBodyValidationResult<Vec<AstNode>> {
     let GenericFunctionBodyValidationInput {
         template,
         mut context,
@@ -57,22 +56,11 @@ pub(crate) fn validate_generic_function_body(
         .as_ref()
         .expect("declaring-module generic validation requires retained body syntax")
         .to_owned();
-    let validated_nodes = function_body_to_ast(
+    function_body_to_ast(
         &mut token_stream,
         context,
         type_interner,
         warnings,
         string_table,
-    )?;
-
-    let policy = terminality_policy_for_signature(&template.signature, false);
-    if let Some(diagnostic) = validate_function_body_terminality(
-        &validated_nodes,
-        policy,
-        template.declaration_location.clone(),
-    ) {
-        return Err(diagnostic.into());
-    }
-
-    Ok(())
+    )
 }

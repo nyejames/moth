@@ -43,15 +43,11 @@ impl ScopeContext {
     }
 
     pub(crate) fn trait_environment(&self) -> &TraitEnvironment {
-        if let Some(trait_environment) = &self.shared.trait_environment_override {
-            return trait_environment.as_ref();
-        }
-
-        self.shared.lookups.trait_environment.as_ref()
+        self.shared.trait_environment.as_ref()
     }
 
     pub(crate) fn trait_evidence_environment(&self) -> &TraitEvidenceEnvironment {
-        self.shared.lookups.trait_evidence_environment.as_ref()
+        self.shared.trait_evidence_environment.as_ref()
     }
 
     pub(crate) fn trait_id_is_visible(&self, trait_id: TraitId) -> bool {

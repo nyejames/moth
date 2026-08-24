@@ -35,7 +35,7 @@ use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
 };
 use crate::compiler_frontend::ast::module_ast::environment::{
-    AstModuleLookups, DeclarationSemanticKind, DeclarationSemanticTable, TopLevelDeclarationTable,
+    AstModuleLookups, DeclarationSemanticKind, ResolvedConstantSet, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
@@ -53,12 +53,8 @@ use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
     ExternalPackageRegistry, ExternalSymbolId, ExternalTypeDef, ExternalTypeId,
 };
-use crate::compiler_frontend::headers::binding_environment::{
-    FileVisibility, HeaderBindingEnvironment,
-};
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols,
-};
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
@@ -98,54 +94,9 @@ use scope_frame::{ScopeArena, ScopeFrameId};
 pub(super) static CONTROL_FLOW_SCOPE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
-    /// The empty lookup package every `ScopeContext::new` starts from.
-    ///
-    /// WHAT: one shared `AstModuleLookups` whose every table is empty, cloned by pointer into
-    /// each new scope's `ScopeShared`.
-    /// WHY: `new` is called once per header per environment pass, and building this package
-    /// inline cost roughly thirty heap allocations each time - a whole empty module scaffold -
-    /// for a value that no caller reads. Environment-time scopes attach the real tables through
-    /// the `with_*` setters; body emission replaces the package wholesale with `with_lookups`.
-    /// The only fields read before either happens are the two empty trait environments, and an
-    /// empty trait environment is exactly what the per-call version produced.
-    ///
-    /// MUST NOT: hold a live handle to the real declaration table. `declaration_table_mut` takes
-    /// it through `Rc::get_mut`, so any retained clone would make every environment-time
-    /// declaration write fail. `ScopeShared::top_level_declarations` carries the real table
-    /// instead, which is the field every scope lookup already reads.
-    static PLACEHOLDER_LOOKUPS: Rc<AstModuleLookups> = Rc::new(AstModuleLookups {
-        module_symbols: ModuleSymbols::empty(),
-        binding_environment: HeaderBindingEnvironment::default(),
-        warnings: Vec::new(),
-        declaration_table: Rc::new(TopLevelDeclarationTable::new(Vec::new())),
-        imported_functions_by_local_path: FxHashMap::default(),
-        imported_struct_definitions: Vec::new(),
-        imported_choice_definitions: Vec::new(),
-        module_constant_paths: Rc::new(FxHashSet::default()),
-        rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
-        builtin_struct_ast_nodes: Vec::new(),
-        resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
-        resolved_function_signatures_by_path: Rc::new(FxHashMap::default()),
-        generic_function_templates_by_path: FxHashMap::default(),
-        resolved_type_aliases_by_path: Rc::new(FxHashMap::default()),
-        choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
-        declaration_semantics: Rc::new(DeclarationSemanticTable::empty()),
-        receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
-        trait_environment: Rc::new(TraitEnvironment::new()),
-        trait_evidence_environment: Rc::new(TraitEvidenceEnvironment::new()),
-        generic_declarations_by_path: Rc::new(FxHashMap::default()),
-        nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
-        source_nominal_paths: Rc::new(Default::default()),
-        external_package_registry: Arc::new(ExternalPackageRegistry::new()),
-        style_directives: StyleDirectiveRegistry::built_ins(),
-        build_profile: FrontendBuildProfile::Dev,
-        project_path_resolver: None,
-        path_format_config: PathStringFormatConfig::default(),
-    });
-}
-
-fn placeholder_lookups() -> Rc<AstModuleLookups> {
-    PLACEHOLDER_LOOKUPS.with(Rc::clone)
+    static EMPTY_TRAIT_ENVIRONMENT: Rc<TraitEnvironment> = Rc::new(TraitEnvironment::new());
+    static EMPTY_TRAIT_EVIDENCE_ENVIRONMENT: Rc<TraitEvidenceEnvironment> =
+        Rc::new(TraitEvidenceEnvironment::new());
 }
 
 /// Shared state common to a scope and all its cloned children.
@@ -157,7 +108,7 @@ fn placeholder_lookups() -> Rc<AstModuleLookups> {
 #[derive(Clone)]
 pub struct ScopeShared {
     // Immutable semantic lookup tables.
-    pub(crate) lookups: Rc<AstModuleLookups>,
+    pub(crate) lookups: Option<Rc<AstModuleLookups>>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
     pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
@@ -176,6 +127,7 @@ pub struct ScopeShared {
         Option<Rc<FxHashMap<InternedPath, Vec<Declaration>>>>,
     pub(crate) choice_variant_shells_by_path:
         Option<Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>>,
+    pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
 
     // Emission side channels (diagnostics, path usages, generic instantiation requests).
     pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
@@ -191,8 +143,9 @@ pub struct ScopeShared {
     // Receiver method catalog for dispatch.
     pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,
 
-    // Constant-header contexts are built before the final module lookup package exists, but
-    // trait names still need to be recognized and rejected in ordinary type positions there.
+    // Constant-header contexts are built before the final module lookup package exists.
+    pub(crate) trait_environment: Rc<TraitEnvironment>,
+    pub(crate) trait_evidence_environment: Rc<TraitEvidenceEnvironment>,
     pub(crate) trait_environment_override: Option<Rc<TraitEnvironment>>,
 }
 
@@ -444,16 +397,14 @@ impl ScopeContext {
 // --------------------------
 
 impl ScopeContext {
-    /// Build a context with the minimum synthetic lookup package needed before
-    /// the completed AST environment is available.
+    /// Build a context before the completed AST environment is available.
     ///
-    /// WHAT: seeds shared services with empty/default lookup tables plus the
-    /// provided declaration table, external package registry, and the shared
-    /// module TIR store.
+    /// WHAT: seeds only the provided declaration table, external package registry and shared
+    /// module TIR store. Environment passes attach their narrow side tables explicitly; body
+    /// emission installs the completed lookup package with `with_lookups`.
     /// WHY: constant-header parsing runs while the environment is still being
-    /// built, so it supplies visibility, aliases, and nominal type maps through
-    /// builder setters. Body emission must replace these synthetic lookups with
-    /// `with_lookups` before parsing function/start/template bodies.
+    /// built, so it supplies visibility, aliases and nominal type maps through builder setters.
+    /// No synthetic `AstModuleLookups` package is constructed for this path.
     ///
     /// The TIR store is a required input, not a scratch default: every production
     /// context must share the one module-level store allocated by
@@ -469,29 +420,32 @@ impl ScopeContext {
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
-        let placeholder = placeholder_lookups();
-
+        let trait_environment = EMPTY_TRAIT_ENVIRONMENT.with(Rc::clone);
+        let trait_evidence_environment = EMPTY_TRAIT_EVIDENCE_ENVIRONMENT.with(Rc::clone);
         let shared = Rc::new(ScopeShared {
-            lookups: Rc::clone(&placeholder),
+            lookups: None,
             top_level_declarations,
             external_package_registry,
-            style_directives: placeholder.style_directives.clone(),
-            build_profile: placeholder.build_profile,
+            style_directives: StyleDirectiveRegistry::built_ins(),
+            build_profile: FrontendBuildProfile::Dev,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,
             resolved_struct_fields_by_path: None,
             choice_variant_shells_by_path: None,
+            resolved_module_constants_override: None,
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             project_path_resolver: None,
             source_file_scope: None,
-            path_format_config: placeholder.path_format_config.clone(),
+            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            receiver_methods: Rc::clone(&placeholder.receiver_methods),
-            nominal_type_ids_by_path: Rc::clone(&placeholder.nominal_type_ids_by_path),
+            receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
+            nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
             generated_evidence_pairs: Rc::new(FxHashSet::default()),
+            trait_environment,
+            trait_evidence_environment,
             trait_environment_override: None,
         });
 

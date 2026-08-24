@@ -7,10 +7,15 @@
 //! exhaustiveness validation for later template control-flow work.
 
 use crate::ast_log;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, IfBranchMetadata, MatchExhaustiveness, NodeKind,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::function_body_to_ast;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericRequestRange, IfGenericRequestRanges,
+};
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
     current_line_contains_top_level_colon, current_token_starts_match_arm_header,
@@ -176,11 +181,9 @@ pub fn create_branch(
 
     token_stream.advance();
 
-    // Branch bodies own every generic request their calls publish. Static specialisation will
-    // need that boundary, so the parser records how much durable generated work a branch
-    // contributes before any selection exists.
-    #[cfg(feature = "benchmark_counters")]
-    let branch_request_checkpoint = context.generic_request_checkpoint();
+    // Both bodies publish provisional generic requests into the shared sink. Finalisation owns
+    // selection, so retain the exact parser boundaries without rescanning calls later.
+    let then_request_start = context.generic_request_checkpoint();
 
     let then_context = context.new_child_control_flow(ContextKind::Branch, string_table);
     let then_scope = then_context.scope.clone();
@@ -191,32 +194,46 @@ pub fn create_branch(
         warnings,
         string_table,
     )?;
+    let then_request_end = context.generic_request_checkpoint();
 
-    let else_block = if token_stream.current_token_kind() == &TokenKind::Else {
+    let (else_block, else_scope) = if token_stream.current_token_kind() == &TokenKind::Else {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context = context.new_child_control_flow(ContextKind::Branch, string_table);
-        Some(function_body_to_ast(
-            token_stream,
-            else_context,
-            type_interner,
-            warnings,
-            string_table,
-        )?)
+        let else_scope = else_context.scope.clone();
+        (
+            Some(function_body_to_ast(
+                token_stream,
+                else_context,
+                type_interner,
+                warnings,
+                string_table,
+            )?),
+            Some(else_scope),
+        )
     } else {
-        None
+        (None, None)
+    };
+    let else_request_end = context.generic_request_checkpoint();
+
+    let request_ranges = IfGenericRequestRanges {
+        then_branch: GenericRequestRange::new(then_request_start, then_request_end),
+        else_branch: GenericRequestRange::new(then_request_end, else_request_end),
     };
 
     #[cfg(feature = "benchmark_counters")]
     add_ast_counter(
         AstCounter::BranchLocalGenericRequests,
-        context
-            .generic_request_checkpoint()
-            .saturating_sub(branch_request_checkpoint),
+        request_ranges.then_branch.len() + request_ranges.else_branch.len(),
     );
 
     Ok(vec![AstNode {
-        kind: NodeKind::If(condition, then_block, else_block),
+        kind: NodeKind::If(
+            condition,
+            then_block,
+            else_block,
+            IfBranchMetadata::new(request_ranges, then_scope.clone(), else_scope),
+        ),
         location: token_stream.current_location(),
         scope: then_scope,
     }])

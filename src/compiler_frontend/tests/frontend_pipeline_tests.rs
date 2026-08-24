@@ -16,6 +16,7 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
@@ -530,10 +531,8 @@ fn html_style_directive_available_during_header_parsing() {
 // ---------------------------------
 //
 // Stage 4 owns static Bool `if` specialisation, so the AST that reaches HIR must contain a
-// branch only where the condition is a genuine runtime test. The frozen case below records the
-// runtime shape that must survive specialisation. The `intended_` cases record the accepted
-// contract the current compiler does not implement yet; they are enabled by the phase that adds
-// the Stage 4 specialisation owner.
+// branch only where the condition is a genuine runtime test. The runtime case below records the
+// shape that survives specialisation, while the static cases protect the Stage 4 handoff.
 
 /// Count the `if` diamonds a lowered module actually contains.
 fn branch_terminator_count(hir: &HirModule) -> usize {
@@ -564,9 +563,7 @@ fn runtime_bool_condition_lowers_one_branch_diamond() {
 }
 
 #[test]
-#[ignore = "intended Stage 4 static Bool `if` specialisation; enabled by the static-if phase of \
-            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
-fn intended_compile_time_true_condition_reaches_hir_without_a_branch() {
+fn compile_time_true_condition_reaches_hir_without_a_branch() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
@@ -586,9 +583,7 @@ fn intended_compile_time_true_condition_reaches_hir_without_a_branch() {
 }
 
 #[test]
-#[ignore = "intended Stage 4 static Bool `if` specialisation; enabled by the static-if phase of \
-            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
-fn intended_compile_time_false_condition_without_else_lowers_no_branch_body() {
+fn compile_time_false_condition_without_else_lowers_no_branch_body() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
@@ -608,10 +603,7 @@ fn intended_compile_time_false_condition_without_else_lowers_no_branch_body() {
 }
 
 #[test]
-#[ignore = "intended Stage 4 terminality over specialised control flow; enabled by the static-if \
-            phase of \
-            docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md"]
-fn intended_terminality_observes_the_selected_branch() {
+fn terminality_observes_the_selected_branch() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
@@ -629,5 +621,62 @@ fn intended_terminality_observes_the_selected_branch() {
         branch_terminator_count(&hir),
         0,
         "a compile-time `true` branch return must be terminal without a runtime branch"
+    );
+}
+
+#[test]
+fn selected_terminating_value_if_body_replaces_its_receiver_before_hir() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "enabled #= true\ndisabled #= false\nchoose_then || -> Int:\n    return if enabled:\n        return 1\n    else\n        then 2\n    ;\n;\nchoose_else || -> Int:\n    return if disabled:\n        then 1\n    else\n        return 2\n    ;\n;\nio.line([: [choose_then()]-[choose_else()]])\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let hir = project.hir();
+
+    assert_eq!(
+        branch_terminator_count(&hir),
+        0,
+        "terminating selected value bodies must not leave a branch or ownerless merge"
+    );
+}
+
+#[test]
+fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flow() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "enabled #= false\nruntime ~= true\nif enabled:\n    then_value = 1\nelse\n    if runtime:\n        nested_value = 2\n    ;\n;\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+    let body = ast
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(_, _, body) => Some(body),
+            _ => None,
+        })
+        .expect("entry function should exist");
+    let selected = &body[1];
+    let NodeKind::ScopedBlock {
+        body: selected_body,
+    } = &selected.kind
+    else {
+        panic!("static outer if should become one scoped body");
+    };
+    let nested = selected_body
+        .first()
+        .expect("selected else body should retain its nested runtime if");
+
+    assert_ne!(
+        selected.scope, nested.scope,
+        "the selected scope must be the immediate else scope, not the nested if's child scope"
     );
 }

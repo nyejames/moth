@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::module_ast::environment::builder::import_proj
 };
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleEnvironmentBuilder, AstModuleLookups,
-    DeclarationSemanticTable, ResolvedPublicTraitRoot, TopLevelDeclarationTable,
+    DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
+    TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
@@ -88,7 +89,9 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{
+    StringId, StringIdRemap, StringTable, StringTableForkSource,
+};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
@@ -105,7 +108,7 @@ use crate::compiler_frontend::traits::evidence::{
 use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1010,8 +1013,8 @@ impl GenericTemplateArtefact {
                 &requester_context.string_table,
             )
         })?;
-        let mut string_table = StringTable::new();
-        let requester_string_remap = string_table.merge_from(&requester_context.string_table);
+        let (mut string_table, requester_string_remap) =
+            requester_context.fork_materialisation_string_table();
         let mut call_location = requester_call_location.clone();
         call_location.remap_string_ids(&requester_string_remap);
 
@@ -1056,7 +1059,13 @@ impl GenericTemplateArtefact {
         module_symbols
             .builtin_visible_symbol_paths
             .extend(builtin_manifest.visible_symbol_paths.iter().cloned());
-        module_symbols.declarations = builtin_manifest.declarations;
+        module_symbols.compiler_owned_declarations = builtin_manifest
+            .declarations
+            .into_iter()
+            .map(
+                crate::compiler_frontend::headers::module_symbols::CompilerOwnedDeclaration::builtin,
+            )
+            .collect();
         module_symbols
             .resolved_struct_fields_by_path
             .extend(builtin_manifest.resolved_struct_fields_by_path);
@@ -1374,10 +1383,14 @@ impl GenericTemplateArtefact {
                     value,
                 };
                 let lookups = Rc::make_mut(&mut environment.lookups);
-                if lookups.declaration_table.get_by_path(&local_path).is_none() {
-                    append_materialised_declaration(lookups, declaration.clone())?;
-                }
-                Rc::make_mut(&mut lookups.module_constant_paths).insert(declaration.id.to_owned());
+                let declaration_id = match lookups
+                    .declaration_table
+                    .declaration_id_by_path(&local_path)
+                {
+                    Some(declaration_id) => declaration_id,
+                    None => append_materialised_declaration(lookups, declaration.clone())?,
+                };
+                Rc::make_mut(&mut lookups.resolved_module_constants).insert(declaration_id);
                 Rc::make_mut(&mut lookups.declaration_semantics)
                     .register_materialised_constant(local_path);
                 continue;
@@ -2087,7 +2100,7 @@ fn register_materialised_receiver_method(
 fn append_materialised_declaration(
     lookups: &mut AstModuleLookups,
     declaration: Declaration,
-) -> Result<(), CompilerError> {
+) -> Result<crate::compiler_frontend::ast::module_ast::environment::DeclarationId, CompilerError> {
     let path = declaration.id.clone();
     Rc::make_mut(&mut lookups.declaration_table)
         .append_for_construction(declaration)
@@ -2095,8 +2108,7 @@ fn append_materialised_declaration(
             CompilerError::compiler_error(format!(
                 "Materialised declaration path {path:?} was registered more than once",
             ))
-        })?;
-    Ok(())
+        })
 }
 
 impl GenericTemplateArtefact {
@@ -2801,9 +2813,10 @@ impl StableFunctionSignature {
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
+    string_table_fork_source: OnceCell<StringTableForkSource>,
     pub(crate) entry_dir: InternedPath,
     pub(crate) type_environment: TypeEnvironment,
-    pub(crate) declaration_table: TopLevelDeclarationTable,
+    pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) binding_environment: HeaderBindingEnvironment,
     pub(crate) imported_functions_by_local_path:
         FxHashMap<InternedPath, AstImportedFunctionContract>,
@@ -2864,32 +2877,44 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
 }
 
 fn declaration_table_without_module_values(
-    declaration_table: &TopLevelDeclarationTable,
+    declaration_table: &Rc<TopLevelDeclarationTable>,
     const_values: &ConstValueStore,
-) -> Result<TopLevelDeclarationTable, CompilerError> {
-    let declarations = declaration_table
-        .iter()
-        .map(|declaration| {
-            let Some(value_id) = const_values.value_for_path(&declaration.id) else {
-                return Ok(declaration.clone());
-            };
-            let metadata = const_values.metadata(value_id).ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Module materialisation constant has no store metadata for its declaration placeholder.",
-                )
-            })?;
-            Ok(Declaration {
-                id: declaration.id.clone(),
+) -> Result<Rc<TopLevelDeclarationTable>, CompilerError> {
+    let mut generated = TopLevelDeclarationTable::fork_for_generated(Rc::clone(declaration_table));
+    for path in const_values.module_constant_paths() {
+        let value_id = const_values.value_for_path(path).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Module materialisation constant path has no store value for its declaration placeholder.",
+            )
+        })?;
+        let metadata = const_values.metadata(value_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Module materialisation constant has no store metadata for its declaration placeholder.",
+            )
+        })?;
+        let declaration_id = generated.declaration_id_by_path(path).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Module materialisation constant has no declaration-table entry.",
+            )
+        })?;
+        if !generated.replace_by_id(
+            declaration_id,
+            Declaration {
+                id: path.clone(),
                 value: Expression::no_value_with_type_id(
                     metadata.location.clone(),
                     metadata.diagnostic_type.clone(),
                     metadata.type_id,
                     metadata.value_mode.clone(),
                 ),
-            })
-        })
-        .collect::<Result<Vec<_>, CompilerError>>()?;
-    Ok(TopLevelDeclarationTable::new(declarations))
+            },
+        ) {
+            return Err(CompilerError::compiler_error(
+                "Module materialisation constant could not replace its declaration-table row.",
+            ));
+        }
+    }
+    Ok(Rc::new(generated))
 }
 
 impl ModuleMaterialisationPreparationBuilder {
@@ -2989,6 +3014,36 @@ impl ModuleMaterialisationPreparationBuilder {
 }
 
 impl ModuleMaterialisationPreparation {
+    fn string_table_fork_source(&self) -> &StringTableForkSource {
+        self.string_table_fork_source
+            .get_or_init(|| self.string_table.fork_source())
+    }
+
+    /// Fork one generated-local table from the requester's immutable module prefix.
+    ///
+    /// The preparation table may acquire a local suffix in future construction phases, so merge
+    /// that delta explicitly instead of assuming the fork source still covers the whole table.
+    fn fork_materialisation_string_table(&self) -> (StringTable, StringIdRemap) {
+        let (mut string_table, base_len) = self
+            .string_table_fork_source()
+            .fork_for_module()
+            .into_parts();
+        let requester_string_remap = string_table.merge_delta_from(&self.string_table, base_len);
+        (string_table, requester_string_remap)
+    }
+
+    /// Merge one generated-local table back into the compiler that owns this requester.
+    ///
+    /// Both tables inherit the preparation's immutable prefix. They may have independent suffixes,
+    /// so only those suffixes need interning and remapping when the sidecar rejoins its batch.
+    pub(crate) fn merge_materialisation_string_table_into(
+        &self,
+        target: &mut StringTable,
+        materialised: &StringTable,
+    ) -> StringIdRemap {
+        target.merge_delta_from(materialised, self.string_table_fork_source().base_len())
+    }
+
     fn freeze(
         mut self,
         public_interface: &PublicSemanticInterface,
@@ -4932,9 +4987,10 @@ impl ModuleMaterialisationPreparation {
         } = input;
 
         Ok(Self {
-            string_table: string_table.clone(),
+            string_table: string_table.clone_preserving_inherited_prefix(),
+            string_table_fork_source: OnceCell::new(),
             entry_dir,
-            type_environment: type_environment.clone(),
+            type_environment: type_environment.fork_for_generated(),
             declaration_table: declaration_table_without_module_values(
                 &lookups.declaration_table,
                 const_values,
@@ -4980,16 +5036,23 @@ impl ModuleMaterialisationPreparation {
         phase_context: &AstPhaseContext<'_>,
         string_table: &mut StringTable,
     ) -> Result<AstModuleEnvironment, CompilerError> {
-        let mut declaration_table = self.declaration_table.clone();
+        let mut declaration_table =
+            TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
+        let mut resolved_module_constants = ResolvedConstantSet::default();
         for path in self.const_values.module_constant_paths() {
             let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
                 CompilerError::compiler_error(
                     "Generated materialisation module-constant path has no store value.",
                 )
             })?;
-            let Some(declaration) = declaration_table.get_mut_by_path(path) else {
+            let Some(declaration_id) = declaration_table.declaration_id_by_path(path) else {
                 return Err(CompilerError::compiler_error(
                     "Generated materialisation store row has no declaration-table entry",
+                ));
+            };
+            let Some(declaration) = declaration_table.get_mut_by_id(declaration_id) else {
+                return Err(CompilerError::compiler_error(
+                    "Generated materialisation store row has no declaration-table value",
                 ));
             };
             let mut template_builder =
@@ -5005,6 +5068,7 @@ impl ModuleMaterialisationPreparation {
             declaration.value = self
                 .const_values
                 .expression_for_materialisation(value_id, &mut template_builder)?;
+            resolved_module_constants.insert(declaration_id);
         }
 
         let lookups = AstModuleLookups {
@@ -5015,9 +5079,7 @@ impl ModuleMaterialisationPreparation {
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
             imported_struct_definitions: self.imported_struct_definitions.clone(),
             imported_choice_definitions: self.imported_choice_definitions.clone(),
-            module_constant_paths: Rc::new(
-                self.const_values.module_constant_paths().cloned().collect(),
-            ),
+            resolved_module_constants: Rc::new(resolved_module_constants),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path.clone()),
@@ -5118,8 +5180,8 @@ impl ModuleMaterialisationPreparation {
                     &self.string_table,
                 )
             })?;
-        let mut string_table = self.string_table.clone();
-        let requester_string_remap = string_table.merge_from(&requester_context.string_table);
+        let (mut string_table, requester_string_remap) =
+            requester_context.fork_materialisation_string_table();
         let mut call_location = requester_call_location.clone();
         call_location.remap_string_ids(&requester_string_remap);
         let build_context = AstBuildContext {

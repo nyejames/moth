@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["runtime_if_reactive_metadata_preserved runtime-reactive-value 1"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.reactive_template_runtime"

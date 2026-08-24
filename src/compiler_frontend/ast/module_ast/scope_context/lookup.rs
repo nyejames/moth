@@ -144,14 +144,28 @@ impl ScopeContext {
     /// WHY: fixed-capacity type syntax must reject foldable runtime bindings while still
     /// allowing visible explicit constants before and after the final lookup package exists.
     pub(crate) fn is_explicit_compile_time_constant(&self, declaration: &Declaration) -> bool {
-        self.arena
+        if self
+            .arena
             .borrow()
             .is_explicit_compile_time_constant(self.current_frame_id, declaration)
-            || self
-                .shared
-                .lookups
-                .module_constant_paths
-                .contains(&declaration.id)
+        {
+            return true;
+        }
+
+        let Some(declaration_id) = self
+            .shared
+            .top_level_declarations
+            .declaration_id_by_path(&declaration.id)
+        else {
+            return false;
+        };
+        if let Some(constants) = &self.shared.resolved_module_constants_override {
+            return constants.contains(declaration_id);
+        }
+        self.shared
+            .lookups
+            .as_ref()
+            .is_some_and(|lookups| lookups.resolved_module_constants.contains(declaration_id))
     }
 
     pub(crate) fn lookup_generic_function_template(
@@ -160,6 +174,7 @@ impl ScopeContext {
     ) -> Option<&GenericFunctionTemplate> {
         self.shared
             .lookups
+            .as_ref()?
             .generic_function_templates_by_path
             .get(function_path)
     }
@@ -176,8 +191,8 @@ impl ScopeContext {
     ) -> Result<DeclarationSemanticKind, TemplateError> {
         if let Some(kind) = self
             .lookups
-            .declaration_semantics
-            .kind_for_path(&declaration.id)
+            .as_ref()
+            .and_then(|lookups| lookups.declaration_semantics.kind_for_path(&declaration.id))
         {
             return Ok(kind);
         }
@@ -216,11 +231,11 @@ impl ScopeContext {
         &'a self,
         declaration: &'a Declaration,
     ) -> Option<&'a FunctionSignature> {
-        if let Some(resolved_signature) = self
-            .lookups
-            .resolved_function_signatures_by_path
-            .get(&declaration.id)
-        {
+        if let Some(resolved_signature) = self.lookups.as_ref().and_then(|lookups| {
+            lookups
+                .resolved_function_signatures_by_path
+                .get(&declaration.id)
+        }) {
             return Some(&resolved_signature.signature);
         }
 
@@ -434,19 +449,18 @@ impl ScopeContext {
     /// WHY: values may violate naming conventions and receive warnings, but namespace diagnostics
     /// must rely on the header/AST type metadata that identifies real type declarations.
     pub(crate) fn is_nominal_type_declaration_path(&self, path: &InternedPath) -> bool {
-        if self.nominal_type_ids_by_path.contains_key(path)
-            || self
-                .lookups
-                .module_symbols
-                .nominal_type_paths
-                .contains(path)
-        {
+        if self.nominal_type_ids_by_path.contains_key(path) {
             return true;
         }
 
         self.lookups
-            .declaration_semantics
-            .kind_for_path(path)
+            .as_ref()
+            .and_then(|lookups| {
+                if lookups.module_symbols.nominal_type_paths.contains(path) {
+                    return Some(DeclarationSemanticKind::Struct);
+                }
+                lookups.declaration_semantics.kind_for_path(path)
+            })
             .is_some_and(|kind| {
                 matches!(
                     kind,

@@ -218,16 +218,13 @@ fn alias_scope_context(
     scope_context: Option<&ScopeContext>,
 ) -> Option<ScopeContext> {
     let scope_context = scope_context?;
-    let source_file = scope_context
-        .shared
-        .lookups
+    let lookups = scope_context.shared.lookups.as_ref()?;
+    let source_file = lookups
         .module_symbols
         .canonical_source_by_symbol_path
         .get(alias_path)?;
     let visibility = Arc::clone(
-        scope_context
-            .shared
-            .lookups
+        lookups
             .binding_environment
             .visibility_for(source_file)
             .ok()?,

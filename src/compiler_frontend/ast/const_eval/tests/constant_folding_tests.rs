@@ -24,6 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 
@@ -1298,6 +1299,7 @@ fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
             Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
             then_body,
             Some(else_body),
+            test_if_branch_metadata(true),
         ),
         location,
         scope: InternedPath::new(),

@@ -6,9 +6,10 @@
 //! consistent for borrow validation and backend lowering.
 
 use crate::compiler_frontend::ast::ast_nodes::SourceLocation;
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
-    types::{ValueIfBlock, ValueMatchBlock},
+    types::{ValueIfBlock, ValueMatchBlock, ValueScopedBlock},
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -150,6 +151,12 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
         _result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
+        if matches!(value_if.condition.kind, ExpressionKind::Bool(_)) {
+            return_hir_transformation_error!(
+                "Stage 4 passed a statically decided value-producing Bool `if` to HIR",
+                self.hir_error_location(location)
+            );
+        }
         let parent_region = self.current_region_or_error(location)?;
 
         let result_locals =
@@ -222,6 +229,50 @@ impl<'a> HirBuilder<'a> {
         let value = self.value_block_result_expression(
             &result_locals,
             &value_if.result_type_ids,
+            location,
+            parent_region,
+        )?;
+
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
+    }
+
+    /// Lowers one statically selected value-producing body without rebuilding a Bool branch.
+    pub(crate) fn lower_value_block_scoped(
+        &mut self,
+        value_scoped: &ValueScopedBlock,
+        location: &SourceLocation,
+        _result_type_id: TypeId,
+    ) -> Result<LoweredExpression, CompilerError> {
+        let entry_block = self.current_block_id_or_error(location)?;
+        let parent_region = self.current_region_or_error(location)?;
+        let body_region = self.create_child_region(parent_region);
+        let body_block = self.create_block(body_region, location, "static-value-if-body")?;
+        let merge_block = self.create_block(parent_region, location, "static-value-if-merge")?;
+        let result_locals =
+            self.allocate_value_block_result_locals(&value_scoped.result_type_ids, location)?;
+
+        self.emit_jump_to(entry_block, body_block, location, "static-value-if.enter")?;
+        self.set_current_block(body_block, location)?;
+        self.with_active_value_block_target(
+            ValueBlockTarget {
+                result_locals: result_locals.clone(),
+                merge_block,
+            },
+            |builder| builder.lower_statement_sequence(&value_scoped.body),
+        )?;
+
+        let body_tail = self.current_block_id_or_error(location)?;
+        if !self.block_has_explicit_terminator(body_tail, location)? {
+            self.emit_jump_to(body_tail, merge_block, location, "static-value-if.exit")?;
+        }
+        self.set_current_block(merge_block, location)?;
+
+        let value = self.value_block_result_expression(
+            &result_locals,
+            &value_scoped.result_type_ids,
             location,
             parent_region,
         )?;

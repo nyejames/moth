@@ -1664,6 +1664,22 @@ fn trait_declaration_headers_parse_requirement_shells() {
 }
 
 #[test]
+fn duplicate_trait_declarations_are_structured_header_diagnostics() {
+    let result = parse_single_file_headers_with_entry(
+        "DISPLAYABLE must:\n    display |This| -> String\n;\n\
+         DISPLAYABLE must:\n    render |This| -> String\n;\n",
+        "src/@page.moth",
+        "src/@page.moth",
+    );
+    let errors = expect_header_error(result, "duplicate trait declarations must be rejected");
+
+    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
+        diagnostic.payload,
+        DiagnosticPayload::DuplicateDeclaration { .. }
+    )));
+}
+
+#[test]
 fn empty_marker_trait_declaration_is_a_valid_header() {
     let headers = parse_single_file_headers("MARKER must:\n;\n");
 

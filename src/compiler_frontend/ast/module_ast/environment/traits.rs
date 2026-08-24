@@ -5,7 +5,7 @@
 //! WHY: AST owns type resolution, so trait requirement signatures are resolved here while the
 //! trait subsystem owns the resulting compile-time metadata.
 
-use super::builder::AstModuleEnvironmentBuilder;
+use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, SignatureTypeFallbackPolicy,
     function_signature_from_syntax_with_unresolved_types,
@@ -66,6 +66,7 @@ struct TraitRequirementResolutionInput<'a> {
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn resolve_trait_definitions(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) -> Result<TraitEnvironment, CompilerMessages> {
@@ -79,9 +80,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.project_imported_trait_declarations(&mut trait_environment, string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
 
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.traits {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::Trait { declaration } = &header.kind else {
-                continue;
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(
+                        "Trait declaration lane contained a different header kind.",
+                    ),
+                    string_table,
+                ));
             };
 
             let definition = self.resolve_trait_definition(

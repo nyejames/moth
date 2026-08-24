@@ -258,9 +258,8 @@ pub(crate) struct ScopeFrame {
     /// WHAT: body-local explicit compile-time constants live here, just like ordinary
     ///       local declarations, and participate in parent-chain lookup. `None` means the
     ///       frame declares none, which is the common case for control-flow frames.
-    /// WHY: the environment-time header passes seed this from one module-owned set that is
-    ///      shared, not copied, into every frame they build. A frame that later declares its
-    ///      own `#` binding takes a private copy at that point.
+    /// Module constants live in the top-level `ResolvedConstantSet`; this path-keyed set owns only
+    /// lexical declarations, which do not have top-level declaration IDs.
     pub(crate) explicit_compile_time_constant_declarations: Option<Rc<FxHashSet<InternedPath>>>,
 
     /// Parent frame holding visible ancestor declarations.

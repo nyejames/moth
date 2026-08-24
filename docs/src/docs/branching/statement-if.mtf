@@ -29,7 +29,7 @@ The ordinary `if` form is the only conditional source form; there is no new stat
     ;
 ]
 
-`#Config of Bool` is another future source of the same folded value. Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.
+`#Config of Bool` is another future source of the same folded value. It will use this ordinary folded-value path rather than introducing config-specific branch syntax.
 
 ### No statement-level `else if`
 

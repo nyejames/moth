@@ -12,6 +12,7 @@
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, PlaceExpression,
 };
+use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -59,6 +60,32 @@ pub struct AstNode {
     pub scope: InternedPath,
 }
 
+/// Authored statement-branch facts retained until static selection.
+///
+/// WHAT: carries each body's immediate lexical scope and provisional generic-request range.
+/// WHY: finalisation must preserve the selected branch identity and discard inactive generated
+/// work without reconstructing either fact from body contents.
+#[derive(Debug, Clone)]
+pub struct IfBranchMetadata {
+    pub(crate) request_ranges: IfGenericRequestRanges,
+    pub(crate) then_scope: InternedPath,
+    pub(crate) else_scope: Option<InternedPath>,
+}
+
+impl IfBranchMetadata {
+    pub(crate) fn new(
+        request_ranges: IfGenericRequestRanges,
+        then_scope: InternedPath,
+        else_scope: Option<InternedPath>,
+    ) -> Self {
+        Self {
+            request_ranges,
+            then_scope,
+            else_scope,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RangeEndKind {
     Exclusive,
@@ -91,9 +118,14 @@ pub enum MatchExhaustiveness {
 #[derive(Debug, Clone)]
 pub enum NodeKind {
     // Control Flow
-    Return(Vec<Expression>),                            // Return value,
-    ReturnError(Expression),                            // return! value
-    If(Expression, Vec<AstNode>, Option<Vec<AstNode>>), // Condition, If true, Else
+    Return(Vec<Expression>), // Return value,
+    ReturnError(Expression), // return! value
+    If(
+        Expression,
+        Vec<AstNode>,
+        Option<Vec<AstNode>>,
+        IfBranchMetadata,
+    ), // Condition, If true, Else, provisional generic work
 
     Match {
         scrutinee: Expression,

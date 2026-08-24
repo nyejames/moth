@@ -13,6 +13,10 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveTemplateMetadata,
 };
 use crate::compiler_frontend::ast::templates::reactive_template_metadata;
+use crate::compiler_frontend::ast::templates::reactive_template_metadata::{
+    metadata_for_owned_runtime_slot_application_handoff,
+    metadata_for_owned_runtime_template_handoff,
+};
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{TemplateIrStore, TemplateTirPhase, TirView};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -28,6 +32,20 @@ pub(super) fn metadata_for_expression(
     match &expression.kind {
         ExpressionKind::Template(template) => {
             metadata_for_template(template, flows, value_environment, store)
+        }
+
+        ExpressionKind::RuntimeTemplateHandoff(handoff) => {
+            metadata_for_owned_runtime_template_handoff(handoff, &mut |nested| {
+                metadata_for_expression(nested, flows, value_environment, store)
+            })
+            .map(Some)
+        }
+
+        ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
+            metadata_for_owned_runtime_slot_application_handoff(handoff, &mut |nested| {
+                metadata_for_expression(nested, flows, value_environment, store)
+            })
+            .map(Some)
         }
 
         ExpressionKind::FunctionCall { name, args, .. }

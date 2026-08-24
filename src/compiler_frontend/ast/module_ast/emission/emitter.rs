@@ -10,7 +10,7 @@
 //! Constants and choices are handled in earlier passes; they do not emit nodes here.
 //! Struct node emission reads the resolved field table produced by environment construction.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -28,9 +28,6 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, Scop
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
-use crate::compiler_frontend::ast::statements::terminality::{
-    terminality_policy_for_signature, validate_function_body_terminality,
-};
 use crate::compiler_frontend::ast::templates::create_template_node::PreparedTemplateConstruction;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -42,7 +39,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
 };
@@ -86,6 +83,9 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// transaction from the declaring module's retained context.
     pub(in crate::compiler_frontend::ast) deferred_generic_requests:
         Vec<GenericFunctionInstantiationRequest>,
+    /// Fully validated generic template bodies retained only through static specialisation and
+    /// terminality. They never enter executable HIR.
+    pub(in crate::compiler_frontend::ast) validated_generic_template_bodies: Vec<AstNode>,
 }
 
 #[cfg(test)]
@@ -198,6 +198,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
+    validated_generic_template_bodies: Vec<AstNode>,
 }
 
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
@@ -217,6 +218,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             generic_function_instances_by_key: FxHashMap::default(),
             deferred_generic_requests: Vec::new(),
+            validated_generic_template_bodies: Vec::new(),
         }
     }
 
@@ -234,6 +236,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests: self.deferred_generic_requests,
+            validated_generic_template_bodies: self.validated_generic_template_bodies,
         })
     }
 
@@ -443,6 +446,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests: self.deferred_generic_requests,
+            validated_generic_template_bodies: self.validated_generic_template_bodies,
         })
     }
 
@@ -461,20 +465,21 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             std::mem::take(&mut *self.generic_function_instantiation_requests.borrow_mut());
 
         for request in requests {
-            if self
+            if !self
                 .generic_function_instances_by_key
                 .contains_key(&request.key)
             {
-                continue;
+                self.generic_function_instances_by_key.insert(
+                    request.key.clone(),
+                    GenericFunctionInstance {
+                        instance_path: request.instance_path.clone(),
+                        key: request.key.clone(),
+                    },
+                );
             }
 
-            self.generic_function_instances_by_key.insert(
-                request.key.clone(),
-                GenericFunctionInstance {
-                    instance_path: request.instance_path.clone(),
-                    key: request.key.clone(),
-                },
-            );
+            // Keep every provisional origin until static specialisation removes inactive ranges.
+            // Deduplicating first would lose an active duplicate when its first call was inactive.
             self.deferred_generic_requests.push(request);
         }
     }
@@ -720,25 +725,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
         };
 
-        // Template validation already proved terminality, so a failure during concrete instance
-        // reparse is an internal compiler invariant failure rather than a user-facing diagnostic.
-        let policy = terminality_policy_for_signature(&signature, false);
-        if let Some(diagnostic) =
-            validate_function_body_terminality(&body, policy, template.declaration_location.clone())
-        {
-            return Err(self.error_messages(
-                CompilerError::new(
-                    format!(
-                        "Generic function instance {} failed terminality validation after template validation succeeded",
-                        request.instance_path.to_string(string_table)
-                    ),
-                    diagnostic.primary_location,
-                    ErrorType::Compiler,
-                ),
-                string_table,
-            ));
-        }
-
         // Nested calls remain stable requests. The generated-function transaction materialises
         // their bodies, records dependency edges and detects indirect request cycles.
         self.defer_requested_generic_function_instances();
@@ -831,20 +817,27 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
         context.current_function_return_type_ids = context.expected_result_type_ids.clone();
-        context.set_local_declarations(resolved_signature.signature.parameters);
+        context.set_local_declarations(resolved_signature.signature.parameters.clone());
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
-        validate_generic_body_template(GenericFunctionBodyValidationInput {
+        let body = validate_generic_body_template(GenericFunctionBodyValidationInput {
             template: &template,
             context,
             type_interner: &mut type_interner,
             warnings: &mut self.warnings,
             string_table,
         })
-        .map_err(|error| self.expression_error_messages(error, string_table))
+        .map_err(|error| self.expression_error_messages(error, string_table))?;
+
+        self.validated_generic_template_bodies.push(AstNode {
+            kind: NodeKind::Function(template.function_path, resolved_signature.signature, body),
+            location: template.declaration_location,
+            scope: header.tokens.src_path,
+        });
+        Ok(())
     }
 
     fn emit_function(
@@ -920,14 +913,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         let body =
             body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
-
-        self.validate_body_terminality(
-            &body,
-            &resolved_signature.signature,
-            false,
-            header.name_location.clone(),
-            string_table,
-        )?;
 
         // AST symbol IDs are stored as full InternedPath values and are unique
         // module-wide, not only within a local scope.
@@ -1011,14 +996,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 channel: ReturnChannel::Success,
             }],
         };
-
-        self.validate_body_terminality(
-            &body,
-            &start_signature,
-            true,
-            header.name_location.clone(),
-            string_table,
-        )?;
 
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),
@@ -1212,27 +1189,5 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 self.error_messages(*error, string_table)
             }
         }
-    }
-
-    /// Runs AST-owned terminality validation for a parsed function body.
-    ///
-    /// WHAT: converts the optional `FunctionMayFallThrough` diagnostic into the standard
-    /// `CompilerMessages` wrapper used by this emitter.
-    /// WHY: body parsing is complete at this point; missing-return diagnostics belong to AST,
-    /// not to HIR lowering.
-    fn validate_body_terminality(
-        &self,
-        body: &[AstNode],
-        signature: &FunctionSignature,
-        is_entry_start: bool,
-        location: SourceLocation,
-        string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let policy = terminality_policy_for_signature(signature, is_entry_start);
-        if let Some(diagnostic) = validate_function_body_terminality(body, policy, location) {
-            return Err(self.diagnostic_messages(diagnostic, string_table));
-        }
-
-        Ok(())
     }
 }

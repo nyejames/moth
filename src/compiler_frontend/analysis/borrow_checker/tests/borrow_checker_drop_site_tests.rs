@@ -10,12 +10,15 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, symbol, test_source_location,
+    assignment_target, function_node, make_test_variable, node, symbol, test_if_branch_metadata,
+    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
-use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
+};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -93,7 +96,16 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
+                    runtime_expr(
+                        vec![runtime_operand_item(Expression::bool(
+                            true,
+                            test_source_location(2),
+                            ValueMode::ImmutableOwned,
+                        ))],
+                        builtin_type_ids::BOOL,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ),
                     vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
@@ -126,6 +138,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                         },
                         test_source_location(4),
                     )]),
+                    test_if_branch_metadata(true),
                 ),
                 test_source_location(2),
             ),

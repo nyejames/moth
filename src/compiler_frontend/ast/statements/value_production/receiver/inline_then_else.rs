@@ -15,6 +15,9 @@ use crate::compiler_frontend::ast::expressions::parse_expression::{
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericRequestRange, IfGenericRequestRanges,
+};
 use crate::compiler_frontend::ast::statements::value_production::parse_values::{
     ProducedValuesParseInput, is_missing_produced_value_boundary, parse_produced_values_typed,
 };
@@ -49,6 +52,13 @@ pub(super) struct InlineThenElseOutput {
     pub(super) else_values: Vec<Expression>,
     pub(super) result_type_id: Option<TypeId>,
     pub(super) result_type_ids: Vec<TypeId>,
+    pub(super) generic_request_ranges: IfGenericRequestRanges,
+}
+
+struct ParsedInlineBranchValues {
+    then_values: Vec<Expression>,
+    else_values: Vec<Expression>,
+    generic_request_ranges: IfGenericRequestRanges,
 }
 
 /// Returns `true` when both source locations are on the same logical line.
@@ -71,14 +81,15 @@ type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 /// and reads each branch through `parse_produced_values_typed`.
 /// WHY: known multi-value receivers and inferred multi-bind share this grammar;
 /// slot inference stays with the multi-bind owner after these values are collected.
-pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_inline_then_else_with_target(
+fn parse_inline_then_else_with_target(
     token_stream: &mut FileTokens,
     then_context: &ScopeContext,
     else_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     target: &ActiveValueProductionTarget,
     string_table: &mut StringTable,
-) -> InlineThenElseResult<(Vec<Expression>, Vec<Expression>)> {
+) -> InlineThenElseResult<ParsedInlineBranchValues> {
+    let then_request_start = then_context.generic_request_checkpoint();
     let then_location = token_stream.current_location();
     token_stream.advance(); // consume `then`
 
@@ -108,6 +119,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_inl
         label: "then branch",
         string_table,
     })?;
+    let then_request_end = then_context.generic_request_checkpoint();
 
     require_else_inline(token_stream, &then_location)?;
     token_stream.advance(); // consume `else`
@@ -124,8 +136,16 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_inl
         label: "else branch",
         string_table,
     })?;
+    let else_request_end = else_context.generic_request_checkpoint();
 
-    Ok((then_values, else_values))
+    Ok(ParsedInlineBranchValues {
+        then_values,
+        else_values,
+        generic_request_ranges: IfGenericRequestRanges {
+            then_branch: GenericRequestRange::new(then_request_start, then_request_end),
+            else_branch: GenericRequestRange::new(then_request_end, else_request_end),
+        },
+    })
 }
 
 /// Parses the shared `then <branch> else <branch>` inline shape.
@@ -150,7 +170,7 @@ pub(super) fn parse_inline_then_else(
     let receiver_kind = target.receiver_kind;
 
     if expected_result_type_ids.len() > 1 || target.expected_arity.is_some_and(|arity| arity > 1) {
-        let (then_values, else_values) = parse_inline_then_else_with_target(
+        let parsed = parse_inline_then_else_with_target(
             token_stream,
             then_context,
             else_context,
@@ -160,10 +180,11 @@ pub(super) fn parse_inline_then_else(
         )?;
         if target.needs_slot_inference() {
             return Ok(InlineThenElseOutput {
-                then_values,
-                else_values,
+                then_values: parsed.then_values,
+                else_values: parsed.else_values,
                 result_type_id: None,
                 result_type_ids: Vec::new(),
+                generic_request_ranges: parsed.generic_request_ranges,
             });
         }
 
@@ -173,14 +194,16 @@ pub(super) fn parse_inline_then_else(
             .intern_tuple(result_type_ids.clone());
 
         return Ok(InlineThenElseOutput {
-            then_values,
-            else_values,
+            then_values: parsed.then_values,
+            else_values: parsed.else_values,
             result_type_id: Some(result_type_id),
             result_type_ids,
+            generic_request_ranges: parsed.generic_request_ranges,
         });
     }
 
     let then_location = token_stream.current_location();
+    let then_request_start = then_context.generic_request_checkpoint();
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
@@ -238,6 +261,7 @@ pub(super) fn parse_inline_then_else(
             ],
         )?
     };
+    let then_request_end = then_context.generic_request_checkpoint();
 
     require_else_inline(token_stream, &then_location)?;
     token_stream.advance(); // consume `else`
@@ -265,6 +289,7 @@ pub(super) fn parse_inline_then_else(
         false,
     );
     let else_expr = create_expression_with_trailing_newline_policy(input)?;
+    let else_request_end = else_context.generic_request_checkpoint();
 
     if !same_logical_line(&then_location, &else_expr.location) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
@@ -311,6 +336,10 @@ pub(super) fn parse_inline_then_else(
             vec![result_type_id]
         } else {
             expected_result_type_ids.to_vec()
+        },
+        generic_request_ranges: IfGenericRequestRanges {
+            then_branch: GenericRequestRange::new(then_request_start, then_request_end),
+            else_branch: GenericRequestRange::new(then_request_end, else_request_end),
         },
     })
 }

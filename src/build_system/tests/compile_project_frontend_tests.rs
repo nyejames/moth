@@ -1068,6 +1068,9 @@ same_private_box PrivateBox of Bool = forward(private_box)
         6,
         "each outer request and nested private identity request needs one sidecar"
     );
+    let mut saw_box = false;
+    let mut saw_maybe = false;
+    let mut saw_private_box = false;
     for sidecar in sidecars {
         let argument = sidecar
             .identity
@@ -1090,21 +1093,27 @@ same_private_box PrivateBox of Bool = forward(private_box)
 
         match base_name {
             "Box" => {
+                saw_box = true;
                 let fields = environment
                     .fields_for(instance_type_id)
                     .expect("generated Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
                 assert_eq!(fields[0].type_id, builtin_type_ids::INT);
             }
             "Maybe" => {
+                saw_maybe = true;
                 let variants = environment
                     .variants_for(instance_type_id)
                     .expect("generated Maybe instance should expose substituted variants");
                 assert_eq!(variants.len(), 2);
+                assert_eq!(string_table.resolve(variants[0].name), "Some");
+                assert_eq!(string_table.resolve(variants[1].name), "Empty");
                 let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
                     panic!("Some should retain its record payload");
                 };
                 assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
                 assert_eq!(fields[0].type_id, builtin_type_ids::STRING);
                 assert!(matches!(
                     variants[1].payload,
@@ -1112,14 +1121,118 @@ same_private_box PrivateBox of Bool = forward(private_box)
                 ));
             }
             name if name.ends_with("PrivateBox") => {
+                saw_private_box = true;
                 let fields = environment
                     .fields_for(instance_type_id)
                     .expect("generated private Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
                 assert_eq!(fields[0].type_id, builtin_type_ids::BOOL);
             }
             other => panic!("unexpected generic nominal request base {other}"),
         }
+    }
+    assert!(saw_box && saw_maybe && saw_private_box);
+}
+
+#[test]
+fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("provider")).expect("should create provider module");
+    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("provider/@mod.moth"),
+        r#"export:
+    RemoteMarker = |
+        value Int,
+    |
+
+    seed || -> Int:
+        return 1
+    ;
+;
+"#,
+    )
+    .expect("should write provider");
+    fs::write(
+        dir.join("@page.moth"),
+        r#"@provider seed, RemoteMarker as LocalMarker
+
+inner type T |marker LocalMarker, value T| -> T:
+    unused Int = seed()
+    marker_value Int = marker.value
+    return value
+;
+
+outer type T |marker LocalMarker, value T| -> T:
+    return inner(marker, value)
+;
+
+result String = outer(LocalMarker(1), "trigger")
+"#,
+    )
+    .expect("should write entry");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    string_table.intern("preexisting-global-name");
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("nested generated sidecars should publish after the provider module");
+
+    let imported_marker_path = InternedPath::from_single_str("provider", &mut string_table)
+        .join_str("RemoteMarker", &mut string_table);
+    let published_alias_owners = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .filter(|artifact| {
+            artifact
+                .module
+                .executable
+                .type_environment
+                .nominal_id_for_path(&imported_marker_path)
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        published_alias_owners, 1,
+        "only the requesting module should publish its local nominal alias"
+    );
+
+    let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+    assert_eq!(
+        sidecars.len(),
+        2,
+        "outer and nested inner should materialise"
+    );
+
+    for sidecar in sidecars {
+        let environment = &sidecar.module.executable.type_environment;
+        let marker_nominal_id = environment
+            .nominal_id_for_path(&imported_marker_path)
+            .expect("sidecar should resolve the inherited import path in the global string domain");
+        let marker_type_id = environment
+            .type_id_for_nominal_id(marker_nominal_id)
+            .expect("sidecar should retain the inherited Marker type");
+        assert_eq!(
+            display_type(marker_type_id, environment, &string_table),
+            "RemoteMarker"
+        );
+
+        let fields = environment
+            .fields_for(marker_type_id)
+            .expect("sidecar should retain inherited Marker fields");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name.name_str(&string_table), Some("value"));
     }
 }
 

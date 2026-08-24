@@ -93,6 +93,6 @@ Both branches must satisfy normal completeness, receiving arity and type rules f
     ;
 ]
 
-Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.
+The selected body keeps its child scope. Calls and other executable work from the inactive body do not reach generated materialisation, HIR or later analysis.
 
 Option-present and choice-predicate inline and block forms use the same receiving-site model and are covered by the pattern references.

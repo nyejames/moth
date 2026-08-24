@@ -810,6 +810,9 @@ impl<'a> HirBuilder<'a> {
             ValueBlock::If(value_if) => {
                 self.lower_value_block_if(value_if, location, result_type_id)
             }
+            ValueBlock::Scoped(value_scoped) => {
+                self.lower_value_block_scoped(value_scoped, location, result_type_id)
+            }
             ValueBlock::Match(value_match) => {
                 self.lower_value_block_match(value_match, location, result_type_id)
             }

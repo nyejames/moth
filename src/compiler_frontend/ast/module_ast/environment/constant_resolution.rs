@@ -17,7 +17,9 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
+use crate::compiler_frontend::ast::module_ast::environment::{
+    ResolvedConstantSet, TopLevelDeclarationTable,
+};
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::declarations::resolve_declaration_syntax;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -43,7 +45,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -76,7 +78,7 @@ pub(crate) struct ConstantHeaderInput<'a> {
     /// session takes a fresh handle per constant rather than retaining one.
     pub top_level_declarations: Rc<TopLevelDeclarationTable>,
     /// Paths of the constants resolved so far, shared rather than copied into the scope frame.
-    pub resolved_constant_paths: Rc<FxHashSet<InternedPath>>,
+    pub resolved_constants: Rc<ResolvedConstantSet>,
     pub file_visibility: &'a Arc<FileVisibility>,
     pub type_environment: &'a mut TypeEnvironment,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
@@ -120,7 +122,7 @@ impl ConstantResolutionSession {
     ) -> Result<Declaration, ExpressionParseError> {
         let ConstantHeaderInput {
             top_level_declarations,
-            resolved_constant_paths,
+            resolved_constants,
             file_visibility,
             type_environment,
             warnings,
@@ -136,7 +138,7 @@ impl ConstantResolutionSession {
         let mut scope_context = self.constant_header_scope(
             header,
             top_level_declarations,
-            resolved_constant_paths,
+            resolved_constants,
             file_visibility,
             string_table,
         );
@@ -190,7 +192,7 @@ impl ConstantResolutionSession {
         &mut self,
         header: &Header,
         top_level_declarations: Rc<TopLevelDeclarationTable>,
-        resolved_constant_paths: Rc<FxHashSet<InternedPath>>,
+        resolved_constants: Rc<ResolvedConstantSet>,
         file_visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
     ) -> ScopeContext {
@@ -223,7 +225,7 @@ impl ConstantResolutionSession {
         .with_file_visibility(Arc::clone(file_visibility))
         .with_source_file_scope(source_file_scope.to_owned())
         .with_resolved_type_aliases(Rc::clone(&module_view.resolved_type_aliases))
-        .with_explicit_compile_time_constants(resolved_constant_paths)
+        .with_resolved_module_constants(resolved_constants)
         .with_generic_declarations(Rc::clone(&module_view.generic_declarations_by_path))
         .with_resolved_struct_fields_by_path(Rc::clone(&module_view.resolved_struct_fields_by_path))
         .with_choice_variant_shells_by_path(Rc::clone(&module_view.choice_variant_shells_by_path))

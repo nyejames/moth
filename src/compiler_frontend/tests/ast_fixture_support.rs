@@ -5,11 +5,14 @@
 //!      HIR lowering and borrow-checker ownership.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, IfBranchMetadata, NodeKind, SourceLocation,
+};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
 };
+use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
@@ -45,6 +48,15 @@ pub(crate) fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
         location,
         scope: InternedPath::new(),
     }
+}
+
+pub(crate) fn test_if_branch_metadata(has_else: bool) -> IfBranchMetadata {
+    let mut string_table = StringTable::new();
+    let then_scope = InternedPath::from_single_str("test_then_branch", &mut string_table);
+    let else_scope =
+        has_else.then(|| InternedPath::from_single_str("test_else_branch", &mut string_table));
+
+    IfBranchMetadata::new(IfGenericRequestRanges::default(), then_scope, else_scope)
 }
 
 pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {

@@ -8,7 +8,9 @@
 //!       afterwards. A transaction publishes nothing: a diagnosed module simply drops it.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar,
@@ -275,10 +277,19 @@ impl<'a> GeneratedFunctionTransaction<'a> {
     ///
     /// WHY: nested requests materialise against their own local string table, so the sidecars they
     ///      produced must follow the same merge as their requester's generated module.
-    pub(crate) fn remap_sidecars_from(&mut self, first_sidecar: usize, remap: &StringIdRemap) {
+    pub(crate) fn remap_sidecars_and_module_from(
+        &mut self,
+        first_sidecar: usize,
+        module: &mut Module,
+        remap: &StringIdRemap,
+    ) {
+        let mut type_environment_cache = TypeEnvironmentRemapCache::default();
         for record in &mut self.completed_records[first_sidecar..] {
-            record.sidecar.remap_string_ids(remap);
+            record
+                .sidecar
+                .remap_string_ids_with_type_environment_cache(remap, &mut type_environment_cache);
         }
+        module.remap_string_ids_with_type_environment_cache(remap, &mut type_environment_cache);
     }
 
     /// Close the transaction and hand back everything it completed.

@@ -20,6 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 use crate::compiler_frontend::traits::ids::TraitId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 use super::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ChoiceVariantDefinition,
@@ -82,6 +83,13 @@ pub struct BuiltinTypes {
 /// Owns resolved frontend semantic type identity.
 #[derive(Debug, Clone)]
 pub struct TypeEnvironment {
+    /// Immutable requester environment inherited by generated-local forks.
+    ///
+    /// Root module environments have no base. A generated fork keeps only types and indexes
+    /// interned by that sidecar, while every inherited `TypeId` remains valid through this shared
+    /// prefix.
+    base: Option<Arc<TypeEnvironment>>,
+
     // Sequential storage: index == TypeId.0
     types: Vec<TypeDefinition>,
 
@@ -142,6 +150,16 @@ pub struct TypeEnvironment {
     // WHY: generic instance fields, variants, and function templates often ask
     //      for the same nested substitution shape repeatedly.
     substitution_cache: FxHashMap<TypeSubstitutionKey, TypeId>,
+}
+
+/// Shared inherited-snapshot remaps for one publication boundary.
+///
+/// Generated siblings and nested sidecars may point at the same immutable requester snapshot.
+/// The boundary keeps one remapped `Arc` per original snapshot so remapping preserves that sharing
+/// instead of flattening or cloning the inherited type prefix into every sidecar.
+#[derive(Default)]
+pub(crate) struct TypeEnvironmentRemapCache {
+    inherited_snapshots: FxHashMap<*const TypeEnvironment, Arc<TypeEnvironment>>,
 }
 
 /// Internal enum mapping a `NominalTypeId` to its actual definition storage.
@@ -255,6 +273,7 @@ impl TypeEnvironment {
     /// Creates a new environment with all builtin types seeded.
     pub fn new() -> Self {
         let mut env = Self {
+            base: None,
             types: Vec::new(),
             builtin_ids: FxHashMap::default(),
             constructed_ids: FxHashMap::default(),
@@ -320,6 +339,64 @@ impl TypeEnvironment {
         &self.builtins
     }
 
+    /// Fork a generated-local environment from this completed requester environment.
+    ///
+    /// The requester is snapshotted once by the preparation owner. Later clones of the fork share
+    /// that immutable snapshot and copy only their generated-local overlay.
+    pub(crate) fn fork_for_generated(&self) -> Self {
+        Self {
+            base: Some(Arc::new(self.clone())),
+            types: Vec::new(),
+            builtin_ids: FxHashMap::default(),
+            constructed_ids: FxHashMap::default(),
+            function_ids: FxHashMap::default(),
+            external_ids: FxHashMap::default(),
+            generic_instance_ids: FxHashMap::default(),
+            canonical_type_ids: FxHashMap::default(),
+            canonical_identities: FxHashMap::default(),
+            nominal_registry: Vec::new(),
+            struct_definitions: Vec::new(),
+            choice_definitions: Vec::new(),
+            generic_parameter_lists: Vec::new(),
+            generic_parameter_ids: FxHashMap::default(),
+            trait_bounds_by_generic_parameter_id: FxHashMap::default(),
+            nominal_by_path: FxHashMap::default(),
+            nominal_to_type_id: FxHashMap::default(),
+            next_generic_parameter_id: self.next_generic_parameter_id,
+            next_generic_parameter_list_id: self.next_generic_parameter_list_id,
+            builtins: self.builtins,
+            generic_instance_fields: FxHashMap::default(),
+            generic_instance_variants: FxHashMap::default(),
+            substitution_cache: FxHashMap::default(),
+        }
+    }
+
+    fn inherited_type_count(&self) -> usize {
+        self.base.as_ref().map_or(0, |base| base.type_count())
+    }
+
+    fn type_count(&self) -> usize {
+        self.inherited_type_count() + self.types.len()
+    }
+
+    fn inherited_nominal_count(&self) -> usize {
+        self.base.as_ref().map_or(0, |base| base.nominal_count())
+    }
+
+    fn nominal_count(&self) -> usize {
+        self.inherited_nominal_count() + self.nominal_registry.len()
+    }
+
+    fn inherited_generic_parameter_list_count(&self) -> usize {
+        self.base
+            .as_ref()
+            .map_or(0, |base| base.generic_parameter_list_count())
+    }
+
+    fn generic_parameter_list_count(&self) -> usize {
+        self.inherited_generic_parameter_list_count() + self.generic_parameter_lists.len()
+    }
+
     // -----------------
     //  Maintenance
     // -----------------
@@ -331,6 +408,31 @@ impl TypeEnvironment {
     /// WHY: module compilation uses local `StringTable`s and later merges them into the build
     /// table; every frontend payload that stores `StringId`s must be rewritten at that boundary.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.remap_string_ids_with_cache(remap, &mut TypeEnvironmentRemapCache::default());
+    }
+
+    pub(crate) fn remap_string_ids_with_cache(
+        &mut self,
+        remap: &StringIdRemap,
+        cache: &mut TypeEnvironmentRemapCache,
+    ) {
+        if let Some(inherited) = self.base.take() {
+            let original_identity = Arc::as_ptr(&inherited);
+            let remapped = if let Some(remapped) = cache.inherited_snapshots.get(&original_identity)
+            {
+                Arc::clone(remapped)
+            } else {
+                let mut remapped = inherited.as_ref().clone();
+                remapped.remap_string_ids_with_cache(remap, cache);
+                let remapped = Arc::new(remapped);
+                cache
+                    .inherited_snapshots
+                    .insert(original_identity, Arc::clone(&remapped));
+                remapped
+            };
+            self.base = Some(remapped);
+        }
+
         for definition in &mut self.types {
             Self::remap_type_definition(definition, remap);
         }
@@ -357,7 +459,7 @@ impl TypeEnvironment {
             Self::remap_variants(variants, remap);
         }
 
-        self.rebuild_nominal_path_index();
+        self.remap_nominal_path_index(remap);
     }
 
     // -----------------
@@ -366,7 +468,12 @@ impl TypeEnvironment {
 
     /// Returns the generic parameter list for a given ID, if it exists.
     pub fn generic_parameters(&self, id: GenericParameterListId) -> Option<&GenericParameterList> {
-        self.generic_parameter_lists.get(id.0 as usize)
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_generic_parameter_list_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.generic_parameters(id);
+        }
+        self.generic_parameter_lists.get(index - inherited_count)
     }
 
     /// Returns the trait bounds recorded on a canonical generic parameter.
@@ -382,6 +489,11 @@ impl TypeEnvironment {
         self.trait_bounds_by_generic_parameter_id
             .get(&parameter_id)
             .map(|bounds| bounds.as_slice())
+            .or_else(|| {
+                self.base
+                    .as_ref()?
+                    .trait_bounds_for_generic_parameter(parameter_id)
+            })
     }
 
     /// Registers a parsed generic parameter list and returns its canonical semantic IDs.
@@ -439,7 +551,19 @@ impl TypeEnvironment {
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
         canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
     ) {
-        let Some(list) = self.generic_parameter_lists.get_mut(list_id.0 as usize) else {
+        let index = list_id.0 as usize;
+        let inherited_count = self.inherited_generic_parameter_list_count();
+        if index < inherited_count {
+            debug_assert!(
+                false,
+                "generated type-environment forks cannot patch inherited generic bounds"
+            );
+            return;
+        }
+        let Some(list) = self
+            .generic_parameter_lists
+            .get_mut(index - inherited_count)
+        else {
             return;
         };
 
@@ -485,16 +609,13 @@ impl TypeEnvironment {
         match self.get(type_id)? {
             TypeDefinition::Struct(def) => def.generic_parameters,
             TypeDefinition::Choice(def) => def.generic_parameters,
-            TypeDefinition::GenericInstance(instance) => {
-                match self.nominal_registry.get(instance.base.0 as usize)? {
-                    NominalEntry::Struct(index) => {
-                        self.struct_definitions.get(*index)?.generic_parameters
-                    }
-                    NominalEntry::Choice(index) => {
-                        self.choice_definitions.get(*index)?.generic_parameters
-                    }
-                }
-            }
+            TypeDefinition::GenericInstance(instance) => self
+                .struct_definition(instance.base)
+                .and_then(|definition| definition.generic_parameters)
+                .or_else(|| {
+                    self.choice_definition(instance.base)
+                        .and_then(|definition| definition.generic_parameters)
+                }),
             _ => None,
         }
     }
@@ -548,7 +669,7 @@ impl TypeEnvironment {
 
         let cache_key = TypeSubstitutionKey::new(type_id, mapping);
         increment_frontend_counter(FrontendCounter::TypeEnvironmentSubstitutionCacheLookups);
-        if let Some(substituted_type_id) = self.substitution_cache.get(&cache_key) {
+        if let Some(substituted_type_id) = self.substitution_cache_get(&cache_key) {
             increment_frontend_counter(FrontendCounter::TypeEnvironmentSubstitutionCacheHits);
             return *substituted_type_id;
         }
@@ -778,7 +899,11 @@ impl TypeEnvironment {
             arguments,
         };
 
-        if let Some(&existing) = self.constructed_ids.get(&key) {
+        if let Some(existing) = self.constructed_ids.get(&key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.constructed_type_id(&key))
+        }) {
             return existing;
         }
 
@@ -793,7 +918,11 @@ impl TypeEnvironment {
 
     /// Interns a function type.
     pub fn intern_function(&mut self, key: FunctionTypeKey) -> TypeId {
-        if let Some(&existing) = self.function_ids.get(&key) {
+        if let Some(existing) = self.function_ids.get(&key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.function_type_id(&key))
+        }) {
             return existing;
         }
 
@@ -830,7 +959,16 @@ impl TypeEnvironment {
     /// them to `None` during diagnostic-only `DataType -> TypeId` conversion.
     /// WHY: external types are opaque but still semantically distinct type identities.
     pub fn intern_external(&mut self, external_type_id: ExternalTypeId) -> TypeId {
-        if let Some(&existing) = self.external_ids.get(&external_type_id) {
+        if let Some(existing) = self
+            .external_ids
+            .get(&external_type_id)
+            .copied()
+            .or_else(|| {
+                self.base
+                    .as_ref()
+                    .and_then(|base| base.external_type_id(external_type_id))
+            })
+        {
             return existing;
         }
 
@@ -853,7 +991,11 @@ impl TypeEnvironment {
             arguments: arguments.clone(),
         };
 
-        if let Some(&existing) = self.generic_instance_ids.get(&key) {
+        if let Some(existing) = self.generic_instance_ids.get(&key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_type_id(&key))
+        }) {
             return existing;
         }
 
@@ -885,7 +1027,7 @@ impl TypeEnvironment {
         mut definition: StructTypeDefinition,
     ) -> (NominalTypeId, TypeId) {
         let struct_index = self.struct_definitions.len();
-        let nominal_id = NominalTypeId(self.nominal_registry.len() as u32);
+        let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
         let canonical_path = definition.path.clone();
 
@@ -913,7 +1055,18 @@ impl TypeEnvironment {
             return;
         };
         let nominal_id = def.id;
-        let struct_index = match self.nominal_registry.get(nominal_id.0 as usize) {
+        let inherited_count = self.inherited_nominal_count();
+        if (nominal_id.0 as usize) < inherited_count {
+            debug_assert!(
+                false,
+                "generated type-environment forks cannot patch inherited struct fields"
+            );
+            return;
+        }
+        let struct_index = match self
+            .nominal_registry
+            .get(nominal_id.0 as usize - inherited_count)
+        {
             Some(NominalEntry::Struct(index)) => *index,
             _ => return,
         };
@@ -922,7 +1075,8 @@ impl TypeEnvironment {
         }
         // Also update the cached TypeDefinition so subsequent `get()` calls
         // see the resolved fields.
-        if let Some(TypeDefinition::Struct(cached)) = self.types.get_mut(type_id.0 as usize) {
+        let type_index = type_id.0 as usize - self.inherited_type_count();
+        if let Some(TypeDefinition::Struct(cached)) = self.types.get_mut(type_index) {
             cached.fields = fields;
         }
 
@@ -936,7 +1090,7 @@ impl TypeEnvironment {
         mut definition: ChoiceTypeDefinition,
     ) -> (NominalTypeId, TypeId) {
         let choice_index = self.choice_definitions.len();
-        let nominal_id = NominalTypeId(self.nominal_registry.len() as u32);
+        let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
         let canonical_path = definition.path.clone();
 
@@ -967,7 +1121,18 @@ impl TypeEnvironment {
             return;
         };
         let nominal_id = def.id;
-        let choice_index = match self.nominal_registry.get(nominal_id.0 as usize) {
+        let inherited_count = self.inherited_nominal_count();
+        if (nominal_id.0 as usize) < inherited_count {
+            debug_assert!(
+                false,
+                "generated type-environment forks cannot patch inherited choice variants"
+            );
+            return;
+        }
+        let choice_index = match self
+            .nominal_registry
+            .get(nominal_id.0 as usize - inherited_count)
+        {
             Some(NominalEntry::Choice(index)) => *index,
             _ => return,
         };
@@ -976,7 +1141,8 @@ impl TypeEnvironment {
             def.variants = variants.clone();
         }
 
-        if let Some(TypeDefinition::Choice(cached)) = self.types.get_mut(type_id.0 as usize) {
+        let type_index = type_id.0 as usize - self.inherited_type_count();
+        if let Some(TypeDefinition::Choice(cached)) = self.types.get_mut(type_index) {
             cached.variants = variants;
         }
 
@@ -989,7 +1155,12 @@ impl TypeEnvironment {
 
     /// Returns the definition for a given `TypeId`, if it exists.
     pub fn get(&self, id: TypeId) -> Option<&TypeDefinition> {
-        self.types.get(id.0 as usize)
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_type_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.get(id);
+        }
+        self.types.get(index - inherited_count)
     }
 
     /// Returns the high-level kind of the type.
@@ -1008,7 +1179,12 @@ impl TypeEnvironment {
 
     /// Returns the nominal path registered for a `NominalTypeId`, if any.
     pub fn nominal_path_by_id(&self, id: NominalTypeId) -> Option<&InternedPath> {
-        match self.nominal_registry.get(id.0 as usize)? {
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_nominal_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.nominal_path_by_id(id);
+        }
+        match self.nominal_registry.get(index - inherited_count)? {
             NominalEntry::Struct(index) => self.struct_definitions.get(*index).map(|s| &s.path),
             NominalEntry::Choice(index) => self.choice_definitions.get(*index).map(|c| &c.path),
         }
@@ -1016,7 +1192,11 @@ impl TypeEnvironment {
 
     /// Returns the `NominalTypeId` for a path, if registered.
     pub fn nominal_id_for_path(&self, path: &InternedPath) -> Option<NominalTypeId> {
-        self.nominal_by_path.get(path).copied()
+        self.nominal_by_path.get(path).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.nominal_id_for_path(path))
+        })
     }
 
     /// Register an additional consumer-local lookup spelling for an existing nominal type.
@@ -1039,8 +1219,8 @@ impl TypeEnvironment {
             }
         };
 
-        if let Some(existing) = self.nominal_by_path.get(&path)
-            && *existing != nominal_id
+        if let Some(existing) = self.nominal_id_for_path(&path)
+            && existing != nominal_id
         {
             return Err(CompilerError::compiler_error(
                 "Nominal path alias collides with a different registered nominal type",
@@ -1053,7 +1233,11 @@ impl TypeEnvironment {
 
     /// Returns the `TypeId` for a nominal, if registered.
     pub fn type_id_for_nominal_id(&self, id: NominalTypeId) -> Option<TypeId> {
-        self.nominal_to_type_id.get(&id).copied()
+        self.nominal_to_type_id.get(&id).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.type_id_for_nominal_id(id))
+        })
     }
 
     /// Registers one exact stable identity for a consumer-local type handle.
@@ -1062,15 +1246,15 @@ impl TypeEnvironment {
         identity: CanonicalTypeIdentity,
         type_id: TypeId,
     ) -> Result<(), CompilerError> {
-        if let Some(existing_type_id) = self.canonical_type_ids.get(&identity)
-            && *existing_type_id != type_id
+        if let Some(existing_type_id) = self.type_id_for_canonical_identity(&identity)
+            && existing_type_id != type_id
         {
             return Err(CompilerError::compiler_error(format!(
                 "Canonical type identity {identity:?} was assigned to both TypeId({}) and TypeId({})",
                 existing_type_id.0, type_id.0
             )));
         }
-        if let Some(existing_identity) = self.canonical_identities.get(&type_id)
+        if let Some(existing_identity) = self.canonical_identity_for_type_id(type_id)
             && existing_identity != &identity
         {
             return Err(CompilerError::compiler_error(format!(
@@ -1088,14 +1272,22 @@ impl TypeEnvironment {
         &self,
         identity: &CanonicalTypeIdentity,
     ) -> Option<TypeId> {
-        self.canonical_type_ids.get(identity).copied()
+        self.canonical_type_ids.get(identity).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.type_id_for_canonical_identity(identity))
+        })
     }
 
     pub(crate) fn canonical_identity_for_type_id(
         &self,
         type_id: TypeId,
     ) -> Option<&CanonicalTypeIdentity> {
-        self.canonical_identities.get(&type_id)
+        self.canonical_identities.get(&type_id).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.canonical_identity_for_type_id(type_id))
+        })
     }
 
     /// Iterate every exact stable identity paired with its environment-local handle.
@@ -1105,15 +1297,28 @@ impl TypeEnvironment {
     /// deliberately have no consumer-local path.
     pub(crate) fn canonical_type_identities(
         &self,
-    ) -> impl Iterator<Item = (&CanonicalTypeIdentity, TypeId)> {
-        self.canonical_type_ids
+    ) -> Box<dyn Iterator<Item = (&CanonicalTypeIdentity, TypeId)> + '_> {
+        let inherited = self
+            .base
             .iter()
-            .map(|(identity, type_id)| (identity, *type_id))
+            .flat_map(|base| base.canonical_type_identities());
+        Box::new(
+            inherited.chain(
+                self.canonical_type_ids
+                    .iter()
+                    .map(|(identity, type_id)| (identity, *type_id)),
+            ),
+        )
     }
 
     /// Returns the struct definition for a nominal ID, if it is a struct.
     pub fn struct_definition(&self, id: NominalTypeId) -> Option<&StructTypeDefinition> {
-        match self.nominal_registry.get(id.0 as usize)? {
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_nominal_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.struct_definition(id);
+        }
+        match self.nominal_registry.get(index - inherited_count)? {
             NominalEntry::Struct(index) => self.struct_definitions.get(*index),
             NominalEntry::Choice(..) => None,
         }
@@ -1121,7 +1326,12 @@ impl TypeEnvironment {
 
     /// Returns the choice definition for a nominal ID, if it is a choice.
     pub fn choice_definition(&self, id: NominalTypeId) -> Option<&ChoiceTypeDefinition> {
-        match self.nominal_registry.get(id.0 as usize)? {
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_nominal_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.choice_definition(id);
+        }
+        match self.nominal_registry.get(index - inherited_count)? {
             NominalEntry::Struct(..) => None,
             NominalEntry::Choice(index) => self.choice_definitions.get(*index),
         }
@@ -1375,12 +1585,16 @@ impl TypeEnvironment {
 
     /// Returns the `TypeId` for a generic parameter, if already registered.
     pub fn type_id_for_generic_parameter(&self, id: GenericParameterId) -> Option<TypeId> {
-        self.generic_parameter_ids.get(&id).copied()
+        self.generic_parameter_ids.get(&id).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.type_id_for_generic_parameter(id))
+        })
     }
 
     /// Interns a generic parameter as a type identity.
     pub fn intern_generic_parameter(&mut self, id: GenericParameterId, name: StringId) -> TypeId {
-        if let Some(&existing) = self.generic_parameter_ids.get(&id) {
+        if let Some(existing) = self.type_id_for_generic_parameter(id) {
             return existing;
         }
         let type_id = self.insert_definition(TypeDefinition::GenericParameter(
@@ -1426,7 +1640,11 @@ impl TypeEnvironment {
         increment_frontend_counter(FrontendCounter::TypeEnvironmentFieldsForQueries);
 
         // Generic instances carry pre-substituted field views keyed by their canonical TypeId.
-        if let Some(cached) = self.generic_instance_fields.get(&id) {
+        if let Some(cached) = self.generic_instance_fields.get(&id).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_fields_for(id))
+        }) {
             add_frontend_counter(FrontendCounter::TypeEnvironmentFieldsReturned, cached.len());
             return Some(cached.as_slice());
         }
@@ -1464,7 +1682,11 @@ impl TypeEnvironment {
         increment_frontend_counter(FrontendCounter::TypeEnvironmentVariantsForQueries);
 
         // Generic instances carry pre-substituted variant views keyed by their canonical TypeId.
-        if let Some(cached) = self.generic_instance_variants.get(&id) {
+        if let Some(cached) = self.generic_instance_variants.get(&id).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_variants_for(id))
+        }) {
             add_frontend_counter(
                 FrontendCounter::TypeEnvironmentVariantsReturned,
                 cached.len(),
@@ -1787,8 +2009,67 @@ impl TypeEnvironment {
     //  Private Helpers
     // --------------------------------------------------------
 
+    fn constructed_type_id(&self, key: &ConstructedTypeKey) -> Option<TypeId> {
+        self.constructed_ids.get(key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.constructed_type_id(key))
+        })
+    }
+
+    fn substitution_cache_get(&self, key: &TypeSubstitutionKey) -> Option<&TypeId> {
+        self.substitution_cache.get(key).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.substitution_cache_get(key))
+        })
+    }
+
+    fn function_type_id(&self, key: &FunctionTypeKey) -> Option<TypeId> {
+        self.function_ids.get(key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.function_type_id(key))
+        })
+    }
+
+    fn external_type_id(&self, external_type_id: ExternalTypeId) -> Option<TypeId> {
+        self.external_ids
+            .get(&external_type_id)
+            .copied()
+            .or_else(|| {
+                self.base
+                    .as_ref()
+                    .and_then(|base| base.external_type_id(external_type_id))
+            })
+    }
+
+    fn generic_instance_type_id(&self, key: &GenericInstanceKey) -> Option<TypeId> {
+        self.generic_instance_ids.get(key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_type_id(key))
+        })
+    }
+
+    fn generic_instance_fields_for(&self, id: TypeId) -> Option<&Vec<FieldDefinition>> {
+        self.generic_instance_fields.get(&id).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_fields_for(id))
+        })
+    }
+
+    fn generic_instance_variants_for(&self, id: TypeId) -> Option<&Vec<ChoiceVariantDefinition>> {
+        self.generic_instance_variants.get(&id).or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.generic_instance_variants_for(id))
+        })
+    }
+
     fn insert_definition(&mut self, definition: TypeDefinition) -> TypeId {
-        let id = TypeId(self.types.len() as u32);
+        let id = TypeId(self.type_count() as u32);
         self.types.push(definition);
         id
     }
@@ -1856,17 +2137,19 @@ impl TypeEnvironment {
         }
     }
 
-    fn rebuild_nominal_path_index(&mut self) {
-        self.nominal_by_path.clear();
+    fn remap_nominal_path_index(&mut self, remap: &StringIdRemap) {
+        let previous = std::mem::take(&mut self.nominal_by_path);
+        self.nominal_by_path =
+            FxHashMap::with_capacity_and_hasher(previous.len(), Default::default());
 
-        for definition in &self.struct_definitions {
-            self.nominal_by_path
-                .insert(definition.path.clone(), definition.id);
-        }
-
-        for definition in &self.choice_definitions {
-            self.nominal_by_path
-                .insert(definition.path.clone(), definition.id);
+        for (mut path, nominal_id) in previous {
+            path.remap_string_ids(remap);
+            if let Some(existing) = self.nominal_by_path.insert(path, nominal_id) {
+                assert_eq!(
+                    existing, nominal_id,
+                    "String remapping merged paths for different nominal types"
+                );
+            }
         }
     }
 }

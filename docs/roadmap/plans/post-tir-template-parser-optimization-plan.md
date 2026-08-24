@@ -101,11 +101,10 @@ emit/finalize pressure, but it did not isolate template clone or render-plan all
 That evidence defers broad arena conversion; it is not permission to implement this plan without a
 fresh profile.
 
-## Evidence carried in from the constant-folding plan (2026-08-24)
+## Evidence carried in from the constant-folding work (2026-08-24)
 
-Recorded here so Phase 0 does not have to rediscover it. Source:
-`docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md`, findings 13-15,
-and `benchmarks/frontend-optimization-results.md`. Measured at commit `19340ca29`,
+Recorded here so Phase 0 does not have to rediscover it. The durable measurements are recorded in
+`benchmarks/frontend-optimization-results.md`. Measured at commit `19340ca29`,
 `--profile profiling`, `RAYON_NUM_THREADS=1`, on the `docs` project (`73` modules, `545` constant
 headers). Attribution used a per-pass probe of `34` marks whose total measured overhead was `0.25%`
 of the stage (`94.15ms` probed against `93.92ms` unprobed).

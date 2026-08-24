@@ -12139,6 +12139,27 @@ contract = "language.control_flow.compile_time_bool_inactive_branch_validated"
 role = "primary"
 
 [[case]]
+id = "static_if_inactive_branch_type_error_rejected"
+path = "static_if_inactive_branch_type_error_rejected"
+tags = ["integration", "control-flow", "constants", "diagnostics"]
+contract = "language.control_flow.compile_time_bool_inactive_branch_validated"
+role = "boundary"
+
+[[case]]
+id = "static_if_inactive_reactive_metadata_ignored"
+path = "static_if_inactive_reactive_metadata_ignored"
+tags = ["integration", "control-flow", "constants", "reactivity", "wasm"]
+contract = "language.control_flow.compile_time_bool_inactive_reactive_metadata_absent"
+role = "primary"
+
+[[case]]
+id = "runtime_if_reactive_metadata_preserved"
+path = "runtime_if_reactive_metadata_preserved"
+tags = ["integration", "control-flow", "reactivity", "wasm", "diagnostics"]
+contract = "language.control_flow.runtime_bool_reactive_metadata_preserved"
+role = "primary"
+
+[[case]]
 id = "trait_requirement_unimported_type_rejected"
 path = "trait_requirement_unimported_type_rejected"
 tags = ["integration","language","traits"]

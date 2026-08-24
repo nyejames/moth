@@ -133,11 +133,11 @@ fn statement_is_all_paths_terminal(statement: &AstNode) -> bool {
 
         NodeKind::ScopedBlock { body } => body_is_all_paths_terminal(body),
 
-        NodeKind::If(_, then_body, Some(else_body)) => {
+        NodeKind::If(_, then_body, Some(else_body), _) => {
             body_is_all_paths_terminal(then_body) && body_is_all_paths_terminal(else_body)
         }
 
-        NodeKind::If(_, _, None) => false,
+        NodeKind::If(_, _, None, _) => false,
 
         NodeKind::Match {
             arms,

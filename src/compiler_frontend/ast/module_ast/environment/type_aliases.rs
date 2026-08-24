@@ -10,7 +10,9 @@
 //! `create_header` collects named-type dependency edges from alias targets just like from struct
 //! fields and constant type annotations. Self-reference (`A as A`) also creates a self-loop edge.
 
-use crate::compiler_frontend::ast::module_ast::environment::builder::AstModuleEnvironmentBuilder;
+use crate::compiler_frontend::ast::module_ast::environment::builder::{
+    AstModuleEnvironmentBuilder, DeclarationPassLanes,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, resolve_diagnostic_type_to_type_id_opt, resolve_type,
 };
@@ -31,12 +33,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// already been processed.
     pub(in crate::compiler_frontend::ast) fn resolve_type_aliases(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.aliases {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::TypeAlias { target } = &header.kind else {
-                continue;
+                return Err(self.error_messages(
+                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        "Type-alias declaration lane contained a different header kind.",
+                    ),
+                    string_table,
+                ));
             };
 
             let visibility = self.header_visibility(header, string_table)?;

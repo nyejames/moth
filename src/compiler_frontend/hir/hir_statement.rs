@@ -212,7 +212,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_error_return_statement(value, &node.location)
             }
 
-            NodeKind::If(condition, then_body, else_body) => {
+            NodeKind::If(condition, then_body, else_body, _) => {
                 self.lower_if_statement(condition, then_body, else_body.as_deref(), &node.location)
             }
 

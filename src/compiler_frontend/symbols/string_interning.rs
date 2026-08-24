@@ -262,6 +262,40 @@ impl StringTable {
         }
     }
 
+    /// Clone this table while retaining any inherited shared prefix.
+    ///
+    /// Ordinary [`Clone`] deliberately flattens the table into independent storage. Generated
+    /// preparation contexts instead remain in the same compilation batch, so they can share the
+    /// inherited prefix and copy only their local suffix. A root table has no inherited prefix and
+    /// therefore still performs one full clone.
+    pub(crate) fn clone_preserving_inherited_prefix(&self) -> Self {
+        if self.base.is_none() {
+            return self.clone();
+        }
+
+        let base_len = self.base_len();
+        let strings = self
+            .strings
+            .iter()
+            .map(|string| Box::<str>::from(string.as_ref()))
+            .collect::<Vec<_>>();
+        let mut string_to_id =
+            FxHashMap::with_capacity_and_hasher(strings.len(), Default::default());
+        for (index, string) in strings.iter().enumerate() {
+            string_to_id.insert(
+                Self::static_str_key(string.as_ref()),
+                StringId((base_len + index) as u32),
+            );
+        }
+
+        Self {
+            base: self.base.clone(),
+            strings,
+            string_to_id,
+            next_id: self.next_id,
+        }
+    }
+
     /// Intern a string slice, returning its unique ID.
     /// If the string already exists, returns the existing ID.
     /// If the string is new, stores it and returns a new ID.

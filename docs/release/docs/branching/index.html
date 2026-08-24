@@ -755,7 +755,7 @@ td {
 
 <span class='moth-code-keyword'>if</span> enabled<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-function'>perform_optional_work</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p><code>#Config of Bool</code> is another future source of the same folded value. Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.</p><h3>No statement-level <code>else if</code></h3><p>A same-line <code>else if</code> chain is not syntax.</p><p>Use a nested <code>if</code> inside the <code>else</code> body:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> first_condition<span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>#Config of Bool</code> is another future source of the same folded value. It will use this ordinary folded-value path rather than introducing config-specific branch syntax.</p><h3>No statement-level <code>else if</code></h3><p>A same-line <code>else if</code> chain is not syntax.</p><p>Use a nested <code>if</code> inside the <code>else</code> body:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> first_condition<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;first&quot;</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-keyword'>else</span>
     <span class='moth-code-keyword'>if</span> second_condition<span class='moth-code-delimiter'>:</span>
@@ -850,7 +850,7 @@ score <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>
     <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;on&quot;</span>
 <span class='moth-code-keyword'>else</span>
     <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;off&quot;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>Static Bool specialisation is accepted deferred until the constant-evaluation plan lands.</p><p>Option-present and choice-predicate inline and block forms use the same receiving-site model and are covered by the pattern references.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The selected body keeps its child scope. Calls and other executable work from the inactive body do not reach generated materialisation, HIR or later analysis.</p><p>Option-present and choice-predicate inline and block forms use the same receiving-site model and are covered by the pattern references.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">

@@ -18,9 +18,12 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    test_if_branch_metadata, test_source_location,
+};
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, loop_binding_with_type_id as loop_binding,
+    inferred_type_reference_expr, loop_binding_with_type_id as loop_binding, runtime_expr,
+    runtime_operand_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -415,7 +418,16 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
             body: vec![
                 node(
                     NodeKind::If(
-                        Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                        runtime_expr(
+                            vec![runtime_operand_item(Expression::bool(
+                                true,
+                                location.clone(),
+                                ValueMode::ImmutableOwned,
+                            ))],
+                            builtin_type_ids::BOOL,
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        ),
                         vec![node(
                             NodeKind::VariableDeclaration(Declaration {
                                 id: branch_value,
@@ -428,6 +440,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                             location.clone(),
                         )],
                         None,
+                        test_if_branch_metadata(false),
                     ),
                     location.clone(),
                 ),
@@ -941,9 +954,19 @@ fn break_targets_exit_block_in_collection_loop() {
             iterable: collection_literal(location.clone()),
             body: vec![node(
                 NodeKind::If(
-                    Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                    runtime_expr(
+                        vec![runtime_operand_item(Expression::bool(
+                            true,
+                            location.clone(),
+                            ValueMode::ImmutableOwned,
+                        ))],
+                        builtin_type_ids::BOOL,
+                        location.clone(),
+                        ValueMode::ImmutableOwned,
+                    ),
                     vec![node(NodeKind::Break, location.clone())],
                     None,
+                    test_if_branch_metadata(false),
                 ),
                 location.clone(),
             )],

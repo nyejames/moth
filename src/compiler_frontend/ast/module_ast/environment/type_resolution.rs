@@ -4,7 +4,7 @@
 //! WHY: headers are already dependency-sorted; constants are parsed linearly. Struct defaults
 //! can reference constants, so constants are resolved before struct fields.
 
-use super::builder::AstModuleEnvironmentBuilder;
+use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -102,10 +102,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// fully resolved fields.
     pub(in crate::compiler_frontend::ast) fn register_nominal_shells(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.nominals {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             match &header.kind {
                 HeaderKind::Struct {
                     fields,
@@ -148,19 +152,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                         .insert(header.tokens.src_path.to_owned(), unresolved_fields);
 
-                    self.replace_declaration(Declaration {
-                        id: header.tokens.src_path.to_owned(),
-                        value: Expression::new(
-                            ExpressionKind::NoValue,
-                            header.name_location.to_owned(),
-                            struct_type_id,
-                            DataType::runtime_struct(
-                                header.tokens.src_path.to_owned(),
+                    self.replace_declaration(
+                        declaration_id,
+                        Declaration {
+                            id: header.tokens.src_path.to_owned(),
+                            value: Expression::new(
+                                ExpressionKind::NoValue,
+                                header.name_location.to_owned(),
                                 struct_type_id,
+                                DataType::runtime_struct(
+                                    header.tokens.src_path.to_owned(),
+                                    struct_type_id,
+                                ),
+                                ValueMode::ImmutableReference,
                             ),
-                            ValueMode::ImmutableReference,
-                        ),
-                    })
+                        },
+                    )
                     .map_err(|error| self.error_messages(error, string_table))?;
                 }
                 HeaderKind::Choice {
@@ -201,20 +208,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
                         .insert(header.tokens.src_path.clone(), choice_type_id);
 
-                    self.replace_declaration(Declaration {
-                        id: header.tokens.src_path.to_owned(),
-                        value: Expression::new(
-                            ExpressionKind::NoValue,
-                            header.name_location.to_owned(),
-                            choice_type_id,
-                            DataType::Choices {
-                                nominal_path: header.tokens.src_path.to_owned(),
-                                type_id: choice_type_id,
-                                generic_instance_key: None,
-                            },
-                            ValueMode::ImmutableReference,
-                        ),
-                    })
+                    self.replace_declaration(
+                        declaration_id,
+                        Declaration {
+                            id: header.tokens.src_path.to_owned(),
+                            value: Expression::new(
+                                ExpressionKind::NoValue,
+                                header.name_location.to_owned(),
+                                choice_type_id,
+                                DataType::Choices {
+                                    nominal_path: header.tokens.src_path.to_owned(),
+                                    type_id: choice_type_id,
+                                    generic_instance_key: None,
+                                },
+                                ValueMode::ImmutableReference,
+                            ),
+                        },
+                    )
                     .map_err(|error| self.error_messages(error, string_table))?;
                 }
                 _ => {}
@@ -232,6 +242,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// are rejected as static contracts instead of falling through to an unknown-type diagnostic.
     pub(in crate::compiler_frontend::ast) fn resolve_nominal_members_and_constants(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
@@ -240,6 +251,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve constructor shell types for constants
         // -------------------------------------------------
         self.resolve_constructor_shells_for_constants(
+            declaration_lanes,
             sorted_headers,
             trait_environment,
             string_table,
@@ -259,13 +271,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .constant_header_resolution(),
                 self.context.timing_context
             );
-            self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
+            self.resolve_constant_headers(
+                declaration_lanes,
+                sorted_headers,
+                trait_environment,
+                string_table,
+            )?;
         }
 
         // ----------------------------
         //  Resolve struct field types
         // ----------------------------
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.structs {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::Struct {
                 generic_parameters,
                 fields,
@@ -370,7 +390,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // --------------------------------------
         //  Resolve choice variant payload types
         // --------------------------------------
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.choices {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::Choice {
                 generic_parameters,
                 variants,
@@ -492,20 +515,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             );
 
             // Replace the placeholder declaration with the resolved choice type.
-            self.replace_declaration(Declaration {
-                id: header.tokens.src_path.to_owned(),
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
-                    choice_type_id,
-                    DataType::Choices {
-                        nominal_path: header.tokens.src_path.to_owned(),
-                        type_id: choice_type_id,
-                        generic_instance_key: None,
-                    },
-                    ValueMode::ImmutableReference,
-                ),
-            })
+            self.replace_declaration(
+                declaration_id,
+                Declaration {
+                    id: header.tokens.src_path.to_owned(),
+                    value: Expression::new(
+                        ExpressionKind::NoValue,
+                        header.name_location.to_owned(),
+                        choice_type_id,
+                        DataType::Choices {
+                            nominal_path: header.tokens.src_path.to_owned(),
+                            type_id: choice_type_id,
+                            generic_instance_key: None,
+                        },
+                        ValueMode::ImmutableReference,
+                    ),
+                },
+            )
             .map_err(|error| self.error_messages(error, string_table))?;
         }
 
@@ -528,11 +554,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// generic instantiation later needs the bounds stored on the canonical TypeEnvironment list.
     pub(in crate::compiler_frontend::ast) fn resolve_nominal_generic_bounds(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.nominals {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let generic_parameters = match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
@@ -598,12 +628,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// but each concrete `Box of T` still needs visible reusable evidence at its declaration site.
     pub(in crate::compiler_frontend::ast) fn validate_nominal_generic_bound_surfaces(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         trait_evidence_environment: &TraitEvidenceEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.ordered {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let visibility = self.header_visibility(header, string_table)?;
             let validation_context = NominalBoundSurfaceValidationContext {
                 visibility: &visibility,
@@ -640,9 +674,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
 
                 HeaderKind::Constant { .. } => {
-                    let Some(declaration) =
-                        self.declaration_table.get_by_path(&header.tokens.src_path)
-                    else {
+                    let Some(declaration) = self.declaration_table.get_by_id(declaration_id) else {
                         continue;
                     };
                     self.validate_nominal_generic_bound_type_id(
@@ -755,11 +787,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// need resolved member types to validate arity and field compatibility at parse time.
     fn resolve_constructor_shells_for_constants(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.nominals {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
@@ -875,14 +911,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// instead of once per constant.
     fn resolve_constant_headers(
         &mut self,
+        declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        if !sorted_headers
-            .iter()
-            .any(|header| matches!(header.kind, HeaderKind::Constant { .. }))
-        {
+        if declaration_lanes.constants.is_empty() {
             return Ok(());
         }
 
@@ -906,9 +940,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             rendered_path_usages: Rc::clone(&self.rendered_path_usages),
         });
 
-        for header in sorted_headers {
+        for &declaration_id in &declaration_lanes.constants {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let HeaderKind::Constant { .. } = &header.kind else {
-                continue;
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(
+                        "Constant declaration lane contained a different header kind.",
+                    ),
+                    string_table,
+                ));
             };
 
             let visibility = self.header_visibility(header, string_table)?;
@@ -918,7 +960,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     header,
                     ConstantHeaderInput {
                         top_level_declarations: Rc::clone(&self.declaration_table),
-                        resolved_constant_paths: Rc::clone(&self.resolved_module_constant_paths),
+                        resolved_constants: Rc::clone(&self.resolved_module_constants),
                         file_visibility: &visibility,
                         type_environment: &mut self.type_environment,
                         warnings: &mut self.warnings,
@@ -927,10 +969,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 )
                 .map_err(|error| self.expression_error_messages(error, string_table))?;
 
-            let declaration_path = declaration.id.clone();
-            self.replace_declaration(declaration)
+            self.replace_declaration(declaration_id, declaration)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            self.push_module_constant_path(declaration_path);
+            self.publish_resolved_module_constant(declaration_id);
         }
 
         Ok(())
@@ -956,7 +997,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let field_context = self
             .environment_header_scope(header, string_table)
             .with_file_visibility(Arc::clone(&visibility))
-            .with_explicit_compile_time_constants(Rc::clone(&self.resolved_module_constant_paths))
+            .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
             .with_choice_variant_shells_by_path(Rc::clone(&self.choice_variant_shells_by_path));
 
         // Parse each field inside a temporary scope so that type-resolution errors

@@ -322,6 +322,43 @@ fn dynamic_assertion_retains_generic_message_requests() {
     );
 }
 
+#[test]
+fn static_if_discards_inactive_generic_requests() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
+        "enabled #= true\nidentity type T |value T| -> T:\n    return value\n;\n\nactive ~= 0\ninactive ~= \"\"\nif enabled:\n    active = 1\nelse\n    inactive = identity(\"inactive\")\n;\n",
+    )
+    .expect("both static-if branches should remain frontend-valid");
+
+    assert!(
+        build_result.deferred_generic_requests.is_empty(),
+        "the inactive branch must not publish a generated-function request"
+    );
+}
+
+#[test]
+fn static_if_keeps_active_duplicate_after_inactive_first_request() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
+        "enabled #= false\nidentity type T |value T| -> T:\n    return value\n;\n\nvalue ~= 0\nif enabled:\n    value = identity(1)\nelse\n    value = identity(2)\n;\n",
+    )
+    .expect("both duplicate generic calls should remain frontend-valid");
+
+    assert_eq!(
+        build_result.deferred_generic_requests.len(),
+        1,
+        "deduplication must run after inactive request ranges are removed"
+    );
+}
+
+#[test]
+fn generic_template_terminality_uses_static_module_constant_selection() {
+    let (build_result, _string_table) = parse_single_file_ast_build_result(
+        "enabled #= true\nchoose type T |value T| -> T:\n    if enabled:\n        return value\n    ;\n;\n\nselected = choose(7)\n",
+    )
+    .expect("generic template terminality should consume its specialised validated body");
+
+    assert_eq!(build_result.deferred_generic_requests.len(), 1);
+}
+
 // --------------------------
 //  Call dispatch
 // --------------------------

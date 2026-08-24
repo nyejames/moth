@@ -10,6 +10,9 @@ use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericRequestRange, IfGenericRequestRanges,
+};
 use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
 use crate::compiler_frontend::ast::statements::value_production::completeness::analyze_branch_exits;
 use crate::compiler_frontend::ast::statements::value_production::types::{
@@ -19,6 +22,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -43,8 +47,11 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Block
 pub(in crate::compiler_frontend::ast::statements::value_production) struct ParsedValueBlockBodies {
     pub then_body: Vec<AstNode>,
     pub else_body: Vec<AstNode>,
+    pub then_scope: InternedPath,
+    pub else_scope: InternedPath,
     pub then_exits: BranchExitSummary,
     pub else_exits: BranchExitSummary,
+    pub generic_request_ranges: IfGenericRequestRanges,
 }
 
 type BlockBodyResult<T> = Result<T, ExpressionParseError>;
@@ -65,7 +72,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
 
     token_stream.advance(); // consume `:`
 
-    let then_body = parse_one_value_block_body(
+    let then_request_start = outer_context.generic_request_checkpoint();
+    let (then_body, then_scope) = parse_one_value_block_body(
         token_stream,
         then_parent,
         outer_context,
@@ -73,6 +81,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         string_table,
         active_target.clone(),
     )?;
+    let then_request_end = outer_context.generic_request_checkpoint();
 
     if token_stream.current_token_kind() != &TokenKind::Else {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
@@ -83,7 +92,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     }
     token_stream.advance(); // consume `else`
 
-    let else_body = parse_one_value_block_body(
+    let (else_body, else_scope) = parse_one_value_block_body(
         token_stream,
         else_parent,
         outer_context,
@@ -91,6 +100,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         string_table,
         active_target,
     )?;
+    let else_request_end = outer_context.generic_request_checkpoint();
 
     let then_exits = analyze_branch_exits(&then_body);
     let else_exits = analyze_branch_exits(&else_body);
@@ -98,8 +108,14 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     Ok(ParsedValueBlockBodies {
         then_body,
         else_body,
+        then_scope,
+        else_scope,
         then_exits,
         else_exits,
+        generic_request_ranges: IfGenericRequestRanges {
+            then_branch: GenericRequestRange::new(then_request_start, then_request_end),
+            else_branch: GenericRequestRange::new(then_request_end, else_request_end),
+        },
     })
 }
 
@@ -110,8 +126,9 @@ fn parse_one_value_block_body(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     active_target: ActiveValueProductionTarget,
-) -> BlockBodyResult<Vec<AstNode>> {
+) -> BlockBodyResult<(Vec<AstNode>, InternedPath)> {
     let mut branch_context = parent.new_child_control_flow(ContextKind::Branch, string_table);
+    let branch_scope = branch_context.scope.clone();
     branch_context.active_value_target = Some(active_target);
 
     let mut warnings = Vec::new();
@@ -124,5 +141,5 @@ fn parse_one_value_block_body(
     )?;
     emit_collected_warnings(outer_context, warnings);
 
-    Ok(body)
+    Ok((body, branch_scope))
 }

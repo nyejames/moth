@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::statements::terminality::{
 use crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    fresh_success_returns, node, test_source_location,
+    fresh_success_returns, node, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -179,6 +179,7 @@ fn if_requires_both_branches_to_terminate() {
             Expression::bool(true, test_source_location(1), ValueMode::ImmutableOwned),
             vec![int_return(2)],
             Some(vec![int_return(3)]),
+            test_if_branch_metadata(true),
         ),
         test_source_location(1),
     );
@@ -188,6 +189,7 @@ fn if_requires_both_branches_to_terminate() {
             Expression::bool(true, test_source_location(4), ValueMode::ImmutableOwned),
             vec![int_return(5)],
             Some(vec![expression_statement(6)]),
+            test_if_branch_metadata(true),
         ),
         test_source_location(4),
     );
@@ -197,6 +199,7 @@ fn if_requires_both_branches_to_terminate() {
             Expression::bool(true, test_source_location(7), ValueMode::ImmutableOwned),
             vec![int_return(8)],
             None,
+            test_if_branch_metadata(false),
         ),
         test_source_location(7),
     );

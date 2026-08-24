@@ -67,18 +67,17 @@ impl AstFinalizer<'_, '_> {
         let mut module_values = FxHashMap::default();
         let store = self.context.template_ir_store.borrow();
 
-        for declaration in self
-            .environment
-            .lookups
-            .declaration_table
-            .iter()
-            .filter(|declaration| {
-                self.environment
-                    .lookups
-                    .module_constant_paths
-                    .contains(&declaration.id)
-            })
-        {
+        for declaration_id in self.environment.lookups.resolved_module_constants.iter() {
+            let declaration = self
+                .environment
+                .lookups
+                .declaration_table
+                .get_by_id(declaration_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Resolved module-constant ID had no declaration-table row.",
+                    )
+                })?;
             if !matches!(declaration.value.kind, ExpressionKind::Template(_)) {
                 continue;
             }

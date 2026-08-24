@@ -16,14 +16,16 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
-    test_source_location,
+    test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
-use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
+};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -52,7 +54,16 @@ fn if_branch_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
+                    runtime_expr(
+                        vec![runtime_operand_item(Expression::bool(
+                            true,
+                            test_source_location(2),
+                            ValueMode::ImmutableOwned,
+                        ))],
+                        BOOL,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
@@ -66,6 +77,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
                         test_source_location(3),
                     )],
                     Some(vec![]),
+                    test_if_branch_metadata(true),
                 ),
                 test_source_location(2),
             ),
@@ -244,7 +256,16 @@ fn dead_local_access_reports_borrow_error() {
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
+                    runtime_expr(
+                        vec![runtime_operand_item(Expression::bool(
+                            true,
+                            test_source_location(2),
+                            ValueMode::ImmutableOwned,
+                        ))],
+                        BOOL,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y.clone(),
@@ -258,6 +279,7 @@ fn dead_local_access_reports_borrow_error() {
                         test_source_location(3),
                     )],
                     Some(vec![]),
+                    test_if_branch_metadata(true),
                 ),
                 test_source_location(2),
             ),

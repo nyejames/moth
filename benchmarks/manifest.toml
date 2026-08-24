@@ -1208,18 +1208,16 @@ points = [
     { case = "constant_chain_512_frontend", size = 512 },
 ]
 
-# Generic instantiation. The budget here is a RATCHET AROUND A KNOWN DEFECT, not
-# an accepted shape: generated-function materialisation is measured at n^1.70 and
-# is 94% of this fixture's frontend at the largest point. Every generated function
-# builds a fresh string table and merges the whole requester table into it, so the
-# cost is O(instantiations x module string count). See the Phase F outcome in
-# docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md.
-# Tighten this budget when that is fixed; do not raise it.
+# Generic instantiation. Generated materialisation now shares immutable requester
+# prefixes and copies only generated-local string, type and declaration deltas. The
+# n^1.70 budget is a tight ratchet around the post-fix n^1.63 release and n^1.59
+# development fits, not spare headroom. Do not raise it. See "Generated
+# materialisation prefix sharing" in benchmarks/frontend-optimization-results.md.
 
 [[scaling]]
 id = "generic_instantiation"
 metric = "frontend.generated.materialise"
-max_exponent = 1.80
+max_exponent = 1.70
 points = [
     { case = "generic_scaling_20_frontend", size = 20 },
     { case = "generic_scaling_40_frontend", size = 40 },

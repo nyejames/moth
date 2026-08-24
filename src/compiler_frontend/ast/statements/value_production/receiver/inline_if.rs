@@ -61,7 +61,10 @@ pub(super) fn parse_inline_value_if(
         condition,
         then_body,
         else_body,
+        then_scope: context.scope.clone(),
+        else_scope: context.scope.clone(),
         location,
+        generic_request_ranges: output.generic_request_ranges,
         result_type_ids: output.result_type_ids,
     };
 

@@ -9,7 +9,7 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::environment::{
-    DeclarationSemanticTable, TopLevelDeclarationTable,
+    DeclarationSemanticTable, ResolvedConstantSet, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
@@ -60,12 +60,12 @@ pub(crate) struct AstModuleLookups {
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
-    /// Paths of every authored module constant.
+    /// Stable IDs of every authored module constant.
     ///
     /// WHY: fixed-capacity type syntax asks whether a visible declaration is an explicit `#`
     /// constant, once per capacity expression. Answering from a set makes that a hash lookup
     /// instead of retaining a second declaration vector beside the indexed declaration table.
-    pub(crate) module_constant_paths: Rc<FxHashSet<InternedPath>>,
+    pub(crate) resolved_module_constants: Rc<ResolvedConstantSet>,
     pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
 

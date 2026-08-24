@@ -37,7 +37,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `tests.support` | Test-only support and helper modules under `src/**/tests/` and `src/**/test_support.rs` | Redundancy 2026-08 AUD-0001 `partial` |
 | `tests.cases` | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture | — |
 | `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` |
-| `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 |
+| `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
 | `docs.audit_framework` | This file, `audit-guide.md`, `audit-kinds/**`, `open-audit-findings.md` and `audits/**` | Documentation 2026-08 AUD-0004 `partial` |
 
 ## Never audited

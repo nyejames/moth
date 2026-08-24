@@ -916,6 +916,9 @@ Private inferred const facts are advisory optimisation metadata. They do not aff
 Static specialisation applies to ordinary statement and value-producing `if` forms and uses the normal
 folded Bool authority. It has no `#Config` special case and no config-specific branch node.
 
+The current AST finalisation owner performs this selection after type and value-production
+validation and before terminality, durable generated requests and executable const facts.
+
 - both branches are fully frontend-valid before selection
 - a known `true` selects the `then` branch
 - a known `false` selects the `else` branch or an empty scoped result when no `else` exists

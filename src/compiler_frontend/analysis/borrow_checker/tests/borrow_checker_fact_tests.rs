@@ -31,13 +31,15 @@ use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, immutable_reference_expr, make_test_variable, node, param,
-    symbol, test_source_location,
+    symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
-use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
@@ -75,7 +77,16 @@ fn statement_terminator_and_value_facts_are_populated() {
             ),
             node(
                 NodeKind::If(
-                    Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
+                    runtime_expr(
+                        vec![runtime_operand_item(Expression::bool(
+                            true,
+                            test_source_location(3),
+                            ValueMode::ImmutableOwned,
+                        ))],
+                        builtin_type_ids::BOOL,
+                        test_source_location(3),
+                        ValueMode::ImmutableOwned,
+                    ),
                     vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
@@ -108,6 +119,7 @@ fn statement_terminator_and_value_facts_are_populated() {
                         },
                         test_source_location(5),
                     )]),
+                    test_if_branch_metadata(true),
                 ),
                 test_source_location(3),
             ),

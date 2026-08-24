@@ -31,19 +31,6 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
-/// Split HIR branch conditions into already-folded Bool values and genuine runtime tests.
-///
-/// WHY: Stage 4 owns static Bool specialisation, so a compile-time-known condition reaching
-/// this CFG builder is inactive executable work that every later system still pays for. The
-/// split makes that cost visible before and after specialisation lands.
-fn record_hir_branch_condition_kind(condition: &Expression) {
-    if matches!(condition.kind, ExpressionKind::Bool(_)) {
-        increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
-    } else {
-        increment_frontend_counter(FrontendCounter::HirRuntimeIfNodes);
-    }
-}
-
 fn lower_relational_pattern_op(op: RelationalPatternOp) -> HirRelationalPatternOp {
     match op {
         RelationalPatternOp::LessThan => HirRelationalPatternOp::LessThan,
@@ -96,6 +83,14 @@ impl<'a> HirBuilder<'a> {
         else_body: Option<&[AstNode]>,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        if matches!(condition.kind, ExpressionKind::Bool(_)) {
+            increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
+            return_hir_transformation_error!(
+                "Stage 4 passed a statically decided Bool `if` to HIR",
+                self.hir_error_location(location)
+            );
+        }
+
         self.lower_if_with_body_emitters(
             condition,
             location,
@@ -123,7 +118,7 @@ impl<'a> HirBuilder<'a> {
         emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
         emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
-        record_hir_branch_condition_kind(condition);
+        increment_frontend_counter(FrontendCounter::HirRuntimeIfNodes);
 
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error(location)?;

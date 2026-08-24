@@ -114,6 +114,9 @@ fn finalize_inferred_value_block(
         ValueBlock::Catch(_) => unreachable!(
             "value-if receivers do not parse catch handlers; mixed-slot catch is not a multi-bind path"
         ),
+        ValueBlock::Scoped(_) => unreachable!(
+            "static value-if specialisation runs after mixed-slot inference is complete"
+        ),
     }
 }
 

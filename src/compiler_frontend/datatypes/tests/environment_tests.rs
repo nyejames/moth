@@ -5,7 +5,9 @@ use crate::compiler_frontend::datatypes::definitions::{
     FunctionParameterDefinition, FunctionTypeDefinition, StructTypeDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::display::display_type;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::environment::{
+    TypeEnvironment, TypeEnvironmentRemapCache,
+};
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, TypeParameterId,
 };
@@ -1500,4 +1502,145 @@ fn display_renders_nested_map_type() {
         display_type(outer_map, &env, &table),
         "{String = {String = Int}}"
     );
+}
+
+#[test]
+fn generated_forks_share_inherited_types_and_keep_local_interning_independent() {
+    let mut requester = TypeEnvironment::new();
+    let inherited_collection = requester.intern_collection(requester.builtins().int, None);
+
+    let preparation = requester.fork_for_generated();
+    let mut first = preparation.clone();
+    let mut second = preparation;
+
+    assert_eq!(
+        first.intern_collection(first.builtins().int, None),
+        inherited_collection
+    );
+    assert_eq!(
+        second.intern_collection(second.builtins().int, None),
+        inherited_collection
+    );
+
+    let first_local = first.intern_option(first.builtins().bool);
+    let second_local = second.intern_option(second.builtins().string);
+
+    assert_eq!(first_local, second_local);
+    assert_eq!(
+        first.option_inner_type(first_local),
+        Some(first.builtins().bool)
+    );
+    assert_eq!(
+        second.option_inner_type(second_local),
+        Some(second.builtins().string)
+    );
+}
+
+#[test]
+fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
+    let mut requester = TypeEnvironment::new();
+    let mut local_table = StringTable::new();
+    let source_scope = InternedPath::from_single_str("generated_source.moth", &mut local_table);
+    let source_location = SourceLocation::new(source_scope, Default::default(), Default::default());
+
+    let point_path = InternedPath::from_single_str("Point", &mut local_table);
+    let (point_nominal_id, point_type_id) =
+        requester.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path: point_path,
+            fields: vec![FieldDefinition {
+                name: InternedPath::from_single_str("value", &mut local_table),
+                type_id: requester.builtins().int,
+                location: source_location.clone(),
+            }]
+            .into_boxed_slice(),
+            generic_parameters: None,
+            const_record: false,
+        });
+    let point_alias_path = InternedPath::from_single_str("PointAlias", &mut local_table);
+    requester
+        .register_nominal_path_alias(point_alias_path, point_type_id)
+        .expect("point alias should target the registered nominal");
+
+    let state_path = InternedPath::from_single_str("State", &mut local_table);
+    let (state_nominal_id, state_type_id) =
+        requester.register_nominal_choice(ChoiceTypeDefinition {
+            id: NominalTypeId(0),
+            path: state_path,
+            variants: vec![ChoiceVariantDefinition {
+                name: local_table.intern("Ready"),
+                tag: 0,
+                payload: ChoiceVariantPayloadDefinition::Record {
+                    fields: vec![FieldDefinition {
+                        name: InternedPath::from_single_str("item", &mut local_table),
+                        type_id: requester.builtins().string,
+                        location: source_location.clone(),
+                    }]
+                    .into_boxed_slice(),
+                },
+                location: source_location,
+            }]
+            .into_boxed_slice(),
+            generic_parameters: None,
+        });
+
+    let preparation = requester.fork_for_generated();
+    let mut sibling = preparation.clone();
+    let mut nested = preparation.fork_for_generated();
+
+    let mut merged_table = StringTable::new();
+    merged_table.intern("preexisting-name");
+    let remap = merged_table.merge_from(&local_table);
+    assert!(
+        !remap.is_identity(),
+        "fixture must exercise a real ID remap"
+    );
+
+    let mut remap_cache = TypeEnvironmentRemapCache::default();
+    sibling.remap_string_ids_with_cache(&remap, &mut remap_cache);
+    nested.remap_string_ids_with_cache(&remap, &mut remap_cache);
+
+    let remapped_point_path = InternedPath::from_single_str("Point", &mut merged_table);
+    let remapped_point_alias_path = InternedPath::from_single_str("PointAlias", &mut merged_table);
+    let remapped_state_path = InternedPath::from_single_str("State", &mut merged_table);
+    for generated in [&sibling, &nested] {
+        assert_eq!(
+            generated.nominal_id_for_path(&remapped_point_path),
+            Some(point_nominal_id)
+        );
+        assert_eq!(
+            generated.nominal_id_for_path(&remapped_point_alias_path),
+            Some(point_nominal_id)
+        );
+        assert_eq!(
+            generated.nominal_id_for_path(&remapped_state_path),
+            Some(state_nominal_id)
+        );
+        assert_eq!(
+            display_type(point_type_id, generated, &merged_table),
+            "Point"
+        );
+
+        let fields = generated
+            .fields_for(point_type_id)
+            .expect("generated fork should resolve inherited struct fields");
+        assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
+        assert_eq!(
+            fields[0].location.scope.name_str(&merged_table),
+            Some("generated_source.moth")
+        );
+
+        let variants = generated
+            .variants_for(state_type_id)
+            .expect("generated fork should resolve inherited choice variants");
+        assert_eq!(merged_table.resolve(variants[0].name), "Ready");
+        let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
+            panic!("inherited choice payload should remain a record");
+        };
+        assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
+        assert_eq!(
+            fields[0].location.scope.name_str(&merged_table),
+            Some("generated_source.moth")
+        );
+    }
 }

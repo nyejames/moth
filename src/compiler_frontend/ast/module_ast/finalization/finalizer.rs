@@ -13,11 +13,16 @@ use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::public_const_templates::const_template_value_from_projection;
+use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
+};
+use crate::compiler_frontend::ast::statements::terminality::{
+    terminality_policy_for_signature, validate_function_body_terminality,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::top_level_templates::{
@@ -102,35 +107,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
         // ----------------------------
-        //  Propagate reactive template metadata
-        // ----------------------------
-        self.propagate_reactive_template_metadata(&mut emitted.ast)
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
-
-        // ----------------------------
-        //  Normalize AST templates for HIR
-        // ----------------------------
-        self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
-            .map_err(|error| {
-                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
-            })?;
-
-        // ----------------------------
-        //  Synchronize normalized public defaults
-        // ----------------------------
-        //
-        // The emitted AST was just normalized once (function signature parameter defaults,
-        // struct field defaults and function bodies folded together). Synchronize those exact
-        // normalized signatures and fields into the retained public root table so the
-        // public-interface draft's callable seed table reads one normalized copy. Generic free
-        // functions, generic structs and generic receiver methods have no emitted declaration
-        // node, so their retained defaults are normalized in place through the same helper.
-        self.synchronize_normalized_public_defaults(&emitted.ast, string_table)
-            .map_err(|error| {
-                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
-            })?;
-
-        // ----------------------------
         //  Normalize module constants
         // ----------------------------
         timing_scope_attributed_opt!(
@@ -185,7 +161,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
             ConstValueStore::from_declaration_table(
                 &self.environment.lookups.declaration_table,
-                &self.environment.lookups.module_constant_paths,
+                &self.environment.lookups.resolved_module_constants,
                 &self.environment.type_environment,
                 &mut template_builder,
             )
@@ -195,26 +171,139 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         })?;
 
         // ----------------------------
-        //  Validate type boundaries
+        //  Prepare static-control-flow candidate
         // ----------------------------
-        self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
+        // Selection runs transactionally on a projection. When it finds a known Bool, the
+        // authored AST remains the validation authority and the candidate becomes durable only
+        // after every authored template and type boundary has passed below.
+        let mut static_candidate = StaticIfCandidate::prepare(
+            &emitted.ast,
+            &const_values,
+            Rc::clone(&self.context.template_ir_store),
+            string_table,
+        )
+        .map_err(|error| {
+            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+        })?;
+
+        if static_candidate.has_selections() {
+            // Normalize and validate the untouched authored tree first. Its provisional reactive
+            // summaries may include both branches because this copy is never published.
+            self.propagate_reactive_template_metadata(&mut emitted.ast)
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
+                .map_err(|error| {
+                    self.template_normalization_error_messages(
+                        error,
+                        &emitted.warnings,
+                        string_table,
+                    )
+                })?;
+            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+
+            // The candidate owns its exact annotated TIR contexts. Normalize those active views,
+            // validate the completed HIR-boundary shape and publish the candidate atomically.
+            self.propagate_reactive_template_metadata(static_candidate.ast_mut())
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            self.normalize_ast_templates_for_hir(static_candidate.ast_mut(), string_table)
+                .map_err(|error| {
+                    self.template_normalization_error_messages(
+                        error,
+                        &emitted.warnings,
+                        string_table,
+                    )
+                })?;
+            self.validate_no_unresolved_executable_types(
+                static_candidate.ast(),
+                &const_values,
+                string_table,
+            )
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+        } else {
+            // The common runtime-only path retains the existing single normalization owner. The
+            // unchanged projection is discarded without allocating reactive or normalization
+            // overlays.
+            self.propagate_reactive_template_metadata(&mut emitted.ast)
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
+                .map_err(|error| {
+                    self.template_normalization_error_messages(
+                        error,
+                        &emitted.warnings,
+                        string_table,
+                    )
+                })?;
+            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+        }
+
+        let mut specialization = static_candidate.publish(&mut emitted.ast);
 
         // The authored assertion message must remain available to the authoritative AST
         // type/TIR boundary validation above. Only after that validation succeeds may AST
         // finalization discard compile-time-inactive executable message state.
         discard_inactive_assertion_messages(&mut emitted.ast);
 
-        // ----------------------------
-        //  Collect const facts
-        // ----------------------------
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.context
                 .entry_dir
                 .join_str(IMPLICIT_START_FUNC_NAME, string_table)
         });
-        // Const-fact collection reads template values through their exact
-        // module-local effective views, including finalization overlays.
+
+        // ----------------------------
+        //  Specialise static Bool control flow
+        // ----------------------------
+        let template_specialization = StaticIfSpecialization::run(
+            &mut emitted.validated_generic_template_bodies,
+            &const_values,
+            Rc::clone(&self.context.template_ir_store),
+            string_table,
+        )
+        .map_err(|error| {
+            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+        })?;
+        specialization.merge(template_specialization);
+        emitted.deferred_generic_requests =
+            specialization.commit_active_generic_requests(emitted.deferred_generic_requests);
+        self.validate_specialized_function_terminality(
+            &emitted.ast,
+            start_function_path.as_ref(),
+            &emitted.warnings,
+            string_table,
+        )?;
+        self.validate_specialized_function_terminality(
+            &emitted.validated_generic_template_bodies,
+            None,
+            &emitted.warnings,
+            string_table,
+        )?;
+
+        // ----------------------------
+        //  Publish active reactive metadata
+        // ----------------------------
+        // Template normalization above validates and materialises both authored branches. The
+        // durable flow pass runs only after static selection, so inactive returns cannot pollute
+        // function signatures, surviving calls or runtime handoffs.
+        self.propagate_reactive_template_metadata(&mut emitted.ast)
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+
+        // ----------------------------
+        //  Synchronize finalized public defaults
+        // ----------------------------
+        // The emitted AST now carries normalized defaults and active reactive return metadata.
+        // Synchronize that one completed copy into public roots and receiver indexes. Generic
+        // declarations without emitted nodes normalize their retained defaults here as before.
+        self.synchronize_normalized_public_defaults(&emitted.ast, string_table)
+            .map_err(|error| {
+                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            })?;
+
+        // ----------------------------
+        //  Collect active const facts
+        // ----------------------------
+        // Const-fact collection reads template values through their exact module-local effective
+        // views after static selection, so inactive bodies publish no executable advisory facts.
         let const_facts = ConstFactCollector::new(
             string_table,
             &const_values,
@@ -394,6 +483,35 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 self.error_messages(*error, warnings, string_table)
             }
         }
+    }
+
+    fn validate_specialized_function_terminality(
+        &self,
+        ast_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        start_function_path: Option<&InternedPath>,
+        warnings: &[CompilerDiagnostic],
+        string_table: &StringTable,
+    ) -> Result<(), CompilerMessages> {
+        for node in ast_nodes {
+            let NodeKind::Function(path, signature, body) = &node.kind else {
+                continue;
+            };
+            let policy = terminality_policy_for_signature(
+                signature,
+                start_function_path.is_some_and(|start_path| start_path == path),
+            );
+            if let Some(diagnostic) =
+                validate_function_body_terminality(body, policy, node.location.clone())
+            {
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    diagnostic,
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+            }
+        }
+        Ok(())
     }
 
     /// Collects all non-generic choice definitions from the resolved environment.

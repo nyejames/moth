@@ -25,8 +25,12 @@ mod type_resolution;
 //  Re-exports
 // --------------------------
 
+pub(in crate::compiler_frontend::ast) use crate::compiler_frontend::headers::module_symbols::DeclarationId;
 pub(in crate::compiler_frontend::ast) use builder::AstModuleEnvironmentBuilder;
+#[cfg(test)]
+pub(crate) use builder::DeclarationPassLanes;
 pub(crate) use declaration_semantics::{DeclarationSemanticKind, DeclarationSemanticTable};
+pub(in crate::compiler_frontend::ast) use declaration_table::ResolvedConstantSet;
 pub(crate) use declaration_table::TopLevelDeclarationTable;
 pub(in crate::compiler_frontend::ast) use input::AstEnvironmentInput;
 pub(in crate::compiler_frontend::ast) use lookups::{AstModuleEnvironment, AstModuleLookups};

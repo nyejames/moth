@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_source_location,
+    function_node, make_test_variable, node, test_if_branch_metadata, test_source_location,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -91,7 +91,16 @@ fn lowers_if_to_then_else_merge_blocks() {
 
     let if_node = node(
         NodeKind::If(
-            Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned),
+            runtime_expr(
+                vec![runtime_operand_item(Expression::bool(
+                    true,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
+                ))],
+                builtin_type_ids::BOOL,
+                test_source_location(2),
+                ValueMode::ImmutableOwned,
+            ),
             vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
@@ -106,6 +115,7 @@ fn lowers_if_to_then_else_merge_blocks() {
                 )),
                 test_source_location(3),
             )]),
+            test_if_branch_metadata(true),
         ),
         test_source_location(2),
     );
@@ -144,6 +154,35 @@ fn lowers_if_to_then_else_merge_blocks() {
         module.blocks[else_block.0 as usize].terminator,
         HirTerminator::Jump { .. }
     ));
+}
+
+#[test]
+fn rejects_statically_decided_statement_if_at_hir_boundary() {
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
+    let location = test_source_location(2);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::If(
+                Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                vec![],
+                None,
+                test_if_branch_metadata(false),
+            ),
+            location.clone(),
+        )],
+        test_source_location(1),
+    );
+
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    lower_ast(ast, &mut string_table)
+        .expect_err("Stage 4 must specialise statically decided statement `if` before HIR");
 }
 
 #[test]
@@ -207,6 +246,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
                     location.clone(),
                 )],
                 None,
+                test_if_branch_metadata(false),
             ),
             location.clone(),
         )],
@@ -335,6 +375,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
                     location.clone(),
                 )],
                 None,
+                test_if_branch_metadata(false),
             ),
             location.clone(),
         )],
@@ -456,6 +497,7 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
                         location.clone(),
                     )],
                     None,
+                    test_if_branch_metadata(false),
                 ),
                 location.clone(),
             ),
@@ -534,10 +576,22 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
     let value_if_expression = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: runtime_expr(
+                    vec![runtime_operand_item(Expression::bool(
+                        true,
+                        location.clone(),
+                        ValueMode::ImmutableOwned,
+                    ))],
+                    builtin_type_ids::BOOL,
+                    location.clone(),
+                    ValueMode::ImmutableOwned,
+                ),
                 then_body,
                 else_body,
+                then_scope: location.scope.clone(),
+                else_scope: location.scope.clone(),
                 location: location.clone(),
+                generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
@@ -653,7 +707,10 @@ fn assertion_failure_uses_message_value_block_tail() {
                     }),
                     location.clone(),
                 )],
+                then_scope: location.scope.clone(),
+                else_scope: location.scope.clone(),
                 location: location.clone(),
+                generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
@@ -857,7 +914,10 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                     }),
                     location.clone(),
                 )],
+                then_scope: location.scope.clone(),
+                else_scope: location.scope.clone(),
                 location: location.clone(),
+                generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
@@ -936,7 +996,16 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         },
         vec![node(
             NodeKind::If(
-                Expression::bool(true, test_source_location(8), ValueMode::ImmutableOwned),
+                runtime_expr(
+                    vec![runtime_operand_item(Expression::bool(
+                        true,
+                        test_source_location(8),
+                        ValueMode::ImmutableOwned,
+                    ))],
+                    builtin_type_ids::BOOL,
+                    test_source_location(8),
+                    ValueMode::ImmutableOwned,
+                ),
                 vec![node(
                     NodeKind::Return(vec![Expression::int(
                         1,
@@ -953,6 +1022,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                     )]),
                     test_source_location(9),
                 )]),
+                test_if_branch_metadata(true),
             ),
             test_source_location(8),
         )],

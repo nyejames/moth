@@ -8,8 +8,10 @@
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, FallibleHandling};
+use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Values produced by a `then` statement inside a value-producing block.
@@ -101,6 +103,7 @@ pub enum ValueReceiverKind {
 #[derive(Clone, Debug)]
 pub enum ValueBlock {
     If(ValueIfBlock),
+    Scoped(ValueScopedBlock),
     Match(ValueMatchBlock),
     Catch(ValueCatchBlock),
 }
@@ -127,12 +130,27 @@ pub struct ValueIfBlock {
     pub condition: Expression,
     pub then_body: Vec<AstNode>,
     pub else_body: Vec<AstNode>,
+    pub then_scope: InternedPath,
+    pub else_scope: InternedPath,
     pub location: SourceLocation,
+    pub generic_request_ranges: IfGenericRequestRanges,
     /// Expected result types for each produced value slot.
     ///
     /// WHAT: one type per value produced by `then` in each branch.
     /// WHY: HIR lowering needs the individual slot types to allocate result locals,
     ///      and the AST expression type is derived from these (single type or tuple).
+    pub result_type_ids: Vec<TypeId>,
+}
+
+/// One statically selected value-producing body.
+///
+/// WHAT: preserves the authored branch body after Stage 4 removes its known Bool condition.
+/// WHY: HIR still needs the ordinary value-block target for `then` values, but must not receive
+/// a runtime branch or the inactive body.
+#[derive(Clone, Debug)]
+pub struct ValueScopedBlock {
+    pub body: Vec<AstNode>,
+    pub scope: InternedPath,
     pub result_type_ids: Vec<TypeId>,
 }
 
