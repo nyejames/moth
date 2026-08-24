@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::store::ConstValuePayload;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -245,15 +246,21 @@ fn int_division_resolves_to_float() {
 fn grouped_integer_subexpression_does_not_override_division_result_type() {
     let (ast, _string_table) =
         parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped Float = value\n");
+    let value_id = ast
+        .const_values
+        .iter_module_constant_views()
+        .next()
+        .expect("the inferred constant should be retained in module constants")
+        .id;
     let value = ast
-        .module_constants
-        .first()
-        .expect("the inferred constant should be retained in module constants");
+        .const_values
+        .value(value_id)
+        .expect("the inferred constant value should be retained");
 
-    assert_eq!(value.value.type_id, builtin_type_ids::FLOAT);
-    assert_eq!(value.value.diagnostic_type, DataType::Float);
+    assert_eq!(value.metadata.type_id, builtin_type_ids::FLOAT);
+    assert_eq!(value.metadata.diagnostic_type, DataType::Float);
     assert!(
-        matches!(value.value.kind, ExpressionKind::Float(result) if (result - 50.0).abs() < f64::EPSILON)
+        matches!(value.payload, ConstValuePayload::Float(result) if (result - 50.0).abs() < f64::EPSILON)
     );
 }
 

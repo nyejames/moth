@@ -4,65 +4,53 @@
 //! WHY: arithmetic rules must stay explicit so implicit broad compatibility cannot quietly
 //!      weaken type safety; mixed numeric promotion is intentionally narrow.
 
-use super::super::result_type::ExpressionResultType;
 use super::diagnostics::invalid_operator_types;
 use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 
 pub(super) fn resolve_arithmetic_operator_type(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     op: &Operator,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
+) -> Result<TypeId, ExpressionTypingError> {
     let builtins = type_environment.builtins();
 
-    if lhs.type_id == rhs.type_id {
+    if lhs == rhs {
         // Same-type operator handling stays explicit so broad "compatible" types cannot quietly
         // weaken arithmetic rules.
-        if lhs.type_id == builtins.int {
+        if lhs == builtins.int {
             return match op {
                 Operator::Add
                 | Operator::Subtract
                 | Operator::Multiply
                 | Operator::Modulus
                 | Operator::Exponent
-                | Operator::IntDivide => Ok(ExpressionResultType::from_type_id(
-                    builtins.int,
-                    type_environment,
-                )),
+                | Operator::IntDivide => Ok(builtins.int),
 
                 // Standard division always produces Float, even when both operands are Int.
-                Operator::Divide => Ok(ExpressionResultType::from_type_id(
-                    builtins.float,
-                    type_environment,
-                )),
+                Operator::Divide => Ok(builtins.float),
 
                 // Range construction is only valid between two Int operands.
-                Operator::Range => Ok(ExpressionResultType::from_type_id(
-                    builtins.range,
-                    type_environment,
-                )),
+                Operator::Range => Ok(builtins.range),
 
                 _ => invalid_operator_types(lhs, rhs, op, location),
             };
         }
 
-        if lhs.type_id == builtins.float {
+        if lhs == builtins.float {
             return match op {
                 Operator::Add
                 | Operator::Subtract
                 | Operator::Multiply
                 | Operator::Divide
                 | Operator::Modulus
-                | Operator::Exponent => Ok(ExpressionResultType::from_type_id(
-                    builtins.float,
-                    type_environment,
-                )),
+                | Operator::Exponent => Ok(builtins.float),
 
                 _ => invalid_operator_types(lhs, rhs, op, location),
             };
@@ -78,10 +66,7 @@ pub(super) fn resolve_arithmetic_operator_type(
             | Operator::Multiply
             | Operator::Divide
             | Operator::Modulus
-            | Operator::Exponent => Ok(ExpressionResultType::from_type_id(
-                builtins.float,
-                type_environment,
-            )),
+            | Operator::Exponent => Ok(builtins.float),
 
             _ => invalid_operator_types(lhs, rhs, op, location),
         };

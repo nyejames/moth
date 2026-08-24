@@ -1,60 +1,35 @@
 //! Expression result-type resolution for AST evaluation.
 //!
-//! WHAT: mirrors final RPN execution shape with a type-only stack.
+//! WHAT: mirrors final RPN execution shape with a `TypeId`-only stack.
 //! WHY: AST must enforce operator typing before folding/lowering so later stages never infer
-//! type policy from runtime-oriented structures.
+//! type policy from runtime-oriented structures. The stack carries semantic IDs only: operator
+//! policy decides on `TypeId` equality, and diagnostics resolve their own spelling from the
+//! `TypeId` at the point they are built, so a successful typing pass materialises no `DataType`.
 
 use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operator_type};
 use super::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
+use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
 };
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
-/// Resolved type facts carried by the operator typing stack.
-///
-/// WHAT: keeps canonical `TypeId` and readable diagnostic type spelling.
-/// WHY: operator compatibility is decided on semantic IDs. `DataType` is retained only for
-///      diagnostics.
-#[derive(Clone)]
-pub(super) struct ExpressionResultType {
-    pub(super) diagnostic_type: DataType,
-    pub(super) type_id: TypeId,
-}
-
-impl ExpressionResultType {
-    pub(super) fn from_type_id(type_id: TypeId, type_environment: &TypeEnvironment) -> Self {
-        let diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
-        Self {
-            diagnostic_type: diagnostic_type.to_owned(),
-            type_id,
-        }
-    }
-
-    pub(super) fn from_expression(expression: &Expression) -> Self {
-        Self {
-            diagnostic_type: expression.diagnostic_type.to_owned(),
-            type_id: expression.type_id,
-        }
-    }
-}
 
 pub(super) fn resolve_expression_result_type(
     output_queue: &[ExpressionRpnItem],
     expression_location: &SourceLocation,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
+) -> Result<TypeId, ExpressionTypingError> {
     // Mirror the final RPN evaluation shape with a type-only stack so operator diagnostics fire
     // before constant folding mutates any nodes.
-    let mut stack: Vec<ExpressionResultType> = Vec::with_capacity(output_queue.len());
+    add_ast_counter(AstCounter::ExpressionTypedStackItems, output_queue.len());
+
+    let mut stack: Vec<TypeId> = Vec::with_capacity(output_queue.len());
 
     // ------------------------
     //  Walk RPN output queue
@@ -64,7 +39,7 @@ pub(super) fn resolve_expression_result_type(
         match item {
             // Operand expressions push their pre-resolved types directly.
             ExpressionRpnItem::Operand(expression) => {
-                stack.push(ExpressionResultType::from_expression(expression));
+                stack.push(expression.type_id);
             }
 
             // Operators consume operand types from the stack and push the result type.
@@ -81,7 +56,7 @@ pub(super) fn resolve_expression_result_type(
                         };
                         stack.push(resolve_unary_operator_type(
                             operator,
-                            &operand,
+                            operand,
                             location,
                             type_environment,
                         )?);
@@ -105,8 +80,8 @@ pub(super) fn resolve_expression_result_type(
                             ));
                         };
                         stack.push(resolve_binary_operator_type(
-                            &lhs,
-                            &rhs,
+                            lhs,
+                            rhs,
                             operator,
                             location,
                             type_environment,

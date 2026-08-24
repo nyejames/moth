@@ -16,6 +16,7 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, SourceLocation};
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -41,7 +42,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 mod metadata;
 mod reactivity;
@@ -166,9 +167,9 @@ pub struct HirBuilder<'a> {
         ChoiceId,
     >,
     pub(super) fields_by_struct_and_name: FxHashMap<(StructId, InternedPath), FieldId>,
-    pub(super) module_constants_by_name: FxHashMap<InternedPath, Declaration>,
+    pub(super) module_constants_by_name: FxHashMap<InternedPath, ConstValueId>,
+    pub(super) module_const_values: ConstValueStore,
     pub(super) local_const_records_by_name: FxHashMap<InternedPath, Declaration>,
-    pub(super) currently_lowering_constants: FxHashSet<InternedPath>,
 
     // === Fast ID -> arena index maps ===
     pub(super) block_index_by_id: FxHashMap<BlockId, usize>,
@@ -275,8 +276,8 @@ impl<'a> HirBuilder<'a> {
             generic_choices_by_key: FxHashMap::default(),
             fields_by_struct_and_name: FxHashMap::default(),
             module_constants_by_name: FxHashMap::default(),
+            module_const_values: ConstValueStore::default(),
             local_const_records_by_name: FxHashMap::default(),
-            currently_lowering_constants: FxHashSet::default(),
 
             block_index_by_id: FxHashMap::default(),
             function_index_by_id: FxHashMap::default(),
@@ -330,7 +331,8 @@ impl<'a> HirBuilder<'a> {
 
     /// Builds an HIR module from an AST.
     /// This is the main entry point for HIR generation.
-    pub fn build_hir_module(mut self, ast: Ast) -> Result<HirLoweringResult, CompilerMessages> {
+    pub fn build_hir_module(mut self, mut ast: Ast) -> Result<HirLoweringResult, CompilerMessages> {
+        self.module_const_values = std::mem::take(&mut ast.const_values);
         // Keep the AST warnings privately for error-context rendering only. They are not exposed
         // on the successful lowering result; frontend orchestration owns the merged warning vector.
         self.ast_warnings = ast.warnings.to_owned();
@@ -420,7 +422,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         // 2. Lower module-level constants
-        if let Err(error) = self.lower_module_constants(&ast) {
+        if let Err(error) = self.lower_module_constants() {
             return Err(self.lower_error_messages(error));
         }
 

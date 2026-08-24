@@ -11,8 +11,10 @@ use std::rc::Rc;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::constant_fold;
 use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstDeclarationFact, ConstBindingScope, ConstBindingSource, ConstFactValueKind,
+    AstConstDeclarationFact, AstConstFactValue, ConstBindingScope, ConstBindingSource,
+    ConstFactValueKind,
 };
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -32,25 +34,52 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
-/// Lookup table for resolved const bindings visible in the current scope.
+/// Const bindings visible in the current scope: a shared module base and a lexical overlay.
 ///
-/// WHAT: maps interned declaration path to the fully resolved const expression.
-/// WHY: reference resolution needs a narrow, explicit environment instead of
-///      reaching into broader AST or scope context structures.
+/// WHAT: module constants are held as `ConstValueId`, the store's own identity for an
+///       already-folded value. Only bindings a lexical scope introduced itself - private
+///       top-level and body-local declarations - are held as expressions here.
+/// WHY:  reference resolution needs a narrow, explicit environment instead of reaching into
+///       broader AST or scope context structures, and it needs it without giving an authored
+///       module constant a second representation. The module base is shared by every scope in
+///       the module, so entering a scope copies the overlay and nothing else, and a module
+///       constant is materialised into an expression only where one is actually referenced.
 #[derive(Clone, Debug, Default)]
 pub struct ConstValueEnvironment {
-    bindings: FxHashMap<InternedPath, Expression>,
+    module: Rc<FxHashMap<InternedPath, ConstValueId>>,
+    local: FxHashMap<InternedPath, Expression>,
 }
 
 impl ConstValueEnvironment {
-    /// Insert a resolved const binding into the environment.
-    pub fn insert(&mut self, path: InternedPath, expression: Expression) {
-        self.bindings.insert(path, expression);
+    /// Build an environment over a module's authored constants.
+    pub(crate) fn with_module_base(module: FxHashMap<InternedPath, ConstValueId>) -> Self {
+        Self {
+            module: Rc::new(module),
+            local: FxHashMap::default(),
+        }
     }
 
-    /// Look up a const binding by path.
-    pub fn lookup(&self, path: &InternedPath) -> Option<&Expression> {
-        self.bindings.get(path)
+    /// Insert a resolved const binding introduced by the current lexical scope.
+    ///
+    /// A local binding shadows a module constant of the same path, which is what
+    /// [`Self::module_constant`] relies on being consulted second.
+    pub fn insert(&mut self, path: InternedPath, expression: Expression) {
+        self.local.insert(path, expression);
+    }
+
+    /// Look up a binding introduced by this scope or an enclosing one.
+    pub(crate) fn lookup_local(&self, path: &InternedPath) -> Option<&Expression> {
+        self.local.get(path)
+    }
+
+    /// Look up an authored module constant by path.
+    pub(crate) fn module_constant(&self, path: &InternedPath) -> Option<ConstValueId> {
+        self.module.get(path).copied()
+    }
+
+    /// Number of bindings a scope copy actually duplicates.
+    pub(crate) fn len(&self) -> usize {
+        self.local.len()
     }
 }
 
@@ -116,6 +145,7 @@ impl Eq for ConstResolutionError {}
 /// whether they are compile-time constants.
 pub struct ConstValueResolver<'a> {
     string_table: &'a mut StringTable,
+    const_values: &'a ConstValueStore,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 }
 
@@ -129,10 +159,12 @@ impl<'a> ConstValueResolver<'a> {
     ///      its overlay identity.
     pub fn new(
         string_table: &'a mut StringTable,
+        const_values: &'a ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
     ) -> Self {
         Self {
             string_table,
+            const_values,
             template_ir_store,
         }
     }
@@ -140,28 +172,6 @@ impl<'a> ConstValueResolver<'a> {
     // ------------------------------
     //  Declaration resolution
     // ------------------------------
-
-    /// Resolve an explicit `#=` top-level constant declaration.
-    ///
-    /// WHAT: explicit constants are const by syntax; this resolves their initializer
-    ///       expression through the environment and builds a fact.
-    pub fn resolve_explicit_top_level_constant(
-        &mut self,
-        declaration: &Declaration,
-        environment: &ConstValueEnvironment,
-    ) -> Result<AstConstDeclarationFact, ConstResolutionError> {
-        let resolved = self.resolve_expression(&declaration.value, environment)?;
-        let value_kind = self.fact_value_kind(&resolved)?;
-
-        Ok(AstConstDeclarationFact {
-            declaration_path: declaration.id.clone(),
-            scope: ConstBindingScope::ExplicitTopLevel,
-            source: ConstBindingSource::ExplicitHash,
-            value_kind,
-            resolved_expression: resolved,
-            location: declaration.value.location.clone(),
-        })
-    }
 
     /// Resolve a private inferred top-level declaration (`=` in start body).
     ///
@@ -184,7 +194,7 @@ impl<'a> ConstValueResolver<'a> {
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
             value_kind,
-            resolved_expression: resolved,
+            value: AstConstFactValue::Expression(Box::new(resolved)),
             location: declaration.value.location.clone(),
         })
     }
@@ -210,7 +220,7 @@ impl<'a> ConstValueResolver<'a> {
             scope: ConstBindingScope::BodyLocal,
             source: ConstBindingSource::InferredImmutable,
             value_kind,
-            resolved_expression: resolved,
+            value: AstConstFactValue::Expression(Box::new(resolved)),
             location: declaration.value.location.clone(),
         })
     }
@@ -269,12 +279,32 @@ impl<'a> ConstValueResolver<'a> {
         path: &InternedPath,
         environment: &ConstValueEnvironment,
     ) -> Result<Expression, ConstResolutionError> {
-        let resolved = environment
-            .lookup(path)
+        // A binding the scope introduced itself shadows a module constant of the same path, so
+        // the overlay is consulted first.
+        if let Some(local) = environment.lookup_local(path) {
+            let local = local.clone();
+            return if self.is_compile_time_constant(&local)? {
+                Ok(local)
+            } else {
+                Err(ConstResolutionError::NonConstReference)
+            };
+        }
+
+        let value_id = environment
+            .module_constant(path)
             .ok_or(ConstResolutionError::UnresolvedReference)?;
 
-        if self.is_compile_time_constant(resolved)? {
-            Ok(resolved.clone())
+        // The store is the module constant's one representation. An expression is built here,
+        // at the only point that consumes one, and only for the constants a body actually
+        // references. Wrapper and slot-insert templates have no expression form: they were
+        // absent from the environment before this was lazy, and stay unresolved now.
+        let resolved = self
+            .const_values
+            .expression_for_resolution(value_id)
+            .map_err(|_| ConstResolutionError::UnresolvedReference)?;
+
+        if self.is_compile_time_constant(&resolved)? {
+            Ok(resolved)
         } else {
             Err(ConstResolutionError::NonConstReference)
         }
@@ -299,14 +329,14 @@ impl<'a> ConstValueResolver<'a> {
             substituted.push(new_item);
         }
 
-        let stack = constant_fold(&substituted, self.string_table)
+        let mut stack = constant_fold(substituted, self.string_table)
             .map_err(|_| ConstResolutionError::NonFoldableRuntimeExpression)?;
 
         if stack.len() == 1
-            && let ExpressionRpnItem::Operand(expression) = &stack[0]
-            && self.is_compile_time_constant(expression)?
+            && let Some(ExpressionRpnItem::Operand(expression)) = stack.pop()
+            && self.is_compile_time_constant(&expression)?
         {
-            return Ok(expression.clone());
+            return Ok(expression);
         }
 
         Err(ConstResolutionError::NonFoldableRuntimeExpression)

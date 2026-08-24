@@ -10,7 +10,7 @@
 //! HIR transformation or lowering invariant failure only.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, RelationalPatternOp,
 };
@@ -27,8 +27,22 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelati
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
+
+/// Split HIR branch conditions into already-folded Bool values and genuine runtime tests.
+///
+/// WHY: Stage 4 owns static Bool specialisation, so a compile-time-known condition reaching
+/// this CFG builder is inactive executable work that every later system still pays for. The
+/// split makes that cost visible before and after specialisation lands.
+fn record_hir_branch_condition_kind(condition: &Expression) {
+    if matches!(condition.kind, ExpressionKind::Bool(_)) {
+        increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
+    } else {
+        increment_frontend_counter(FrontendCounter::HirRuntimeIfNodes);
+    }
+}
 
 fn lower_relational_pattern_op(op: RelationalPatternOp) -> HirRelationalPatternOp {
     match op {
@@ -109,6 +123,8 @@ impl<'a> HirBuilder<'a> {
         emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
         emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
+        record_hir_branch_condition_kind(condition);
+
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error(location)?;
 

@@ -143,6 +143,51 @@ greet || -> String:
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
 }
 
+// -------------------------------------------
+//  Body-local reference to a module constant
+// -------------------------------------------
+
+#[test]
+fn body_local_reference_to_a_module_constant_is_collected() {
+    // The advisory environment holds module constants as store ids and materialises an
+    // expression only at the reference that consumes one. This is the path that does it.
+    let source = r#"
+site_name #= "Moth"
+
+greet || -> String:
+    message = site_name
+    return message
+;
+"#;
+    let (ast, string_table) = parse_single_file_ast(source);
+
+    assert_has_fact(&ast, &string_table, "site_name");
+    let fact = fact_for(&ast, &string_table, "message");
+    assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
+    assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+}
+
+#[test]
+fn body_local_arithmetic_over_a_module_constant_is_collected() {
+    // Substituting a module constant into RPN and folding it is the other consumer of a
+    // materialised store value, and it reaches the store through a different path than a
+    // bare reference does.
+    let source = r#"
+base_width #= 40
+
+layout || -> Int:
+    padded = base_width + 2
+    return padded
+;
+"#;
+    let (ast, string_table) = parse_single_file_ast(source);
+
+    assert_has_fact(&ast, &string_table, "base_width");
+    let fact = fact_for(&ast, &string_table, "padded");
+    assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
+    assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
+}
+
 #[test]
 fn catch_handler_body_local_literal_is_collected_as_fact() {
     let source = r#"

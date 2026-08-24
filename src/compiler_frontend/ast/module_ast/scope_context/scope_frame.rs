@@ -176,7 +176,8 @@ impl ScopeArena {
             let frame = self.frame(id);
             if frame
                 .explicit_compile_time_constant_declarations
-                .contains(&declaration.id)
+                .as_ref()
+                .is_some_and(|declarations| declarations.contains(&declaration.id))
             {
                 return true;
             }
@@ -255,8 +256,12 @@ pub(crate) struct ScopeFrame {
     /// Declarations authored with `#` that are visible to this frame and its descendants.
     ///
     /// WHAT: body-local explicit compile-time constants live here, just like ordinary
-    ///       local declarations, and participate in parent-chain lookup.
-    pub(crate) explicit_compile_time_constant_declarations: FxHashSet<InternedPath>,
+    ///       local declarations, and participate in parent-chain lookup. `None` means the
+    ///       frame declares none, which is the common case for control-flow frames.
+    /// WHY: the environment-time header passes seed this from one module-owned set that is
+    ///      shared, not copied, into every frame they build. A frame that later declares its
+    ///      own `#` binding takes a private copy at that point.
+    pub(crate) explicit_compile_time_constant_declarations: Option<Rc<FxHashSet<InternedPath>>>,
 
     /// Parent frame holding visible ancestor declarations.
     parent: Option<ScopeFrameId>,
@@ -273,7 +278,7 @@ impl ScopeFrame {
         Self {
             local_declarations: Vec::with_capacity(declarations_capacity),
             local_declarations_by_name: FxHashMap::default(),
-            explicit_compile_time_constant_declarations: FxHashSet::default(),
+            explicit_compile_time_constant_declarations: None,
             parent: None,
             depth: 0,
         }
@@ -287,7 +292,7 @@ impl ScopeFrame {
         Self {
             local_declarations: Vec::new(),
             local_declarations_by_name: FxHashMap::default(),
-            explicit_compile_time_constant_declarations: FxHashSet::default(),
+            explicit_compile_time_constant_declarations: None,
             parent,
             depth,
         }
@@ -344,8 +349,11 @@ impl ScopeFrame {
         declaration: Declaration,
         binding_location: SourceLocation,
     ) {
-        self.explicit_compile_time_constant_declarations
-            .insert(declaration.id.clone());
+        let declarations = self
+            .explicit_compile_time_constant_declarations
+            .get_or_insert_with(Default::default);
+        Rc::make_mut(declarations).insert(declaration.id.clone());
+
         self.add_var(declaration, binding_location);
     }
 

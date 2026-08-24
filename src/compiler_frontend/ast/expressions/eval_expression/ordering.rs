@@ -12,6 +12,7 @@
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::{eval_log, return_compiler_error};
 
 /// Order a parsed expression fragment into RPN and return the expression source location anchor.
@@ -22,8 +23,13 @@ pub(super) fn order_expression_nodes(
         return_compiler_error!("No nodes found in expression. This should never happen.");
     }
 
-    let mut output_queue: Vec<ExpressionRpnItem> = Vec::new();
-    let mut operator_stack: Vec<ExpressionRpnItem> = Vec::new();
+    add_ast_counter(AstCounter::ExpressionOrderingInputItems, nodes.len());
+
+    // Every input node ends up in the output queue exactly once, so the input length is the
+    // exact capacity, not an estimate. A well-formed infix fragment of `n` items carries at most
+    // `(n - 1) / 2` operators, so the operator stack is bounded by half the input.
+    let mut output_queue: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len());
+    let mut operator_stack: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len() / 2);
     let location = extract_expression_location(&nodes)?;
 
     // The parser already handled parentheses recursively, so this pass only needs to order the

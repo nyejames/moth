@@ -25,6 +25,7 @@ use super::test_support::{
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -259,7 +260,6 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         trait_roots: vec![trait_root],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let max_size_constant = Declaration {
@@ -267,6 +267,8 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         value: Expression::int(256, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
     let module_constants = vec![max_size_constant];
+    let const_values = ConstValueStore::from_test_declarations(module_constants.clone(), &env)
+        .expect("test module constant should be representable in the value store");
 
     let registry = ExternalPackageRegistry::new();
     let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -278,7 +280,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &module_constants,
+        const_values: &const_values,
     })
     .build()
     .expect("declaration-centric draft builds for all categories")
@@ -412,7 +414,6 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -425,7 +426,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("draft with receiver method builds")
@@ -527,7 +528,6 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     // Build a generic function template for the receiver method, using the same generic
@@ -555,7 +555,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &template_map,
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("generic receiver path should build");
@@ -611,7 +611,6 @@ fn module_origin_survives_empty_public_surface() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -624,7 +623,7 @@ fn module_origin_survives_empty_public_surface() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("empty-surface draft builds")
@@ -735,7 +734,6 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -748,7 +746,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("draft with function defaults should build")
@@ -835,7 +833,6 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -848,7 +845,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("draft with struct field defaults should build")
@@ -933,7 +930,6 @@ fn choice_payload_fields_remain_default_free() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -946,7 +942,7 @@ fn choice_payload_fields_remain_default_free() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("draft with choice should build")
@@ -1032,7 +1028,6 @@ fn receiver_method_retains_folded_parameter_defaults() {
         trait_roots: vec![],
         trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
 
     let registry = ExternalPackageRegistry::new();
@@ -1045,7 +1040,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("draft with receiver method defaults should build")

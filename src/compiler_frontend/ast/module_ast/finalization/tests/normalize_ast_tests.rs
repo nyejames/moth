@@ -1,19 +1,28 @@
 //! Tests for AST template normalization at the HIR boundary.
 
+use super::super::public_const_templates::{
+    const_template_value_from_projection, project_const_template_value,
+};
 use super::super::template_helpers::{
     FinalizedTemplateValue, TemplateValueFinalizationInputs, finalize_template_value,
 };
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstTemplateValue, ConstValueStoreError,
+};
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
+use crate::compiler_frontend::ast::templates::tir::SlotOccurrenceId;
 use crate::compiler_frontend::ast::templates::tir::TirExpressionOverlayId;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::{
@@ -1704,19 +1713,18 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
     let ExpressionKind::Template(template) = &expression.kind else {
         panic!("module constant regression must start from a template expression");
     };
-    let result = super::super::normalize_constants::normalize_module_constant_template_expression(
-        &expression,
+    let projected = project_const_template_value(
         template,
-        TemplateValueFinalizationInputs {
-            string_table: &mut string_table,
-            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            template_ir_store: &template_ir_store,
-        },
-    );
+        &template_ir_store.borrow(),
+        &mut string_table,
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+    )
+    .expect("a runtime slot plan must classify rather than fail preparation");
+    let Err(result) = const_template_value_from_projection(projected, template) else {
+        panic!("runtime-plan module constants must be rejected structurally");
+    };
 
-    let TemplateNormalizationError::Diagnostic(diagnostic) =
-        result.expect_err("runtime-plan module constants must be rejected structurally")
-    else {
+    let ConstValueStoreError::Diagnostic(diagnostic) = result else {
         panic!(
             "runtime-plan module constants must not report the old internal fold transformation error"
         );
@@ -2446,21 +2454,17 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let ExpressionKind::Template(constant_template) = &constant_expression.kind else {
         panic!("module constant regression must start from a template expression");
     };
-    let normalized_constant =
-        super::super::normalize_constants::normalize_module_constant_template_expression(
-            &constant_expression,
-            constant_template,
-            TemplateValueFinalizationInputs {
-                string_table: &mut string_table,
-                template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                template_ir_store: &template_ir_store,
-            },
-        )
-        .expect("selected exact TIR fold should normalize module constants");
+    let projected_constant = project_const_template_value(
+        constant_template,
+        &template_ir_store.borrow(),
+        &mut string_table,
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+    )
+    .expect("selected exact TIR fold should project module constants");
     assert_eq!(
-        normalized_constant.synthetic_interface_provenance.members(),
+        projected_constant.provenance.members(),
         std::slice::from_ref(&selected_member),
-        "module constant normalization must retain selected folded provenance"
+        "module constant projection must retain selected folded provenance"
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -3497,5 +3501,107 @@ fn synchronize_receiver_secondary_indexes_rejects_extra_secondary_entry() {
     assert!(
         result.is_err(),
         "a by_receiver_and_name entry with no matching by_function_path primary must be rejected"
+    );
+}
+
+// ------------------------------
+//  Slot-bearing template classification uses effective view
+// ------------------------------
+
+/// Builds a finalized slot template whose effective overlay resolves one fill.
+///
+/// WHAT: gives the resolver a module-local root plus the slot-resolution
+///       overlay that makes the template an effective wrapper value.
+/// WHY: const-fact classification must preserve the overlay-backed wrapper
+///      category rather than reading only the structural root.
+fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore>>) {
+    let location = SourceLocation::default();
+    let store_handle = Rc::new(RefCell::new(TemplateIrStore::new()));
+
+    let (template_id, fill_template_id) = {
+        let mut store = store_handle.borrow_mut();
+
+        let mut fill_builder = TemplateIrBuilder::new(&mut store);
+        let fill_root = fill_builder.push_sequence_node(Vec::new(), location.clone());
+        let fill_template_id = fill_builder.finish_template(
+            fill_root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location.clone(),
+        );
+
+        let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
+        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location.clone());
+        let template_id = wrapper_builder.finish_template(
+            slot_node,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location.clone(),
+        );
+
+        (template_id, fill_template_id)
+    };
+
+    let slot_overlay_id = store_handle
+        .borrow_mut()
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(
+                SlotOccurrenceId::new(0),
+                TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
+            )],
+        })
+        .expect("test overlay allocation");
+    let context = TemplateViewContext {
+        expression_overlay: None,
+        slot_resolution: Some(slot_overlay_id),
+        wrapper_context: None,
+    };
+
+    let template = Template {
+        tir_reference: TemplateTirReference {
+            root: template_id,
+            phase: TemplateTirPhase::Finalized,
+            context,
+        },
+        location,
+    };
+
+    (template, store_handle)
+}
+
+#[test]
+fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
+    let mut string_table = StringTable::new();
+
+    let (template, registry) = build_resolved_slot_template_store();
+    let projected = project_const_template_value(
+        &template,
+        &registry.borrow(),
+        &mut string_table,
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+    )
+    .expect("slot template should project as a const template value");
+
+    assert_eq!(
+        projected.kind,
+        TemplateConstValueKind::WrapperTemplate,
+        "resolved-slot module constants must classify through the effective TIR view"
+    );
+
+    let value = const_template_value_from_projection(projected, &template)
+        .expect("an effective wrapper is a supported module-constant store value");
+    assert!(
+        matches!(
+            value,
+            ConstTemplateValue::Public {
+                kind: ConstValueKind::TemplateWrapper,
+                hir_visible: true,
+                folded: Some(_),
+                ..
+            }
+        ),
+        "a wrapper module constant keeps its public projection and its folded string"
     );
 }

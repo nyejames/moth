@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = ["value_if active=on inactive=off literal=yes call=10"]

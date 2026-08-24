@@ -12,9 +12,14 @@ use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
+use super::public_const_templates::const_template_value_from_projection;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstTemplateValue, ConstValueStore, ConstValueStoreError,
+};
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
+use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     collect_and_strip_comment_templates, collect_const_top_level_fragments,
 };
@@ -24,6 +29,7 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timing_scope_attributed_opt;
@@ -141,16 +147,57 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-        let module_constants = self
-            .normalize_module_constants_for_hir(string_table)
-            .map_err(|error| {
-                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
-            })?;
+        // The TIR store borrow lives only for store construction. Const-fact collection and
+        // generated materialisation below take the same `RefCell` again.
+        let const_values = {
+            let template_ir_store = self.context.template_ir_store.borrow();
+            let mut template_builder =
+                |defining_path: Option<&InternedPath>,
+                 template: &Template|
+                 -> Result<ConstTemplateValue, ConstValueStoreError> {
+                    // A root module constant was already projected once by `project_const_templates`.
+                    // Only a nested template inside an aggregate constant is projected here, and it
+                    // must go through the same owner rather than a second classification rule.
+                    let projected = match defining_path {
+                    Some(path) => projected_const_templates
+                        .module_values
+                        .get(path)
+                        .cloned()
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Module constant template has no single finalization projection.",
+                            )
+                        })?,
+                    None => self
+                        .project_template_value(template, &template_ir_store, string_table)
+                        .map_err(|error| match error {
+                            TemplateNormalizationError::Diagnostic(diagnostic) => {
+                                ConstValueStoreError::Diagnostic(diagnostic)
+                            }
+                            TemplateNormalizationError::Infrastructure(error) => {
+                                ConstValueStoreError::Infrastructure(error)
+                            }
+                        })?,
+                };
+
+                    const_template_value_from_projection(projected, template)
+                };
+
+            ConstValueStore::from_declaration_table(
+                &self.environment.lookups.declaration_table,
+                &self.environment.lookups.module_constant_paths,
+                &self.environment.type_environment,
+                &mut template_builder,
+            )
+        }
+        .map_err(|error| {
+            self.const_value_store_error_messages(error, &emitted.warnings, string_table)
+        })?;
 
         // ----------------------------
         //  Validate type boundaries
         // ----------------------------
-        self.validate_no_unresolved_executable_types(&emitted.ast, &module_constants, string_table)
+        self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
         // The authored assertion message must remain available to the authoritative AST
@@ -168,20 +215,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         });
         // Const-fact collection reads template values through their exact
         // module-local effective views, including finalization overlays.
-        let const_facts =
-            ConstFactCollector::new(string_table, Rc::clone(&self.context.template_ir_store))
-                .collect(
-                    &module_constants,
-                    &emitted.ast,
-                    start_function_path.as_ref(),
-                )
-                .map_err(|error| {
-                    self.template_normalization_error_messages(
-                        error,
-                        &emitted.warnings,
-                        string_table,
-                    )
-                })?;
+        let const_facts = ConstFactCollector::new(
+            string_table,
+            &const_values,
+            Rc::clone(&self.context.template_ir_store),
+        )
+        .collect(&const_values, &emitted.ast, start_function_path.as_ref())
+        .map_err(|error| {
+            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+        })?;
 
         // ----------------------------
         //  Merge builtin AST nodes
@@ -216,7 +258,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let template_ir_store = self.context.template_ir_store.borrow();
             debug_validate_type_ids_for_hir(
                 &emitted.ast,
-                &module_constants,
+                &const_values,
                 &choice_definitions,
                 &type_environment,
                 &template_ir_store,
@@ -248,9 +290,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let materialisation_context = ModuleMaterialisationPreparationBuilder::from_environment(
             ModuleMaterialisationEnvironmentInput {
                 lookups: &owned_lookups,
+                const_values: &const_values,
                 type_environment: &type_environment,
                 public_trait_roots: &resolved_public_trait_roots,
-                const_templates_by_path: projected_const_templates.by_path,
+                default_const_templates_by_path: projected_const_templates.by_path,
                 entry_dir: self.context.entry_dir.clone(),
                 string_table,
                 template_const_loop_iteration_limit: self
@@ -258,7 +301,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                     .template_const_loop_iteration_limit,
                 capacity_estimate: self.context.capacity_estimate,
             },
-        );
+        )
+        .map_err(|error| {
+            CompilerMessages::from_error_with_warnings(
+                error,
+                emitted.warnings.clone(),
+                string_table,
+            )
+            .with_type_context_for_all_diagnostics(type_environment.clone())
+        })?;
         let rendered_path_usages =
             std::mem::take(&mut *owned_lookups.rendered_path_usages.borrow_mut());
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
@@ -266,12 +317,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             trait_roots: resolved_public_trait_roots,
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
-            const_templates_by_name: projected_const_templates.by_name,
         };
         Ok(AstBuildResult {
             ast: Ast {
                 nodes: emitted.ast,
-                module_constants,
+                const_values,
                 doc_fragments,
                 entry_path: self.context.entry_dir.to_owned(),
                 root_role: self.context.root_role,
@@ -320,6 +370,27 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
             }
             TemplateNormalizationError::Infrastructure(error) => {
+                self.error_messages(*error, warnings, string_table)
+            }
+        }
+    }
+
+    fn const_value_store_error_messages(
+        &self,
+        error: ConstValueStoreError,
+        warnings: &[CompilerDiagnostic],
+        string_table: &StringTable,
+    ) -> CompilerMessages {
+        match error {
+            ConstValueStoreError::Diagnostic(diagnostic) => {
+                CompilerMessages::from_diagnostic_with_warnings(
+                    *diagnostic,
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+            }
+            ConstValueStoreError::Infrastructure(error) => {
                 self.error_messages(*error, warnings, string_table)
             }
         }

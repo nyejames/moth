@@ -1,9 +1,8 @@
-//! TIR fold-cache and view-fold tests.
+//! TIR view-fold tests.
 //
-// WHAT: protects cache identity, module-local view folding, and overlay-aware
+// WHAT: protects module-local view folding, fold determinism and overlay-aware
 // folding at the owning TIR boundary.
-// WHY: these tests cover module-local cache identity and semantic fold
-// invariants.
+// WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -18,7 +17,6 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
-use crate::compiler_frontend::ast::templates::tir::fold_cache::{TirFoldCache, TirFoldCacheKey};
 use crate::compiler_frontend::ast::templates::tir::ids::{
     SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
@@ -35,9 +33,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
-use crate::compiler_frontend::ast::templates::tir::view::{
-    TemplateTirPhase, TirView, TirViewIdentity,
-};
+use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
@@ -51,74 +47,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-fn sample_key() -> TirFoldCacheKey {
-    TirFoldCacheKey {
-        identity: TirViewIdentity {
-            root: TemplateIrId::new(0),
-            phase: TemplateTirPhase::Parsed,
-            context: TemplateViewContext::default(),
-        },
-        loop_iteration_limit: 1024,
-        bindings_empty: true,
-    }
-}
-
-#[test]
-fn cache_key_equality_and_inequality_across_identity_dimensions() {
-    let key = sample_key();
-    assert_eq!(key, sample_key(), "identical keys must be equal");
-
-    let mut root = key;
-    root.identity.root = TemplateIrId::new(1);
-    assert_ne!(key, root, "different roots must be unequal");
-
-    let mut phase = key;
-    phase.identity.phase = TemplateTirPhase::Formatted;
-    assert_ne!(key, phase, "different phases must be unequal");
-
-    let mut overlay = key;
-    overlay.identity.context = TemplateViewContext {
-        expression_overlay: Some(TirExpressionOverlayId::new(7)),
-        ..TemplateViewContext::default()
-    };
-    assert_ne!(
-        key, overlay,
-        "different expression overlays must be unequal"
-    );
-
-    let mut loop_limit = key;
-    loop_limit.loop_iteration_limit = 512;
-    assert_ne!(key, loop_limit, "different loop limits must be unequal");
-
-    let mut bindings = key;
-    bindings.bindings_empty = false;
-    assert_ne!(key, bindings, "different binding emptiness must be unequal");
-}
-
-#[test]
-fn cache_lookup_miss_then_hit_and_overwrite() {
-    let mut string_table = StringTable::new();
-    let first_id = string_table.intern("first");
-    let second_id = string_table.intern("second");
-    let mut cache = TirFoldCache::new();
-    let key = sample_key();
-
-    assert!(cache.get(&key).is_none());
-    let first = TemplateFoldResult::with_projection(
-        TemplateEmission::Output(first_id),
-        Default::default(),
-        None,
-    );
-    let second = TemplateFoldResult::with_projection(
-        TemplateEmission::Output(second_id),
-        Default::default(),
-        None,
-    );
-    assert_eq!(cache.insert(key, first.clone()), None);
-    assert_eq!(cache.insert(key, second.clone()), Some(first));
-    assert_eq!(cache.get(&key), Some(&second));
-}
 
 struct TextFixture {
     store: TemplateIrStore,
@@ -158,7 +86,6 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     }
 }
 
@@ -199,7 +126,7 @@ fn fold_view_matches_direct_template_fold_for_simple_text() {
 }
 
 #[test]
-fn fold_view_caches_empty_binding_results_but_not_active_bindings() {
+fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let mut string_table = StringTable::new();
     let fixture = build_text_fixture(&mut string_table, "cached");
     let view = TirView::new(
@@ -210,32 +137,17 @@ fn fold_view_caches_empty_binding_results_but_not_active_bindings() {
     )
     .expect("view should construct");
 
-    let cache_identity = TirViewIdentity {
-        root: fixture.template_id,
-        phase: TemplateTirPhase::Composed,
-        context: fixture.context,
-    };
-
-    // Empty bindings are cached and reusable.
+    // Folding the same view twice in one context must produce the same result.
     {
         let mut empty_context = fold_context(&mut string_table);
         let first = fold_prepared_view(&view, &mut empty_context)
             .expect("empty-binding fold should succeed");
-        let empty_cache_key = TirFoldCacheKey {
-            identity: cache_identity,
-            loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            bindings_empty: true,
-        };
-        assert!(
-            empty_context.fold_cache.get(&empty_cache_key).is_some(),
-            "empty-binding fold must populate its cache entry"
-        );
         let second =
-            fold_prepared_view(&view, &mut empty_context).expect("cached fold should succeed");
-        assert_eq!(first, second, "cached fold must equal the first fold");
+            fold_prepared_view(&view, &mut empty_context).expect("repeat fold should succeed");
+        assert_eq!(first, second, "repeated folds must agree");
     };
 
-    // Active bindings are never cached.
+    // An active binding stack does not change a view that reads no bindings.
     let path = InternedPath::from_single_str("value", &mut string_table);
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
@@ -244,19 +156,9 @@ fn fold_view_caches_empty_binding_results_but_not_active_bindings() {
             path,
             value: Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
         }],
-        fold_cache: TirFoldCache::new(),
     };
     fold_prepared_view(&view, &mut active_context)
         .expect("active-binding fold should still succeed");
-    let active_cache_key = TirFoldCacheKey {
-        identity: cache_identity,
-        loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        bindings_empty: false,
-    };
-    assert!(
-        active_context.fold_cache.get(&active_cache_key).is_none(),
-        "active-binding fold must not populate the cache"
-    );
 }
 
 #[test]
@@ -306,7 +208,6 @@ fn prepared_view_rejects_identity_mismatch() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
     let error = fold_prepared_template(&preparation, alternate_view, &mut context)
         .expect_err("prepared identity mismatch should fail");
@@ -474,7 +375,7 @@ fn text_template(
 }
 
 #[test]
-fn fold_prepared_template_rejects_parsed_phase_without_caching() {
+fn fold_prepared_template_rejects_parsed_phase() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let template_id = text_template(&mut store, &mut string_table, "parsed");
@@ -500,7 +401,7 @@ fn fold_prepared_template_rejects_parsed_phase_without_caching() {
         outcome: TemplatePreparationOutcome::Foldable,
     };
     let error = fold_prepared_template(&prepared, view, &mut context)
-        .expect_err("a Parsed view must not fold or be cached");
+        .expect_err("a Parsed view must not fold");
 
     assert!(
         format!("{error:?}").contains("Composed"),
@@ -570,7 +471,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
 }
 
 #[test]
-fn prepared_fold_reuses_cache_for_repeated_composed_child_views() {
+fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let child_template_id = text_template(&mut store, &mut string_table, "child");
@@ -611,19 +512,6 @@ fn prepared_fold_reuses_cache_for_repeated_composed_child_views() {
         .expect("repeated composed child views should fold successfully");
 
     assert_eq!(emission, TemplateEmission::Output(expected_output));
-    let child_cache_key = TirFoldCacheKey {
-        identity: TirViewIdentity {
-            root: child_template_id,
-            phase: TemplateTirPhase::Composed,
-            context: TemplateViewContext::default(),
-        },
-        loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        bindings_empty: true,
-    };
-    assert!(
-        context.fold_cache.get(&child_cache_key).is_some(),
-        "a repeated Composed child view must populate its exact cache entry"
-    );
 }
 
 #[test]
@@ -759,7 +647,7 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
 }
 
 #[test]
-fn prepared_fold_cache_hit_reuses_effective_expression_provenance() {
+fn repeated_prepared_fold_reuses_effective_expression_provenance() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let text = string_table.intern("effective");
@@ -830,13 +718,16 @@ fn prepared_fold_cache_hit_reuses_effective_expression_provenance() {
     let first = fold_prepared_template(&prepared, view.clone(), &mut context)
         .expect("first exact fold should succeed");
     let second = fold_prepared_template(&prepared, view, &mut context)
-        .expect("cached exact fold should succeed");
+        .expect("repeated exact fold should succeed");
 
-    assert_eq!(first, second, "cache hits must retain the exact provenance");
+    assert_eq!(
+        first, second,
+        "repeated folds must retain the exact provenance"
+    );
     assert_eq!(
         first.provenance.members(),
         &[member],
-        "the cached result must retain effective dynamic-expression provenance"
+        "the fold result must retain effective dynamic-expression provenance"
     );
 }
 
@@ -992,7 +883,6 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     fold_prepared_view(&view, &mut fold_context)
@@ -1070,9 +960,8 @@ fn prepared_fold_increments_phase1_attribution_counters() {
 
     reset_ast_counters();
     let first = fold_prepared_view(&view, &mut fold_context).expect("first fold should succeed");
-    // Second fold with empty bindings must hit the fold cache.
     let second = fold_prepared_view(&view, &mut fold_context).expect("second fold should succeed");
-    assert_eq!(first, second, "cached fold must equal the first fold");
+    assert_eq!(first, second, "repeated folds must agree");
 
     assert_eq!(
         test_read_ast_counter(AstCounter::TirViewFoldsAttempted),
@@ -1080,21 +969,8 @@ fn prepared_fold_increments_phase1_attribution_counters() {
         "prepared fold should be attempted twice"
     );
     assert_eq!(
-        test_read_ast_counter(AstCounter::TirFoldCacheMisses),
-        1,
-        "first empty-binding fold should miss the cache once"
-    );
-    assert_eq!(
-        test_read_ast_counter(AstCounter::TirFoldCacheHits),
-        1,
-        "second empty-binding fold should hit the cache once"
-    );
-    // The second fold hits the cache and returns before the overlay-shape
-    // attribution runs, so the empty-overlay counter records only the one
-    // real fold (the cache miss).
-    assert_eq!(
         test_read_ast_counter(AstCounter::TirViewFoldOverlayEmpty),
-        1,
-        "only the cache-miss fold attributes its overlay shape"
+        2,
+        "every fold attributes its overlay shape"
     );
 }

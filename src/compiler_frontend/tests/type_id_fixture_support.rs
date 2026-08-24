@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind, SourceLocation,
 };
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
     Operator,
@@ -682,7 +683,7 @@ pub(crate) fn build_ast_with_choices(
     Ast {
         root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         nodes,
-        module_constants: vec![],
+        const_values: ConstValueStore::default(),
         doc_fragments: vec![],
         entry_path,
         const_top_level_fragments: vec![],

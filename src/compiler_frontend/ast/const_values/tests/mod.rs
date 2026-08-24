@@ -5,11 +5,12 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::facts::{
-    ConstBindingScope, ConstBindingSource, ConstFactValueKind,
+    AstConstFactValue, ConstBindingScope, ConstBindingSource, ConstFactValueKind,
 };
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, Operator,
 };
@@ -17,12 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
-use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
-use crate::compiler_frontend::ast::templates::tir::{
-    SlotOccurrenceId, TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase,
-    TemplateTirReference, TemplateViewContext, TirSlotResolution, TirSlotResolutionOverlay,
-};
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -32,9 +28,14 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 fn make_resolver<'a>(
     string_table: &'a mut StringTable,
+    const_values: &'a ConstValueStore,
     store: &mut TemplateIrStore,
 ) -> ConstValueResolver<'a> {
-    ConstValueResolver::new(string_table, Rc::new(RefCell::new(std::mem::take(store))))
+    ConstValueResolver::new(
+        string_table,
+        const_values,
+        Rc::new(RefCell::new(std::mem::take(store))),
+    )
 }
 
 fn make_environment_with(
@@ -67,9 +68,10 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 fn literal_int_resolves_as_const() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let expression = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -82,6 +84,7 @@ fn literal_int_resolves_as_const() {
 fn literal_string_resolves_as_const() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let string_id = string_table.intern("hello");
     let expression = Expression::string_slice(
         string_id,
@@ -89,7 +92,7 @@ fn literal_string_resolves_as_const() {
         ValueMode::ImmutableOwned,
     );
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -106,6 +109,7 @@ fn literal_string_resolves_as_const() {
 fn folded_arithmetic_resolves_to_literal() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::int(
@@ -130,7 +134,7 @@ fn folded_arithmetic_resolves_to_literal() {
     );
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -143,6 +147,7 @@ fn folded_arithmetic_resolves_to_literal() {
 fn folded_arithmetic_with_reference_substitution_resolves() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
@@ -172,7 +177,7 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
         Expression::int(3, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -185,6 +190,7 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
 fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let reference = Expression::reference(
         InternedPath::from_single_str("x", &mut string_table),
         DataType::Int,
@@ -215,7 +221,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
         Expression::int(40, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -232,6 +238,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
 fn reference_to_known_const_resolves() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let path = InternedPath::from_single_str("ratio", &mut string_table);
     let expression = Expression::reference_with_type_id(
         path.clone(),
@@ -247,7 +254,7 @@ fn reference_to_known_const_resolves() {
         Expression::float(2.71, SourceLocation::default(), ValueMode::ImmutableOwned),
         &mut string_table,
     );
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&expression, &env)
@@ -266,6 +273,7 @@ fn reference_to_known_const_resolves() {
 fn unresolved_reference_fails() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let path = InternedPath::from_single_str("unknown", &mut string_table);
     let expression = Expression::reference_with_type_id(
         path,
@@ -277,7 +285,7 @@ fn unresolved_reference_fails() {
     );
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let error = resolver
         .resolve_expression(&expression, &env)
@@ -294,6 +302,7 @@ fn unresolved_reference_fails() {
 fn function_call_fails_const_resolution() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let expression = Expression::function_call(
         InternedPath::from_single_str("foo", &mut string_table),
         vec![],
@@ -302,7 +311,7 @@ fn function_call_fails_const_resolution() {
     );
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let error = resolver
         .resolve_expression(&expression, &env)
@@ -319,44 +328,20 @@ fn function_call_fails_const_resolution() {
 fn mutable_declaration_fails_private_const_resolution() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("value", &mut string_table),
         value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let error = resolver
         .resolve_private_top_level_declaration(&declaration, &env)
         .expect_err("mutable declaration should fail");
 
     assert_eq!(error, ConstResolutionError::MutableDeclaration);
-}
-
-#[test]
-fn explicit_top_level_constant_ignores_value_mode() {
-    let mut string_table = StringTable::new();
-    let mut store = TemplateIrStore::new();
-    let declaration = Declaration {
-        id: InternedPath::from_single_str("value", &mut string_table),
-        value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
-    };
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
-
-    // Explicit constants are const by syntax; the resolver does not check mutability.
-    let fact = resolver
-        .resolve_explicit_top_level_constant(&declaration, &env)
-        .expect("explicit constant should resolve");
-
-    assert_eq!(fact.scope, ConstBindingScope::ExplicitTopLevel);
-    assert_eq!(fact.source, ConstBindingSource::ExplicitHash);
-    assert!(matches!(
-        fact.resolved_expression.kind,
-        ExpressionKind::Int(1)
-    ));
 }
 
 // ------------------------------
@@ -387,11 +372,12 @@ fn fact_value_kind_from_runtime_is_non_const() {
 fn coerced_expression_resolves_inner_value() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let inner = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned);
     let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let result = resolver
         .resolve_expression(&coerced, &env)
@@ -409,6 +395,7 @@ fn coerced_expression_resolves_inner_value() {
 fn runtime_rpn_with_unresolved_reference_fails() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
             rvalue_item(Expression::reference(
@@ -434,7 +421,7 @@ fn runtime_rpn_with_unresolved_reference_fails() {
     );
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let error = resolver
         .resolve_expression(&expression, &env)
@@ -451,13 +438,14 @@ fn runtime_rpn_with_unresolved_reference_fails() {
 fn body_local_immutable_literal_resolves() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
         value: Expression::int(99, SourceLocation::default(), ValueMode::ImmutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let fact = resolver
         .resolve_body_local_declaration(&declaration, &env)
@@ -466,8 +454,9 @@ fn body_local_immutable_literal_resolves() {
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
     assert!(matches!(
-        fact.resolved_expression.kind,
-        ExpressionKind::Int(99)
+        fact.value,
+        AstConstFactValue::Expression(expression)
+            if matches!(expression.kind, ExpressionKind::Int(99))
     ));
 }
 
@@ -475,107 +464,18 @@ fn body_local_immutable_literal_resolves() {
 fn body_local_mutable_declaration_fails() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
         value: Expression::int(99, SourceLocation::default(), ValueMode::MutableOwned),
     };
 
     let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &mut store);
+    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
     let error = resolver
         .resolve_body_local_declaration(&declaration, &env)
         .expect_err("body-local mutable declaration should fail");
 
     assert_eq!(error, ConstResolutionError::MutableDeclaration);
-}
-
-// ------------------------------
-//  Slot-bearing template classification uses effective view
-// ------------------------------
-
-/// Builds a finalized slot template whose effective overlay resolves one fill.
-///
-/// WHAT: gives the resolver a module-local root plus the slot-resolution
-///       overlay that makes the template an effective wrapper value.
-/// WHY: const-fact classification must preserve the overlay-backed wrapper
-///      category rather than reading only the structural root.
-fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let location = SourceLocation::default();
-    let store_handle = Rc::new(RefCell::new(TemplateIrStore::new()));
-
-    let (template_id, fill_template_id) = {
-        let mut store = store_handle.borrow_mut();
-
-        let mut fill_builder = TemplateIrBuilder::new(&mut store);
-        let fill_root = fill_builder.push_sequence_node(Vec::new(), location.clone());
-        let fill_template_id = fill_builder.finish_template(
-            fill_root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::default(),
-            location.clone(),
-        );
-
-        let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
-        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location.clone());
-        let template_id = wrapper_builder.finish_template(
-            slot_node,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::default(),
-            location.clone(),
-        );
-
-        (template_id, fill_template_id)
-    };
-
-    let slot_overlay_id = store_handle
-        .borrow_mut()
-        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
-            resolutions: vec![(
-                SlotOccurrenceId::new(0),
-                TirSlotResolution::resolved(SlotKey::Default, vec![fill_template_id]),
-            )],
-        })
-        .expect("test overlay allocation");
-    let context = TemplateViewContext {
-        expression_overlay: None,
-        slot_resolution: Some(slot_overlay_id),
-        wrapper_context: None,
-    };
-
-    let template = Template {
-        tir_reference: TemplateTirReference {
-            root: template_id,
-            phase: TemplateTirPhase::Finalized,
-            context,
-        },
-        location,
-    };
-
-    (template, store_handle)
-}
-
-#[test]
-fn slot_template_const_fact_uses_effective_tir_view() {
-    let mut string_table = StringTable::new();
-
-    let (template, registry) = build_resolved_slot_template_store();
-    let declaration = Declaration {
-        id: InternedPath::from_single_str("wrapper", &mut string_table),
-        value: Expression::template(template, ValueMode::ImmutableOwned),
-    };
-    let environment = ConstValueEnvironment::default();
-
-    let mut resolver = ConstValueResolver::new(&mut string_table, registry);
-    let fact = resolver
-        .resolve_explicit_top_level_constant(&declaration, &environment)
-        .expect("slot template should resolve as a const fact");
-
-    assert_eq!(
-        fact.value_kind,
-        ConstFactValueKind::TemplateWrapper,
-        "resolved-slot const facts must classify through the effective TIR view"
-    );
 }

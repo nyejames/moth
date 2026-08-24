@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
-    TemplateViewContext, TirFoldCache,
+    TemplateViewContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -98,7 +98,6 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     let condition = Expression::bool(true, test_source_location(1), ValueMode::ImmutableOwned);
@@ -119,7 +118,6 @@ fn string_slice_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     let text =
@@ -159,7 +157,6 @@ fn bool_condition_binding_substitution_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
-        fold_cache: TirFoldCache::new(),
     };
 
     let resolved = resolve_fold_bindings_in_expression(&condition, &mut fold_context)
@@ -209,7 +206,6 @@ fn option_present_capture_substitution_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
-        fold_cache: TirFoldCache::new(),
     };
 
     let resolved = resolve_fold_bindings_in_expression(&scrutinee, &mut fold_context)
@@ -286,7 +282,6 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
             path: option_path,
             value: option_value,
         }],
-        fold_cache: TirFoldCache::new(),
     };
 
     let capture = selected_option_capture_payload_with_provenance(
@@ -343,7 +338,6 @@ fn assert_store_backed_option_capture(
             path: option_path,
             value: option_value,
         }],
-        fold_cache: TirFoldCache::new(),
     };
 
     // The TIR folder retains this borrow while option-capture resolution classifies
@@ -381,7 +375,6 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     let resolved = resolve_fold_bindings_in_expression(&coerced, &mut fold_context)
@@ -438,7 +431,6 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     let resolved = resolve_fold_bindings_in_expression(&coerced_template, &mut fold_context)
@@ -467,7 +459,6 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     };
 
     let rpn = ExpressionRpn {
@@ -545,7 +536,6 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings,
-        fold_cache: TirFoldCache::new(),
     };
 
     let resolved = resolve_fold_bindings_in_expression(&runtime_expr, &mut fold_context)

@@ -9,9 +9,7 @@ use super::builder::AstModuleEnvironmentBuilder;
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
-use crate::compiler_frontend::ast::module_ast::scope_context::{
-    ContextKind, ReceiverMethodCatalog, ScopeContext,
-};
+use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::receiver_methods::{
     BuildReceiverMethodCatalogInput, ReceiverMethodCatalogError, ReceiverMethodEntry,
     build_receiver_method_catalog,
@@ -22,7 +20,6 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    GenericParameterScopeBuildInput, build_generic_parameter_scope,
     collect_type_parameter_ids_from_declarations, collect_type_parameter_ids_from_type,
     resolve_function_signature, validate_generic_parameters_used,
 };
@@ -69,11 +66,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
 
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
@@ -110,58 +103,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     ))
                 };
 
-            let generic_parameter_scope =
-                build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                    generic_parameters,
-                    canonical_by_local: registered_generic_parameters
-                        .as_ref()
-                        .map(|registered| &registered.canonical_by_local),
-                    visible_source_bindings: &visibility.visible_source_names,
-                    visible_type_aliases: &visibility.visible_type_alias_names,
-                    visible_external_symbols: &visibility.visible_external_symbols,
-                    declaration_table: self.declaration_table.as_ref(),
-                    generic_declarations_by_path: &self.module_symbols.generic_declarations_by_path,
-                    string_table,
-                })
-                .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            let generic_parameter_scope = self.generic_parameter_scope(
+                generic_parameters,
+                registered_generic_parameters
+                    .as_ref()
+                    .map(|registered| &registered.canonical_by_local),
+                &visibility,
+                string_table,
+            )?;
 
             // ---------------------------------
             //  Parse unresolved signature
             // ---------------------------------
 
             let unresolved_signature = {
-                let source_file_scope = header.canonical_source_file(string_table);
-                let signature_context = ScopeContext::new(
-                    ContextKind::ConstantHeader,
-                    header.tokens.src_path.to_owned(),
-                    Rc::clone(&self.declaration_table),
-                    Arc::clone(&self.context.external_package_registry),
-                    vec![],
-                    0,
-                    self.context.template_ir_store.clone(),
-                )
-                .with_style_directives(self.context.style_directives)
-                .with_build_profile(self.context.build_profile)
-                .with_project_path_resolver(self.context.project_path_resolver.clone())
-                .with_path_format_config(self.context.path_format_config.clone())
-                .with_template_const_loop_iteration_limit(
-                    self.context.template_const_loop_iteration_limit,
-                )
-                .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-                .with_visible_declarations(visibility.visible_declaration_paths.clone())
-                .with_visible_external_symbols(visibility.visible_external_symbols.clone())
-                .with_visible_source_bindings(visibility.visible_source_names.clone())
-                .with_visible_type_aliases(visibility.visible_type_alias_names.clone())
-                .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
-                .with_explicit_compile_time_constants(&self.module_constants)
-                .with_generic_declarations(Rc::new(
-                    self.module_symbols.generic_declarations_by_path.clone(),
-                ))
-                .with_resolved_struct_fields_by_path(Rc::new(
-                    self.resolved_struct_fields_by_path.clone(),
-                ))
-                .with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
-                .with_source_file_scope(source_file_scope);
+                let signature_context = self
+                    .environment_header_scope(header, string_table)
+                    .with_file_visibility(Arc::clone(&visibility))
+                    .with_explicit_compile_time_constants(Rc::clone(
+                        &self.resolved_module_constant_paths,
+                    ));
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);

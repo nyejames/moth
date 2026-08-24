@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
@@ -105,30 +105,34 @@ content #= [wrapper: [:Hello]]
 
     let (ast, string_table) = parse_single_file_ast(source);
 
-    let wrapper = ast
-        .module_constants
-        .iter()
-        .find(|declaration| declaration.id.name_str(&string_table) == Some("wrapper"))
-        .expect("wrapper constant should exist");
-    let content = ast
-        .module_constants
-        .iter()
-        .find(|declaration| declaration.id.name_str(&string_table) == Some("content"))
-        .expect("content constant should exist");
+    let wrapper_id = ast
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(&string_table) == Some("wrapper"))
+        .expect("wrapper constant should exist")
+        .id;
+    let content_id = ast
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(&string_table) == Some("content"))
+        .expect("content constant should exist")
+        .id;
 
-    let ExpressionKind::StringSlice(wrapper_value) = &wrapper.value.kind else {
-        panic!("wrapper template should already be materialized before HIR");
-    };
-    let ExpressionKind::StringSlice(content_value) = &content.value.kind else {
-        panic!("const template application should already be materialized before HIR");
-    };
+    let wrapper_value = ast
+        .const_values
+        .string_value(wrapper_id)
+        .expect("wrapper template should already be materialized before HIR");
+    let content_value = ast
+        .const_values
+        .string_value(content_id)
+        .expect("const template application should already be materialized before HIR");
 
     assert_eq!(
-        string_table.resolve(*wrapper_value),
+        string_table.resolve(wrapper_value),
         "<div class=\"frame\"></div>"
     );
     assert_eq!(
-        string_table.resolve(*content_value),
+        string_table.resolve(content_value),
         "<div class=\"frame\"> Hello</div>"
     );
 }

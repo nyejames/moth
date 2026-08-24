@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::{
     fold_prepared_const_template_pattern, fold_prepared_template,
 };
-use crate::compiler_frontend::ast::templates::tir::fold_cache::{TirFoldCache, TirFoldCacheKey};
 use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
 };
@@ -47,7 +46,6 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -65,7 +63,6 @@ fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldCont
         template_const_loop_iteration_limit:
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     }
 }
 
@@ -1267,8 +1264,6 @@ fn final_view_runtime_slot_application_requires_handoff() {
         fixture.context,
     )
     .expect("final view should construct");
-    let fold_context = build_test_fold_context(&mut string_table);
-
     let first = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime slot application should prepare as runtime");
     assert!(matches!(
@@ -1276,21 +1271,10 @@ fn final_view_runtime_slot_application_requires_handoff() {
         TemplatePreparationOutcome::Runtime(_)
     ));
 
-    let key = TirFoldCacheKey {
-        identity: view.identity(),
-        loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        bindings_empty: true,
-    };
-    assert!(
-        fold_context.fold_cache.get(&key).is_none(),
-        "runtime slot application must not populate the fold cache"
-    );
-
     let second = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime slot application should remain a runtime result");
     assert!(matches!(
         second.outcome,
         TemplatePreparationOutcome::Runtime(_)
     ));
-    assert!(fold_context.fold_cache.get(&key).is_none());
 }

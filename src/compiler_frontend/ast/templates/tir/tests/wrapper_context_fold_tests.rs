@@ -21,7 +21,6 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::TemplateSlotPlan;
 use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
-use crate::compiler_frontend::ast::templates::tir::fold_cache::TirFoldCache;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId,
     TemplateWrapperSetId,
@@ -66,7 +65,6 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
-        fold_cache: TirFoldCache::new(),
     }
 }
 

@@ -39,6 +39,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -2464,9 +2465,15 @@ fn imported_const_template_context(
         ),
     );
 
-    constant_template_context(scope, &[declaration])
-        .with_visible_declarations(visible_declarations)
-        .with_visible_source_bindings(visible_bindings)
+    // Production scopes install one header-built `FileVisibility` package rather than
+    // assembling it field by field, so the fixture does the same.
+    let file_visibility = FileVisibility {
+        visible_declaration_paths: Arc::new(visible_declarations),
+        visible_source_names: visible_bindings,
+        ..FileVisibility::default()
+    };
+
+    constant_template_context(scope, &[declaration]).with_file_visibility(Arc::new(file_visibility))
 }
 
 /// Builds a const-required option-capture template fixture directly as a

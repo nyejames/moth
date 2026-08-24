@@ -8,18 +8,23 @@ use crate::compiler_frontend::style_directives::builtins::frontend_built_in_dire
 use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 /// Ordered registry used by tokenizer and AST template parsing.
+///
+/// The directive list is immutable once built, so it is held behind an `Arc` and cloning the
+/// registry is a refcount bump. Every environment-time `ScopeContext` clones one of these, so a
+/// `Vec` here charged a fresh allocation per directive per scope.
 #[derive(Clone, Debug, Default)]
 pub struct StyleDirectiveRegistry {
-    ordered: Vec<StyleDirectiveSpec>,
+    ordered: Arc<[StyleDirectiveSpec]>,
 }
 
 impl StyleDirectiveRegistry {
     /// Frontend-owned directives that are always available.
     pub fn built_ins() -> Self {
         Self {
-            ordered: frontend_built_in_directives(),
+            ordered: frontend_built_in_directives().into(),
         }
     }
 
@@ -61,7 +66,9 @@ impl StyleDirectiveRegistry {
             }
         }
 
-        Ok(Self { ordered: merged })
+        Ok(Self {
+            ordered: merged.into(),
+        })
     }
 
     pub fn find(&self, name: &str) -> Option<&StyleDirectiveSpec> {

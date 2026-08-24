@@ -1,0 +1,32 @@
+-- Executable work reachable only through a compile-time-false branch.
+--
+-- The inactive branch stays fully Stage 4 validated: its generic argument inference,
+-- evidence resolution, type/cast checking and call validation still run. Borrow validation
+-- is a later stage and sees only the selected branch. Only the inactive branch's durable
+-- generated work and downstream executable facts are candidates for removal once static
+-- specialisation selects the active branch.
+
+enabled #= true
+
+identity type A |value A| -> A:
+    return value
+;
+
+append_label |target ~{String}|:
+    ~target.push("inactive") catch:
+        io.error("push failed")
+    ;
+;
+
+active ~= 0
+inactive ~= ""
+labels ~{String} = {}
+
+if enabled:
+    active = identity(41) + 1
+else
+    inactive = identity("never-generated")
+    append_label(~labels)
+;
+
+[:inactive_work active=[active] inactive=[inactive] labels=[labels.length()]]

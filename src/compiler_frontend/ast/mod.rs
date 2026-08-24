@@ -142,8 +142,9 @@ pub use templates::top_level_templates::AstDocFragment;
 pub use templates::top_level_templates::AstDocFragmentKind;
 
 // Imports for the AST entry point and body-parsing helper.
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
+use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
@@ -202,7 +203,10 @@ pub(crate) struct AstImportedStructDefinition {
 /// [`AstBuildResult`] and never reach HIR.
 pub struct Ast {
     pub nodes: Vec<AstNode>,
-    pub module_constants: Vec<Declaration>,
+    /// The module-local folded-value graph consumed by public projection, HIR and short
+    /// compiler services. Authored declarations remain in the declaration table during
+    /// finalization and are not duplicated into an AST declaration vector.
+    pub const_values: ConstValueStore,
     pub doc_fragments: Vec<AstDocFragment>,
 
     /// The path to the original entry point file.

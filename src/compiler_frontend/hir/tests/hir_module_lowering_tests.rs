@@ -5,11 +5,12 @@
 //! WHY: module lowering defines the global HIR shape that backends traverse; regressions here
 //!      affect code generation and symbol emission.
 
-use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
-use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
+use crate::compiler_frontend::ast::{Ast, AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::constants::HirConstValue;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
@@ -22,8 +23,15 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, test_source_location,
 };
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+
+fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) {
+    let type_environment = ast.type_environment.clone();
+    ast.const_values
+        .insert_test_declaration(declaration, &type_environment);
+}
 
 use crate::compiler_frontend::hir::hir_builder::{
     build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
@@ -137,14 +145,17 @@ fn lowers_module_constants_into_hir_const_pool() {
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let const_name = super::symbol("SITE_NAME", &mut string_table);
-    ast.module_constants.push(make_test_variable(
-        const_name,
-        Expression::string_slice(
-            string_table.intern("Moth"),
-            test_source_location(1),
-            ValueMode::ImmutableOwned,
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            const_name,
+            Expression::string_slice(
+                string_table.intern("Moth"),
+                test_source_location(1),
+                ValueMode::ImmutableOwned,
+            ),
         ),
-    ));
+    );
 
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");
@@ -156,6 +167,47 @@ fn lowers_module_constants_into_hir_const_pool() {
         constant.value,
         HirConstValue::String(ref value) if value == "Moth"
     ));
+}
+
+#[test]
+fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() {
+    let source = r#"
+layout #= [:<h1>[$slot("title")]</h1><p>[$slot]</p>]
+stored_title #= [$insert("title"): Stored title]
+rendered #= [layout: [stored_title] Body]
+"#;
+    let (ast, string_table) = parse_single_file_ast(source);
+    let helper = ast
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(&string_table) == Some("stored_title"))
+        .expect("slot-insert helper should be retained in the AST store");
+    let helper_name = helper.path.to_string(&string_table);
+    let helper_metadata = helper.metadata;
+    assert_eq!(
+        helper_metadata.value_kind,
+        ConstValueKind::SlotInsertTemplate
+    );
+    assert!(!helper_metadata.hir_visible);
+
+    let mut string_table = string_table;
+    let (module, _) = lower_ast(ast, &mut string_table)
+        .expect("real slot-insert helper should be excluded before HIR lowering");
+    assert!(
+        module
+            .module_constants
+            .iter()
+            .all(|constant| constant.name != helper_name
+                && !constant.name.ends_with("/stored_title")),
+        "helper-only constants must not enter the HIR constant pool"
+    );
+    assert!(
+        module
+            .module_constants
+            .iter()
+            .any(|constant| constant.name.ends_with("/layout") || constant.name == "layout"),
+        "wrapper constants must remain visible to HIR"
+    );
 }
 
 #[test]
@@ -183,10 +235,13 @@ fn start_function_can_reference_module_constant() {
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    ast.module_constants.push(make_test_variable(
-        third_const,
-        Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
-    ));
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            third_const,
+            Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
+        ),
+    );
 
     let (module, _type_environment) = lower_ast(ast, &mut string_table)
         .expect("start function should lower when referencing a module constant");
@@ -229,10 +284,13 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    ast.module_constants.push(make_test_variable(
-        super::symbol("WRAPPER", &mut string_table),
-        template_constant,
-    ));
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            super::symbol("WRAPPER", &mut string_table),
+            template_constant,
+        ),
+    );
 
     let error =
         lower_ast(ast, &mut string_table).expect_err("template constants should fail in HIR");
@@ -269,18 +327,21 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
     let body_field = page_const_name.append(string_table.intern("body"));
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    ast.module_constants.push(make_test_variable(
-        page_const_name,
-        Expression::struct_instance(
-            super::symbol("Page", &mut string_table),
-            vec![make_test_variable(body_field, template_constant)],
-            test_source_location(2),
-            ValueMode::ImmutableOwned,
-            true,
-            None,
-            builtin_type_ids::NONE,
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            page_const_name,
+            Expression::struct_instance(
+                super::symbol("Page", &mut string_table),
+                vec![make_test_variable(body_field, template_constant)],
+                test_source_location(2),
+                ValueMode::ImmutableOwned,
+                true,
+                None,
+                builtin_type_ids::NONE,
+            ),
         ),
-    ));
+    );
 
     let error =
         lower_ast(ast, &mut string_table).expect_err("nested template constants should fail");
@@ -338,27 +399,30 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
     let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
     let const_name = super::symbol("POINT", &mut string_table);
 
-    ast.module_constants.push(make_test_variable(
-        const_name,
-        Expression::struct_instance(
-            super::symbol("Point", &mut string_table),
-            vec![
-                make_test_variable(
-                    x_field,
-                    Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned),
-                ),
-                make_test_variable(
-                    y_field,
-                    Expression::int(99, test_source_location(2), ValueMode::ImmutableOwned),
-                ),
-            ],
-            test_source_location(2),
-            ValueMode::ImmutableOwned,
-            true,
-            None,
-            builtin_type_ids::NONE,
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            const_name,
+            Expression::struct_instance(
+                super::symbol("Point", &mut string_table),
+                vec![
+                    make_test_variable(
+                        x_field,
+                        Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned),
+                    ),
+                    make_test_variable(
+                        y_field,
+                        Expression::int(99, test_source_location(2), ValueMode::ImmutableOwned),
+                    ),
+                ],
+                test_source_location(2),
+                ValueMode::ImmutableOwned,
+                true,
+                None,
+                builtin_type_ids::NONE,
+            ),
         ),
-    ));
+    );
 
     let (module, _type_environment) =
         lower_ast(ast, &mut string_table).expect("HIR lowering should succeed");

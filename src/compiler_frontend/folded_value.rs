@@ -14,6 +14,9 @@
 //! second parallel value enum or duplicate conversion implementation.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValueStore, ConstValueVisit,
+};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
@@ -22,6 +25,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 // ===========================================================================
@@ -259,6 +263,8 @@ pub(crate) fn convert_expression_to_folded_value(
     string_table: &StringTable,
     projection_context: &CanonicalTypeProjectionContext,
 ) -> Result<PublicFoldedValue, CompilerError> {
+    increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
+
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
         ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
@@ -386,6 +392,94 @@ pub(crate) fn convert_expression_to_folded_value(
             kind
         ))),
     }
+}
+
+/// Convert one module-store value to the owned public folded-value vocabulary.
+///
+/// WHAT: consumes the store's postorder visitor rather than walking an AST expression tree.
+/// WHY: module constants have one folded-value owner; public projection must not reconstruct or
+/// recursively reinterpret a second declaration-shaped value tree.
+pub(crate) fn convert_const_value_to_folded_value(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    type_environment: &TypeEnvironment,
+    string_table: &StringTable,
+    projection_context: &CanonicalTypeProjectionContext,
+) -> Result<PublicFoldedValue, CompilerError> {
+    const_values.fold_value(value_id, &mut |metadata, visit| {
+        increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
+
+        match visit {
+            ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
+            ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
+            ConstValueVisit::Bool(value) => Ok(PublicFoldedValue::Bool(value)),
+            ConstValueVisit::Char(value) => Ok(PublicFoldedValue::Char(value)),
+            ConstValueVisit::String(value) => Ok(PublicFoldedValue::String(
+                string_table.resolve(value).to_owned(),
+            )),
+            ConstValueVisit::Collection(values) => Ok(PublicFoldedValue::Collection(values)),
+            ConstValueVisit::Record(fields) => Ok(PublicFoldedValue::Record(
+                fields
+                    .into_iter()
+                    .map(|field| {
+                        let name = field.name.name_str(string_table).ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "public-interface folded store record field has no resolvable name",
+                            )
+                        })?;
+                        Ok(PublicFoldedField {
+                            name: name.to_owned(),
+                            value: field.value,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?,
+            )),
+            ConstValueVisit::Choice { tag, fields, .. } => {
+                let type_identity = project_type_id_to_canonical_identity(
+                    metadata.type_id,
+                    type_environment,
+                    projection_context,
+                )?;
+                let variant_name = resolve_choice_variant_name(
+                    metadata.type_id,
+                    tag,
+                    type_environment,
+                    string_table,
+                )?;
+                let fields = fields
+                    .into_iter()
+                    .map(|field| {
+                        let name = field.name.name_str(string_table).ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "public-interface folded store choice field has no resolvable name",
+                            )
+                        })?;
+                        Ok(PublicFoldedField {
+                            name: name.to_owned(),
+                            value: field.value,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                Ok(PublicFoldedValue::Choice {
+                    type_identity: Box::new(type_identity),
+                    variant_name,
+                    fields,
+                })
+            }
+            ConstValueVisit::Range { start, end } => Ok(PublicFoldedValue::Range {
+                start: Box::new(start),
+                end: Box::new(end),
+            }),
+            ConstValueVisit::Coerced(value) => Ok(value),
+            ConstValueVisit::OptionSome(value) => {
+                Ok(PublicFoldedValue::OptionSome(Box::new(value)))
+            }
+            ConstValueVisit::OptionNone => Ok(PublicFoldedValue::OptionNone),
+            ConstValueVisit::Template { template, .. } => {
+                Ok(PublicFoldedValue::ConstTemplate(template.clone()))
+            }
+        }
+    })
 }
 
 /// Convert a slice of [`Declaration`] fields to owned [`PublicFoldedField`] values.

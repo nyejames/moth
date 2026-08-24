@@ -20,6 +20,7 @@ use super::test_support::{path, receiver_entry, register_struct};
 
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ReactiveSource, ReactiveSourceKind,
 };
@@ -432,9 +433,10 @@ fn build_draft_with_constants(
         trait_roots: Vec::new(),
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
+    let const_values =
+        ConstValueStore::from_test_declarations(module_constants.to_vec(), refs.env)?;
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
         export_seed,
         public_interface_projection_input: projection_input,
@@ -444,7 +446,7 @@ fn build_draft_with_constants(
         external_registry: &registry,
         string_table: refs.string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants,
+        const_values: &const_values,
     })
     .build()
     .map(|result| result.draft.declarations)
@@ -1732,7 +1734,6 @@ fn project_struct_with_receiver_method(
         trait_roots: Vec::new(),
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
     let declarations = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -1744,7 +1745,7 @@ fn project_struct_with_receiver_method(
         external_registry: &registry,
         string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .map(|result| result.draft.declarations)

@@ -318,7 +318,7 @@ fn provenance_unioned_through_constant_folding() {
     };
 
     let mut string_table = StringTable::new();
-    let folded = constant_fold(&rpn.items, &mut string_table).expect("folding should succeed");
+    let folded = constant_fold(rpn.items, &mut string_table).expect("folding should succeed");
 
     assert_eq!(folded.len(), 1);
     let ExpressionRpnItem::Operand(result) = &folded[0] else {

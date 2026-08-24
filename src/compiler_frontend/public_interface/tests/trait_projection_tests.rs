@@ -24,6 +24,7 @@ use super::test_support::{
     this_type, trait_binding, trait_origin, trait_origins_map, trait_root,
 };
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::{
     AstPublicInterfaceProjectionInput, ResolvedPublicTraitRoot, ResolvedPublicTypeRootTable,
@@ -1096,7 +1097,6 @@ fn builder_carries_incompatibilities_on_trait_record() {
             trait_roots: vec![trait_root],
             trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
             trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
-            const_templates_by_name: FxHashMap::default(),
         },
         public_source_nominal_type_origins: &nominal_origins,
         public_source_trait_origins: &trait_origins,
@@ -1104,7 +1104,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
         external_registry: &ExternalPackageRegistry::new(),
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants: &[],
+        const_values: &ConstValueStore::default(),
     })
     .build()
     .expect("a trait record with one public incompatibility builds a draft")

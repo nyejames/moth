@@ -257,8 +257,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
 
-            self.nominal_type_ids_by_path
-                .insert(local_path.clone(), type_id);
+            Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
             self.type_environment
                 .register_nominal_path_alias(local_path.clone(), type_id)?;
 
@@ -292,8 +291,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         parameters,
                         declaration_location: Default::default(),
                     };
-                self.module_symbols
-                    .generic_declarations_by_path
+                Rc::make_mut(&mut self.generic_declarations_by_path)
                     .insert(local_path.clone(), metadata.clone());
 
                 let internal_path = self
@@ -305,8 +303,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             "Imported generic nominal has no canonical local path",
                         )
                     })?;
-                self.module_symbols
-                    .generic_declarations_by_path
+                Rc::make_mut(&mut self.generic_declarations_by_path)
                     .insert(internal_path.clone(), metadata);
 
                 if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
@@ -319,7 +316,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 "Imported generic struct has no projected field template",
                             )
                         })?;
-                    self.resolved_struct_fields_by_path
+                    Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                         .insert(local_path.clone(), fields);
                 }
             }
@@ -514,7 +511,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         self.type_environment
             .update_struct_fields(type_id, fields.into_boxed_slice());
-        self.resolved_struct_fields_by_path
+        Rc::make_mut(&mut self.resolved_struct_fields_by_path)
             .insert(nominal_path.clone(), field_declarations.clone());
         if semantics.generic_parameters.is_empty() {
             self.imported_struct_definitions

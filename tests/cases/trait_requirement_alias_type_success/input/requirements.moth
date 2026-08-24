@@ -1,0 +1,19 @@
+Label = |
+    text String,
+|
+
+Tag as Label
+
+DESCRIBE must:
+    describe |This, tag Tag| -> String
+;
+
+Badge = |
+    id Int,
+|
+
+describe |this Badge, tag Label| -> String:
+    return tag.text
+;
+
+Badge must DESCRIBE

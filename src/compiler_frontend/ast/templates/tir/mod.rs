@@ -57,7 +57,6 @@
 //! | `expression_overlays.rs` | Collect structural/effective expression overlays and precedence |
 //! | `preparation.rs` | Sole exhaustive semantic preparation owner |
 //! | `fold/` | Prepared fold entries, the insertion-aware reducer, control flow, wrappers and estimates |
-//! | `fold_cache.rs` | Cache exact-view prepared fold emissions |
 //! | `handoff_materialization.rs` | Build prepared owned runtime-handoff payloads |
 //! | `tests/` | Focused TIR invariant tests |
 //!
@@ -78,7 +77,6 @@ mod subtree_copy;
 
 mod construction_context;
 mod fold;
-mod fold_cache;
 mod formatter_view;
 mod handoff_materialization;
 mod node;
@@ -171,8 +169,6 @@ pub(crate) use preparation::{
     TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
     refresh_kind_from_preparation,
 };
-
-pub(crate) use fold_cache::TirFoldCache;
 
 #[cfg(test)]
 pub(crate) use formatter_view::format_tir_template;

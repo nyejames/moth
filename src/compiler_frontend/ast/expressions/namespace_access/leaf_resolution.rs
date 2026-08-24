@@ -101,8 +101,7 @@ fn resolve_source_value_member(
 
     let Some(declaration) = context
         .shared
-        .lookups
-        .declaration_table
+        .top_level_declarations
         .get_by_path(symbol_path)
     else {
         return Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into());

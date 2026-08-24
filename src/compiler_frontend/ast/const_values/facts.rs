@@ -11,6 +11,8 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashMap;
 
+use super::store::ConstValueId;
+
 /// Collection of all const facts discovered in one AST module.
 ///
 /// WHAT: maps declaration path to the resolved const fact for that declaration.
@@ -23,17 +25,28 @@ pub struct AstConstFacts {
 /// A single resolved const fact for one declaration.
 ///
 /// WHAT: records the scope, source, value classification, and fully resolved
-///       AST expression for a compile-time declaration.
-/// WHY: config shape extraction can reuse the resolved expression directly;
-///      HIR can project a smaller summary without storing the full expression.
+///       value for a compile-time declaration.
+/// WHY: authored module constants reuse the module-owned [`ConstValueStore`] identity while
+///      body-local and inferred facts retain their resolver-owned expression only as advisory
+///      metadata.
 #[derive(Clone, Debug)]
 pub struct AstConstDeclarationFact {
     pub declaration_path: InternedPath,
     pub scope: ConstBindingScope,
     pub source: ConstBindingSource,
     pub value_kind: ConstFactValueKind,
-    pub resolved_expression: Expression,
+    pub value: AstConstFactValue,
     pub location: SourceLocation,
+}
+
+/// Value retained by one advisory const fact.
+#[derive(Clone, Debug)]
+pub enum AstConstFactValue {
+    /// The authored module constant's folded value is owned by the module store.
+    Stored(ConstValueId),
+
+    /// A body-local or inferred declaration keeps its resolver result as advisory metadata.
+    Expression(Box<Expression>),
 }
 
 /// Where a const binding is visible in the source program.

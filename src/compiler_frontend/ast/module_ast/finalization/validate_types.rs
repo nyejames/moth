@@ -12,6 +12,7 @@ use super::finalizer::AstFinalizer;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, LoopBindings, MultiBindTarget, NodeKind,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling,
@@ -55,7 +56,7 @@ impl AstFinalizer<'_, '_> {
     pub(crate) fn validate_no_unresolved_executable_types(
         &self,
         ast: &[AstNode],
-        module_constants: &[Declaration],
+        const_values: &ConstValueStore,
         _string_table: &StringTable,
     ) -> Result<(), CompilerError> {
         let template_ir_store = self.context.template_ir_store.borrow();
@@ -68,9 +69,7 @@ impl AstFinalizer<'_, '_> {
             validate_node(node, &context)?;
         }
 
-        for constant in module_constants {
-            validate_declaration(constant, &context)?;
-        }
+        const_values.validate_type_ids(context.type_environment)?;
 
         Ok(())
     }

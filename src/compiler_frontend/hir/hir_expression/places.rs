@@ -7,10 +7,12 @@
 #[cfg(test)]
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
@@ -297,6 +299,54 @@ impl<'a> HirBuilder<'a> {
         result_type_id: FrontendTypeId,
         location: &SourceLocation,
     ) -> Result<Option<LoweredExpression>, CompilerError> {
+        if let Some(base_value_id) = self.const_store_value_for_expression(base) {
+            let base_metadata = self
+                .module_const_values
+                .metadata(base_value_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "HIR const-record base points outside the folded-value store",
+                    )
+                })?;
+            if base_metadata.const_record_state != ConstRecordState::ConstRecord {
+                return Ok(None);
+            }
+
+            let Some(field_value_id) = self.module_const_values.field_value(base_value_id, field)
+            else {
+                return_hir_transformation_error!(
+                    format!(
+                        "Const record field '{}' was not present during HIR field lowering",
+                        self.string_table.resolve(field)
+                    ),
+                    self.hir_error_location(location)
+                );
+            };
+
+            let metadata = self
+                .module_const_values
+                .metadata(field_value_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "HIR const-record field points outside the folded-value store",
+                    )
+                })?;
+            if metadata.const_record_state == ConstRecordState::ConstRecord {
+                return_hir_transformation_error!(
+                    "HIR invariant: nested const-record field access still produces a record",
+                    self.hir_error_location(location)
+                );
+            }
+
+            let mut value = self.lower_const_store_expression(field_value_id, location)?;
+            value.ty = self.lower_type_id(result_type_id, location)?;
+            value.region = self.current_region_or_error(location)?;
+            return Ok(Some(LoweredExpression {
+                prelude: vec![],
+                value,
+            }));
+        }
+
         let mut visited_records = FxHashSet::default();
         let Some(field_expression) = self.resolve_const_record_field_expression_for_expression(
             base,
@@ -361,6 +411,17 @@ impl<'a> HirBuilder<'a> {
         Ok(Some(field_declaration.value.to_owned()))
     }
 
+    fn const_store_value_for_expression(&self, expression: &Expression) -> Option<ConstValueId> {
+        match &expression.kind {
+            ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
+            ExpressionKind::FieldAccess { base, field } => {
+                let base_value_id = self.const_store_value_for_expression(base)?;
+                self.module_const_values.field_value(base_value_id, *field)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn lower_reference_expression(
         &mut self,
         name: &InternedPath,
@@ -411,16 +472,25 @@ impl<'a> HirBuilder<'a> {
         name: &InternedPath,
         location: &SourceLocation,
     ) -> Result<Option<HirExpression>, CompilerError> {
-        let Some(constant_declaration) = self.module_constants_by_name.get(name).cloned() else {
+        let Some(value_id) = self.module_constants_by_name.get(name).copied() else {
             return Ok(None);
         };
 
-        // INVARIANT: template constants should have been materialized into string literals
-        // or runtime expressions by AST template folding before HIR lowering.
-        if matches!(constant_declaration.value.kind, ExpressionKind::Template(_)) {
+        let metadata = self.module_const_values.metadata(value_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "HIR module constant name index points outside the folded-value store",
+            )
+        })?;
+
+        // INVARIANT: helper-only templates are excluded before HIR. A wrapper may retain a
+        // public template payload, but its store row also carries the folded string used here.
+        if matches!(
+            self.module_const_values.payload(value_id),
+            Some(ConstValuePayload::Template { folded: None, .. })
+        ) {
             return_hir_transformation_error!(
                 format!(
-                    "HIR invariant: template constant '{}' reached HIR expression lowering before AST materialized it.",
+                    "HIR invariant: non-renderable template constant '{}' reached HIR expression lowering",
                     self.symbol_name_for_diagnostics(name)
                 ),
                 self.hir_error_location(location)
@@ -430,7 +500,7 @@ impl<'a> HirBuilder<'a> {
         // INVARIANT: const-record runtime use should have been rejected in AST.
         // If a const record reaches HIR reference lowering, push validation earlier
         // instead of converting this into a user diagnostic here.
-        if constant_declaration.value.is_const_record_value() {
+        if metadata.const_record_state == ConstRecordState::ConstRecord {
             return_hir_transformation_error!(
                 format!(
                     "HIR invariant: const record '{}' reached HIR reference lowering without field access",
@@ -440,31 +510,7 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        if !self.currently_lowering_constants.insert(name.to_owned()) {
-            return_hir_transformation_error!(
-                format!(
-                    "Cyclic module constant dependency detected while lowering '{}'",
-                    self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(location)
-            );
-        }
-
-        let lowered_constant = self.lower_expression(&constant_declaration.value);
-        self.currently_lowering_constants.remove(name);
-        let lowered_constant = lowered_constant?;
-
-        if !lowered_constant.prelude.is_empty() {
-            return_hir_transformation_error!(
-                format!(
-                    "Module constant '{}' unexpectedly emitted runtime statements during HIR lowering",
-                    self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(location)
-            );
-        }
-
-        Ok(Some(lowered_constant.value))
+        Ok(Some(self.lower_const_store_expression(value_id, location)?))
     }
 
     fn const_record_expression_for_expression(
@@ -510,11 +556,10 @@ impl<'a> HirBuilder<'a> {
                     );
                 }
 
-                let Some(declaration) = self
-                    .local_const_records_by_name
-                    .get(name)
-                    .or_else(|| self.module_constants_by_name.get(name))
-                else {
+                let Some(declaration) = self.local_const_records_by_name.get(name) else {
+                    if self.module_constants_by_name.contains_key(name) {
+                        return Ok(None);
+                    }
                     return_hir_transformation_error!(
                         format!(
                             "Const record '{}' reached HIR without compile-time record data",
@@ -625,7 +670,7 @@ impl<'a> HirBuilder<'a> {
         Ok(field_id)
     }
 
-    pub(super) fn resolve_struct_id_from_nominal_path(
+    pub(crate) fn resolve_struct_id_from_nominal_path(
         &self,
         nominal_path: &InternedPath,
         location: &SourceLocation,

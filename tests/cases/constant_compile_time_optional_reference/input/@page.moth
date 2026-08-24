@@ -1,0 +1,14 @@
+-- Compile-time optional constant referenced in the page body. The `Int -> Int?`
+-- coercion folds into the optional payload, and the body reference lowers the
+-- OptionSome constant shape into the expression.
+
+present #Int? = 7
+
+describe || -> Int:
+    if present is |value|:
+        return value
+    ;
+    return 0
+;
+
+[:[describe()]]

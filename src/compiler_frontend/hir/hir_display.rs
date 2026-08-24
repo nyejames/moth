@@ -25,8 +25,6 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::external_packages::CallTarget;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-#[cfg(test)]
-use crate::compiler_frontend::hir::expressions::FallibleCarrierVariant;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
@@ -1194,15 +1192,5 @@ impl Display for HirUnaryOp {
 impl Display for HirNumericOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.source_name())
-    }
-}
-
-#[cfg(test)]
-impl Display for FallibleCarrierVariant {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            FallibleCarrierVariant::Success => write!(f, "Ok"),
-            FallibleCarrierVariant::Error => write!(f, "Err"),
-        }
     }
 }

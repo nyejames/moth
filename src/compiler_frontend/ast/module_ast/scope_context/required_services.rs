@@ -84,7 +84,6 @@ impl ScopeContext {
             string_table,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
             bindings: Vec::new(),
-            fold_cache: TirFoldCache::new(),
         }
     }
 }

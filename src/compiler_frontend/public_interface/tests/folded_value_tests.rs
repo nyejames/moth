@@ -19,6 +19,7 @@ use super::test_support::{
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::{
     ChoiceConstructInput, Expression, ExpressionKind,
 };
@@ -95,9 +96,9 @@ fn build_constant_records(
         trait_roots: vec![],
         trait_environment: Some(Rc::new(TraitEnvironment::new())),
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
-        const_templates_by_name: FxHashMap::default(),
     };
     let registry = ExternalPackageRegistry::new();
+    let const_values = ConstValueStore::from_test_declarations(module_constants.to_vec(), env)?;
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
         export_seed,
         public_interface_projection_input: projection_input,
@@ -107,7 +108,7 @@ fn build_constant_records(
         external_registry: &registry,
         string_table,
         generic_function_templates: &FxHashMap::default(),
-        module_constants,
+        const_values: &const_values,
     })
     .build()
     .map(|result| result.draft.declarations)
@@ -957,7 +958,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
     assert!(result.is_err());
     let message = result.unwrap_err().msg.clone();
     assert!(
-        message.contains("Reference expression reached conversion"),
+        message.contains("reached ConstValueStore without a folded value"),
         "expected an unsupported-shape diagnostic, got: {message}"
     );
 }

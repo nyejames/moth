@@ -39,7 +39,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
-use crate::compiler_frontend::ast::templates::tir::{TemplateIrStore, TirFoldCache};
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -54,7 +54,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalPackageRegistry, ExternalSymbolId, ExternalTypeDef, ExternalTypeId,
 };
 use crate::compiler_frontend::headers::binding_environment::{
-    FileVisibility, HeaderBindingEnvironment, SourceDeclarationTarget,
+    FileVisibility, HeaderBindingEnvironment,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
@@ -97,6 +97,57 @@ use scope_frame::{ScopeArena, ScopeFrameId};
 /// Global counter for generating unique synthetic scope paths in child control-flow contexts.
 pub(super) static CONTROL_FLOW_SCOPE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+thread_local! {
+    /// The empty lookup package every `ScopeContext::new` starts from.
+    ///
+    /// WHAT: one shared `AstModuleLookups` whose every table is empty, cloned by pointer into
+    /// each new scope's `ScopeShared`.
+    /// WHY: `new` is called once per header per environment pass, and building this package
+    /// inline cost roughly thirty heap allocations each time - a whole empty module scaffold -
+    /// for a value that no caller reads. Environment-time scopes attach the real tables through
+    /// the `with_*` setters; body emission replaces the package wholesale with `with_lookups`.
+    /// The only fields read before either happens are the two empty trait environments, and an
+    /// empty trait environment is exactly what the per-call version produced.
+    ///
+    /// MUST NOT: hold a live handle to the real declaration table. `declaration_table_mut` takes
+    /// it through `Rc::get_mut`, so any retained clone would make every environment-time
+    /// declaration write fail. `ScopeShared::top_level_declarations` carries the real table
+    /// instead, which is the field every scope lookup already reads.
+    static PLACEHOLDER_LOOKUPS: Rc<AstModuleLookups> = Rc::new(AstModuleLookups {
+        module_symbols: ModuleSymbols::empty(),
+        binding_environment: HeaderBindingEnvironment::default(),
+        warnings: Vec::new(),
+        declaration_table: Rc::new(TopLevelDeclarationTable::new(Vec::new())),
+        imported_functions_by_local_path: FxHashMap::default(),
+        imported_struct_definitions: Vec::new(),
+        imported_choice_definitions: Vec::new(),
+        module_constant_paths: Rc::new(FxHashSet::default()),
+        rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
+        builtin_struct_ast_nodes: Vec::new(),
+        resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
+        resolved_function_signatures_by_path: Rc::new(FxHashMap::default()),
+        generic_function_templates_by_path: FxHashMap::default(),
+        resolved_type_aliases_by_path: Rc::new(FxHashMap::default()),
+        choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
+        declaration_semantics: Rc::new(DeclarationSemanticTable::empty()),
+        receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
+        trait_environment: Rc::new(TraitEnvironment::new()),
+        trait_evidence_environment: Rc::new(TraitEvidenceEnvironment::new()),
+        generic_declarations_by_path: Rc::new(FxHashMap::default()),
+        nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
+        source_nominal_paths: Rc::new(Default::default()),
+        external_package_registry: Arc::new(ExternalPackageRegistry::new()),
+        style_directives: StyleDirectiveRegistry::built_ins(),
+        build_profile: FrontendBuildProfile::Dev,
+        project_path_resolver: None,
+        path_format_config: PathStringFormatConfig::default(),
+    });
+}
+
+fn placeholder_lookups() -> Rc<AstModuleLookups> {
+    PLACEHOLDER_LOOKUPS.with(Rc::clone)
+}
+
 /// Shared state common to a scope and all its cloned children.
 ///
 /// WHAT: bundles all state that is identical across child scopes so cloning a
@@ -117,7 +168,7 @@ pub struct ScopeShared {
     pub(crate) build_profile: FrontendBuildProfile,
 
     // File-local visibility and resolved declarations.
-    pub(crate) file_visibility: Option<Rc<FileVisibility>>,
+    pub(crate) file_visibility: Option<Arc<FileVisibility>>,
     pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>>,
     pub(crate) generic_declarations_by_path:
         Option<Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>>,
@@ -187,8 +238,11 @@ pub struct ScopeContext {
 
     // Optional file-local visibility gate over declarations.
     // When present, references must be in this set, which enforces dependency boundaries.
-    // Kept directly on ScopeContext (not in ScopeShared) because add_var mutates it.
-    pub visible_declaration_ids: Option<FxHashSet<InternedPath>>,
+    //
+    // Kept directly on `ScopeContext` rather than in `ScopeShared` because `add_var` extends it.
+    // The set is shared copy-on-write: child scopes and header-pass scopes clone the handle, and
+    // only a scope that actually declares a local pays for a private copy.
+    pub visible_declaration_ids: Option<Arc<FxHashSet<InternedPath>>>,
 
     // Type expectations.
     pub expected_result_type_ids: Vec<TypeId>,
@@ -415,56 +469,28 @@ impl ScopeContext {
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
-        let lookups = Rc::new(AstModuleLookups {
-            module_symbols: ModuleSymbols::empty(),
-            binding_environment: HeaderBindingEnvironment::default(),
-            warnings: Vec::new(),
-            declaration_table: top_level_declarations,
-            imported_functions_by_local_path: FxHashMap::default(),
-            imported_struct_definitions: Vec::new(),
-            imported_choice_definitions: Vec::new(),
-            module_constants: Vec::new(),
-            rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
-            builtin_struct_ast_nodes: Vec::new(),
-            resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
-            resolved_function_signatures_by_path: Rc::new(FxHashMap::default()),
-            generic_function_templates_by_path: FxHashMap::default(),
-            resolved_type_aliases_by_path: Rc::new(FxHashMap::default()),
-            choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
-            declaration_semantics: Rc::new(DeclarationSemanticTable::empty()),
-            receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
-            trait_environment: Rc::new(TraitEnvironment::new()),
-            trait_evidence_environment: Rc::new(TraitEvidenceEnvironment::new()),
-            generic_declarations_by_path: Rc::new(FxHashMap::default()),
-            nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
-            source_nominal_paths: Rc::new(Default::default()),
-            external_package_registry,
-            style_directives: StyleDirectiveRegistry::built_ins(),
-            build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: None,
-            path_format_config: PathStringFormatConfig::default(),
-        });
+        let placeholder = placeholder_lookups();
 
         let shared = Rc::new(ScopeShared {
-            lookups: Rc::clone(&lookups),
-            top_level_declarations: Rc::clone(&lookups.declaration_table),
-            external_package_registry: lookups.external_package_registry.clone(),
-            style_directives: lookups.style_directives.clone(),
-            build_profile: lookups.build_profile,
+            lookups: Rc::clone(&placeholder),
+            top_level_declarations,
+            external_package_registry,
+            style_directives: placeholder.style_directives.clone(),
+            build_profile: placeholder.build_profile,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,
             resolved_struct_fields_by_path: None,
             choice_variant_shells_by_path: None,
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
-            rendered_path_usages: Rc::clone(&lookups.rendered_path_usages),
+            rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
-            project_path_resolver: lookups.project_path_resolver.clone(),
+            project_path_resolver: None,
             source_file_scope: None,
-            path_format_config: lookups.path_format_config.clone(),
+            path_format_config: placeholder.path_format_config.clone(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            receiver_methods: Rc::clone(&lookups.receiver_methods),
-            nominal_type_ids_by_path: Rc::clone(&lookups.nominal_type_ids_by_path),
+            receiver_methods: Rc::clone(&placeholder.receiver_methods),
+            nominal_type_ids_by_path: Rc::clone(&placeholder.nominal_type_ids_by_path),
             generated_evidence_pairs: Rc::new(FxHashSet::default()),
             trait_environment_override: None,
         });
@@ -680,6 +706,7 @@ impl ScopeContext {
     ///       resolver + source file scope propagation into constant parsing paths.
     /// WHY: resolver-less constant contexts are invalid for template folding and
     ///      template-head path coercion.
+    ///
     pub fn new_constant(scope: InternedPath, parent: &ScopeContext) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 

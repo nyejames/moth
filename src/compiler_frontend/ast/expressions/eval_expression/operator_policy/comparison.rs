@@ -4,7 +4,6 @@
 //! WHY: structural equality rules for choices, scalar ordering, and mixed numeric comparisons
 //! must be enforced consistently before backend lowering.
 
-use super::super::result_type::ExpressionResultType;
 use super::diagnostics::invalid_comparison_types;
 use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
@@ -31,12 +30,12 @@ pub(super) fn is_comparison_operator(op: &Operator) -> bool {
 }
 
 pub(super) fn resolve_comparison_operator_type(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     op: &Operator,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
+) -> Result<TypeId, ExpressionTypingError> {
     let builtins = type_environment.builtins();
 
     // ------------------------
@@ -51,13 +50,11 @@ pub(super) fn resolve_comparison_operator_type(
     // ------------------------
     //  Same-type comparisons
     // ------------------------
-    if lhs.type_id == rhs.type_id {
-        let bool_result = || ExpressionResultType::from_type_id(builtins.bool, type_environment);
-
+    if lhs == rhs {
         // Numeric scalars support full ordering and equality.
         // Decimal is intentionally inactive in the Alpha surface and is not treated
         // as a comparable numeric type.
-        let same_numeric_scalar = lhs.type_id == builtins.int || lhs.type_id == builtins.float;
+        let same_numeric_scalar = lhs == builtins.int || lhs == builtins.float;
 
         if same_numeric_scalar {
             return match op {
@@ -66,51 +63,46 @@ pub(super) fn resolve_comparison_operator_type(
                 | Operator::GreaterThan
                 | Operator::GreaterThanOrEqual
                 | Operator::LessThan
-                | Operator::LessThanOrEqual => Ok(bool_result()),
+                | Operator::LessThanOrEqual => Ok(builtins.bool),
                 _ => invalid_comparison_types(lhs, rhs, op, location),
             };
         }
 
         // Booleans only support equality checks.
-        if lhs.type_id == builtins.bool {
+        if lhs == builtins.bool {
             return match op {
-                Operator::Equality | Operator::NotEqual => Ok(bool_result()),
+                Operator::Equality | Operator::NotEqual => Ok(builtins.bool),
                 _ => invalid_comparison_types(lhs, rhs, op, location),
             };
         }
 
         // Strings support equality only.
-        if lhs.type_id == builtins.string {
+        if lhs == builtins.string {
             return match op {
-                Operator::Equality | Operator::NotEqual => Ok(bool_result()),
+                Operator::Equality | Operator::NotEqual => Ok(builtins.bool),
                 _ => invalid_comparison_types(lhs, rhs, op, location),
             };
         }
 
         // Characters support full ordering.
-        if lhs.type_id == builtins.char {
+        if lhs == builtins.char {
             return match op {
                 Operator::Equality
                 | Operator::NotEqual
                 | Operator::LessThan
                 | Operator::LessThanOrEqual
                 | Operator::GreaterThan
-                | Operator::GreaterThanOrEqual => Ok(bool_result()),
+                | Operator::GreaterThanOrEqual => Ok(builtins.bool),
                 _ => invalid_comparison_types(lhs, rhs, op, location),
             };
         }
 
         // Choice types support structural equality when every payload field supports it.
-        if type_environment.variants_for(lhs.type_id).is_some() {
+        if type_environment.variants_for(lhs).is_some() {
             return match op {
                 Operator::Equality | Operator::NotEqual => {
-                    validate_choice_equality_support(
-                        lhs.type_id,
-                        rhs.type_id,
-                        location,
-                        type_environment,
-                    )?;
-                    Ok(bool_result())
+                    validate_choice_equality_support(lhs, rhs, location, type_environment)?;
+                    Ok(builtins.bool)
                 }
                 _ => invalid_comparison_types(lhs, rhs, op, location),
             };
@@ -126,21 +118,18 @@ pub(super) fn resolve_comparison_operator_type(
 
     // Int and Float can be compared directly.
     if is_mixed_int_float(lhs, rhs, type_environment) {
-        return Ok(ExpressionResultType::from_type_id(
-            builtins.bool,
-            type_environment,
-        ));
+        return Ok(builtins.bool);
     }
 
     // Two choice values of different nominal types are never comparable.
-    let lhs_is_choice = type_environment.variants_for(lhs.type_id).is_some();
-    let rhs_is_choice = type_environment.variants_for(rhs.type_id).is_some();
+    let lhs_is_choice = type_environment.variants_for(lhs).is_some();
+    let rhs_is_choice = type_environment.variants_for(rhs).is_some();
 
     if lhs_is_choice && rhs_is_choice {
         return Err(CompilerDiagnostic::incompatible_choice_comparison(
             IncompatibleChoiceComparisonReason::DifferentChoiceTypes,
-            lhs.type_id,
-            rhs.type_id,
+            lhs,
+            rhs,
             location.clone(),
         )
         .into());
@@ -151,8 +140,8 @@ pub(super) fn resolve_comparison_operator_type(
     if exactly_one_is_choice {
         return Err(CompilerDiagnostic::incompatible_choice_comparison(
             IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
-            lhs.type_id,
-            rhs.type_id,
+            lhs,
+            rhs,
             location.clone(),
         )
         .into());
@@ -227,28 +216,28 @@ fn classify_option_comparison_operand(
 }
 
 fn expression_pair_has_option_context(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     type_environment: &TypeEnvironment,
 ) -> bool {
     matches!(
-        classify_option_comparison_operand(lhs.type_id, type_environment),
+        classify_option_comparison_operand(lhs, type_environment),
         OptionComparisonOperand::Option { .. }
     ) || matches!(
-        classify_option_comparison_operand(rhs.type_id, type_environment),
+        classify_option_comparison_operand(rhs, type_environment),
         OptionComparisonOperand::Option { .. }
     )
 }
 
 fn resolve_option_equality_type(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     op: &Operator,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
-    let lhs_kind = classify_option_comparison_operand(lhs.type_id, type_environment);
-    let rhs_kind = classify_option_comparison_operand(rhs.type_id, type_environment);
+) -> Result<TypeId, ExpressionTypingError> {
+    let lhs_kind = classify_option_comparison_operand(lhs, type_environment);
+    let rhs_kind = classify_option_comparison_operand(rhs, type_environment);
 
     let comparison_supported = match (lhs_kind, rhs_kind) {
         // Option vs NoneLiteral is always supported.
@@ -263,12 +252,12 @@ fn resolve_option_equality_type(
 
         // Option vs a compatible non-option type is supported when the option inner type supports equality.
         (OptionComparisonOperand::Option { inner }, OptionComparisonOperand::Other) => {
-            is_type_compatible(lhs.type_id, rhs.type_id, type_environment)
+            is_type_compatible(lhs, rhs, type_environment)
                 && type_environment.supports_runtime_equality(inner)
         }
 
         (OptionComparisonOperand::Other, OptionComparisonOperand::Option { inner }) => {
-            is_type_compatible(rhs.type_id, lhs.type_id, type_environment)
+            is_type_compatible(rhs, lhs, type_environment)
                 && type_environment.supports_runtime_equality(inner)
         }
 
@@ -276,10 +265,7 @@ fn resolve_option_equality_type(
     };
 
     if comparison_supported {
-        return Ok(ExpressionResultType::from_type_id(
-            type_environment.builtins().bool,
-            type_environment,
-        ));
+        return Ok(type_environment.builtins().bool);
     }
 
     invalid_comparison_types(lhs, rhs, op, location)

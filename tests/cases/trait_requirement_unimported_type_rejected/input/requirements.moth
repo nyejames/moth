@@ -1,0 +1,3 @@
+DESCRIBE must:
+    describe |This, tag Label| -> String
+;

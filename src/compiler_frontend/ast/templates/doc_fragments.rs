@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
-    TirFoldCache, TirView, fold_prepared_template, prepare_tir_view,
+    TirView, fold_prepared_template, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     AstDocFragment, AstDocFragmentKind,
@@ -132,7 +132,6 @@ fn collect_doc_fragments(
             string_table: context.string_table,
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
             bindings: Vec::new(),
-            fold_cache: TirFoldCache::new(),
         };
         let reference = template.tir_reference;
         let store = context.template_ir_store.borrow();

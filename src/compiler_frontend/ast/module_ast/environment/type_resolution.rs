@@ -12,20 +12,18 @@ use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
 use crate::compiler_frontend::ast::module_ast::environment::constant_resolution::{
-    ConstantHeaderParseContext, parse_constant_header_declaration,
+    ConstantHeaderInput, ConstantResolutionSession, ConstantResolutionSessionInput,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::functions::{
     SignatureTypeFallbackPolicy, signature_member_to_declaration,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    GenericParameterScopeBuildInput, StructFieldResolutionError, build_generic_parameter_scope,
-    collect_type_parameter_ids_from_choice_variants, collect_type_parameter_ids_from_declarations,
-    resolve_choice_variant_payload_types, resolve_diagnostic_type_to_type_id_checked,
-    resolve_struct_constructor_shell_types, resolve_struct_field_types,
-    validate_generic_parameters_used, validate_no_recursive_generic_type,
-    validate_no_recursive_runtime_structs,
+    StructFieldResolutionError, collect_type_parameter_ids_from_choice_variants,
+    collect_type_parameter_ids_from_declarations, resolve_choice_variant_payload_types,
+    resolve_diagnostic_type_to_type_id_checked, resolve_struct_constructor_shell_types,
+    resolve_struct_field_types, validate_generic_parameters_used,
+    validate_no_recursive_generic_type, validate_no_recursive_runtime_structs,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
@@ -46,7 +44,6 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -145,10 +142,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     };
                     let (_, struct_type_id) =
                         self.type_environment.register_nominal_struct(struct_def);
-                    self.nominal_type_ids_by_path
+                    Rc::make_mut(&mut self.nominal_type_ids_by_path)
                         .insert(header.tokens.src_path.clone(), struct_type_id);
 
-                    self.resolved_struct_fields_by_path
+                    Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                         .insert(header.tokens.src_path.to_owned(), unresolved_fields);
 
                     self.replace_declaration(Declaration {
@@ -190,7 +187,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
                         true,
                     )?;
-                    self.choice_variant_shells_by_path
+                    Rc::make_mut(&mut self.choice_variant_shells_by_path)
                         .insert(header.tokens.src_path.to_owned(), unresolved_variants);
 
                     let choice_def = ChoiceTypeDefinition {
@@ -201,7 +198,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     };
                     let (_, choice_type_id) =
                         self.type_environment.register_nominal_choice(choice_def);
-                    self.nominal_type_ids_by_path
+                    Rc::make_mut(&mut self.nominal_type_ids_by_path)
                         .insert(header.tokens.src_path.clone(), choice_type_id);
 
                     self.replace_declaration(Declaration {
@@ -251,14 +248,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // -------------------
         //  Resolve constants
         // -------------------
-        timing_scope_attributed_opt!(
-            _constant_header_guard,
-            self.context
-                .timing_metric_family
-                .constant_header_resolution(),
-            self.context.timing_context
-        );
-        self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
+        // The guard is scoped to the constant pass alone. Left at function scope it would drop at
+        // the end of this function and bill the struct-field and choice-variant loops below to a
+        // metric named for constant resolution.
+        {
+            timing_scope_attributed_opt!(
+                _constant_header_guard,
+                self.context
+                    .timing_metric_family
+                    .constant_header_resolution(),
+                self.context.timing_context
+            );
+            self.resolve_constant_headers(sorted_headers, trait_environment, string_table)?;
+        }
 
         // ----------------------------
         //  Resolve struct field types
@@ -272,28 +274,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
 
             let source_file_scope = header.canonical_source_file(string_table);
-            let generic_parameter_scope =
-                build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                    generic_parameters,
-                    canonical_by_local: self
-                        .generic_parameter_lists_by_path
-                        .get(&header.tokens.src_path)
-                        .map(|registered| &registered.canonical_by_local),
-                    visible_source_bindings: &visibility.visible_source_names,
-                    visible_type_aliases: &visibility.visible_type_alias_names,
-                    visible_external_symbols: &visibility.visible_external_symbols,
-                    declaration_table: self.declaration_table.as_ref(),
-                    generic_declarations_by_path: &self.module_symbols.generic_declarations_by_path,
-                    string_table,
-                })
-                .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            let generic_parameter_scope = self.generic_parameter_scope_for_header(
+                header,
+                generic_parameters,
+                &visibility,
+                string_table,
+            )?;
             // Rebuild member shells after constants are available so fixed-capacity
             // expressions in field types fold into final canonical TypeIds. The
             // earlier shell table is intentionally only a constructor-parsing scaffold.
@@ -340,7 +329,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             // Update the AST-owned shell table with resolved fields so later stages
             // (including constant parsing) see canonical member metadata.
-            self.resolved_struct_fields_by_path.insert(
+            Rc::make_mut(&mut self.resolved_struct_fields_by_path).insert(
                 header.tokens.src_path.to_owned(),
                 resolved_fields.to_owned(),
             );
@@ -391,27 +380,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let source_file_scope = header.canonical_source_file(string_table);
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
 
-            let generic_parameter_scope =
-                build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                    generic_parameters,
-                    canonical_by_local: self
-                        .generic_parameter_lists_by_path
-                        .get(&header.tokens.src_path)
-                        .map(|registered| &registered.canonical_by_local),
-                    visible_source_bindings: &visibility.visible_source_names,
-                    visible_type_aliases: &visibility.visible_type_alias_names,
-                    visible_external_symbols: &visibility.visible_external_symbols,
-                    declaration_table: self.declaration_table.as_ref(),
-                    generic_declarations_by_path: &self.module_symbols.generic_declarations_by_path,
-                    string_table,
-                })
-                .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            let generic_parameter_scope = self.generic_parameter_scope_for_header(
+                header,
+                generic_parameters,
+                &visibility,
+                string_table,
+            )?;
             // Rebuild payload shells after constants for the same reason as struct
             // fields: final semantic member types must preserve folded fixed capacities.
             let unresolved_variants = self.unresolved_choice_variants_for_header(
@@ -506,7 +482,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             // Update the AST-owned shell table with resolved variants for later
             // constant constructor parsing and body emission.
-            self.choice_variant_shells_by_path.insert(
+            Rc::make_mut(&mut self.choice_variant_shells_by_path).insert(
                 header.tokens.src_path.to_owned(),
                 resolved_variants.to_owned(),
             );
@@ -572,11 +548,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
                 &visibility,
@@ -632,11 +604,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         for header in sorted_headers {
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
             let validation_context = NominalBoundSurfaceValidationContext {
                 visibility: &visibility,
                 trait_environment,
@@ -796,31 +764,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Struct {
                     generic_parameters, ..
                 } => {
-                    let visibility = self
-                        .binding_environment
-                        .visibility_for(&header.source_file)
-                        .map_err(|error| self.error_messages(error, string_table))?
-                        .clone();
+                    let visibility = self.header_visibility(header, string_table)?;
 
-                    let generic_parameter_scope =
-                        build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                            generic_parameters,
-                            canonical_by_local: self
-                                .generic_parameter_lists_by_path
-                                .get(&header.tokens.src_path)
-                                .map(|registered| &registered.canonical_by_local),
-                            visible_source_bindings: &visibility.visible_source_names,
-                            visible_type_aliases: &visibility.visible_type_alias_names,
-                            visible_external_symbols: &visibility.visible_external_symbols,
-                            declaration_table: self.declaration_table.as_ref(),
-                            generic_declarations_by_path: &self
-                                .module_symbols
-                                .generic_declarations_by_path,
-                            string_table,
-                        })
-                        .map_err(|diagnostic| {
-                            self.diagnostic_messages(*diagnostic, string_table)
-                        })?;
+                    let generic_parameter_scope = self.generic_parameter_scope_for_header(
+                        header,
+                        generic_parameters,
+                        &visibility,
+                        string_table,
+                    )?;
 
                     let unresolved_fields = self
                         .resolved_struct_fields_by_path
@@ -859,38 +810,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     })?;
 
                     // Store resolved constructor shell types for constant parsing.
-                    self.resolved_struct_fields_by_path
+                    Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                         .insert(header.tokens.src_path.to_owned(), resolved_fields);
                 }
 
                 HeaderKind::Choice {
                     generic_parameters, ..
                 } => {
-                    let visibility = self
-                        .binding_environment
-                        .visibility_for(&header.source_file)
-                        .map_err(|error| self.error_messages(error, string_table))?
-                        .clone();
+                    let visibility = self.header_visibility(header, string_table)?;
 
-                    let generic_parameter_scope =
-                        build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                            generic_parameters,
-                            canonical_by_local: self
-                                .generic_parameter_lists_by_path
-                                .get(&header.tokens.src_path)
-                                .map(|registered| &registered.canonical_by_local),
-                            visible_source_bindings: &visibility.visible_source_names,
-                            visible_type_aliases: &visibility.visible_type_alias_names,
-                            visible_external_symbols: &visibility.visible_external_symbols,
-                            declaration_table: self.declaration_table.as_ref(),
-                            generic_declarations_by_path: &self
-                                .module_symbols
-                                .generic_declarations_by_path,
-                            string_table,
-                        })
-                        .map_err(|diagnostic| {
-                            self.diagnostic_messages(*diagnostic, string_table)
-                        })?;
+                    let generic_parameter_scope = self.generic_parameter_scope_for_header(
+                        header,
+                        generic_parameters,
+                        &visibility,
+                        string_table,
+                    )?;
 
                     let unresolved_variants = self
                         .choice_variant_shells_by_path
@@ -921,7 +855,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
 
                     // Store resolved constructor shell types for constant parsing.
-                    self.choice_variant_shells_by_path
+                    Rc::make_mut(&mut self.choice_variant_shells_by_path)
                         .insert(header.tokens.src_path.to_owned(), resolved_variants);
                 }
 
@@ -932,66 +866,71 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
+    /// Resolve every top-level constant initializer in header dependency order.
+    ///
+    /// WHAT: drives one [`ConstantResolutionSession`] across the whole constant pass and commits
+    /// each folded constant to the declaration table and module constant list.
+    /// WHY: the session owns the module view the pass reads, so const-heavy modules prepare
+    /// their visibility packages, side tables and compatibility cache a fixed number of times
+    /// instead of once per constant.
     fn resolve_constant_headers(
         &mut self,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        let resolved_type_aliases = Rc::new(self.resolved_type_aliases_by_path.clone());
-        let generic_declarations =
-            Rc::new(self.module_symbols.generic_declarations_by_path.clone());
+        if !sorted_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Constant { .. }))
+        {
+            return Ok(());
+        }
 
-        // Constant parsing reads these side tables but does not mutate them. Clone the maps once
-        // for the constants pass so const-heavy modules do not rebuild identical Rc payloads for
-        // every header.
-        let resolved_struct_fields_by_path = Rc::new(self.resolved_struct_fields_by_path.clone());
-        let choice_variant_shells_by_path = Rc::new(self.choice_variant_shells_by_path.clone());
-        let nominal_type_ids_by_path = Rc::new(self.nominal_type_ids_by_path.clone());
-        let trait_environment = Rc::new(trait_environment.clone());
+        // Constant parsing reads these side tables but does not mutate them, so the session takes
+        // one shared handle to each for the whole pass. The builder owns them behind `Rc`, so a
+        // handle costs a refcount rather than a copy of the module.
+        let mut session = ConstantResolutionSession::new(ConstantResolutionSessionInput {
+            resolved_type_aliases: Rc::clone(&self.resolved_type_aliases_by_path),
+            generic_declarations_by_path: Rc::clone(&self.generic_declarations_by_path),
+            resolved_struct_fields_by_path: Rc::clone(&self.resolved_struct_fields_by_path),
+            choice_variant_shells_by_path: Rc::clone(&self.choice_variant_shells_by_path),
+            nominal_type_ids_by_path: Rc::clone(&self.nominal_type_ids_by_path),
+            trait_environment: Rc::new(trait_environment.clone()),
+            external_package_registry: Arc::clone(&self.context.external_package_registry),
+            style_directives: self.context.style_directives.clone(),
+            project_path_resolver: self.context.project_path_resolver.clone(),
+            path_format_config: self.context.path_format_config.clone(),
+            template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
+            template_ir_store: Rc::clone(&self.context.template_ir_store),
+            build_profile: self.context.build_profile,
+            rendered_path_usages: Rc::clone(&self.rendered_path_usages),
+        });
 
         for header in sorted_headers {
             let HeaderKind::Constant { .. } = &header.kind else {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let visibility = self.header_visibility(header, string_table)?;
 
-            let declaration = parse_constant_header_declaration(
-                header,
-                ConstantHeaderParseContext {
-                    top_level_declarations: Rc::clone(&self.declaration_table),
-                    module_constants: &self.module_constants,
-                    file_visibility: visibility,
-                    resolved_type_aliases: Rc::clone(&resolved_type_aliases),
-                    generic_declarations_by_path: Rc::clone(&generic_declarations),
-                    resolved_struct_fields_by_path: Rc::clone(&resolved_struct_fields_by_path),
-                    choice_variant_shells_by_path: Rc::clone(&choice_variant_shells_by_path),
-                    type_environment: &mut self.type_environment,
-                    nominal_type_ids_by_path: Rc::clone(&nominal_type_ids_by_path),
-                    external_package_registry: &self.context.external_package_registry,
-                    style_directives: self.context.style_directives,
-                    project_path_resolver: self.context.project_path_resolver.clone(),
-                    path_format_config: self.context.path_format_config.clone(),
-                    template_const_loop_iteration_limit: self
-                        .context
-                        .template_const_loop_iteration_limit,
-                    template_ir_store: self.context.template_ir_store.clone(),
-                    build_profile: self.context.build_profile,
-                    warnings: &mut self.warnings,
-                    rendered_path_usages: self.rendered_path_usages.clone(),
+            let declaration = session
+                .resolve_constant_header(
+                    header,
+                    ConstantHeaderInput {
+                        top_level_declarations: Rc::clone(&self.declaration_table),
+                        resolved_constant_paths: Rc::clone(&self.resolved_module_constant_paths),
+                        file_visibility: &visibility,
+                        type_environment: &mut self.type_environment,
+                        warnings: &mut self.warnings,
+                    },
                     string_table,
-                    trait_environment: Some(Rc::clone(&trait_environment)),
-                },
-            )
-            .map_err(|error| self.expression_error_messages(error, string_table))?;
+                )
+                .map_err(|error| self.expression_error_messages(error, string_table))?;
 
-            self.replace_declaration(declaration.clone())
+            let declaration_path = declaration.id.clone();
+            self.replace_declaration(declaration)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            self.module_constants.push(declaration);
+            self.push_module_constant_path(declaration_path);
         }
 
         Ok(())
@@ -1012,13 +951,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         fallback_policy: SignatureTypeFallbackPolicy,
         emit_warnings: bool,
     ) -> Result<Vec<Declaration>, CompilerMessages> {
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = self.header_visibility(header, string_table)?;
 
-        let field_context = self.constant_header_scope_context(header, &visibility, string_table);
+        let field_context = self
+            .environment_header_scope(header, string_table)
+            .with_file_visibility(Arc::clone(&visibility))
+            .with_explicit_compile_time_constants(Rc::clone(&self.resolved_module_constant_paths))
+            .with_choice_variant_shells_by_path(Rc::clone(&self.choice_variant_shells_by_path));
 
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
@@ -1106,46 +1045,5 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Ok(resolved_variants)
-    }
-
-    /// Build a `ScopeContext` suitable for parsing constant headers during environment construction.
-    ///
-    /// WHAT: assembles visibility, type aliases, and struct/choice metadata into a
-    /// `ScopeContext` that constant header parsing can use.
-    /// WHY: the full `AstModuleEnvironment` is not yet assembled when constants are
-    /// resolved, so this helper wires up the pieces that are already available.
-    fn constant_header_scope_context(
-        &self,
-        header: &Header,
-        visibility: &FileVisibility,
-        string_table: &mut StringTable,
-    ) -> ScopeContext {
-        let source_file_scope: InternedPath = header.canonical_source_file(string_table);
-
-        ScopeContext::new(
-            ContextKind::ConstantHeader,
-            header.tokens.src_path.to_owned(),
-            Rc::clone(&self.declaration_table),
-            Arc::clone(&self.context.external_package_registry),
-            vec![],
-            0,
-            self.context.template_ir_store.clone(),
-        )
-        .with_style_directives(self.context.style_directives)
-        .with_build_profile(self.context.build_profile)
-        .with_project_path_resolver(self.context.project_path_resolver.clone())
-        .with_path_format_config(self.context.path_format_config.clone())
-        .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
-        .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-        .with_file_visibility(Rc::new(visibility.clone()))
-        .with_explicit_compile_time_constants(&self.module_constants)
-        .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
-        .with_generic_declarations(Rc::new(
-            self.module_symbols.generic_declarations_by_path.clone(),
-        ))
-        .with_resolved_struct_fields_by_path(Rc::new(self.resolved_struct_fields_by_path.clone()))
-        .with_choice_variant_shells_by_path(Rc::new(self.choice_variant_shells_by_path.clone()))
-        .with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
-        .with_source_file_scope(source_file_scope)
     }
 }

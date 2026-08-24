@@ -29,14 +29,8 @@ pub enum HirConstValue {
     Collection(Vec<HirConstValue>),
     Record(Vec<HirConstField>),
     Range(Box<HirConstValue>, Box<HirConstValue>),
-    #[cfg(test)]
-    Result {
-        /// Stored for completeness so the const-value payload carries the full
-        /// result shape. Currently not read outside of test assertions.
-        #[allow(dead_code)]
-        variant: crate::compiler_frontend::hir::expressions::FallibleCarrierVariant,
-        value: Box<HirConstValue>,
-    },
+    OptionSome(Box<HirConstValue>),
+    OptionNone,
     Choice {
         /// Stored for completeness so the const-value payload carries the full
         /// choice shape. Currently not read outside of test assertions.

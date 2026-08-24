@@ -31,6 +31,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Shared state for AST semantic type resolution.
 ///
@@ -40,7 +41,7 @@ use std::rc::Rc;
 ///      make every helper signature noisy and error-prone.
 pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    pub visible_declaration_ids: Option<&'a FxHashSet<InternedPath>>,
+    pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -73,7 +74,7 @@ pub(crate) struct TypeResolutionContext<'a> {
 ///       have to remember the field order of the context constructor.
 pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    pub visible_declaration_ids: Option<&'a FxHashSet<InternedPath>>,
+    pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,

@@ -9,7 +9,6 @@
 
 use super::{ConfigCompilationRequest, compile_config_source};
 use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -41,20 +40,22 @@ fn compiles_one_authored_source_to_folded_values_and_key_spans() {
 
     let entry_root = compiled
         .ast
-        .module_constants
-        .iter()
-        .find(|constant| constant.id.name_str(&string_table) == Some("entry_root"))
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(&string_table) == Some("entry_root"))
         .expect("the authored key should reach folded module constants");
-    let ExpressionKind::StringSlice(value) = &entry_root.value.kind else {
-        panic!("the authored key should fold to a string");
-    };
-    assert_eq!(string_table.resolve(*value), "src");
+    let value = compiled
+        .ast
+        .const_values
+        .string_value(entry_root.id)
+        .expect("the authored key should fold to a string");
+    assert_eq!(string_table.resolve(value), "src");
 
     // The key-name span is the service's own output: it is captured before AST consumes the
     // headers, so nothing downstream can rebuild it.
     let key_location = compiled
         .authored_key_name_locations
-        .get(&entry_root.id)
+        .get(entry_root.path)
         .expect("the authored key should carry its name span");
     assert_eq!(key_location.scope, expected_scope);
 }

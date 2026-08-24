@@ -45,6 +45,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -95,91 +96,87 @@ impl From<TemplateError> for ConstantFoldError {
 /// infrastructure [`CompilerError`]. This keeps constant-folding diagnostics on the
 /// AST-owned user-diagnostic path without hiding compiler invariants.
 pub fn constant_fold(
-    output_stack: &[ExpressionRpnItem],
+    output_stack: Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
 ) -> Result<Vec<ExpressionRpnItem>, ConstantFoldError> {
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
     // numeric failures that happen to sit inside a larger runtime expression.
+    add_ast_counter(AstCounter::ExpressionFoldItems, output_stack.len());
+
     let mut stack: Vec<ExpressionRpnItem> = Vec::with_capacity(output_stack.len());
 
+    // The input vector is consumed: every item either moves onto the fold stack unchanged or is
+    // replaced by the value it folded to. Nothing here copies an `Expression`.
     for item in output_stack {
-        match item {
-            ExpressionRpnItem::Operator { operator, location } => {
-                let required_values = operator.required_values();
-                // Validate stack arity before popping operands so malformed RPN is reported as an
-                // internal compiler invariant failure instead of panicking.
-                if stack.len() < required_values {
-                    return Err(CompilerError::new(
-                        format!(
-                            "Not enough items on the stack for the {} operator when folding an expression. Starting Stack: {:?}. Stack being folded: {:?}",
-                            operator.to_str(),
-                            output_stack,
-                            stack
-                        ),
-                        location.to_owned(),
-                        ErrorType::Compiler,
-                    )
-                    .into());
-                }
+        // Operands move straight onto the stack; only operators need inspection.
+        let ExpressionRpnItem::Operator { operator, location } = &item else {
+            stack.push(item);
+            continue;
+        };
 
-                if matches!(operator, Operator::Not | Operator::Negate) {
-                    let operand = stack.pop().expect(
-                        "unary operator should have one operand after the stack-length guard",
-                    );
+        let required_values = operator.required_values();
+        // Validate stack arity before popping operands so malformed RPN is reported as an
+        // internal compiler invariant failure instead of panicking.
+        if stack.len() < required_values {
+            return Err(CompilerError::new(
+                format!(
+                    "Not enough items on the stack for the {} operator when folding an expression. Stack being folded: {:?}",
+                    operator.to_str(),
+                    stack
+                ),
+                location.to_owned(),
+                ErrorType::Compiler,
+            )
+            .into());
+        }
 
-                    if let Some(folded) =
-                        fold_unary_operator(operator, &operand, string_table, location)?
-                    {
-                        stack.push(folded);
-                    } else {
-                        // Keep unary operators as runtime RPN when the operand cannot fold.
-                        stack.push(operand);
-                        stack.push(item.to_owned());
-                    }
+        if matches!(operator, Operator::Not | Operator::Negate) {
+            let operand = stack
+                .pop()
+                .expect("unary operator should have one operand after the stack-length guard");
 
-                    continue;
-                }
-
-                let rhs = stack
-                    .pop()
-                    .expect("binary operator should have a right operand after the length guard");
-                let lhs = stack
-                    .pop()
-                    .expect("binary operator should have a left operand after the length guard");
-
-                let (lhs_expr, rhs_expr) = match (&lhs, &rhs) {
-                    (
-                        ExpressionRpnItem::Operand(lhs_expr),
-                        ExpressionRpnItem::Operand(rhs_expr),
-                    ) if lhs_expr.kind.is_foldable() && rhs_expr.kind.is_foldable() => {
-                        (lhs_expr, rhs_expr)
-                    }
-                    _ => {
-                        // Preserve runtime RPN when either side is not foldable.
-                        stack.push(lhs);
-                        stack.push(rhs);
-                        stack.push(item.to_owned());
-                        continue;
-                    }
-                };
-
-                if let Some(result) =
-                    lhs_expr.evaluate_operator(rhs_expr, operator, string_table)?
-                {
-                    stack.push(ExpressionRpnItem::Operand(result));
-                } else {
-                    // Keep the original operation for runtime lowering when AST cannot fold it.
-                    stack.push(lhs);
-                    stack.push(rhs);
-                    stack.push(item.to_owned());
-                    continue;
-                }
+            if let Some(folded) = fold_unary_operator(operator, &operand, string_table, location)? {
+                stack.push(folded);
+            } else {
+                // Keep unary operators as runtime RPN when the operand cannot fold.
+                stack.push(operand);
+                stack.push(item);
             }
 
-            operand @ ExpressionRpnItem::Operand(_) => {
-                stack.push(operand.to_owned());
+            continue;
+        }
+
+        let rhs = stack
+            .pop()
+            .expect("binary operator should have a right operand after the length guard");
+        let lhs = stack
+            .pop()
+            .expect("binary operator should have a left operand after the length guard");
+
+        let (lhs_expr, rhs_expr) = match (&lhs, &rhs) {
+            (ExpressionRpnItem::Operand(lhs_expr), ExpressionRpnItem::Operand(rhs_expr))
+                if lhs_expr.kind.is_foldable() && rhs_expr.kind.is_foldable() =>
+            {
+                (lhs_expr, rhs_expr)
             }
+            _ => {
+                // Preserve runtime RPN when either side is not foldable.
+                stack.push(lhs);
+                stack.push(rhs);
+                stack.push(item);
+                continue;
+            }
+        };
+
+        if let Some(result) = lhs_expr.evaluate_operator(rhs_expr, operator, string_table)? {
+            stack.push(ExpressionRpnItem::Operand(result));
+        } else {
+            // Keep the original operation for runtime lowering when AST cannot fold it.
+            stack.push(lhs);
+            stack.push(rhs);
+            stack.push(item);
+            continue;
         }
     }
 

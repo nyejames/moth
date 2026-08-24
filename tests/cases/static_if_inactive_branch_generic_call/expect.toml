@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = ["inactive_work active=42 inactive= labels=0"]

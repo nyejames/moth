@@ -18,8 +18,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateFoldBinding, TemplateLoopControlKind,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase,
-    TirFoldCache, TirView, prepare_tir_view,
+    FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView,
+    prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -44,14 +44,6 @@ pub(crate) struct TirFoldContext<'a> {
     pub template_const_loop_iteration_limit: usize,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
-
-    /// AST-phase-local cache for TIR fold results.
-    ///
-    /// WHAT: stores results of folding specific TIR views so repeated folds of
-    ///       the same effective view can reuse prior work.
-    /// WHY: the cache is tied to one fold context and must not survive beyond it.
-    ///      Keeping it on the context avoids global or static state.
-    pub(crate) fold_cache: TirFoldCache,
 }
 
 /// Compile-time template folding must keep structural no-output distinct from
@@ -69,8 +61,8 @@ pub(crate) enum TemplateEmission {
 ///
 /// WHAT: keeps text emission and the canonical synthetic-interface dependency set together for
 ///      every exact TIR fold, including recursive child and wrapper folds.
-/// WHY: provenance must follow the selected fold path and must remain part of the cached result;
-///      an ambient accumulator would lose cache identity and could leak unselected branches.
+/// WHY: provenance must follow the selected fold path and must stay attached to the result it was
+///      consumed for; an ambient accumulator would leak unselected branches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TemplateFoldResult {
     pub(crate) emission: TemplateEmission,
@@ -453,14 +445,18 @@ fn fold_runtime_expression_with_bindings<'a>(
 
     // At least one operand was substituted; attempt constant folding on the
     // updated RPN to see if the expression can be simplified further.
-    match constant_fold(&substituted, fold_context.string_table) {
-        Ok(stack) => {
+    // Folding consumes what it is given, and both non-folding outcomes below rebuild a runtime
+    // node from the pre-fold items, so this caller keeps its own copy.
+    add_ast_counter(AstCounter::ExpressionOperandClones, substituted.len());
+
+    match constant_fold(substituted.clone(), fold_context.string_table) {
+        Ok(mut stack) => {
             if stack.len() == 1
-                && let ExpressionRpnItem::Operand(folded) = &stack[0]
+                && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()
             {
                 add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
                 add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-                return Ok(FoldResolvedExpression::Owned(Box::new(folded.to_owned())));
+                return Ok(FoldResolvedExpression::Owned(Box::new(folded)));
             }
             // Folding did not simplify to a single value; build a new Runtime
             // expression from the substituted RPN.

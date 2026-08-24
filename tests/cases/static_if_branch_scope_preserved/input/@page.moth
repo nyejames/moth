@@ -1,0 +1,29 @@
+-- A statically selected branch keeps its own lexical scope.
+--
+-- Both branches declare the same branch-local name, which is only legal while each branch
+-- owns a separate scope. Removing the runtime test must not hoist the selected branch's
+-- declarations into the parent scope or merge the two branch frames.
+
+enabled #= true
+observed ~= ""
+
+if enabled:
+    branch_local = "then-local"
+    observed = branch_local
+else
+    branch_local = "else-local"
+    observed = branch_local
+;
+
+nested ~= ""
+if enabled:
+    if not enabled:
+        branch_local = "unreachable"
+        nested = branch_local
+    else
+        branch_local = "nested-else"
+        nested = branch_local
+    ;
+;
+
+[:branch_scope observed=[observed] nested=[nested]]

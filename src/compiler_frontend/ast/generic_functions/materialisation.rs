@@ -8,6 +8,7 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
+use crate::compiler_frontend::ast::const_values::store::{ConstValueMetadata, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
 };
@@ -58,7 +59,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, PublicConstTemplate, PublicFoldedValue,
-    convert_expression_to_folded_value,
+    convert_const_value_to_folded_value, convert_expression_to_folded_value,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, ImportedFunctionContract, NamespaceRecord,
@@ -1162,8 +1163,10 @@ impl GenericTemplateArtefact {
         let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
             source_file.clone(),
-            self.visibility
-                .materialise(external_package_registry, string_table)?,
+            Arc::new(
+                self.visibility
+                    .materialise(external_package_registry, string_table)?,
+            ),
         );
         for binding in &self.declarations {
             let local_path = materialise_path(&binding.local_path, string_table);
@@ -1374,7 +1377,7 @@ impl GenericTemplateArtefact {
                 if lookups.declaration_table.get_by_path(&local_path).is_none() {
                     append_materialised_declaration(lookups, declaration.clone())?;
                 }
-                lookups.module_constants.push(declaration);
+                Rc::make_mut(&mut lookups.module_constant_paths).insert(declaration.id.to_owned());
                 Rc::make_mut(&mut lookups.declaration_semantics)
                     .register_materialised_constant(local_path);
                 continue;
@@ -2560,38 +2563,42 @@ impl StableFileVisibility {
         string_table: &mut StringTable,
     ) -> Result<FileVisibility, CompilerError> {
         let mut visibility = FileVisibility::default();
-        let mut materialise_bindings =
-            |bindings: &[StableVisibleDeclaration],
-             target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
-                for binding in bindings {
-                    let name = string_table.intern(&binding.visible_name);
-                    let local_path = materialise_path(&binding.local_path, string_table);
-                    visibility
-                        .visible_declaration_paths
-                        .insert(local_path.clone());
-                    let declaration_target = match &binding.origin {
-                        Some(origin) => SourceDeclarationTarget::Imported {
-                            origin: origin.clone(),
-                            local_path,
-                        },
-                        None => SourceDeclarationTarget::Local(local_path),
-                    };
-                    target.insert(name, declaration_target);
-                }
-            };
-        materialise_bindings(&self.source_names, &mut visibility.visible_source_names);
-        materialise_bindings(
-            &self.type_alias_names,
-            &mut visibility.visible_type_alias_names,
-        );
-        materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
+
+        // The declaration gate is built alongside the name maps and installed once at the end,
+        // so the binding loop can borrow both without splitting the visibility package.
+        let mut visible_declaration_paths = FxHashSet::default();
+        {
+            let mut materialise_bindings =
+                |bindings: &[StableVisibleDeclaration],
+                 target: &mut FxHashMap<StringId, SourceDeclarationTarget>| {
+                    for binding in bindings {
+                        let name = string_table.intern(&binding.visible_name);
+                        let local_path = materialise_path(&binding.local_path, string_table);
+                        visible_declaration_paths.insert(local_path.clone());
+                        let declaration_target = match &binding.origin {
+                            Some(origin) => SourceDeclarationTarget::Imported {
+                                origin: origin.clone(),
+                                local_path,
+                            },
+                            None => SourceDeclarationTarget::Local(local_path),
+                        };
+                        target.insert(name, declaration_target);
+                    }
+                };
+            materialise_bindings(&self.source_names, &mut visibility.visible_source_names);
+            materialise_bindings(
+                &self.type_alias_names,
+                &mut visibility.visible_type_alias_names,
+            );
+            materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
+        }
+
         let error_path =
             crate::compiler_frontend::builtins::error_type::builtin_error_type_path(string_table);
         let error_name =
             string_table.intern(crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME);
-        visibility
-            .visible_declaration_paths
-            .insert(error_path.clone());
+        visible_declaration_paths.insert(error_path.clone());
+        visibility.visible_declaration_paths = Arc::new(visible_declaration_paths);
         visibility
             .visible_source_names
             .insert(error_name, SourceDeclarationTarget::Local(error_path));
@@ -2803,8 +2810,8 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
-    pub(crate) module_constants: Vec<Declaration>,
-    const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
+    pub(crate) const_values: ConstValueStore,
+    default_const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<InternedPath, Vec<Declaration>>,
     pub(crate) resolved_function_signatures_by_path:
@@ -2846,20 +2853,52 @@ pub(crate) struct ModuleMaterialisationPreparationBuilder {
 /// Declaring-module facts captured together before AST finalisation releases its local owners.
 pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) lookups: &'a AstModuleLookups,
+    pub(crate) const_values: &'a ConstValueStore,
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) public_trait_roots: &'a [ResolvedPublicTraitRoot],
-    pub(crate) const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
+    pub(crate) default_const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
     pub(crate) entry_dir: InternedPath,
     pub(crate) string_table: &'a StringTable,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 }
 
+fn declaration_table_without_module_values(
+    declaration_table: &TopLevelDeclarationTable,
+    const_values: &ConstValueStore,
+) -> Result<TopLevelDeclarationTable, CompilerError> {
+    let declarations = declaration_table
+        .iter()
+        .map(|declaration| {
+            let Some(value_id) = const_values.value_for_path(&declaration.id) else {
+                return Ok(declaration.clone());
+            };
+            let metadata = const_values.metadata(value_id).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Module materialisation constant has no store metadata for its declaration placeholder.",
+                )
+            })?;
+            Ok(Declaration {
+                id: declaration.id.clone(),
+                value: Expression::no_value_with_type_id(
+                    metadata.location.clone(),
+                    metadata.diagnostic_type.clone(),
+                    metadata.type_id,
+                    metadata.value_mode.clone(),
+                ),
+            })
+        })
+        .collect::<Result<Vec<_>, CompilerError>>()?;
+    Ok(TopLevelDeclarationTable::new(declarations))
+}
+
 impl ModuleMaterialisationPreparationBuilder {
-    pub(crate) fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
-        Self {
-            context: ModuleMaterialisationPreparation::from_environment(input),
-        }
+    pub(crate) fn from_environment(
+        input: ModuleMaterialisationEnvironmentInput<'_>,
+    ) -> Result<Self, CompilerError> {
+        Ok(Self {
+            context: ModuleMaterialisationPreparation::from_environment(input)?,
+        })
     }
 
     pub(crate) fn context(&self) -> &ModuleMaterialisationPreparation {
@@ -3136,18 +3175,19 @@ impl ModuleMaterialisationPreparation {
     /// leave a generated sidecar with a visibility entry but no declaration fact to resolve.
     fn stable_semantic_closure(&self) -> Result<StableSemanticClosure, CompilerError> {
         let mut constants = Vec::new();
-        for declaration in &self.module_constants {
+        for row in self.const_values.iter_module_constant_views() {
+            let (path, metadata) = (row.path, row.metadata);
             if self
                 .binding_environment
                 .imported_declarations_by_local_path
-                .contains_key(&declaration.id)
+                .contains_key(path)
             {
                 continue;
             }
-            let type_identity = self.stable_type_identity(declaration.value.type_id)?;
-            let value = self.stable_folded_value_at_path(&declaration.id, &declaration.value)?;
+            let type_identity = self.stable_type_identity(metadata.type_id)?;
+            let value = self.stable_folded_value_at_path(path)?;
             constants.push(StableLocalConstant {
-                local_path: stable_path(&declaration.id, &self.string_table),
+                local_path: stable_path(path, &self.string_table),
                 type_identity,
                 value,
             });
@@ -3380,17 +3420,16 @@ impl ModuleMaterialisationPreparation {
         let mut paths = selected_paths
             .iter()
             .filter(|path| {
-                self.module_constants.iter().any(|declaration| {
-                    declaration.id == **path
-                        && !self
-                            .binding_environment
-                            .imported_declarations_by_local_path
-                            .contains_key(*path)
-                }) || (self.resolved_type_aliases_by_path.contains_key(*path)
+                (self.const_values.value_for_path(path).is_some()
                     && !self
                         .binding_environment
                         .imported_declarations_by_local_path
                         .contains_key(*path))
+                    || (self.resolved_type_aliases_by_path.contains_key(*path)
+                        && !self
+                            .binding_environment
+                            .imported_declarations_by_local_path
+                            .contains_key(*path))
             })
             .map(|path| stable_path(path, &self.string_table))
             .collect::<Vec<_>>();
@@ -3445,14 +3484,14 @@ impl ModuleMaterialisationPreparation {
         })
     }
 
-    fn stable_folded_value_at_path(
+    fn stable_folded_value_at_expression_path(
         &self,
         path: &InternedPath,
         expression: &Expression,
     ) -> Result<PublicFoldedValue, CompilerError> {
         if matches!(expression.kind, ExpressionKind::Template(_)) {
             return self
-                .const_templates_by_path
+                .default_const_templates_by_path
                 .get(path)
                 .cloned()
                 .map(PublicFoldedValue::ConstTemplate)
@@ -3464,6 +3503,47 @@ impl ModuleMaterialisationPreparation {
                 });
         }
         self.stable_folded_value(expression)
+    }
+
+    fn stable_folded_value_at_path(
+        &self,
+        path: &InternedPath,
+    ) -> Result<PublicFoldedValue, CompilerError> {
+        let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Retained module constant at {} has no stable folded store value",
+                path.to_string(&self.string_table)
+            ))
+        })?;
+        let metadata = self.const_values.metadata(value_id).ok_or_else(|| {
+            CompilerError::compiler_error("Retained module constant has no store metadata")
+        })?;
+        let nominal_origins = MaterialisationNominalOriginResolver {
+            type_environment: &self.type_environment,
+        };
+        let generic_parameter_origins = FoldedValueGenericParameterResolver;
+        let projection_context = CanonicalTypeProjectionContext::new(
+            &nominal_origins,
+            &generic_parameter_origins,
+            &self.external_package_registry,
+        );
+        convert_const_value_to_folded_value(
+            &self.const_values,
+            value_id,
+            &self.type_environment,
+            &self.string_table,
+            &projection_context,
+        )
+        .map_err(|mut error| {
+            error.msg = format!(
+                "{} (while freezing value at {}:{}:{})",
+                error.msg,
+                metadata.location.scope.to_string(&self.string_table),
+                metadata.location.start_pos.line_number,
+                metadata.location.start_pos.char_column,
+            );
+            error
+        })
     }
 
     /// Retains the declaration-file spellings that make non-core generic bounds visible.
@@ -3557,7 +3637,12 @@ impl ModuleMaterialisationPreparation {
                     value_mode: parameter.value.value_mode.clone(),
                     reactive: parameter.value.reactive_source.is_some(),
                     folded_default: (!matches!(parameter.value.kind, ExpressionKind::NoValue))
-                        .then(|| self.stable_folded_value_at_path(&parameter.id, &parameter.value))
+                        .then(|| {
+                            self.stable_folded_value_at_expression_path(
+                                &parameter.id,
+                                &parameter.value,
+                            )
+                        })
                         .transpose()?,
                     parameter_type: self
                         .materialisation_type_blueprint(parameter.value.type_id, parameter_slots)?,
@@ -3883,15 +3968,13 @@ impl ModuleMaterialisationPreparation {
             {
                 identities.insert(identity.clone());
             }
-            if let Some(constant) = self
-                .module_constants
-                .iter()
-                .find(|declaration| &declaration.id == path)
-            {
-                if let Ok(identity) = self.stable_type_identity(constant.value.type_id) {
+            if let Some(value_id) = self.const_values.value_for_path(path) {
+                if let Some(metadata) = self.const_values.metadata(value_id)
+                    && let Ok(identity) = self.stable_type_identity(metadata.type_id)
+                {
                     identities.insert(identity);
                 }
-                if let Ok(value) = self.stable_folded_value_at_path(&constant.id, &constant.value) {
+                if let Ok(value) = self.stable_folded_value_at_path(path) {
                     value.visit_type_identities(&mut |identity| {
                         identities.insert(identity.clone());
                     });
@@ -4597,7 +4680,10 @@ impl ModuleMaterialisationPreparation {
                             !matches!(declaration.value.kind, ExpressionKind::NoValue)
                         })
                         .map(|declaration| {
-                            self.stable_folded_value_at_path(&declaration.id, &declaration.value)
+                            self.stable_folded_value_at_expression_path(
+                                &declaration.id,
+                                &declaration.value,
+                            )
                         })
                         .transpose()?,
                 })
@@ -4830,29 +4916,35 @@ impl ModuleMaterialisationPreparation {
         ))
     }
 
-    fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
+    fn from_environment(
+        input: ModuleMaterialisationEnvironmentInput<'_>,
+    ) -> Result<Self, CompilerError> {
         let ModuleMaterialisationEnvironmentInput {
             lookups,
+            const_values,
             type_environment,
             public_trait_roots,
-            const_templates_by_path,
+            default_const_templates_by_path,
             entry_dir,
             string_table,
             template_const_loop_iteration_limit,
             capacity_estimate,
         } = input;
 
-        Self {
+        Ok(Self {
             string_table: string_table.clone(),
             entry_dir,
             type_environment: type_environment.clone(),
-            declaration_table: (*lookups.declaration_table).clone(),
+            declaration_table: declaration_table_without_module_values(
+                &lookups.declaration_table,
+                const_values,
+            )?,
             binding_environment: lookups.binding_environment.clone(),
             imported_functions_by_local_path: lookups.imported_functions_by_local_path.clone(),
             imported_struct_definitions: lookups.imported_struct_definitions.clone(),
             imported_choice_definitions: lookups.imported_choice_definitions.clone(),
-            module_constants: lookups.module_constants.clone(),
-            const_templates_by_path,
+            const_values: const_values.clone(),
+            default_const_templates_by_path,
             builtin_struct_ast_nodes: lookups.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: (*lookups.resolved_struct_fields_by_path).clone(),
             resolved_function_signatures_by_path: (*lookups.resolved_function_signatures_by_path)
@@ -4880,7 +4972,7 @@ impl ModuleMaterialisationPreparation {
             path_format_config: lookups.path_format_config.clone(),
             template_const_loop_iteration_limit,
             capacity_estimate,
-        }
+        })
     }
 
     pub(crate) fn build_environment(
@@ -4888,52 +4980,44 @@ impl ModuleMaterialisationPreparation {
         phase_context: &AstPhaseContext<'_>,
         string_table: &mut StringTable,
     ) -> Result<AstModuleEnvironment, CompilerError> {
-        let mut module_constants = self.module_constants.clone();
-        for declaration in &mut module_constants {
-            let ExpressionKind::Template(_) = &declaration.value.kind else {
-                continue;
+        let mut declaration_table = self.declaration_table.clone();
+        for path in self.const_values.module_constant_paths() {
+            let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated materialisation module-constant path has no store value.",
+                )
+            })?;
+            let Some(declaration) = declaration_table.get_mut_by_path(path) else {
+                return Err(CompilerError::compiler_error(
+                    "Generated materialisation store row has no declaration-table entry",
+                ));
             };
-            let projected = self
-                .const_templates_by_path
-                .get(&declaration.id)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated materialisation constant has no stable const-template projection",
-                    )
-                })?;
-            let template = materialize_public_const_template(
-                projected,
-                &phase_context.template_ir_store,
-                string_table,
-                declaration.value.location.clone(),
-            )?;
-            declaration.value.kind = ExpressionKind::Template(Box::new(template));
+            let mut template_builder =
+                |projected: &PublicConstTemplate, metadata: &ConstValueMetadata| {
+                    let template = materialize_public_const_template(
+                        projected,
+                        &phase_context.template_ir_store,
+                        string_table,
+                        metadata.location.clone(),
+                    )?;
+                    Ok(ExpressionKind::Template(Box::new(template)))
+                };
+            declaration.value = self
+                .const_values
+                .expression_for_materialisation(value_id, &mut template_builder)?;
         }
-
-        let module_constants_by_path = module_constants
-            .iter()
-            .map(|declaration| (&declaration.id, declaration))
-            .collect::<FxHashMap<_, _>>();
-        let declarations = self
-            .declaration_table
-            .iter()
-            .map(|declaration| {
-                module_constants_by_path
-                    .get(&declaration.id)
-                    .map(|constant| (*constant).clone())
-                    .unwrap_or_else(|| declaration.clone())
-            })
-            .collect();
 
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
             binding_environment: self.binding_environment.clone(),
             warnings: Vec::new(),
-            declaration_table: Rc::new(TopLevelDeclarationTable::new(declarations)),
+            declaration_table: Rc::new(declaration_table),
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
             imported_struct_definitions: self.imported_struct_definitions.clone(),
             imported_choice_definitions: self.imported_choice_definitions.clone(),
-            module_constants,
+            module_constant_paths: Rc::new(
+                self.const_values.module_constant_paths().cloned().collect(),
+            ),
             rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path.clone()),

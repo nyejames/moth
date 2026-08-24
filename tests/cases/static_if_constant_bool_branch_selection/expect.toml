@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = [
+    "static_if with_else=1 without_else=0 literal_true=4 literal_false=7 negated=8",
+]

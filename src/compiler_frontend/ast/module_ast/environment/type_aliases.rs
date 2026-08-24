@@ -20,6 +20,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::rc::Rc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Resolve all type alias targets in sorted-header order.
@@ -38,11 +39,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
 
             let resolved_target = {
                 let mut type_resolution_context =
@@ -91,7 +88,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut self.type_environment,
             );
 
-            self.resolved_type_aliases_by_path.insert(
+            Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 header.tokens.src_path.to_owned(),
                 ResolvedTypeAnnotation {
                     source_ref: target.clone(),

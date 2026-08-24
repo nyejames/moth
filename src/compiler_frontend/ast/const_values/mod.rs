@@ -17,6 +17,7 @@
 
 pub(crate) mod facts;
 pub(crate) mod resolver;
+pub(crate) mod store;
 
 #[cfg(test)]
 mod tests;

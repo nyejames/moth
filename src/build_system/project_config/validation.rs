@@ -15,9 +15,13 @@ use crate::builder_surface::config_key_registry::{
     ConfigKeyEntry, ConfigKeyOwner, ConfigValueShape, ProjectConfigKeyRegistry,
     config_value_shape_name,
 };
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
-use crate::compiler_frontend::ast::const_values::facts::{AstConstFacts, ConstFactValueKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::facts::{
+    AstConstFactValue, AstConstFacts, ConstFactValueKind,
+};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValueMetadata, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason, InvalidPackageFolderReason,
@@ -57,38 +61,45 @@ pub(super) fn validate_and_apply_config_ast(
     let authored_scope = &compiled_config.authored_scope;
 
     // 1. Extract authored top-level compile-time constants.
-    for declaration in &compiled_config.ast.module_constants {
+    for row in compiled_config
+        .ast
+        .const_values
+        .iter_module_constant_views()
+    {
+        let (path, value_id, metadata) = (row.path, row.id, row.metadata);
         // A module constant's source file is the parent of its symbol path.
         // WHY: the value expression's location scope may be normalized to an imported
         // file when the initializer references an imported constant, so the declaration id
         // is the reliable source-of-authority for which file owns the constant.
-        if declaration.id.parent().as_ref() != Some(authored_scope) {
+        if path.parent().as_ref() != Some(authored_scope) {
             continue;
         }
 
-        let key = declaration
-            .id
-            .name_str(string_table)
-            .unwrap_or("")
-            .to_string();
+        let key = path.name_str(string_table).unwrap_or("").to_string();
         if !seen_config_keys.insert(key.clone()) {
             errors.push(config_diagnostic(
                 Some(string_table.intern(&key)),
                 InvalidConfigReason::DuplicateKey,
-                key_identity_location(declaration, &compiled_config.authored_key_name_locations)
-                    .clone(),
+                compiled_config
+                    .authored_key_name_locations
+                    .get(path)
+                    .cloned()
+                    .unwrap_or_else(|| metadata.location.clone()),
             ));
             continue;
         }
 
-        if let Err(mut decl_errors) = extract_config_declaration(
+        let mut extraction = ConfigDeclarationExtraction {
             config,
-            declaration,
+            const_values: &compiled_config.ast.const_values,
             config_keys,
-            &compiled_config.ast.const_facts,
-            &compiled_config.authored_key_name_locations,
+            const_facts: &compiled_config.ast.const_facts,
+            authored_key_name_locations: &compiled_config.authored_key_name_locations,
             string_table,
-        ) {
+        };
+        if let Err(mut decl_errors) =
+            extract_config_declaration(&mut extraction, path, value_id, metadata)
+        {
             errors.append(&mut decl_errors);
         }
     }
@@ -153,56 +164,72 @@ pub(super) fn validate_and_apply_config_ast(
 ///
 /// WHY: top-level compile-time constants in the authored config file are the only source of
 /// config entries.
+struct ConfigDeclarationExtraction<'a> {
+    config: &'a mut Config,
+    const_values: &'a ConstValueStore,
+    config_keys: &'a ProjectConfigKeyRegistry,
+    const_facts: &'a AstConstFacts,
+    authored_key_name_locations: &'a HashMap<InternedPath, SourceLocation>,
+    string_table: &'a mut StringTable,
+}
+
 fn extract_config_declaration(
-    config: &mut Config,
-    declaration: &Declaration,
-    config_keys: &ProjectConfigKeyRegistry,
-    const_facts: &AstConstFacts,
-    authored_key_name_locations: &HashMap<InternedPath, SourceLocation>,
-    string_table: &mut StringTable,
+    extraction: &mut ConfigDeclarationExtraction<'_>,
+    declaration_path: &InternedPath,
+    value_id: ConstValueId,
+    metadata: &ConstValueMetadata,
 ) -> Result<(), Vec<CompilerDiagnostic>> {
-    let key = declaration
-        .id
-        .name_str(string_table)
+    let key = declaration_path
+        .name_str(extraction.string_table)
         .unwrap_or("")
         .to_string();
-    let location = declaration.value.location.clone();
+    let location = metadata.location.clone();
 
-    if declaration.value.value_mode.is_mutable() {
+    if metadata.value_mode.is_mutable() {
         return Err(vec![config_diagnostic(
-            declaration.id.name(),
+            declaration_path.name(),
             InvalidConfigReason::MutableBindingUnsupported,
             location,
         )]);
     }
 
-    config
+    extraction
+        .config
         .setting_locations
         .insert(key.clone(), location.clone());
 
     // Every config declaration must be a known key before Stage 0 stores it. All unregistered
     // names flow through the ordinary `UnknownKey` reason.
-    let Some(config_key) = config_keys.lookup(&key) else {
-        let key_id = string_table.intern(&key);
+    let Some(config_key) = extraction.config_keys.lookup(&key) else {
+        let key_id = extraction.string_table.intern(&key);
 
         return Err(vec![config_diagnostic(
             Some(key_id),
             InvalidConfigReason::UnknownKey { key: key_id },
-            key_identity_location(declaration, authored_key_name_locations).clone(),
+            extraction
+                .authored_key_name_locations
+                .get(declaration_path)
+                .cloned()
+                .unwrap_or_else(|| metadata.location.clone()),
         )]);
     };
 
     // Look up the const fact for this declaration. Config values must resolve to
     // compile-time constants through the shared const resolver.
-    let fact = const_facts.declarations.get(&declaration.id);
+    let fact = extraction.const_facts.declarations.get(declaration_path);
 
-    let resolved_expression = match fact {
-        Some(fact) if fact.value_kind != ConstFactValueKind::NonConst => &fact.resolved_expression,
+    let resolved_value_id = match fact {
+        Some(fact)
+            if fact.value_kind != ConstFactValueKind::NonConst
+                && matches!(fact.value, AstConstFactValue::Stored(id) if id == value_id) =>
+        {
+            value_id
+        }
         _ => {
             return Err(vec![config_diagnostic(
-                Some(string_table.intern(&key)),
+                Some(extraction.string_table.intern(&key)),
                 InvalidConfigReason::NotCompileTimeConstant,
-                declaration.value.location.clone(),
+                metadata.location.clone(),
             )]);
         }
     };
@@ -210,25 +237,29 @@ fn extract_config_declaration(
     // Enforce the registered value shape before applying or storing the config value.
     // WHY: the registry declares broad shapes so Stage 0 can reject clearly wrong values
     // before they reach backend-specific validation.
-    let validated =
-        match extract_config_value_for_shape(resolved_expression, config_key.shape, string_table) {
-            Ok(value) => value,
-            Err(reason) => {
-                return Err(vec![config_diagnostic(
-                    Some(string_table.intern(&key)),
-                    reason,
-                    declaration.value.location.clone(),
-                )]);
-            }
-        };
+    let validated = match extract_config_value_for_shape(
+        extraction.const_values,
+        resolved_value_id,
+        config_key.shape,
+        extraction.string_table,
+    ) {
+        Ok(value) => value,
+        Err(reason) => {
+            return Err(vec![config_diagnostic(
+                Some(extraction.string_table.intern(&key)),
+                reason,
+                metadata.location.clone(),
+            )]);
+        }
+    };
 
     apply_validated_config_value(
-        config,
+        extraction.config,
         config_key,
         &key,
         validated,
-        &declaration.value.location,
-        string_table,
+        &metadata.location,
+        extraction.string_table,
     )?;
     Ok(())
 }
@@ -257,21 +288,22 @@ struct ValidatedConfigString {
 ///
 /// WHY: centralizes shape enforcement so every registered key is validated through one path.
 fn extract_config_value_for_shape(
-    expression: &Expression,
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
     shape: ConfigValueShape,
     string_table: &mut StringTable,
 ) -> Result<ValidatedConfigValue, InvalidConfigReason> {
     match shape {
-        ConfigValueShape::String => extract_string_value(expression, string_table)
+        ConfigValueShape::String => extract_string_value(const_values, value_id, string_table)
             .map(ValidatedConfigValue::String)
             .ok_or_else(|| invalid_shape_reason(shape, string_table)),
 
-        ConfigValueShape::Int => extract_int_value(expression)
+        ConfigValueShape::Int => extract_int_value(const_values, value_id)
             .map(ValidatedConfigValue::Int)
             .ok_or_else(|| invalid_shape_reason(shape, string_table)),
 
         ConfigValueShape::ClosedStringSet { allowed } => {
-            let value = extract_string_value(expression, string_table)
+            let value = extract_string_value(const_values, value_id, string_table)
                 .ok_or_else(|| invalid_shape_reason(shape, string_table))?;
 
             if allowed.contains(&value.as_str()) {
@@ -281,12 +313,12 @@ fn extract_config_value_for_shape(
             }
         }
 
-        ConfigValueShape::Bool => extract_bool_value(expression)
+        ConfigValueShape::Bool => extract_bool_value(const_values, value_id)
             .map(ValidatedConfigValue::Bool)
             .ok_or_else(|| invalid_shape_reason(shape, string_table)),
 
         ConfigValueShape::StringCollection => {
-            extract_string_collection_value(expression, string_table)
+            extract_string_collection_value(const_values, value_id, string_table)
                 .map(ValidatedConfigValue::StringCollection)
                 .ok_or(InvalidConfigReason::UnsupportedPackageFoldersValue)
         }
@@ -311,12 +343,14 @@ fn invalid_shape_reason(
 ///
 /// WHY: core path/metadata keys and backend string keys must not accept bool/int/float/char
 /// by accidental stringification.
-fn extract_string_value(expression: &Expression, string_table: &StringTable) -> Option<String> {
-    match &expression.kind {
-        ExpressionKind::StringSlice(value) => Some(string_table.resolve(*value).to_string()),
-        ExpressionKind::Coerced { value, .. } => extract_string_value(value, string_table),
-        _ => None,
-    }
+fn extract_string_value(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    string_table: &StringTable,
+) -> Option<String> {
+    const_values
+        .string_value(value_id)
+        .map(|value| string_table.resolve(value).to_string())
 }
 
 /// Format a human-readable expected-value description for a closed string set.
@@ -336,10 +370,10 @@ fn format_closed_string_set_expected(allowed: &[&str]) -> String {
 ///
 /// WHY: numeric config keys must not accept floats, bools, or strings through coercion or
 /// stringification. Config validation consumes the AST-folded scalar directly.
-fn extract_int_value(expression: &Expression) -> Option<i32> {
-    match &expression.kind {
-        ExpressionKind::Int(value) => Some(*value),
-        ExpressionKind::Coerced { value, .. } => extract_int_value(value),
+fn extract_int_value(const_values: &ConstValueStore, value_id: ConstValueId) -> Option<i32> {
+    match const_values.payload(value_id)? {
+        ConstValuePayload::Int(value) => Some(*value),
+        ConstValuePayload::Coerced(value) => extract_int_value(const_values, *value),
         _ => None,
     }
 }
@@ -347,10 +381,10 @@ fn extract_int_value(expression: &Expression) -> Option<i32> {
 /// Extract a boolean value.
 ///
 /// WHY: backend bool keys require actual boolean literals, not string representations.
-fn extract_bool_value(expression: &Expression) -> Option<bool> {
-    match &expression.kind {
-        ExpressionKind::Bool(value) => Some(*value),
-        ExpressionKind::Coerced { value, .. } => extract_bool_value(value),
+fn extract_bool_value(const_values: &ConstValueStore, value_id: ConstValueId) -> Option<bool> {
+    match const_values.payload(value_id)? {
+        ConstValuePayload::Bool(value) => Some(*value),
+        ConstValuePayload::Coerced(value) => extract_bool_value(const_values, *value),
         _ => None,
     }
 }
@@ -360,16 +394,17 @@ fn extract_bool_value(expression: &Expression) -> Option<bool> {
 /// WHY: `package_folders` accepts either a single string literal or a `{ ... }` collection
 /// of string literals. Each item must be a string-like value, not a bool/int/float/char.
 fn extract_string_collection_value(
-    expression: &Expression,
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
     string_table: &StringTable,
 ) -> Option<Vec<ValidatedConfigString>> {
-    match &expression.kind {
-        ExpressionKind::Collection(items) => {
+    match const_values.payload(value_id)? {
+        ConstValuePayload::Collection(items) => {
             let mut values = Vec::with_capacity(items.len());
             for item in items {
                 values.push(ValidatedConfigString {
-                    value: extract_string_value(item, string_table)?,
-                    location: item.location.clone(),
+                    value: extract_string_value(const_values, *item, string_table)?,
+                    location: const_values.metadata(*item)?.location.clone(),
                 });
             }
             Some(values)
@@ -377,8 +412,8 @@ fn extract_string_collection_value(
         _ => {
             // Single string is accepted as a collection of one.
             Some(vec![ValidatedConfigString {
-                value: extract_string_value(expression, string_table)?,
-                location: expression.location.clone(),
+                value: extract_string_value(const_values, value_id, string_table)?,
+                location: const_values.metadata(value_id)?.location.clone(),
             }])
         }
     }
@@ -708,23 +743,6 @@ fn config_diagnostic(
     location: SourceLocation,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_config_reason(key, reason, location)
-}
-
-// -------------------------
-//  Key-Identity Location Lookup
-// -------------------------
-
-/// Resolve the source location for a config key-identity diagnostic.
-///
-/// Authored name spans are keyed by `Declaration::id`. The declaration value remains a defensive
-/// fallback for declarations without a preserved header span.
-fn key_identity_location<'a>(
-    declaration: &'a Declaration,
-    authored_key_name_locations: &'a HashMap<InternedPath, SourceLocation>,
-) -> &'a SourceLocation {
-    authored_key_name_locations
-        .get(&declaration.id)
-        .unwrap_or(&declaration.value.location)
 }
 
 // -------------------------

@@ -573,46 +573,6 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
 }
 
 #[test]
-fn rejects_cyclic_module_constant_dependencies() {
-    let mut string_table = StringTable::new();
-    let const_a = super::symbol("const_a", &mut string_table);
-    let const_b = super::symbol("const_b", &mut string_table);
-    let location = test_source_location(4);
-    let mut builder = setup_builder(&mut string_table);
-
-    builder.test_register_module_constant(
-        const_a.clone(),
-        inferred_type_reference_expr(
-            const_b.clone(),
-            builtin_type_ids::INT,
-            location.clone(),
-            ValueMode::ImmutableReference,
-        ),
-    );
-    builder.test_register_module_constant(
-        const_b.clone(),
-        inferred_type_reference_expr(
-            const_a.clone(),
-            builtin_type_ids::INT,
-            location.clone(),
-            ValueMode::ImmutableReference,
-        ),
-    );
-
-    let err = builder
-        .lower_expression(&inferred_type_reference_expr(
-            const_a,
-            builtin_type_ids::INT,
-            location.clone(),
-            ValueMode::ImmutableReference,
-        ))
-        .expect_err("cyclic module constants should fail during HIR lowering");
-
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
-    assert!(err.msg.contains("Cyclic module constant dependency"));
-}
-
-#[test]
 fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     let mut string_table = StringTable::new();
     let x = super::symbol("x", &mut string_table);

@@ -1,0 +1,3 @@
+@requirements Badge, Label
+
+[:trait_requirement_alias_type_success [Badge(1).describe(Label("ok"))]]

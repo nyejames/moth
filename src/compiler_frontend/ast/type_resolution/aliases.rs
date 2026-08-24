@@ -33,7 +33,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::resolve_type::{
     resolve_diagnostic_type_to_type_id_checked, resolve_parsed_type_annotation, resolve_type,
@@ -224,16 +224,17 @@ fn alias_scope_context(
         .module_symbols
         .canonical_source_by_symbol_path
         .get(alias_path)?;
-    let visibility = scope_context
-        .shared
-        .lookups
-        .binding_environment
-        .visibility_for(source_file)
-        .ok()?
-        .clone();
+    let visibility = Arc::clone(
+        scope_context
+            .shared
+            .lookups
+            .binding_environment
+            .visibility_for(source_file)
+            .ok()?,
+    );
     let mut alias_scope = scope_context
         .clone()
-        .with_file_visibility(Rc::new(visibility))
+        .with_file_visibility(visibility)
         .with_source_file_scope(source_file.clone());
 
     // Type aliases are top-level metadata. Re-resolving an alias target must not see

@@ -1,0 +1,5 @@
+-- Compile-time character constant referenced in the page body.
+
+initial #Char = 'a'
+
+[:[initial]]

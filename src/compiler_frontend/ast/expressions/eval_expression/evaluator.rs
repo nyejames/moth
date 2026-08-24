@@ -16,9 +16,12 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -89,13 +92,13 @@ pub fn evaluate_expression(
 
     validate_expression_result_type(
         expected_type,
-        resolved_type.type_id,
+        resolved_type,
         &location,
         type_interner.environment_mut_for_derived_types(),
     )?;
 
     if matches!(expected_type, ExpectedType::Infer) {
-        *expected_type = ExpectedType::Known(resolved_type.type_id);
+        *expected_type = ExpectedType::Known(resolved_type);
     }
 
     // Runtime RPN needs an owned value mode for the final expression node.
@@ -103,19 +106,20 @@ pub fn evaluate_expression(
     eval_log!("Attempting to Fold: ", Pretty rpn_items);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
 
-    let stack = constant_fold(&rpn_items, string_table)?;
+    let stack = constant_fold(rpn_items, string_table)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
     eval_log!("Stack after folding: ", Pretty stack);
 
-    // Fully folded to a single compile-time value.
+    // Fully folded to a single compile-time value: hand the folded operand back by move.
     if stack.len() == 1 {
-        let ExpressionRpnItem::Operand(expression) = &stack[0] else {
+        let mut stack = stack;
+        let Some(ExpressionRpnItem::Operand(expression)) = stack.pop() else {
             return Err(CompilerError::compiler_error(
                 "Constant folding produced a non-operand item as the single result.",
             )
             .into());
         };
-        return Ok(expression.clone());
+        return Ok(expression);
     }
 
     // Folding consumed every node but produced no result (e.g. empty input).
@@ -128,10 +132,15 @@ pub fn evaluate_expression(
     }
 
     // Partial fold: assemble the reduced stack into runtime RPN.
+    // The only DataType spelling a successful expression evaluation builds: the partial-fold
+    // result needs one for its runtime node. Fully folded expressions never reach here.
+    increment_ast_counter(AstCounter::DiagnosticDataTypeMaterialisations);
+    let diagnostic_type = diagnostic_type_spelling(resolved_type, type_interner.environment());
+
     Ok(runtime_expression_from_items(
         stack,
-        resolved_type.diagnostic_type,
-        resolved_type.type_id,
+        diagnostic_type,
+        resolved_type,
         value_mode,
         location.clone(),
     )?)

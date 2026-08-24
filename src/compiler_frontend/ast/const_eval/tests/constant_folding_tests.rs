@@ -24,7 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 
 fn test_template_ir_store() -> Rc<RefCell<TemplateIrStore>> {
@@ -369,7 +369,7 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
         operator_item(Operator::Negate),
     ];
 
-    let error = constant_fold(&nodes, &mut string_table)
+    let error = constant_fold(nodes, &mut string_table)
         .expect_err("unary negation of i32::MIN should fail during fold");
     assert_compile_time_error(
         &error,
@@ -452,7 +452,7 @@ fn constant_fold_reports_static_failure_inside_runtime_expression() {
         operator_item(Operator::Add),
     ];
 
-    let error = constant_fold(&nodes, &mut string_table)
+    let error = constant_fold(nodes, &mut string_table)
         .expect_err("divide by zero inside a runtime expression should still be diagnosed");
     assert_compile_time_error(
         &error,
@@ -482,7 +482,7 @@ fn constant_fold_partially_folds_runtime_expression() {
         operator_item(Operator::Multiply),
     ];
 
-    let folded = constant_fold(&nodes, &mut string_table).expect("partial folding should succeed");
+    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -659,7 +659,7 @@ fn constant_fold_folds_comparison_then_boolean_chain() {
         operator_item(Operator::And),
     ];
 
-    let folded = constant_fold(&nodes, &mut string_table).expect("folding should succeed");
+    let folded = constant_fold(nodes, &mut string_table).expect("folding should succeed");
     assert_eq!(folded.len(), 1);
     assert!(matches!(
         folded[0],
@@ -682,7 +682,7 @@ fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
         operator_item(Operator::Not),
     ];
 
-    let folded = constant_fold(&nodes, &mut string_table).expect("folding should not error");
+    let folded = constant_fold(nodes, &mut string_table).expect("folding should not error");
     assert_eq!(folded.len(), 2);
     assert!(matches!(
         folded[0],
@@ -720,7 +720,7 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
     ];
 
     let folded =
-        constant_fold(&nodes, &mut string_table).expect("runtime-dependent folding should succeed");
+        constant_fold(nodes, &mut string_table).expect("runtime-dependent folding should succeed");
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -744,6 +744,152 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
             ..
         }
     ));
+}
+
+/// Build a source location that is distinguishable from every other one in a test.
+fn marked_location(line: i32, string_table: &mut StringTable) -> SourceLocation {
+    SourceLocation::new(
+        InternedPath::from_single_str("provenance_probe", string_table),
+        CharPosition {
+            line_number: line,
+            char_column: line * 10,
+        },
+        CharPosition {
+            line_number: line,
+            char_column: line * 10 + 4,
+        },
+    )
+}
+
+#[test]
+fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
+    // Folding consumes its input, so a moved-back operand could silently become a
+    // reconstruction. Distinct locations and value modes on every input make that visible:
+    // a rebuilt operand would carry defaults, not the values asserted below.
+    let mut string_table = StringTable::new();
+    let flag_name = InternedPath::from_single_str("flag", &mut string_table);
+    let flag_location = marked_location(7, &mut string_table);
+    let literal_location = marked_location(11, &mut string_table);
+    let operator_location = marked_location(23, &mut string_table);
+
+    let nodes = vec![
+        rvalue_item(Expression::reference(
+            flag_name.clone(),
+            DataType::Bool,
+            flag_location.clone(),
+            ValueMode::MutableReference,
+        )),
+        rvalue_item(Expression::bool(
+            true,
+            literal_location.clone(),
+            ValueMode::ImmutableOwned,
+        )),
+        ExpressionRpnItem::Operator {
+            operator: Operator::And,
+            location: operator_location.clone(),
+        },
+    ];
+
+    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
+
+    assert_eq!(folded.len(), 3);
+
+    let ExpressionRpnItem::Operand(runtime_operand) = &folded[0] else {
+        panic!("the runtime reference should stay an operand");
+    };
+    assert_eq!(runtime_operand.location, flag_location);
+    assert_eq!(runtime_operand.value_mode, ValueMode::MutableReference);
+
+    let ExpressionRpnItem::Operand(literal_operand) = &folded[1] else {
+        panic!("the literal should stay an operand");
+    };
+    assert_eq!(literal_operand.location, literal_location);
+    assert_eq!(literal_operand.value_mode, ValueMode::ImmutableOwned);
+
+    let ExpressionRpnItem::Operator { operator, location } = &folded[2] else {
+        panic!("the unfoldable operator should be preserved");
+    };
+    assert_eq!(*operator, Operator::And);
+    assert_eq!(*location, operator_location);
+}
+
+#[test]
+fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
+    // A fold that reduces only part of the expression must move the untouched operands back in
+    // their original order while the folded operand takes its own provenance from the fold.
+    let mut string_table = StringTable::new();
+    let counter_name = InternedPath::from_single_str("counter", &mut string_table);
+    let counter_location = marked_location(3, &mut string_table);
+    let left_literal_location = marked_location(5, &mut string_table);
+
+    let nodes = vec![
+        rvalue_item(Expression::reference(
+            counter_name,
+            DataType::Int,
+            counter_location.clone(),
+            ValueMode::ImmutableReference,
+        )),
+        rvalue_item(Expression::int(
+            2,
+            left_literal_location.clone(),
+            ValueMode::ImmutableOwned,
+        )),
+        rvalue_item(Expression::int(
+            3,
+            marked_location(6, &mut string_table),
+            ValueMode::ImmutableOwned,
+        )),
+        operator_item(Operator::Add),
+        operator_item(Operator::Multiply),
+    ];
+
+    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
+
+    assert_eq!(folded.len(), 3);
+
+    let ExpressionRpnItem::Operand(moved) = &folded[0] else {
+        panic!("the runtime reference should stay an operand");
+    };
+    assert_eq!(moved.location, counter_location);
+
+    let ExpressionRpnItem::Operand(computed) = &folded[1] else {
+        panic!("the constant half should fold to one operand");
+    };
+    assert!(matches!(computed.kind, ExpressionKind::Int(5)));
+    // The folded operand inherits the left operand's anchor, so the reduction stays
+    // attributable to authored source rather than to a synthesized position.
+    assert_eq!(computed.location, left_literal_location);
+}
+
+#[test]
+fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
+    // The single-result path hands the folded operand back by move. Its anchor must still be
+    // the authored one, not a default produced by rebuilding the value.
+    let mut string_table = StringTable::new();
+    let left_location = marked_location(13, &mut string_table);
+
+    let nodes = vec![
+        rvalue_item(Expression::int(
+            20,
+            left_location.clone(),
+            ValueMode::ImmutableOwned,
+        )),
+        rvalue_item(Expression::int(
+            22,
+            marked_location(14, &mut string_table),
+            ValueMode::ImmutableOwned,
+        )),
+        operator_item(Operator::Add),
+    ];
+
+    let folded = constant_fold(nodes, &mut string_table).expect("folding should succeed");
+
+    assert_eq!(folded.len(), 1);
+    let ExpressionRpnItem::Operand(result) = &folded[0] else {
+        panic!("a fully folded expression should be one operand");
+    };
+    assert!(matches!(result.kind, ExpressionKind::Int(42)));
+    assert_eq!(result.location, left_location);
 }
 
 #[test]

@@ -16,7 +16,6 @@ use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -27,8 +26,6 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::FxHashMap;
-
 use rustc_hash::FxHashSet;
 use std::rc::Rc;
 
@@ -138,8 +135,6 @@ pub(crate) struct AstPublicInterfaceProjectionInput {
     /// The validated trait evidence environment, retained for direct reusable-evidence
     /// projection.
     pub(crate) trait_evidence_environment: Option<Rc<TraitEvidenceEnvironment>>,
-    /// Provider-folded const-template values keyed by their exact defining declaration path.
-    pub(crate) const_templates_by_name: FxHashMap<String, PublicConstTemplate>,
 }
 
 /// Build the transient resolved public trait roots from completed AST environment facts.

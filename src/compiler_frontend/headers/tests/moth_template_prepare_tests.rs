@@ -9,7 +9,6 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -452,10 +451,10 @@ impl MothTemplateScopeFixture {
             .unwrap_or(moth_template_relative_path);
         let content_suffix = format!("{logical_moth_template_path}/content");
         assert!(
-            ast.module_constants.iter().any(|constant| {
-                constant.id.name_str(string_table) == Some("content")
-                    && constant
-                        .id
+            ast.const_values.iter_module_constant_views().any(|row| {
+                row.path.name_str(string_table) == Some("content")
+                    && row
+                        .path
                         .to_portable_string(string_table)
                         .ends_with(&content_suffix)
             }),
@@ -737,20 +736,18 @@ fn initializer_kinds(output: &FileFrontendPrepareOutput) -> Vec<&TokenKind> {
 }
 
 fn folded_content_value(ast: &Ast, string_table: &StringTable) -> String {
-    let content = ast
-        .module_constants
-        .iter()
-        .find(|constant| constant.id.name_str(string_table) == Some("content"))
-        .expect("Moth template content constant should exist");
+    let content_id = ast
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(string_table) == Some("content"))
+        .expect("Moth template content constant should exist")
+        .id;
+    let value = ast
+        .const_values
+        .string_value(content_id)
+        .expect("Moth template content should fold to a string slice");
 
-    let ExpressionKind::StringSlice(value) = &content.value.kind else {
-        panic!(
-            "Moth template content should fold to a string slice, got {:?}",
-            content.value.kind
-        );
-    };
-
-    string_table.resolve(*value).to_owned()
+    string_table.resolve(value).to_owned()
 }
 
 fn folded_content_contains(ast: &Ast, string_table: &StringTable, expected: &str) {
@@ -762,20 +759,18 @@ fn folded_content_contains(ast: &Ast, string_table: &StringTable, expected: &str
 }
 
 fn folded_constant_value(ast: &Ast, string_table: &StringTable, name: &str) -> String {
-    let constant = ast
-        .module_constants
-        .iter()
-        .find(|constant| constant.id.name_str(string_table) == Some(name))
-        .unwrap_or_else(|| panic!("module constant {name} should exist"));
+    let value_id = ast
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(string_table) == Some(name))
+        .unwrap_or_else(|| panic!("module constant {name} should exist"))
+        .id;
+    let value = ast
+        .const_values
+        .string_value(value_id)
+        .unwrap_or_else(|| panic!("module constant {name} should fold to a string slice"));
 
-    let ExpressionKind::StringSlice(value) = &constant.value.kind else {
-        panic!(
-            "module constant {name} should fold to a string slice, got {:?}",
-            constant.value.kind
-        );
-    };
-
-    string_table.resolve(*value).to_owned()
+    string_table.resolve(value).to_owned()
 }
 
 #[test]

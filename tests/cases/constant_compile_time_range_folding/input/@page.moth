@@ -1,0 +1,19 @@
+-- A `#` range constant folds and survives to HIR.
+--
+-- Range values outside a loop header are a DEFERRED surface (see the progress
+-- matrix). `start to end` is a loop-header form; a bound `Range` is inert - it is
+-- not a collection-loop source, exposes no members, and is not renderable in a
+-- template head. So this case pins only that the folded value reaches HIR intact,
+-- which is the one thing the constant pipeline is responsible for today.
+--
+-- Do not extend this case with range operations. Add coverage for those when the
+-- range-value surface is designed, not before.
+
+span #= 1 to 10
+
+copied || -> Int:
+    local = span
+    return 1
+;
+
+[:[copied()]]

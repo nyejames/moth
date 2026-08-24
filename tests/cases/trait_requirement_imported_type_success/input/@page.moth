@@ -1,0 +1,4 @@
+@requirements Badge
+@shapes Label
+
+[:trait_requirement_imported_type_success [Badge(1).describe(Label("ok"))]]

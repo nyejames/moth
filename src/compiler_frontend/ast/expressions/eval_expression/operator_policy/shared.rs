@@ -5,7 +5,6 @@
 //! WHY: operator categories share narrow rules (mixed numeric detection and fallible-carrier
 //!      rejection) that are easier to review in one place.
 
-use super::super::result_type::ExpressionResultType;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
@@ -13,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleOperandReason, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 
 /// Rejects binary operators applied to unwrapped fallible `Error!` carriers.
 ///
@@ -21,19 +21,17 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 /// WHY: unwrapped fallible operators are deferred to later pipeline stages; AST typing
 ///      must emit a clear diagnostic here instead of allowing an invalid type through.
 pub(super) fn reject_fallible_operands(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     op: &Operator,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
 ) -> Result<(), ExpressionTypingError> {
-    if type_environment.is_fallible_carrier(lhs.type_id)
-        || type_environment.is_fallible_carrier(rhs.type_id)
-    {
-        let operand_type_id = if type_environment.is_fallible_carrier(lhs.type_id) {
-            lhs.type_id
+    if type_environment.is_fallible_carrier(lhs) || type_environment.is_fallible_carrier(rhs) {
+        let operand_type_id = if type_environment.is_fallible_carrier(lhs) {
+            lhs
         } else {
-            rhs.type_id
+            rhs
         };
 
         let category = match op {
@@ -79,12 +77,11 @@ pub(super) fn reject_fallible_operands(
 /// WHY: mixed `Int`/`Float` promotion is intentionally restricted so broader
 ///      "compatible" types cannot quietly weaken arithmetic or comparison rules.
 pub(super) fn is_mixed_int_float(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     type_environment: &TypeEnvironment,
 ) -> bool {
     let builtins = type_environment.builtins();
 
-    (lhs.type_id == builtins.int && rhs.type_id == builtins.float)
-        || (lhs.type_id == builtins.float && rhs.type_id == builtins.int)
+    (lhs == builtins.int && rhs == builtins.float) || (lhs == builtins.float && rhs == builtins.int)
 }

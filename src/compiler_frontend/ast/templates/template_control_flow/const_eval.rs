@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -97,8 +98,8 @@ fn inline_source_consts_for_const_required_condition(
     // coercion to survive so validation and folding still see an option scrutinee.
     let substituted = substitute_source_consts_in_expression(expression, context, string_table);
 
-    if let ExpressionKind::Runtime(rpn) = &substituted.kind {
-        return fold_substituted_runtime_condition(&substituted, rpn, context, string_table);
+    if matches!(substituted.kind, ExpressionKind::Runtime(_)) {
+        return fold_substituted_runtime_condition(substituted, context, string_table);
     }
 
     substituted
@@ -164,25 +165,33 @@ fn substitute_source_consts_in_rpn_item(
 }
 
 fn fold_substituted_runtime_condition(
-    expression: &Expression,
-    rpn: &ExpressionRpn,
+    expression: Expression,
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Expression {
-    match constant_fold(&rpn.items, string_table) {
-        Ok(stack) => {
+    let ExpressionKind::Runtime(rpn) = &expression.kind else {
+        return expression;
+    };
+
+    // Folding consumes what it is given, and the unfolded condition is the answer whenever it
+    // does not reduce to one compile-time value - so the items are copied and the condition
+    // itself is returned by move.
+    add_ast_counter(AstCounter::ExpressionOperandClones, rpn.items.len());
+
+    match constant_fold(rpn.items.clone(), string_table) {
+        Ok(mut stack) => {
             if stack.len() == 1
-                && let ExpressionRpnItem::Operand(folded) = &stack[0]
-                && expression_is_compile_time_constant_from_effective_tir(folded, context)
+                && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()
+                && expression_is_compile_time_constant_from_effective_tir(&folded, context)
                     .unwrap_or(false)
             {
-                return folded.clone();
+                return folded;
             }
 
-            expression.clone()
+            expression
         }
 
-        Err(_) => expression.clone(),
+        Err(_) => expression,
     }
 }
 
@@ -192,7 +201,7 @@ fn source_const_value_for_path<'a>(
 ) -> Option<&'a Expression> {
     let declaration = context
         .top_level_declarations
-        .get_visible_resolved_by_path(path, context.visible_declaration_ids.as_ref())?;
+        .get_visible_resolved_by_path(path, context.visible_declaration_ids.as_deref())?;
 
     let decidable = source_const_value_is_condition_decidable(&declaration.value, context);
 

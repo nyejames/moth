@@ -30,6 +30,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use super::external_imports::ExternalImportInput;
 use super::source_dependencies::SourceDependencyInput;
@@ -220,7 +221,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if let Some(declared_paths) = self.module_symbols.declared_paths_by_file.get(source_file) {
             for path in declared_paths {
                 file_visibility
-                    .visible_declaration_paths
+                    .visible_declaration_paths_mut()
                     .insert(path.clone());
 
                 let Some(name) = path.name() else {
@@ -283,7 +284,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // 2. Register builtins.
         for path in &self.module_symbols.builtin_visible_symbol_paths {
             file_visibility
-                .visible_declaration_paths
+                .visible_declaration_paths_mut()
                 .insert(path.clone());
             if let Some(name) = path.name() {
                 registry.register(
@@ -446,7 +447,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.environment
             .file_visibility_by_source
-            .insert(source_file.clone(), file_visibility);
+            .insert(source_file.clone(), Arc::new(file_visibility));
         Ok(())
     }
 
@@ -554,7 +555,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         registry.register(local_name, binding, Some(source_location.clone()))?;
         file_visibility
-            .visible_declaration_paths
+            .visible_declaration_paths_mut()
             .insert(local_path.clone());
 
         let target = SourceDeclarationTarget::Imported {
@@ -1010,7 +1011,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 Some(location),
             )?;
             file_visibility
-                .visible_declaration_paths
+                .visible_declaration_paths_mut()
                 .insert(path.clone());
             file_visibility
                 .visible_source_names
@@ -1053,7 +1054,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         file_visibility
-            .visible_declaration_paths
+            .visible_declaration_paths_mut()
             .remove(&content_path);
         registry.remove_same_file_declaration(content_name, &content_path);
         if file_visibility

@@ -6,15 +6,12 @@
 //! trait subsystem owns the resulting compile-time metadata.
 
 use super::builder::AstModuleEnvironmentBuilder;
-use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, SignatureTypeFallbackPolicy,
     function_signature_from_syntax_with_unresolved_types,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::ast::type_resolution::{
-    GenericParameterScopeBuildInput, build_generic_parameter_scope, resolve_function_signature,
-};
+use crate::compiler_frontend::ast::type_resolution::resolve_function_signature;
 use crate::compiler_frontend::builtins::casts::evidence::{
     builtin_evidence_rows, builtin_evidence_trait_kind_for_row, type_id_for_builtin_target,
 };
@@ -36,6 +33,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -53,7 +51,6 @@ use crate::compiler_frontend::traits::syntax::{
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 struct TraitRequirementResolutionInput<'a> {
@@ -308,11 +305,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<ResolvedTraitDefinition, CompilerMessages> {
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = self.header_visibility(header, string_table)?;
 
         let this_name = trait_this_name(string_table);
         let this_parameters =
@@ -336,18 +329,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .type_environment
             .intern_generic_parameter(this_canonical_id, this_name);
 
-        let generic_parameter_scope =
-            build_generic_parameter_scope(GenericParameterScopeBuildInput {
-                generic_parameters: &this_parameters,
-                canonical_by_local: Some(&registered_this.canonical_by_local),
-                visible_source_bindings: &visibility.visible_source_names,
-                visible_type_aliases: &visibility.visible_type_alias_names,
-                visible_external_symbols: &visibility.visible_external_symbols,
-                declaration_table: self.declaration_table.as_ref(),
-                generic_declarations_by_path: &self.module_symbols.generic_declarations_by_path,
-                string_table,
-            })
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        let generic_parameter_scope = self.generic_parameter_scope(
+            &this_parameters,
+            Some(&registered_this.canonical_by_local),
+            &visibility,
+            string_table,
+        )?;
 
         let mut requirements = Vec::with_capacity(declaration.requirements.len());
         let mut requirement_locations_by_name = FxHashMap::default();
@@ -423,11 +410,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_parameter_scope,
         } = input;
 
-        let visibility = self
-            .binding_environment
-            .visibility_for(&header.source_file)
-            .map_err(|error| self.error_messages(error, string_table))?
-            .clone();
+        let visibility = self.header_visibility(header, string_table)?;
 
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
@@ -435,6 +418,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             header,
             declaration,
             &signature_syntax,
+            &visibility,
             string_table,
         )?;
 
@@ -518,31 +502,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         declaration: &TraitDeclarationSyntax,
         signature_syntax: &FunctionSignatureSyntax,
+        visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
     ) -> Result<FunctionSignature, CompilerMessages> {
-        let source_file_scope = header.canonical_source_file(string_table);
-        let signature_context = ScopeContext::new(
-            ContextKind::ConstantHeader,
-            header.tokens.src_path.to_owned(),
-            Rc::clone(&self.declaration_table),
-            Arc::clone(&self.context.external_package_registry),
-            vec![],
-            0,
-            self.context.template_ir_store.clone(),
-        )
-        .with_style_directives(self.context.style_directives)
-        .with_build_profile(self.context.build_profile)
-        .with_project_path_resolver(self.context.project_path_resolver.clone())
-        .with_path_format_config(self.context.path_format_config.clone())
-        .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
-        .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
-        .with_resolved_type_aliases(Rc::new(self.resolved_type_aliases_by_path.clone()))
-        .with_generic_declarations(Rc::new(
-            self.module_symbols.generic_declarations_by_path.clone(),
-        ))
-        .with_resolved_struct_fields_by_path(Rc::new(self.resolved_struct_fields_by_path.clone()))
-        .with_nominal_type_ids_by_path(Rc::new(self.nominal_type_ids_by_path.clone()))
-        .with_source_file_scope(source_file_scope);
+        // This parse is deliberately the permissive half of a two-step resolution: the caller
+        // re-resolves every parameter and return through `resolve_function_signature` with the
+        // generic parameter scope and trait environment this scope does not carry, overwriting
+        // both `diagnostic_type` and `type_id`. It still takes the caller's file visibility so
+        // the two steps disagree about nothing they can both see.
+        let signature_context = self
+            .environment_header_scope(header, string_table)
+            .with_file_visibility(Arc::clone(visibility));
 
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
@@ -584,15 +554,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let visibility = self.header_visibility(header, string_table)?;
 
             for trait_ref in &conformance.traits {
                 self.resolve_visible_trait_reference(
                     trait_ref,
-                    visibility,
+                    &visibility,
                     trait_environment,
                     string_table,
                 )?;
@@ -616,11 +583,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let relation_source_file = header.source_file.clone();
-            let visibility = self
-                .binding_environment
-                .visibility_for(&header.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone();
+            let visibility = self.header_visibility(header, string_table)?;
 
             let subject_id = self.resolve_trait_incompatibility_reference(
                 &incompatibility.subject,
@@ -694,7 +657,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         subject: &TraitReferenceSyntax,
         trait_ref: &TraitReferenceSyntax,
         relation_source_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-        visibility: &crate::compiler_frontend::headers::binding_environment::FileVisibility,
+        visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<TraitId, CompilerMessages> {

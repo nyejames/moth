@@ -113,11 +113,10 @@ pub(super) fn append_template_result_to_buffer(
         TemplateEmission::Output(output) => {
             if output_state.projection_pieces.is_some() {
                 output_state.append_pieces(projection_pieces.as_deref())?;
-            } else {
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
             }
+            output_state
+                .output_buffer
+                .push_str(fold_context.string_table.resolve(output));
             output_state.emitted_output = true;
             Ok(None)
         }
@@ -125,11 +124,10 @@ pub(super) fn append_template_result_to_buffer(
             if let Some(output) = output {
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection_pieces.as_deref())?;
-                } else {
-                    output_state
-                        .output_buffer
-                        .push_str(fold_context.string_table.resolve(output));
                 }
+                output_state
+                    .output_buffer
+                    .push_str(fold_context.string_table.resolve(output));
                 output_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Break))
@@ -138,11 +136,10 @@ pub(super) fn append_template_result_to_buffer(
             if let Some(output) = output {
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection_pieces.as_deref())?;
-                } else {
-                    output_state
-                        .output_buffer
-                        .push_str(fold_context.string_table.resolve(output));
                 }
+                output_state
+                    .output_buffer
+                    .push_str(fold_context.string_table.resolve(output));
                 output_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Continue))
@@ -378,11 +375,10 @@ fn fold_tir_wrapper_with_input(
 
         if wrapper_fold_input.projection_enabled {
             output_state.append_pieces(child_projection)?;
-        } else {
-            output_state
-                .output_buffer
-                .push_str(fold_context.string_table.resolve(child_output));
         }
+        output_state
+            .output_buffer
+            .push_str(fold_context.string_table.resolve(child_output));
         output_state.emitted_output = true;
     } else {
         // Slot-bearing wrappers inject at the loose-fill target first. Named-
@@ -408,11 +404,10 @@ fn fold_tir_wrapper_with_input(
         if fill_target_key.is_none() {
             if wrapper_fold_input.projection_enabled {
                 output_state.append_pieces(child_projection)?;
-            } else {
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(child_output));
             }
+            output_state
+                .output_buffer
+                .push_str(fold_context.string_table.resolve(child_output));
             output_state.emitted_output = true;
         }
     }
@@ -496,11 +491,10 @@ pub(super) fn fold_tir_aggregate_wrapper(
 
     if output_state.projection_pieces.is_some() {
         output_state.append_pieces(wrapper_projection.as_deref())?;
-    } else {
-        output_state
-            .output_buffer
-            .push_str(fold_context.string_table.resolve(wrapper_id));
     }
+    output_state
+        .output_buffer
+        .push_str(fold_context.string_table.resolve(wrapper_id));
     output_state.emitted_output = true;
 
     Ok(None)

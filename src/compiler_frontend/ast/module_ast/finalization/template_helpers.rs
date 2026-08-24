@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateHelperKind, TemplateIrStore, TemplatePreparation, TemplatePreparationMode,
-    TemplatePreparationOutcome, TemplateTirPhase, TirFoldCache, TirView, fold_prepared_template,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
     prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -127,6 +127,5 @@ pub(super) fn make_fold_context<'a>(
         string_table,
         template_const_loop_iteration_limit,
         bindings: Vec::new(),
-        fold_cache: TirFoldCache::new(),
     }
 }

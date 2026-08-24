@@ -14,7 +14,6 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -239,9 +238,9 @@ fn extract_content_string(
     string_table: &StringTable,
 ) -> Result<String, CompilerMessages> {
     let Some(content) = ast
-        .module_constants
-        .iter()
-        .find(|constant| constant.id.name_str(string_table) == Some("content"))
+        .const_values
+        .iter_module_constant_views()
+        .find(|row| row.path.name_str(string_table) == Some("content"))
     else {
         return Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error("Moth template AST did not produce a content constant."),
@@ -249,14 +248,14 @@ fn extract_content_string(
         ));
     };
 
-    let ExpressionKind::StringSlice(value) = &content.value.kind else {
+    let Some(value) = ast.const_values.string_value(content.id) else {
         return Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error("Moth template content did not fold to a string."),
             string_table,
         ));
     };
 
-    Ok(string_table.resolve(*value).to_owned())
+    Ok(string_table.resolve(value).to_owned())
 }
 
 #[cfg(test)]

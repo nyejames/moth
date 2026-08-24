@@ -103,8 +103,7 @@ impl ScopeContext {
             if let Some(canonical_path) = file_visibility.visible_source_names.get(name)
                 && let Some(declaration) = self
                     .shared
-                    .lookups
-                    .declaration_table
+                    .top_level_declarations
                     .get_by_path(canonical_path)
                 && !declaration.value.is_receiver_function()
             {
@@ -118,9 +117,8 @@ impl ScopeContext {
         // 3. Fallback for contexts that do not set file_visibility
         // (e.g. synthetic evaluation contexts and some unit-test helpers).
         self.shared
-            .lookups
-            .declaration_table
-            .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_ref())
+            .top_level_declarations
+            .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_deref())
             .map(ScopeDeclarationRef::Shared)
     }
 
@@ -152,9 +150,8 @@ impl ScopeContext {
             || self
                 .shared
                 .lookups
-                .module_constants
-                .iter()
-                .any(|constant| constant.id == declaration.id)
+                .module_constant_paths
+                .contains(&declaration.id)
     }
 
     pub(crate) fn lookup_generic_function_template(

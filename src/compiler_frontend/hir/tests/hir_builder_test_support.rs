@@ -247,9 +247,22 @@ impl<'a> HirBuilder<'a> {
         self.reserve_struct_id(struct_id);
     }
 
+    /// Register one already-folded module constant in the store the builder lowers from.
+    ///
+    /// WHY: production module constants reach HIR as folded store values, never as expression
+    /// trees, so a test constant must be a value the store can hold.
     pub(crate) fn test_register_module_constant(&mut self, name: InternedPath, value: Expression) {
-        self.module_constants_by_name
-            .insert(name.to_owned(), Declaration { id: name, value });
+        let declaration = Declaration {
+            id: name.clone(),
+            value,
+        };
+        self.module_const_values
+            .insert_test_declaration(declaration, &self.type_environment);
+        let value_id = self
+            .module_const_values
+            .value_for_path(&name)
+            .expect("test module constant should be indexed");
+        self.module_constants_by_name.insert(name, value_id);
     }
 
     pub(crate) fn test_register_nominal_struct_type(

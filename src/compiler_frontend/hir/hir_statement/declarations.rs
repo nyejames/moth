@@ -12,12 +12,20 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind, SourceLocation};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValueStore, ConstValueVisit,
+};
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::TypeId;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue, HirModuleConst};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField,
+    OPTION_SOME_VARIANT_INDEX, ValueKind,
+};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
@@ -26,6 +34,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -64,27 +73,42 @@ impl<'a> HirBuilder<'a> {
 
     // WHAT: lowers the AST module-constant pool into HIR's dedicated constant metadata arena.
     // WHY: module constants should remain compile-time data instead of turning into runtime statements.
-    pub(crate) fn lower_module_constants(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+    pub(crate) fn lower_module_constants(&mut self) -> Result<(), CompilerError> {
         self.module.module_constants.clear();
         self.module_constants_by_name.clear();
 
-        for declaration in &ast.module_constants {
-            self.module_constants_by_name
-                .insert(declaration.id.to_owned(), declaration.to_owned());
+        // WHAT: the store leaves `self` once for the whole pass and returns at the end.
+        // WHY: the closure passed to `fold_value` borrows the rest of `HirBuilder` mutably, so
+        // the store cannot stay borrowed from `self` while lowering runs. Moving it out once
+        // lets the loop read borrowed rows directly - the previous shape collected every row
+        // into an owned `Vec`, cloning each constant's `InternedPath` purely to end the borrow,
+        // and then took and restored the store again for every single value.
+        let store = std::mem::take(&mut self.module_const_values);
+        let result = self.lower_module_constants_from(&store);
+        self.module_const_values = store;
+        result
+    }
 
-            let location = declaration.value.location.to_owned();
-            let Some(const_value) =
-                self.lower_const_value_for_module_pool(&declaration.value, &location)?
-            else {
+    fn lower_module_constants_from(
+        &mut self,
+        store: &ConstValueStore,
+    ) -> Result<(), CompilerError> {
+        for row in store.iter_module_constant_views() {
+            if !row.metadata.hir_visible {
                 continue;
-            };
+            }
+
+            self.module_constants_by_name
+                .insert(row.path.clone(), row.id);
+            let location = row.metadata.location.clone();
+            let const_value = self.lower_const_value_for_module_pool(store, row.id)?;
 
             let const_id = self.allocate_const_id();
-            let const_type = self.lower_type_id(declaration.value.type_id, &location)?;
+            let const_type = self.lower_type_id(row.metadata.type_id, &location)?;
 
             self.module.module_constants.push(HirModuleConst {
                 id: const_id,
-                name: declaration.id.to_string(self.string_table),
+                name: row.path.to_string(self.string_table),
                 ty: const_type,
                 value: const_value,
             });
@@ -95,120 +119,264 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_const_value_for_module_pool(
         &mut self,
-        expression: &Expression,
-        location: &SourceLocation,
-    ) -> Result<Option<HirConstValue>, CompilerError> {
-        self.lower_const_value(expression, location)
+        store: &ConstValueStore,
+        value_id: ConstValueId,
+    ) -> Result<HirConstValue, CompilerError> {
+        store.fold_value(value_id, &mut |_, visit| {
+            increment_frontend_counter(FrontendCounter::HirConstValueConversions);
+            match visit {
+                ConstValueVisit::Int(value) => Ok(HirConstValue::Int(value)),
+                ConstValueVisit::Float(value) => Ok(HirConstValue::Float(value)),
+                ConstValueVisit::Bool(value) => Ok(HirConstValue::Bool(value)),
+                ConstValueVisit::Char(value) => Ok(HirConstValue::Char(value)),
+                ConstValueVisit::String(value) => Ok(HirConstValue::String(
+                    self.string_table.resolve(value).to_owned(),
+                )),
+                ConstValueVisit::Collection(values) => Ok(HirConstValue::Collection(values)),
+                ConstValueVisit::Record(fields) => Ok(HirConstValue::Record(
+                    fields
+                        .into_iter()
+                        .map(|field| HirConstField {
+                            name: field.name.to_string(self.string_table),
+                            value: field.value,
+                        })
+                        .collect(),
+                )),
+                ConstValueVisit::Choice { tag, fields, .. } => Ok(HirConstValue::Choice {
+                    tag,
+                    fields: fields
+                        .into_iter()
+                        .map(|field| HirConstField {
+                            name: field.name.to_string(self.string_table),
+                            value: field.value,
+                        })
+                        .collect(),
+                }),
+                ConstValueVisit::Range { start, end } => {
+                    Ok(HirConstValue::Range(Box::new(start), Box::new(end)))
+                }
+                ConstValueVisit::Coerced(value) => Ok(value),
+                ConstValueVisit::OptionSome(value) => {
+                    Ok(HirConstValue::OptionSome(Box::new(value)))
+                }
+                ConstValueVisit::OptionNone => Ok(HirConstValue::OptionNone),
+                ConstValueVisit::Template { folded, .. } => folded
+                    .map(|value| {
+                        HirConstValue::String(self.string_table.resolve(value).to_owned())
+                    })
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
+                        )
+                    }),
+            }
+        })
     }
 
-    fn lower_const_value(
+    /// Lower one module-store value directly to a constant HIR expression.
+    ///
+    /// WHAT: maps the shared postorder store visitor to HIR's expression vocabulary for
+    /// references and const-record field access.
+    /// WHY: module constants are already folded; HIR must not rebuild an AST expression tree or
+    /// recursively lower a cloned declaration.
+    pub(crate) fn lower_const_store_expression(
         &mut self,
-        expression: &Expression,
+        value_id: ConstValueId,
         location: &SourceLocation,
-    ) -> Result<Option<HirConstValue>, CompilerError> {
-        match &expression.kind {
-            ExpressionKind::Int(value) => Ok(Some(HirConstValue::Int(*value))),
-            ExpressionKind::Float(value) => Ok(Some(HirConstValue::Float(*value))),
-            ExpressionKind::Bool(value) => Ok(Some(HirConstValue::Bool(*value))),
-            ExpressionKind::Char(value) => Ok(Some(HirConstValue::Char(*value))),
-            ExpressionKind::StringSlice(value) => Ok(Some(HirConstValue::String(
-                self.string_table.resolve(*value).to_string(),
-            ))),
-            ExpressionKind::Collection(items) => {
-                let mut lowered_items = Vec::with_capacity(items.len());
-                for item in items {
-                    let Some(lowered_item) = self.lower_const_value(item, location)? else {
-                        return Ok(None);
-                    };
-                    lowered_items.push(lowered_item);
+    ) -> Result<HirExpression, CompilerError> {
+        let store = std::mem::take(&mut self.module_const_values);
+        let result = store.fold_value(value_id, &mut |metadata, visit| {
+            let region = self.current_region_or_error(location)?;
+            let ty = self.lower_type_id(metadata.type_id, location)?;
+            let expression = match visit {
+                ConstValueVisit::Int(value) => {
+                    self.make_expression(location, HirExpressionKind::Int(value), ty, ValueKind::Const, region)
                 }
-                Ok(Some(HirConstValue::Collection(lowered_items)))
-            }
-            ExpressionKind::StructInstance(fields) => {
-                let mut lowered_fields = Vec::with_capacity(fields.len());
-                for field in fields {
-                    let Some(lowered_value) = self.lower_const_value(&field.value, location)?
-                    else {
-                        return Ok(None);
-                    };
-                    lowered_fields.push(HirConstField {
-                        name: field.id.to_string(self.string_table),
-                        value: lowered_value,
-                    });
-                }
-                // Const-eligible struct constructors in top-level compile-time constants are coerced
-                // in AST to data-only struct instances, and land here as HIR const records.
-                Ok(Some(HirConstValue::Record(lowered_fields)))
-            }
-            ExpressionKind::Range(start, end) => {
-                let Some(lowered_start) = self.lower_const_value(start, location)? else {
-                    return Ok(None);
-                };
-                let Some(lowered_end) = self.lower_const_value(end, location)? else {
-                    return Ok(None);
-                };
-
-                Ok(Some(HirConstValue::Range(
-                    Box::new(lowered_start),
-                    Box::new(lowered_end),
-                )))
-            }
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { variant, value } => {
-                let Some(lowered_value) = self.lower_const_value(value, location)? else {
-                    return Ok(None);
-                };
-
-                let hir_variant = match variant {
-                    crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant::Success => {
-                        crate::compiler_frontend::hir::expressions::FallibleCarrierVariant::Success
-                    }
-                    crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant::Error => {
-                        crate::compiler_frontend::hir::expressions::FallibleCarrierVariant::Error
-                    }
-                };
-
-                Ok(Some(HirConstValue::Result {
-                    variant: hir_variant,
-                    value: Box::new(lowered_value),
-                }))
-            }
-            ExpressionKind::ChoiceConstruct { tag, fields, .. } => {
-                let mut lowered_fields = Vec::with_capacity(fields.len());
-                for field in fields {
-                    let Some(lowered_value) = self.lower_const_value(&field.value, location)?
-                    else {
-                        return Ok(None);
-                    };
-                    lowered_fields.push(HirConstField {
-                        name: field.id.to_string(self.string_table),
-                        value: lowered_value,
-                    });
-                }
-                Ok(Some(HirConstValue::Choice {
-                    tag: *tag,
-                    fields: lowered_fields,
-                }))
-            }
-            ExpressionKind::Coerced { value, .. } => {
-                // Module constants keep their canonical TypeId separately on `HirModuleConst`.
-                // The const-value payload only needs the folded data shape, so contextual
-                // declaration coercions such as `Int -> Int?` can lower through the inner value.
-                self.lower_const_value(value, location)
-            }
-            // INVARIANT: template constants should have been materialized by AST folding.
-            ExpressionKind::Template(_) => return_hir_transformation_error!(
-                "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it.",
-                self.hir_error_location(location)
-            ),
-            _ => return_hir_transformation_error!(
-                format!(
-                    "HIR invariant: unsupported constant expression during HIR lowering: {:?}",
-                    expression.kind
+                ConstValueVisit::Float(value) => self.make_expression(
+                    location,
+                    HirExpressionKind::Float(value),
+                    ty,
+                    ValueKind::Const,
+                    region,
                 ),
-                self.hir_error_location(location)
-            ),
+                ConstValueVisit::Bool(value) => {
+                    self.make_expression(location, HirExpressionKind::Bool(value), ty, ValueKind::Const, region)
+                }
+                ConstValueVisit::Char(value) => {
+                    self.make_expression(location, HirExpressionKind::Char(value), ty, ValueKind::Const, region)
+                }
+                ConstValueVisit::String(value) => self.make_expression(
+                    location,
+                    HirExpressionKind::StringLiteral(self.string_table.resolve(value).to_owned()),
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::Collection(values) => self.make_expression(
+                    location,
+                    HirExpressionKind::Collection(values),
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::Record(fields) => {
+                    let struct_id = self.resolve_const_struct_id(metadata.type_id, location)?;
+                    let fields = fields
+                        .into_iter()
+                        .map(|field| {
+                            Ok((
+                                self.resolve_field_id_or_error(struct_id, field.name, location)?,
+                                field.value,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                    self.make_expression(
+                        location,
+                        HirExpressionKind::StructConstruct { struct_id, fields },
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    )
+                }
+                ConstValueVisit::Choice {
+                    nominal_path,
+                    tag,
+                    fields,
+                } => {
+                    let choice_id = self.resolve_const_choice_id(
+                        nominal_path,
+                        metadata.type_id,
+                        location,
+                    )?;
+                    let fields = fields
+                        .into_iter()
+                        .map(|field| HirVariantField {
+                            name: field.name.name(),
+                            value: field.value,
+                        })
+                        .collect();
+                    self.make_expression(
+                        location,
+                        HirExpressionKind::VariantConstruct {
+                            carrier: HirVariantCarrier::Choice { choice_id },
+                            variant_index: tag,
+                            fields,
+                        },
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    )
+                }
+                ConstValueVisit::Range { start, end } => self.make_expression(
+                    location,
+                    HirExpressionKind::Range {
+                        start: Box::new(start),
+                        end: Box::new(end),
+                    },
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::Coerced(value) => value,
+                ConstValueVisit::OptionSome(value) => {
+                    // Option payload fields are named `value`, matching runtime
+                    // `VariantConstruct` producers and `VariantPayloadGet` readers.
+                    let value_name = self.string_table.intern("value");
+                    self.make_expression(
+                        location,
+                        HirExpressionKind::VariantConstruct {
+                            carrier: HirVariantCarrier::Option,
+                            variant_index: OPTION_SOME_VARIANT_INDEX,
+                            fields: vec![HirVariantField {
+                                name: Some(value_name),
+                                value,
+                            }],
+                        },
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    )
+                }
+                ConstValueVisit::OptionNone => self.make_expression(
+                    location,
+                    HirExpressionKind::VariantConstruct {
+                        carrier: HirVariantCarrier::Option,
+                        variant_index: 0,
+                        fields: Vec::new(),
+                    },
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::Template { folded, .. } => {
+                    let Some(value) = folded else {
+                        return_hir_transformation_error!(
+                            "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
+                            self.hir_error_location(location)
+                        );
+                    };
+                    self.make_expression(
+                        location,
+                        HirExpressionKind::StringLiteral(
+                            self.string_table.resolve(value).to_owned(),
+                        ),
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    )
+                }
+            };
+            Ok(expression)
+        });
+        self.module_const_values = store;
+        result
+    }
+
+    fn resolve_const_struct_id(
+        &mut self,
+        type_id: TypeId,
+        location: &SourceLocation,
+    ) -> Result<crate::compiler_frontend::hir::ids::StructId, CompilerError> {
+        if let Some(TypeIdentityKey::GenericInstance(key)) =
+            self.type_environment.type_id_to_type_identity_key(type_id)
+        {
+            let nominal_path = self
+                .type_environment
+                .nominal_path(type_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "HIR const record generic instance has no nominal path",
+                    )
+                })?
+                .to_owned();
+            return self.resolve_or_register_generic_struct(&key, &nominal_path, type_id, location);
         }
+
+        let TypeDefinition::Struct(definition) = self
+            .type_environment
+            .get(type_id)
+            .ok_or_else(|| CompilerError::compiler_error("HIR const record has unknown type"))?
+        else {
+            return_hir_transformation_error!(
+                "HIR invariant: const record value does not carry a struct type",
+                self.hir_error_location(location)
+            );
+        };
+        self.resolve_struct_id_from_nominal_path(&definition.path, location)
+    }
+
+    fn resolve_const_choice_id(
+        &mut self,
+        nominal_path: &InternedPath,
+        type_id: TypeId,
+        location: &SourceLocation,
+    ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
+        if let Some(TypeIdentityKey::GenericInstance(key)) =
+            self.type_environment.type_id_to_type_identity_key(type_id)
+        {
+            return self.resolve_or_register_generic_choice(&key, nominal_path, type_id, location);
+        }
+        self.resolve_choice_id(nominal_path, location)
     }
 
     fn register_struct_declaration(

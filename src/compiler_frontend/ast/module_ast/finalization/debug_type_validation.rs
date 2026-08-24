@@ -8,6 +8,7 @@
 
 use crate::compiler_frontend::ast::AstChoiceDefinition;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
@@ -57,7 +58,7 @@ struct DebugTypeValidationContext<'a> {
 /// stages.
 pub(super) fn debug_validate_type_ids_for_hir(
     nodes: &[AstNode],
-    module_constants: &[Declaration],
+    const_values: &ConstValueStore,
     choice_definitions: &[AstChoiceDefinition],
     type_environment: &TypeEnvironment,
     template_ir_store: &TemplateIrStore,
@@ -71,8 +72,8 @@ pub(super) fn debug_validate_type_ids_for_hir(
         debug_validate_node_type_ids(node, &context);
     }
 
-    for module_constant in module_constants {
-        debug_validate_declaration_type_id(module_constant, &context);
+    if let Err(error) = const_values.validate_type_ids(type_environment) {
+        debug_assert!(false, "{error:?}");
     }
 
     // Choice definitions are collected separately from the AST node tree.

@@ -11,28 +11,28 @@ mod logical;
 mod shared;
 mod unary;
 
-use super::result_type::ExpressionResultType;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 
 pub(super) fn resolve_unary_operator_type(
     op: &Operator,
-    operand: &ExpressionResultType,
+    operand: TypeId,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
+) -> Result<TypeId, ExpressionTypingError> {
     unary::resolve_unary_operator_type(op, operand, location, type_environment)
 }
 
 pub(super) fn resolve_binary_operator_type(
-    lhs: &ExpressionResultType,
-    rhs: &ExpressionResultType,
+    lhs: TypeId,
+    rhs: TypeId,
     op: &Operator,
     location: &SourceLocation,
     type_environment: &TypeEnvironment,
-) -> Result<ExpressionResultType, ExpressionTypingError> {
+) -> Result<TypeId, ExpressionTypingError> {
     shared::reject_fallible_operands(lhs, rhs, op, location, type_environment)?;
 
     if logical::is_logical_operator(op) {

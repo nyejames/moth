@@ -623,7 +623,7 @@ pub fn resolve_declaration_syntax(
     };
 
     // Body-local compile-time constants must fully fold after parsing and coercion.
-    // Top-level constants are validated by `parse_constant_header_declaration`;
+    // Top-level constants are validated by `ConstantResolutionSession`;
     // this check covers the body-local path through `resolve_declaration_syntax`.
     let initializer_is_compile_time_constant = if declaration_syntax.binding_mode.is_compile_time()
     {

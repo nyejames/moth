@@ -1,0 +1,3 @@
+@requirements DESCRIBE
+
+[:trait_requirement_unimported_type_rejected [1]]

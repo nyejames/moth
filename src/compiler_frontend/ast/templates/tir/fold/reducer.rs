@@ -17,7 +17,6 @@ use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoo
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext, resolve_fold_bindings_in_expression,
 };
-use crate::compiler_frontend::ast::templates::tir::fold_cache::TirFoldCacheKey;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
 };
@@ -121,6 +120,8 @@ impl<'view, 'store> FoldTraversalInput<'view, 'store> {
 /// The reducer returns structured text and slot pieces before the donor-local TIR store is dropped.
 pub(crate) struct FoldedConstTemplatePattern {
     pub(crate) pieces: Vec<FoldedConstTemplatePiece>,
+    pub(crate) emission: TemplateEmission,
+    pub(crate) provenance: SyntheticInterfaceProvenance,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,10 +251,10 @@ impl FoldInsertion<'_> {
 
 /// Folds one prepared, exact TIR view into its owned emission and provenance.
 ///
-/// WHAT: consumes the completed preparation proof and enters the fold cache and
-///      reducer without reclassifying or re-walking the template for authority.
+/// WHAT: consumes the completed preparation proof and enters the reducer without
+///      reclassifying or re-walking the template for authority.
 /// WHY: preparation is the sole semantic classifier. The identity check must
-///      happen before cache lookup so a stale proof can never authorize output.
+///      happen before reduction so a stale proof can never authorize output.
 pub(crate) fn fold_prepared_template(
     prepared: &TemplatePreparation,
     view: TirView<'_>,
@@ -332,7 +333,11 @@ pub(crate) fn fold_prepared_const_template_pattern(
 
     match result.emission {
         TemplateEmission::NoOutput | TemplateEmission::Output(_) => {
-            Ok(FoldedConstTemplatePattern { pieces })
+            Ok(FoldedConstTemplatePattern {
+                pieces,
+                emission: result.emission,
+                provenance: result.provenance,
+            })
         }
         TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
             Err(CompilerError::compiler_error(
@@ -365,26 +370,9 @@ fn fold_exact_view_with_projection(
     projection_enabled: bool,
     projection_allowed_slot_insert_root: Option<TemplateIrId>,
 ) -> Result<TemplateFoldResult, TemplateError> {
-    let bindings_empty = fold_context.bindings.is_empty();
-    let cache_key = TirFoldCacheKey {
-        identity: view.identity(),
-        loop_iteration_limit: fold_context.template_const_loop_iteration_limit,
-        bindings_empty,
-    };
-
     // Attribute one prepared view fold per store-backed view, across
     // finalization, doc-fragment, and HIR-handoff callers.
     increment_ast_counter(AstCounter::TirViewFoldsAttempted);
-
-    if !projection_enabled
-        && bindings_empty
-        && let Some(cached) = fold_context.fold_cache.get(&cache_key)
-    {
-        increment_ast_counter(AstCounter::TirFoldCacheHits);
-        return Ok(cached.clone());
-    }
-
-    increment_ast_counter(AstCounter::TirFoldCacheMisses);
 
     let has_expression_overlay = view.context().expression_overlay.is_some();
     let has_slot_overlay = view.context().slot_resolution.is_some();
@@ -410,10 +398,6 @@ fn fold_exact_view_with_projection(
         projection_allowed_slot_insert_root,
     };
     let result = fold_tir_template_with_view(fold_context, &fold_input)?;
-
-    if !projection_enabled && bindings_empty {
-        fold_context.fold_cache.insert(cache_key, result.clone());
-    }
 
     Ok(result)
 }
@@ -618,11 +602,10 @@ pub(super) fn fold_tir_node_into_buffer(
             {
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection)?;
-                } else {
-                    output_state
-                        .output_buffer
-                        .push_str(fold_context.string_table.resolve(output));
                 }
+                output_state
+                    .output_buffer
+                    .push_str(fold_context.string_table.resolve(output));
                 output_state.emitted_output = true;
                 return Ok(None);
             }

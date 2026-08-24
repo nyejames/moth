@@ -1,0 +1,15 @@
+@shapes Label
+
+DESCRIBE must:
+    describe |This, tag Label| -> String
+;
+
+Badge = |
+    id Int,
+|
+
+describe |this Badge, tag Label| -> String:
+    return tag.text
+;
+
+Badge must DESCRIBE

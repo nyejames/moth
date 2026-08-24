@@ -10,10 +10,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
-use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
+use crate::compiler_frontend::ast::const_values::facts::{
+    AstConstDeclarationFact, AstConstFactValue, AstConstFacts, ConstBindingScope,
+    ConstBindingSource, ConstFactValueKind,
+};
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -23,8 +27,12 @@ use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandli
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::instrumentation::{
+    AstCounter, add_ast_counter, increment_ast_counter,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use rustc_hash::FxHashMap;
 
 use super::normalize_ast::TemplateNormalizationError;
 
@@ -44,13 +52,27 @@ impl<'a> ConstFactCollector<'a> {
     ///      classification rather than reconstructed template structure.
     pub(super) fn new(
         string_table: &'a mut StringTable,
+        const_values: &'a ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
     ) -> Self {
         Self {
-            resolver: ConstValueResolver::new(string_table, template_ir_store),
+            resolver: ConstValueResolver::new(string_table, const_values, template_ir_store),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),
         }
+    }
+
+    /// Copy one advisory environment for a nested lexical scope.
+    ///
+    /// WHAT: clones the lexical overlay and attributes the copy.
+    /// WHY: every function body and every nested block, `if` arm and scoped block takes a copy of
+    /// what is visible so inner declarations cannot leak outward. The module base is shared behind
+    /// an `Rc`, so only bindings the scopes introduced themselves are duplicated; the counters
+    /// record how much that is.
+    fn scope_environment(env: &ConstValueEnvironment) -> ConstValueEnvironment {
+        increment_ast_counter(AstCounter::ConstFactEnvironmentClones);
+        add_ast_counter(AstCounter::ConstFactEnvironmentEntriesCloned, env.len());
+        env.clone()
     }
 
     /// Collect const facts from module constants and AST nodes.
@@ -61,11 +83,11 @@ impl<'a> ConstFactCollector<'a> {
     ///       body-local facts.
     pub(super) fn collect(
         mut self,
-        module_constants: &[Declaration],
+        const_values: &ConstValueStore,
         ast_nodes: &[AstNode],
         start_function_path: Option<&InternedPath>,
     ) -> Result<AstConstFacts, TemplateNormalizationError> {
-        self.collect_explicit_top_level_facts(module_constants)?;
+        self.collect_explicit_top_level_facts(const_values);
         self.collect_private_and_body_local_facts(ast_nodes, start_function_path)?;
         Ok(self.facts)
     }
@@ -74,34 +96,32 @@ impl<'a> ConstFactCollector<'a> {
     //  Explicit top-level constants
     // ------------------------------
 
-    /// Resolve explicit module constants and register them as facts.
-    fn collect_explicit_top_level_facts(
-        &mut self,
-        module_constants: &[Declaration],
-    ) -> Result<(), TemplateNormalizationError> {
-        for declaration in module_constants {
-            match self
-                .resolver
-                .resolve_explicit_top_level_constant(declaration, &self.module_explicit_env)
-            {
-                Ok(fact) => {
-                    self.module_explicit_env
-                        .insert(declaration.id.clone(), fact.resolved_expression.clone());
-                    self.facts.declarations.insert(declaration.id.clone(), fact);
-                }
+    /// Register explicit module constants as facts and as the environment's module base.
+    fn collect_explicit_top_level_facts(&mut self, const_values: &ConstValueStore) {
+        let mut module_base = FxHashMap::default();
 
-                Err(error) if error.is_expected_non_const_resolution() => {
-                    // Explicit constants that fail resolution are skipped silently.
-                    // They were already validated earlier; this is a safety fallback.
-                }
+        for row in const_values.iter_module_constant_views() {
+            let (path, value_id, metadata) = (row.path, row.id, row.metadata);
 
-                Err(error) => {
-                    template_classification_error(error)?;
-                }
-            }
+            // The base records the store id, not an expression. Body-local advisory resolution
+            // still consumes `Expression` operands, so one is built at the reference that needs
+            // it rather than for all of a module's constants up front.
+            module_base.insert(path.clone(), value_id);
+
+            self.facts.declarations.insert(
+                path.clone(),
+                AstConstDeclarationFact {
+                    declaration_path: path.clone(),
+                    scope: ConstBindingScope::ExplicitTopLevel,
+                    source: ConstBindingSource::ExplicitHash,
+                    value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
+                    value: AstConstFactValue::Stored(value_id),
+                    location: metadata.location.clone(),
+                },
+            );
         }
 
-        Ok(())
+        self.module_explicit_env = ConstValueEnvironment::with_module_base(module_base);
     }
 
     // ------------------------------------
@@ -117,10 +137,10 @@ impl<'a> ConstFactCollector<'a> {
         for node in ast_nodes {
             if let NodeKind::Function(path, _, body) = &node.kind {
                 if start_function_path == Some(path) {
-                    let mut start_env = self.module_explicit_env.clone();
+                    let mut start_env = Self::scope_environment(&self.module_explicit_env);
                     self.walk_start_body(body, &mut start_env)?;
                 } else {
-                    let mut function_env = self.module_explicit_env.clone();
+                    let mut function_env = Self::scope_environment(&self.module_explicit_env);
                     self.walk_body_local(body, &mut function_env)?;
                 }
             }
@@ -174,7 +194,9 @@ impl<'a> ConstFactCollector<'a> {
             .resolve_private_top_level_declaration(declaration, env)
         {
             Ok(fact) => {
-                env.insert(declaration.id.clone(), fact.resolved_expression.clone());
+                if let AstConstFactValue::Expression(expression) = &fact.value {
+                    env.insert(declaration.id.clone(), expression.as_ref().clone());
+                }
                 self.facts.declarations.insert(declaration.id.clone(), fact);
             }
 
@@ -229,18 +251,18 @@ impl<'a> ConstFactCollector<'a> {
             }
 
             NodeKind::ScopedBlock { body } => {
-                let mut nested_env = env.clone();
+                let mut nested_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut nested_env)?;
             }
 
             NodeKind::If(condition, then_body, else_body) => {
                 self.walk_expression_for_body_local(condition, env)?;
 
-                let mut then_env = env.clone();
+                let mut then_env = Self::scope_environment(env);
                 self.walk_body_local(then_body, &mut then_env)?;
 
                 if let Some(else_body) = else_body {
-                    let mut else_env = env.clone();
+                    let mut else_env = Self::scope_environment(env);
                     self.walk_body_local(else_body, &mut else_env)?;
                 }
             }
@@ -264,12 +286,12 @@ impl<'a> ConstFactCollector<'a> {
                         self.walk_expression_for_body_local(guard, env)?;
                     }
 
-                    let mut arm_env = env.clone();
+                    let mut arm_env = Self::scope_environment(env);
                     self.walk_body_local(&arm.body, &mut arm_env)?;
                 }
 
                 if let Some(default_body) = default {
-                    let mut default_env = env.clone();
+                    let mut default_env = Self::scope_environment(env);
                     self.walk_body_local(default_body, &mut default_env)?;
                 }
             }
@@ -281,26 +303,26 @@ impl<'a> ConstFactCollector<'a> {
                     self.walk_expression_for_body_local(step, env)?;
                 }
 
-                let mut loop_env = env.clone();
+                let mut loop_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut loop_env)?;
             }
 
             NodeKind::CollectionLoop { iterable, body, .. } => {
                 self.walk_expression_for_body_local(iterable, env)?;
 
-                let mut loop_env = env.clone();
+                let mut loop_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut loop_env)?;
             }
 
             NodeKind::WhileLoop(condition, body) => {
                 self.walk_expression_for_body_local(condition, env)?;
 
-                let mut loop_env = env.clone();
+                let mut loop_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut loop_env)?;
             }
 
             NodeKind::Function(_, _, body) => {
-                let mut nested_env = env.clone();
+                let mut nested_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut nested_env)?;
             }
 
@@ -352,7 +374,9 @@ impl<'a> ConstFactCollector<'a> {
             .resolve_body_local_declaration(declaration, env)
         {
             Ok(fact) => {
-                env.insert(declaration.id.clone(), fact.resolved_expression.clone());
+                if let AstConstFactValue::Expression(expression) = &fact.value {
+                    env.insert(declaration.id.clone(), expression.as_ref().clone());
+                }
                 self.facts.declarations.insert(declaration.id.clone(), fact);
             }
 
@@ -526,10 +550,10 @@ impl<'a> ConstFactCollector<'a> {
                 ValueBlock::If(value_if) => {
                     self.walk_expression_for_body_local(&value_if.condition, env)?;
 
-                    let mut then_env = env.clone();
+                    let mut then_env = Self::scope_environment(env);
                     self.walk_body_local(&value_if.then_body, &mut then_env)?;
 
-                    let mut else_env = env.clone();
+                    let mut else_env = Self::scope_environment(env);
                     self.walk_body_local(&value_if.else_body, &mut else_env)?;
                 }
                 ValueBlock::Match(value_match) => {
@@ -539,12 +563,12 @@ impl<'a> ConstFactCollector<'a> {
                         if let Some(guard) = &arm.guard {
                             self.walk_expression_for_body_local(guard, env)?;
                         }
-                        let mut arm_env = env.clone();
+                        let mut arm_env = Self::scope_environment(env);
                         self.walk_body_local(&arm.body, &mut arm_env)?;
                     }
 
                     if let Some(default_body) = &value_match.default {
-                        let mut default_env = env.clone();
+                        let mut default_env = Self::scope_environment(env);
                         self.walk_body_local(default_body, &mut default_env)?;
                     }
                 }
@@ -587,7 +611,7 @@ impl<'a> ConstFactCollector<'a> {
             return Ok(());
         };
 
-        let mut handler_env = env.clone();
+        let mut handler_env = Self::scope_environment(env);
         self.walk_body_local(body, &mut handler_env)
     }
 }

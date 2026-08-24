@@ -1,0 +1,14 @@
+-- Compile-time `none` constant, the documented `#Type? = none` binding form.
+-- The absent optional folds into the constant store and lowers through both the
+-- HIR constant pool and expression lowering when a body reads it.
+
+maybe_name #String? = none
+
+describe || -> String:
+    if maybe_name is |value|:
+        return value
+    ;
+    return "absent"
+;
+
+[:[describe()]]

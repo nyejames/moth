@@ -187,7 +187,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         file_visibility
-            .visible_declaration_paths
+            .visible_declaration_paths_mut()
             .insert(symbol_path.clone());
 
         let binding = if is_type_alias {

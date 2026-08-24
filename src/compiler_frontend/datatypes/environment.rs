@@ -196,6 +196,12 @@ struct TypeSubstitutionPair {
 
 impl TypeSubstitutionKey {
     fn new(source_type_id: TypeId, mapping: &FxHashMap<GenericParameterId, TypeId>) -> Self {
+        increment_frontend_counter(FrontendCounter::GenericSubstitutionKeyBuilds);
+        add_frontend_counter(
+            FrontendCounter::GenericSubstitutionKeySortedPairs,
+            mapping.len(),
+        );
+
         let mut mapping_pairs: Vec<TypeSubstitutionPair> = mapping
             .iter()
             .map(|(parameter_id, replacement_type_id)| TypeSubstitutionPair {

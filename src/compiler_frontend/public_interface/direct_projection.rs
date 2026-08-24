@@ -36,7 +36,7 @@ use super::type_projection::{
     project_free_function_semantics, project_struct_parts,
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -44,7 +44,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::FoldedValueGenericParameterResolver;
 use crate::compiler_frontend::folded_value::{
-    PublicFoldedValue, convert_expression_to_folded_value,
+    PublicFoldedValue, convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::hir::functions::FunctionOriginSeed;
 use crate::compiler_frontend::semantic_identity::{
@@ -93,14 +93,11 @@ pub(in crate::compiler_frontend) struct PublicInterfaceDraftBuilderInput<'a> {
     /// origin and aliases receiver-method local generic parameter IDs; no path or template
     /// enters the declaration-centric draft.
     pub generic_function_templates: &'a FxHashMap<InternedPath, GenericFunctionTemplate>,
-    /// The finalized and normalized module constant declarations from the AST.
+    /// The module-local folded-value authority from AST finalization.
     ///
-    /// WHAT: the already-folded `Ast::module_constants` consumed before HIR lowering. Each
-    /// entry carries the constant's exact defining `InternedPath` and its fully folded
-    /// expression. The draft builder joins each public constant root to a finalized module
-    /// constant by that exact defining path and converts the expression to an owned
-    /// [`PublicFoldedValue`].
-    pub module_constants: &'a [Declaration],
+    /// WHAT: each public constant root joins to a store row by its exact defining
+    /// `InternedPath`, then converts the stored value to an owned [`PublicFoldedValue`].
+    pub const_values: &'a ConstValueStore,
 }
 
 /// Builds the one aggregate [`PublicInterfaceDraft`] from already-resolved pre-HIR facts.
@@ -155,7 +152,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             external_registry,
             string_table,
             generic_function_templates,
-            module_constants,
+            const_values,
         } = self.input;
 
         let AstPublicInterfaceProjectionInput {
@@ -163,7 +160,6 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             trait_roots,
             trait_environment,
             trait_evidence_environment,
-            const_templates_by_name,
         } = public_interface_projection_input;
 
         let trait_environment = trait_environment.ok_or_else(|| {
@@ -258,21 +254,9 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
                 .push(seed);
         }
 
-        // Index the finalized module constants by defining path so each public constant root
-        // folds its value by exact defining path. Entries are removed as constants join.
-        let mut module_constants_by_path: FxHashMap<&InternedPath, &Declaration> =
-            FxHashMap::default();
-        for declaration in module_constants {
-            if module_constants_by_path
-                .insert(&declaration.id, declaration)
-                .is_some()
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft join: two finalized module constants share the defining path {:?}; a duplicate must not silently overwrite the first",
-                    declaration.id
-                )));
-            }
-        }
+        // Track consumption by store ID so each public constant joins one owned value row
+        // exactly once. The store remains the sole folded-value owner.
+        let mut consumed_const_values = FxHashSet::default();
 
         // Build the folded-value projection context from the same shared nominal origin
         // resolver and external registry. Folded constant values are concrete, so a generic
@@ -288,6 +272,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             type_environment,
             string_table,
             projection_context: &folded_projection_context,
+            const_values,
         };
 
         // The direct trait projection holds the trait-root index and projects one final
@@ -312,14 +297,13 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
         let mut state = DeclarationRecordProjectionState {
             receiver_seeds_by_receiver: &mut receiver_seeds_by_receiver,
             receiver_method_signatures: &receiver_method_signatures,
-            module_constants_by_path: &mut module_constants_by_path,
+            consumed_const_values: &mut consumed_const_values,
             trait_projection: &mut trait_projection,
             folded_value_context: &folded_value_context,
         };
         let declarations = project_declaration_records(
             export_seed.export_bindings(),
             &root_table,
-            &const_templates_by_name,
             &type_context,
             &mut state,
         )?;
@@ -388,6 +372,7 @@ pub(super) struct FoldedValueJoinContext<'a> {
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) string_table: &'a StringTable,
     pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
+    pub(super) const_values: &'a ConstValueStore,
 }
 
 // ===========================================================================
@@ -409,7 +394,7 @@ struct DeclarationTypeProjectionContext<'a> {
 
 /// Mutable per-binding join state consumed while projecting declaration records.
 ///
-/// WHAT: bundles the receiver-method seed index and signatures, the module-constants-by-path
+/// WHAT: bundles the receiver-method seed index and signatures, the module-constant value IDs
 /// index, the trait projection and the folded-value context so the per-binding projection
 /// mutates one named state value instead of managing five mutable positional parameters. The
 /// `'a` lifetime is the shared data lifetime for borrowed callable seeds, declarations and the
@@ -418,7 +403,7 @@ struct DeclarationRecordProjectionState<'a, 'b> {
     receiver_seeds_by_receiver: &'b mut FxHashMap<OriginTypeId, Vec<&'a CallableSeed>>,
     receiver_method_signatures:
         &'b FxHashMap<usize, super::type_projection::ProjectedReceiverMethodSignature>,
-    module_constants_by_path: &'b mut FxHashMap<&'a InternedPath, &'a Declaration>,
+    consumed_const_values: &'b mut FxHashSet<ConstValueId>,
     trait_projection: &'b mut DirectTraitProjection<'a>,
     folded_value_context: &'b FoldedValueJoinContext<'a>,
 }
@@ -443,10 +428,6 @@ struct DeclarationRecordProjectionState<'a, 'b> {
 fn project_declaration_records<'a>(
     export_bindings: &'a [ExportBinding],
     root_table: &'a crate::compiler_frontend::ast::ResolvedPublicTypeRootTable,
-    const_templates_by_name: &'a FxHashMap<
-        String,
-        crate::compiler_frontend::folded_value::PublicConstTemplate,
-    >,
     type_context: &DeclarationTypeProjectionContext<'_>,
     state: &mut DeclarationRecordProjectionState<'a, '_>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
@@ -603,15 +584,11 @@ fn project_declaration_records<'a>(
                     type_context.type_environment,
                     type_context.type_projection_context,
                 )?;
-                let folded_value =
-                    match const_templates_by_name.get(binding.origin().defining_name()) {
-                        Some(template) => PublicFoldedValue::ConstTemplate(template.clone()),
-                        None => fold_constant_value(
-                            &root.path,
-                            state.module_constants_by_path,
-                            state.folded_value_context,
-                        )?,
-                    };
+                let folded_value = fold_constant_value(
+                    &root.path,
+                    state.consumed_const_values,
+                    state.folded_value_context,
+                )?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
                     semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
@@ -689,19 +666,20 @@ fn receiver_methods_for_origin(
 
 /// Fold one public constant root's value by exact defining path.
 ///
-/// WHAT: looks up the root's defining `InternedPath` in the module-constants-by-path index,
-/// removes the entry so the same constant cannot fold twice, and converts the expression
-/// through the shared folded-value conversion. A missing match is a `CompilerError`: a public
-/// constant with no matching finalized declaration cannot be projected.
+/// WHAT: looks up the root's defining `InternedPath` in the module-local store, marks the
+/// resulting value ID consumed, and converts it through the shared store visitor. A missing
+/// match is a `CompilerError`: a public constant with no matching finalized value cannot be
+/// projected.
 fn fold_constant_value(
     defining_path: &InternedPath,
-    module_constants_by_path: &mut FxHashMap<&InternedPath, &Declaration>,
+    consumed_const_values: &mut FxHashSet<ConstValueId>,
     context: &FoldedValueJoinContext,
 ) -> Result<PublicFoldedValue, CompilerError> {
-    let Some(declaration) = module_constants_by_path.remove(defining_path) else {
+    let Some(value_id) = context.const_values.value_for_path(defining_path) else {
         let defining_path = defining_path.to_path_buf(context.string_table);
-        let mut available_paths = module_constants_by_path
-            .keys()
+        let mut available_paths = context
+            .const_values
+            .module_constant_paths()
             .map(|path| path.to_path_buf(context.string_table))
             .collect::<Vec<_>>();
         available_paths.sort();
@@ -713,8 +691,15 @@ fn fold_constant_value(
         )));
     };
 
-    convert_expression_to_folded_value(
-        &declaration.value,
+    if !consumed_const_values.insert(value_id) {
+        return Err(CompilerError::compiler_error(format!(
+            "public-interface draft join: constant export binding {defining_path:?} consumed its finalized store value more than once"
+        )));
+    }
+
+    convert_const_value_to_folded_value(
+        context.const_values,
+        value_id,
         context.type_environment,
         context.string_table,
         context.projection_context,

@@ -302,10 +302,3 @@ pub enum HirExpressionKind {
 }
 
 // Option none/some are represented through VariantConstruct with HirVariantCarrier::Option.
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FallibleCarrierVariant {
-    Success,
-    Error,
-}

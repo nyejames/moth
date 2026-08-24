@@ -51,6 +51,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
 use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 /// Resolve a bare named type from the current type-resolution context.
 ///
@@ -536,19 +537,20 @@ fn resolve_generic_base_path(
 /// Fetch a declaration by canonical path, respecting the visible declaration id set.
 fn resolve_declaration_by_path<'a>(
     declaration_table: &'a TopLevelDeclarationTable,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     canonical_path: &InternedPath,
 ) -> Option<&'a Declaration> {
-    declaration_table.get_visible_resolved_by_path(canonical_path, visible_declaration_ids)
+    declaration_table
+        .get_visible_resolved_by_path(canonical_path, visible_declaration_ids.map(Arc::as_ref))
 }
 
 /// Fetch a declaration by bare name, respecting the visible declaration id set.
 fn visible_declaration_by_name<'a>(
     declaration_table: &'a TopLevelDeclarationTable,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     name: StringId,
 ) -> Option<&'a Declaration> {
-    declaration_table.get_visible_resolved_by_name(name, visible_declaration_ids)
+    declaration_table.get_visible_resolved_by_name(name, visible_declaration_ids.map(Arc::as_ref))
 }
 
 /// Builtin scalar type names that may still appear as named placeholders.

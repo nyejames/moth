@@ -67,7 +67,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
             let type_id = self.intern_imported_canonical_type(&alias.target_type_identity)?;
-            self.resolved_type_aliases_by_path.insert(
+            Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 local_path,
                 ResolvedTypeAnnotation {
                     source_ref: ParsedTypeRef::Inferred,
@@ -102,7 +102,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let declaration =
                 self.project_imported_constant(local_path, &constant, string_table)?;
-            self.module_constants.push(declaration.clone());
+            let declaration_path = declaration.id.clone();
             Rc::make_mut(&mut self.declaration_table)
                 .append_for_construction(declaration)
                 .ok_or_else(|| {
@@ -110,6 +110,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         "Imported constant declaration path was registered more than once",
                     )
                 })?;
+            self.push_module_constant_path(declaration_path);
         }
         Ok(())
     }

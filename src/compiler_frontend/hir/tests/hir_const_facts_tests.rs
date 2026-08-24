@@ -5,8 +5,8 @@
 //! WHY: the facts are advisory; their only requirement is faithful copy/projection.
 
 use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
-    ConstFactValueKind,
+    AstConstDeclarationFact, AstConstFactValue, AstConstFacts, ConstBindingScope,
+    ConstBindingSource, ConstFactValueKind,
 };
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -46,11 +46,11 @@ fn projects_ast_const_facts_into_hir_metadata() {
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::Literal,
-            resolved_expression: Expression::string_slice(
+            value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
                 string_table.intern("Moth"),
                 test_source_location(2),
                 ValueMode::ImmutableOwned,
-            ),
+            ))),
             location: test_source_location(2),
         },
     );
@@ -62,11 +62,11 @@ fn projects_ast_const_facts_into_hir_metadata() {
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
             value_kind: ConstFactValueKind::Literal,
-            resolved_expression: Expression::int(
+            value: AstConstFactValue::Expression(Box::new(Expression::int(
                 42,
                 test_source_location(3),
                 ValueMode::ImmutableOwned,
-            ),
+            ))),
             location: test_source_location(3),
         },
     );
@@ -146,7 +146,11 @@ fn remaps_const_fact_keys_and_payload_paths() {
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::Literal,
-            resolved_expression: Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+            value: AstConstFactValue::Expression(Box::new(Expression::int(
+                1,
+                location.clone(),
+                ValueMode::ImmutableOwned,
+            ))),
             location,
         },
     );

@@ -98,7 +98,7 @@ struct BaseScopeContextInput<'scope> {
     kind: ContextKind,
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
-    visibility: Rc<FileVisibility>,
+    visibility: Arc<FileVisibility>,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }
@@ -256,7 +256,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
-        .with_file_visibility(input.visibility)
+        .with_file_visibility(Arc::clone(&input.visibility))
         .with_resolved_type_aliases(Rc::clone(
             &self.environment.lookups.resolved_type_aliases_by_path,
         ))
@@ -302,13 +302,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
 
         for header in sorted_headers {
-            let visibility = Rc::new(
+            let visibility = Arc::clone(
                 self.environment
                     .lookups
                     .binding_environment
                     .visibility_for(&header.source_file)
-                    .map_err(|error| self.error_messages(error, string_table))?
-                    .clone(),
+                    .map_err(|error| self.error_messages(error, string_table))?,
             );
             let source_file_scope = header.canonical_source_file(string_table);
 
@@ -657,15 +656,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Build body parsing context
         // --------------------------
-        let visibility = Rc::new(
+        let visibility = Arc::clone(
             self.environment
                 .lookups
                 .binding_environment
                 .visibility_for(&template.source_file)
-                .map_err(|error| self.error_messages(error, string_table))?
-                .clone(),
+                .map_err(|error| self.error_messages(error, string_table))?,
         );
-        let mut visible_declarations = visibility.visible_declaration_paths.clone();
+        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
         for parameter in &signature.parameters {
             visible_declarations.insert(parameter.id.to_owned());
         }
@@ -682,7 +680,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
             })
-            .with_visible_declarations(visible_declarations)
+            .with_visible_declarations(Arc::new(visible_declarations))
             .with_active_generic_type_context(generic_type_context)
             .with_generic_function_instantiation_stack(active_instance_stack.clone());
         context.expected_result_type_ids = signature.success_return_type_ids();
@@ -767,7 +765,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     fn validate_generic_function_body(
         &mut self,
         header: Header,
-        visibility: Rc<FileVisibility>,
+        visibility: Arc<FileVisibility>,
         source_file_scope: InternedPath,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
@@ -808,7 +806,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Build validation context and run check
         // --------------------------
-        let mut visible_declarations = visibility.visible_declaration_paths.clone();
+        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
         for parameter in &resolved_signature.signature.parameters {
             visible_declarations.insert(parameter.id.to_owned());
         }
@@ -822,7 +820,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope,
                 scope_frame_capacity,
             })
-            .with_visible_declarations(visible_declarations);
+            .with_visible_declarations(Arc::new(visible_declarations));
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             None,
@@ -852,7 +850,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     fn emit_function(
         &mut self,
         header: Header,
-        visibility: Rc<FileVisibility>,
+        visibility: Arc<FileVisibility>,
         source_file_scope: InternedPath,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
@@ -878,7 +876,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Build body parsing context
         // --------------------------
-        let mut visible_declarations = visibility.visible_declaration_paths.clone();
+        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
         for parameter in &resolved_signature.signature.parameters {
             visible_declarations.insert(parameter.id.to_owned());
         }
@@ -894,7 +892,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope,
                 scope_frame_capacity,
             })
-            .with_visible_declarations(visible_declarations);
+            .with_visible_declarations(Arc::new(visible_declarations));
         let expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         let expected_error_type = resolved_signature.signature.error_return_type_id();
         context.expected_result_type_ids = expected_result_type_ids;
@@ -949,7 +947,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     fn emit_start(
         &mut self,
         header: Header,
-        visibility: Rc<FileVisibility>,
+        visibility: Arc<FileVisibility>,
         source_file_scope: InternedPath,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,

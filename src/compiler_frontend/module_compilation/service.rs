@@ -351,7 +351,7 @@ fn run_semantic_stages(
     //    step 4b, and concrete call-summary finalization is already completed after
     //    borrow validation, while provenance, re-export interfaces, cross-module call
     //    lowering and future generated-generic summaries remain for later phases.
-    //    Folded constant values are now owned by each constant declaration record.
+    //    Folded constant values are owned by the AST module store and projected by value ID.
     let public_interface_build = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendPublicInterfaceProject,
         timing_context,
@@ -366,7 +366,7 @@ fn run_semantic_stages(
             generic_function_templates: materialisation_context_builder
                 .context()
                 .generic_function_templates(),
-            module_constants: &module_ast.module_constants,
+            const_values: &module_ast.const_values,
         })
         .build(),
     )

@@ -243,7 +243,7 @@ fn resolve_struct_field_defaults(
 fn inline_visible_constant_references(
     expression: &Expression,
     declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     type_environment: &mut TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
@@ -261,7 +261,7 @@ fn inline_visible_constant_references(
 fn inline_visible_constant_references_impl(
     expression: &Expression,
     declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     type_environment: &mut TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
@@ -312,9 +312,9 @@ fn inline_visible_constant_references_impl(
                 Rc::clone(template_ir_store),
             );
 
-            if let Some(visible) = visible_declaration_ids {
-                evaluation_context.visible_declaration_ids = Some(visible.to_owned());
-            }
+            // The visibility set arrives as the same handle the scope stores, so entering the
+            // field-default evaluation shares it instead of copying every visible path.
+            evaluation_context.visible_declaration_ids = visible_declaration_ids.map(Arc::clone);
 
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
@@ -448,11 +448,11 @@ fn inline_visible_constant_references_impl(
 fn visible_compile_time_constant_reference<'a>(
     path: &InternedPath,
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Option<&'a Declaration>, StructFieldResolutionError> {
-    if let Some(declaration) =
-        declaration_table.get_visible_resolved_by_path(path, visible_declaration_ids)
+    if let Some(declaration) = declaration_table
+        .get_visible_resolved_by_path(path, visible_declaration_ids.map(Arc::as_ref))
     {
         let declaration_is_constant = expression_is_compile_time_constant_from_effective_tir(
             &declaration.value,
@@ -468,8 +468,8 @@ fn visible_compile_time_constant_reference<'a>(
         return Ok(None);
     };
 
-    let Some(declaration) =
-        declaration_table.get_visible_resolved_by_name(name, visible_declaration_ids)
+    let Some(declaration) = declaration_table
+        .get_visible_resolved_by_name(name, visible_declaration_ids.map(Arc::as_ref))
     else {
         return Ok(None);
     };
@@ -517,7 +517,7 @@ fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -
 fn inline_visible_constant_references_in_rpn_item(
     item: &ExpressionRpnItem,
     declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&FxHashSet<InternedPath>>,
+    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
     type_environment: &mut TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,

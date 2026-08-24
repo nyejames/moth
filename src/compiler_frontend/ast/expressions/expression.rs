@@ -1293,6 +1293,14 @@ impl Expression {
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_) => ConstValueKind::Literal,
 
+            // WHAT: the `none` literal is a compile-time constant value.
+            // WHY: it carries no runtime dependency, and the folded-value pipeline already
+            // represents it end to end - `ConstValuePayload::OptionNone`,
+            // `PublicFoldedValue::OptionNone` and `HirConstValue::OptionNone`. Classifying it
+            // non-const rejected the documented `maybe_name #String? = none` binding form and
+            // left that machinery unreachable.
+            ExpressionKind::OptionNone => ConstValueKind::Literal,
+
             #[cfg(test)]
             ExpressionKind::Path(_) => ConstValueKind::Literal,
 
@@ -1390,7 +1398,6 @@ impl Expression {
             | ExpressionKind::CollectionBuiltinCall { .. }
             | ExpressionKind::MapBuiltinCall { .. }
             | ExpressionKind::NoValue
-            | ExpressionKind::OptionNone
             | ExpressionKind::ValueBlock { .. } => ConstValueKind::NonConst,
 
             // Delegate const classification to the wrapped value — the coercion
