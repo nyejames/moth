@@ -4,13 +4,13 @@
 >
 > **Permanent design authority:** `docs/src/developer-docs/memory-management/borrow-validation/boracle-reference-solver.mtf`
 >
-> **Status:** Queued for activation in the dedicated Boracle worktree. The current alpha borrow checker remains the normal compiler authority.
+> **Status:** Active on the `boracle` branch and worktree. Phase 0 is complete and audited. The current alpha borrow checker remains the normal compiler authority. Phase 0 changed no compiler behaviour itself, but the branch carries `7571448bf`, a separately approved fix to the alpha checker's future-use liveness, authored and validated on `main`. Phase 0 working notes live in this worktree's untracked `tmp/boracle-phase0-notes.md` and hold the owner map, baseline record, semantic-case inventory and audit record.
 >
-> **Current slice:** Phase 0 when activated.
+> **Current slice:** Phase 1.
 >
 > **Blockers:** None for the initial reference-solver work. Do not start the production borrow-checker replacement, lifetime-topology implementation or REC integration in this plan.
 >
-> **Next action:** Add this plan and the permanent Boracle design authority to the active worktree, update the roadmap at activation, then execute Phase 0 against that worktree's current revision.
+> **Next action:** Execute Phase 1: declare the `boracle` feature, add the empty feature-gated seam and the shared `problem/` and `last_use/` seams, split the feature matrix into standard and opt-in lanes, and give `just boracle` a real lane.
 
 ## Purpose
 
@@ -644,17 +644,17 @@ Re-anchor the plan in the dedicated worktree, preserve all local work and build 
 
 ## Tasks
 
-- [ ] Read the authority list from the active worktree.
-- [ ] Record the active branch, revision, worktree list and `git status --short` in working notes, not as a pinned pre-activation SHA in this committed plan.
-- [ ] Confirm the dedicated worktree does not contain unrelated implementation changes that would make audit attribution unclear.
-- [ ] Inventory every current borrow-checker file, public entry point, consumer and test owner.
-- [ ] Inventory current last-use construction and every consumer of `FutureUseKind`, optional transfer and advisory drop facts.
-- [ ] Inventory HIR place, value, statement, terminator, source-location and call-summary owners.
-- [ ] Inventory `show_borrow_checker`, compiler developer logging and current CLI extension points.
-- [ ] Inventory Cargo features, feature-matrix coverage, native Clippy and `just validate` ownership.
-- [ ] Run the current focused alpha borrow-checker tests and record the baseline result.
-- [ ] Add or identify reduced current cases for known `copy`, rebind, projection, loop and multi-return limitations without changing alpha behaviour.
-- [ ] Classify each case as accepted current behaviour, known alpha bug, expected conservatism or unsettled future rule.
+- [x] Read the authority list from the active worktree.
+- [x] Record the active branch, revision, worktree list and `git status --short` in working notes, not as a pinned pre-activation SHA in this committed plan.
+- [x] Confirm the dedicated worktree does not contain unrelated implementation changes that would make audit attribution unclear.
+- [x] Inventory every current borrow-checker file, public entry point, consumer and test owner.
+- [x] Inventory current last-use construction and every consumer of `FutureUseKind`, optional transfer and advisory drop facts.
+- [x] Inventory HIR place, value, statement, terminator, source-location and call-summary owners.
+- [x] Inventory `show_borrow_checker`, compiler developer logging and current CLI extension points.
+- [x] Inventory Cargo features, feature-matrix coverage, native Clippy and `just validate` ownership.
+- [x] Run the current focused alpha borrow-checker tests and record the baseline result.
+- [x] Add or identify reduced current cases for known `copy`, rebind, projection, loop and multi-return limitations without changing alpha behaviour.
+- [x] Classify each case as accepted current behaviour, known alpha bug, expected conservatism or unsettled future rule.
 
 Suggested searches:
 
