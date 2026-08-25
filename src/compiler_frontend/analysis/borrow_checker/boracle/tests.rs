@@ -362,6 +362,76 @@ fn boracle_generated_problems_are_deterministic_and_well_formed() {
     }
 }
 
+#[test]
+fn boracle_generated_problems_preserve_copy_and_rebind_semantics() {
+    for seed in 0..32 {
+        for cyclic in [false, true] {
+            let problem = generated_problem(seed, cyclic);
+            let report = super::BoracleSolver::solve(&problem)
+                .unwrap_or_else(|error| panic!("generated seed {seed} should solve: {error:?}"));
+            let copy_event = problem
+                .events()
+                .iter()
+                .find_map(|event| match event.kind {
+                    EventKind::Copy {
+                        source,
+                        destination,
+                        ..
+                    } => Some((event.id, source, destination)),
+                    _ => None,
+                })
+                .expect("generated problem should contain its explicit copy event");
+            let source_origins =
+                report
+                    .origin
+                    .origins_for_place_after_event(&problem, copy_event.0, copy_event.1);
+            let copy_origins = report
+                .origin
+                .origins_after_event(copy_event.0, copy_event.2)
+                .expect("generated copy should publish a destination origin");
+            assert!(!source_origins.is_empty(), "seed={seed} cyclic={cyclic}");
+            assert!(!copy_origins.is_empty(), "seed={seed} cyclic={cyclic}");
+            assert!(
+                source_origins
+                    .iter()
+                    .all(|origin| !copy_origins.contains(origin)),
+                "copy origin unexpectedly overlaps source: seed={seed} cyclic={cyclic}"
+            );
+
+            let rebind_event = problem
+                .events()
+                .iter()
+                .find_map(|event| match event.kind {
+                    EventKind::Rebind { destination, .. } => Some((event.id, destination)),
+                    _ => None,
+                })
+                .expect("generated problem should contain its fresh rebind event");
+            let rebound_origins = report
+                .origin
+                .origins_after_event(rebind_event.0, rebind_event.1)
+                .expect("generated rebind should publish a destination origin");
+            assert_eq!(rebound_origins, [ValueOriginId::new(2)]);
+
+            if cyclic {
+                assert!(
+                    problem
+                        .control_flow()
+                        .edges
+                        .iter()
+                        .any(|edge| edge.to.raw() <= edge.from.raw())
+                );
+                assert!(
+                    report
+                        .loans
+                        .loans()
+                        .iter()
+                        .any(|loan| !loan.origins.is_empty())
+                );
+            }
+        }
+    }
+}
+
 fn generated_problem(seed: u32, cyclic: bool) -> BorrowProblem {
     let places = vec![
         Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),

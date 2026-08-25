@@ -74,7 +74,8 @@ fn compile_boracle_input(
 mod tests {
     use super::{run_boracle, solve_boracle};
     use crate::compiler_frontend::analysis::borrow_checker::{
-        BoracleDump, BoracleExperiment, BoracleModuleReport, EventKind,
+        AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, CallResultProvenance,
+        EventKind, OriginKind,
     };
     use std::fs;
 
@@ -162,6 +163,62 @@ result = shared
     }
 
     #[test]
+    fn boracle_source_copy_report_keeps_origins_independent() {
+        let report = solve_source(
+            r#"
+items ~= {1}
+shared = items
+snapshot ~= copy items
+~snapshot.push(2) catch:
+;
+result = shared
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                !function.report.has_conflicts()
+                    && function
+                        .problem
+                        .events()
+                        .iter()
+                        .any(|event| matches!(event.kind, EventKind::Copy { .. }))
+            })
+            .expect("copy source should produce an independent typed report");
+        let (copy_event, source, destination) = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::Copy {
+                    source,
+                    destination,
+                    ..
+                } => Some((event.id, *source, *destination)),
+                _ => None,
+            })
+            .expect("copy event should be present in the typed source problem");
+        let source_origins = function.report.origin.origins_for_place_after_event(
+            &function.problem,
+            copy_event,
+            source,
+        );
+        let destination_origins = function
+            .report
+            .origin
+            .origins_after_event(copy_event, destination)
+            .expect("copy destination should publish a typed origin row");
+        assert!(!source_origins.is_empty());
+        assert!(!destination_origins.is_empty());
+        assert!(
+            source_origins
+                .iter()
+                .all(|origin| !destination_origins.contains(origin))
+        );
+    }
+
+    #[test]
     fn boracle_source_rebind_separates_old_alias_origin() {
         let output = run_source_dump(
             r#"
@@ -178,6 +235,81 @@ result = shared
         assert!(
             output.trim_end().ends_with("[]"),
             "unexpected rebind conflict:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_rebind_report_separates_old_and_new_generations() {
+        let report = solve_source(
+            r#"
+items ~= {"a"}
+shared = items
+items = {"b"}
+~items.push("c") catch:
+;
+result = shared
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                !function.report.has_conflicts()
+                    && function
+                        .problem
+                        .events()
+                        .iter()
+                        .any(|event| matches!(event.kind, EventKind::Aggregate { .. }))
+            })
+            .expect("rebind source should produce a typed generation report");
+        let (alias_event, alias_destination, source_root) = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::AliasFromPlace {
+                    source,
+                    destination,
+                }
+                | EventKind::ExclusiveAliasFromPlace {
+                    source,
+                    destination,
+                } => {
+                    let source_place = &function.problem.places()[source.index()];
+                    Some((event.id, *destination, source_place.root))
+                }
+                _ => None,
+            })
+            .expect("rebind source should retain its alias event");
+        let old_origins = function
+            .report
+            .origin
+            .origins_after_event(alias_event, alias_destination)
+            .expect("old alias should publish its origin");
+        let (new_event, new_destination) = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::Aggregate { destination, .. } => {
+                    let destination_place = &function.problem.places()[destination.index()];
+                    (event.id > alias_event && destination_place.root == source_root)
+                        .then_some((event.id, *destination))
+                }
+                _ => None,
+            })
+            .expect("fresh source rebind should retain its aggregate event");
+        let new_origins = function
+            .report
+            .origin
+            .origins_after_event(new_event, new_destination)
+            .expect("new source generation should publish its origin");
+        assert!(!old_origins.is_empty());
+        assert!(!new_origins.is_empty());
+        assert!(
+            old_origins
+                .iter()
+                .all(|origin| !new_origins.contains(origin))
         );
     }
 
@@ -203,6 +335,41 @@ result = increment(value = ~x)
     }
 
     #[test]
+    fn boracle_source_local_mutable_parameter_report_is_exclusive() {
+        let report = solve_source(
+            r#"
+increment |value ~Int| -> Int:
+    value = value + 1
+    return value
+;
+
+x ~= 10
+result = increment(value = ~x)
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                function.problem.events().iter().any(|event| {
+                    matches!(
+                        &event.kind,
+                        EventKind::CallArgument { argument, .. }
+                            if argument.access == AccessKind::Exclusive
+                    )
+                })
+            })
+            .expect("mutable parameter call should retain a typed exclusive argument");
+        assert!(
+            function
+                .problem
+                .events()
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::CallEffect(_)))
+        );
+    }
+
+    #[test]
     fn boracle_source_unknown_result_does_not_prove_independence() {
         let output = run_source_dump(
             r#"
@@ -223,6 +390,53 @@ result = shared
         assert!(
             output.contains("ConflictWitness"),
             "expected conservative unknown-result conflict, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_unknown_result_report_keeps_conservative_overlap() {
+        let report = solve_source(
+            r#"
+keep_values |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+shared = items
+unknown ~= keep_values(value = items)
+~unknown.push(2) catch:
+;
+result = shared
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| function.report.has_conflicts())
+            .expect("unknown result should retain a typed conflict");
+        let result = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::CallEffect(effect) => effect.result,
+                _ => None,
+            })
+            .expect("unknown call should retain its result row");
+        assert!(matches!(
+            &function.problem.origins()[result.origin.index()].kind,
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Unknown,
+                ..
+            }
+        ));
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| witness.origin_overlap)
         );
     }
 
@@ -428,6 +642,185 @@ result = shared
     }
 
     #[test]
+    fn boracle_source_branch_separates_typed_use_and_mutation() {
+        let report = solve_source(
+            r#"
+observe |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+shared = items
+condition = true
+if condition:
+    observed = observe(value = shared)
+else
+    ~items.push(2) catch:
+    ;
+;
+result = 0
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                function
+                    .problem
+                    .events()
+                    .iter()
+                    .any(|event| matches!(event.kind, EventKind::CallArgument { .. }))
+            })
+            .expect("branch source should produce one typed entry-function report");
+
+        assert!(!function.report.has_conflicts());
+        assert!(function.problem.control_flow().edges.len() >= 3);
+        assert!(function.problem.events().iter().any(|event| {
+            matches!(
+                event.kind,
+                EventKind::AliasFromPlace { .. } | EventKind::ExclusiveAliasFromPlace { .. }
+            )
+        }));
+        assert!(function.problem.events().iter().any(|event| {
+            matches!(
+                &event.kind,
+                EventKind::CallArgument { argument, .. }
+                    if argument.access == AccessKind::Shared
+            )
+        }));
+        assert!(
+            function
+                .report
+                .loans
+                .decisions()
+                .iter()
+                .any(|decision| decision.kind == AccessKind::Exclusive)
+        );
+    }
+
+    #[test]
+    fn boracle_source_loop_alias_rebind_reaches_a_deterministic_typed_fixpoint() {
+        let source = r#"
+items ~= {1}
+counter ~= 0
+loop counter < 2:
+    old = items
+    items = {2}
+    ~items.push(3) catch:
+    ;
+    result = old
+    counter = counter + 1
+;
+"#;
+        let first = solve_source(source);
+        let second = solve_source(source);
+        let first_function = first
+            .functions()
+            .iter()
+            .find(|function| {
+                function.problem.events().iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        EventKind::AliasFromPlace { .. }
+                            | EventKind::ExclusiveAliasFromPlace { .. }
+                    )
+                })
+            })
+            .expect("loop source should produce a typed alias function report");
+        let second_function = second
+            .functions()
+            .iter()
+            .find(|function| {
+                function.problem.events().iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        EventKind::AliasFromPlace { .. }
+                            | EventKind::ExclusiveAliasFromPlace { .. }
+                    )
+                })
+            })
+            .expect("repeat loop source should produce a typed alias function report");
+
+        assert!(
+            first_function
+                .problem
+                .control_flow()
+                .edges
+                .iter()
+                .any(|edge| edge.to.raw() <= edge.from.raw())
+        );
+        assert!(first_function.problem.events().iter().any(|event| {
+            matches!(
+                event.kind,
+                EventKind::Fresh { .. } | EventKind::Aggregate { .. }
+            )
+        }));
+        assert_eq!(
+            first_function.problem.debug_dump(),
+            second_function.problem.debug_dump()
+        );
+        assert_eq!(
+            first_function.report.debug_dump(),
+            second_function.report.debug_dump()
+        );
+    }
+
+    #[test]
+    fn boracle_source_final_call_argument_queries_transfer_after_exact_event() {
+        let report = solve_source(
+            r#"
+observe |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+result = observe(value = items)
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                function
+                    .problem
+                    .events()
+                    .iter()
+                    .any(|event| matches!(event.kind, EventKind::CallArgument { .. }))
+            })
+            .expect("final call source should contain a typed call argument event");
+        let (event_id, place, use_id, point) = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::CallArgument { argument, .. } => {
+                    Some((event.id, argument.place, argument.use_id, event.point))
+                }
+                _ => None,
+            })
+            .expect("final call should retain its exact argument event");
+        let origin = function
+            .report
+            .origin
+            .origins_for_place_after_event(&function.problem, event_id, place)
+            .first()
+            .copied()
+            .expect("final call argument should retain its source origin");
+        let use_row = function
+            .problem
+            .uses()
+            .get(use_id.index())
+            .expect("call argument should own its normalized use");
+        assert_eq!(use_row.point, point);
+        assert_eq!(use_row.place, place);
+        assert!(
+            function
+                .report
+                .optional_transfer_allowed_for_origin_after_event(origin, event_id, point)
+        );
+    }
+
+    #[test]
     fn boracle_source_typed_report_connects_origins_loans_and_conflicts() {
         let report = solve_source(
             r#"
@@ -485,6 +878,42 @@ result = score
     }
 
     #[test]
+    fn boracle_source_map_get_report_keeps_receiver_loan_live() {
+        let report = solve_source(
+            r#"
+scores ~{String = Int} = {"Priya" = 10}
+score = scores.get("Priya") catch:
+    then 0
+;
+~scores.set("Linus", 7) catch:
+;
+result = score
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| function.report.has_conflicts())
+            .expect("map get should retain a typed receiver conflict");
+        assert!(
+            function
+                .report
+                .loans
+                .loans()
+                .iter()
+                .any(|loan| { !loan.origins.is_empty() && !loan.uses.is_empty() })
+        );
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| witness.origin_overlap && witness.keeping_use.is_some())
+        );
+    }
+
+    #[test]
     fn boracle_source_map_remove_is_not_fresh_provenance() {
         let output = run_source_dump(
             r#"
@@ -501,6 +930,46 @@ result = removed
             output.contains("provenance: Unknown"),
             "expected conservative map-remove provenance, got:\n{output}"
         );
+    }
+
+    #[test]
+    fn boracle_source_map_remove_report_is_unknown_not_fresh() {
+        let report = solve_source(
+            r#"
+scores ~{String = Int} = {"Priya" = 10}
+removed = ~scores.remove("Priya") catch:
+    then 0
+;
+result = removed
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                function
+                    .problem
+                    .events()
+                    .iter()
+                    .any(|event| matches!(event.kind, EventKind::CallEffect(_)))
+            })
+            .expect("map remove should retain a typed call result");
+        let result = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::CallEffect(effect) => effect.result,
+                _ => None,
+            })
+            .expect("map remove should retain its result row");
+        assert!(matches!(
+            &function.problem.origins()[result.origin.index()].kind,
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Unknown,
+                ..
+            }
+        ));
     }
 
     #[test]
