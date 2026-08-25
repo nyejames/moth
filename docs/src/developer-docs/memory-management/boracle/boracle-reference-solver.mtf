@@ -556,6 +556,10 @@ A use occurs when a later source-semantic operation observes through the loan or
 
 Merely keeping a binding visible is not a use.
 
+A direct write through a mutable alias is both a holder use and a kill boundary. It keeps the loan
+live for earlier overlapping accesses, then ends the capability immediately after that write
+event.
+
 ### Loan kills
 
 A loan can stop being usable through:

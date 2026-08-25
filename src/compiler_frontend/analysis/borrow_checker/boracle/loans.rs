@@ -333,7 +333,7 @@ fn derive_alias_loans(
         };
         let source_origins = origins_for_access(problem, origins, event.id, source);
         let kills = holder_kills(problem, origins, graph, event.id, destination);
-        let uses = holder_uses(problem, graph, event.id, destination, &kills)?;
+        let uses = holder_uses(problem, origins, graph, event.id, destination, &kills)?;
         let holder_is_compiler_temporary = problem
             .places()
             .get(destination.index())
@@ -576,7 +576,7 @@ fn push_provenance_loan(
         return Ok(());
     }
     let kills = holder_kills(problem, origins, graph, event.id, holder);
-    let uses = holder_uses(problem, graph, event.id, holder, &kills)?;
+    let uses = holder_uses(problem, origins, graph, event.id, holder, &kills)?;
     let id = next_loan_id(first_id + result.len())?;
     result.push(LoanFact {
         id,
@@ -693,6 +693,7 @@ fn next_loan_id(index: usize) -> Result<LoanId, CompilerError> {
 
 fn holder_uses(
     problem: &BorrowProblem,
+    origins: &OriginSolution,
     graph: &EventGraph,
     issue_event: EventId,
     holder: PlaceId,
@@ -709,7 +710,7 @@ fn holder_uses(
         if event_id == issue_event || !places_cover(problem, holder, use_row.place) {
             continue;
         }
-        if use_row.definition {
+        if use_row.definition && !origins.is_write_through_use(use_row.id) {
             continue;
         }
         if graph.reaches_without_kill(problem, issue_event, event_id, kills) {

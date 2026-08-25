@@ -389,6 +389,40 @@ writer = {2}
 }
 
 #[test]
+fn boracle_source_write_through_keeps_alias_loan_live_before_overlap() {
+    let report = solve_source(
+        r#"
+items ~= {1}
+writer ~= items
+~items.push(2) catch:
+;
+writer = {3}
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| function.report.has_conflicts())
+        .expect("write-through liveness source should produce a conflict");
+    let write_through_use = function
+        .problem
+        .uses()
+        .iter()
+        .find(|use_row| {
+            use_row.definition && function.report.origin.is_write_through_use(use_row.id)
+        })
+        .expect("direct alias write should be classified as write-through");
+    assert!(
+        function
+            .report
+            .loans
+            .conflicts()
+            .iter()
+            .any(|witness| { witness.keeping_use == Some(write_through_use.id) })
+    );
+}
+
+#[test]
 fn boracle_source_local_mutable_parameter_is_exclusive() {
     let output = run_source_dump(
         r#"
