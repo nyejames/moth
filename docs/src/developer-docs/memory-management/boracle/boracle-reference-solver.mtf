@@ -21,7 +21,14 @@ Canonical language and memory documents still define Moth semantics. Boracle doe
 
 The current alpha borrow checker remains the normal compiler authority until a later project replaces it. Boracle is compiled and run only through explicit developer and test paths.
 
-Boracle has an initial implementation milestone but no final research endpoint. It may accumulate new cases, investigations, traces and analysis queries throughout the compiler's life.
+The semantic integration and adversarial-hardening baseline is now complete for the reference
+borrow-analysis boundary. The source service feeds one normalized problem into parameter-aware
+origin flow, alias-derived loans, origin-aware overlap, use-driven liveness and origin/event-aware
+last-use queries. This makes Boracle suitable for reference investigations and differential tests;
+it does not make it the production checker or a lifetime-topology authority.
+
+Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and
+analysis queries throughout the compiler's life.
 
 ## Core contract
 
@@ -126,6 +133,30 @@ The initial architecture keeps the current checker isolated:
 ]
 
 A future production checker may consume `BorrowProblem` or an accepted evolution of it. Boracle does not lock the optimized solver's storage or algorithm.
+
+### Integrated source solve
+
+The compiler-owned Boracle source service follows one explicit analysis relationship:
+
+[codeblock, $code("text"):
+    validated HIR
+        -> normalized semantic events and CFG facts
+        -> parameter and definition-aware origin propagation
+        -> alias/provenance-derived loan rows
+        -> structural-place and origin-aware overlap
+        -> use-driven loan liveness and conflict witnesses
+        -> origin and loan last-use observations
+        -> exact after-event optional-transfer advice
+]
+
+The origin solution is an input to loan derivation and conflict checking, not a report collected
+beside an independent loan solve. Structural place overlap handles bases and projections within a
+binding; origin overlap handles aliases across binding roots. Explicit copies and fresh
+rebindings remain disjoint from the source generation they replace or copy.
+
+Source extraction preserves exact call-argument and result-write boundaries, edge-specific scope
+visibility and deterministic CFG ordering. Local and generated call summaries that are unavailable
+at this boundary remain conservative rather than being invented from source text.
 
 ### Planned main paths
 
@@ -347,6 +378,10 @@ This is Stage 6 provenance, not final lifetime result provenance. Detached store
 
 Literals, templates, constructors, fresh collection/map values, supported computations and fresh call results introduce a fresh origin class.
 
+Function parameters enter the origin state with a stable parameter-origin identity. A parameter
+load therefore preserves a positive origin even when the function contains no local fresh
+definition event.
+
 A backend may later represent a scalar directly. The abstract origin only distinguishes source-semantic value lineages needed for alias and transfer reasoning.
 
 ### Shared aliases
@@ -369,11 +404,21 @@ A mutable declaration from an existing place carries mutation-capable access to 
 
 Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias.
 
+The reference extractor also distinguishes an alias-only binding from a slot-backed binding. A
+write through an alias preserves the referent generation and is checked against other holders; a
+write to a slot-backed binding replaces that binding's origin generation. At CFG joins, only the
+paths proven alias-only use the write-through interpretation; mixed or uncertain paths remain
+conservative.
+
 ### Joins
 
 When control-flow paths meet, the receiving value may represent several possible origins.
 
 Boracle should retain the explicit set and the path reason for each origin. It must not collapse to the destination binding merely because that is convenient.
+
+Unknown call-result provenance is an explicit top-like relation. It may overlap an argument origin
+and cannot establish an independence proof. It is never treated as a fresh origin merely because a
+local summary is unavailable.
 
 ## Explicit copy
 
@@ -499,6 +544,10 @@ Issuance may come from:
 
 Compiler-introduced plumbing must not invent stronger source loans than the source operation requires.
 
+The HIR builder retains alias, access, holder and use facts; the reference solver derives the loan
+rows after origin propagation. A source function therefore does not rely on hand-authored loan
+tables for ordinary aliases, mutable aliases, projections, call arguments or map `get` results.
+
 ### Loan uses
 
 A use occurs when a later source-semantic operation observes through the loan or a derived value that preserves it.
@@ -532,6 +581,10 @@ The exact algorithm may evolve, but it should remain inspectable. One suitable r
 Branches are independent. Joins merge possible live loans. Loops iterate to a fixed point.
 
 Boracle must model unreachable blocks explicitly so dead source paths do not keep a loan live.
+
+Reachability from an issue is not sufficient by itself. A loan is propagated only where a future
+loan use remains reachable without crossing a valid kill. Conflict witnesses name a reachable
+keeping-alive use when one exists; a first syntactic use is not a substitute for that path fact.
 
 ## Access legality
 
@@ -591,6 +644,13 @@ Boracle should retain witnesses:
 - one use path and one no-use path for `MayBeUsed`
 - one required later use for `MustBeUsed`
 
+The implemented report asks these questions at three levels: normalized places for structural
+inspection, resolved origins for value-lineage queries and loans for capability liveness. Origin
+observations come from the origin solution; they are not reconstructed by looking for later uses of
+the current binding name. Place queries remain useful for debugging, but redefinition-aware
+transfer and final-use decisions use the origin/loan subject that the consuming event actually
+touches.
+
 ### Optional transfer
 
 Moth has no ordinary mandatory-consuming value operation.
@@ -607,6 +667,10 @@ A call, assignment, return or aggregate insertion may receive affine cleanup res
 ]
 
 Transfer does not change alias semantics. It changes who may perform cleanup later.
+
+Final-use decisions are attached to the exact consuming event. Queries at that boundary use the
+represented origin or loan, then ask for the state after the event; querying only the binding at
+the containing point would still observe the final read and give the wrong transfer answer.
 
 ### Shared liveness substrate
 
@@ -715,6 +779,11 @@ Boracle should retain enough structure to distinguish:
 
 Final retained-edge cardinality and physical family edges belong to lifetime analysis. Boracle's stored-child facts are preliminary access/provenance evidence.
 
+The usable state retains the child-origin relation, not only a trace note on the aggregate event.
+A later field projection can therefore resolve to the source child origin, including when several
+fields store the same alias. The outer aggregate origin remains fresh and does not erase those
+child relationships.
+
 ## Collections and maps
 
 Builtin collections and maps have compiler-known effects, but the initial borrow reference model should stay conservative about structural mutation.
@@ -724,7 +793,8 @@ Builtin collections and maps have compiler-known effects, but the initial borrow
 - a dynamic collection index overlaps other indexes under the same base unless a stronger accepted proof is available.
 - map keys and values follow ordinary shared, copy and final-use rules.
 - inserting a value does not silently copy it.
-- removing a value may create preliminary detached-result provenance, but final lifetime effects belong later.
+- removing a value has preliminary detached or unknown provenance; it is never fresh independent
+  storage. Final detached-result lifetime effects belong later.
 - `clear` is relevant to future retained-edge frontiers, not ordinary loan counting.
 
 Boracle must not add per-entry uniqueness scans or runtime alias registries.
@@ -741,6 +811,12 @@ The initial input may consume current summary facts for:
 - preliminary return aliasing
 - reactive effect
 - external boundary access rules
+
+When a local summary is unavailable, call arguments and results use the conservative contract. An
+unknown result may alias an argument and remains origin-overlapping until a stronger summary is
+available. Generated functions likewise need either an already available summary or a conservative
+unknown contract at this boundary; Boracle does not assume that post-lowering summary convergence
+has already happened.
 
 Boracle may investigate a richer future summary vocabulary without publishing it as current interface contract.
 
@@ -1196,6 +1272,9 @@ Useful properties include:
 - copying an origin cannot introduce overlap with the source result
 - deleting the final use cannot extend a loan
 - adding a reachable later use cannot turn `MayBeUsed` into `NoFutureUse`
+- replacing an alias with a copy cannot add an alias conflict
+- a fresh rebind separates the new generation from old aliases
+- equivalent binding renumbering or branch splitting does not change semantic results
 - reference results are deterministic
 - experiment mode reports every acceptance delta
 - malformed input never reaches the solver
@@ -1254,6 +1333,9 @@ The command currently covers:
 - canonical semantic corpus
 - bounded generated problems
 - deterministic bounded generated problems
+- typed source-mode semantic corpus through the compiler-owned HIR service
+- exact after-event optional-transfer queries
+- generated copy/rebind provenance properties and loop/branch determinism
 - an internal source-mode smoke
 
 Future production differential tests remain an explicit later extension.
