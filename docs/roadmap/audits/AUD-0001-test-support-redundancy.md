@@ -3,7 +3,7 @@
 - State: `complete`
 - Kind: `Redundancy`
 - Primary scope: `tests.support`
-- Required context: `tests.harness`, `docs/src/docs/codebase/style-guide/testing.mtf`, consuming test modules
+- Required context: `tests.harness`, `docs/src/developer-docs/style-guide/testing.mtf`, consuming test modules
 - Coverage: `partial`
 - Reviewed: `2026-08`
 - Baseline: no validation gate was run; this audit is read-only and made no code change. Branch `test-suite-honesty` is mid-campaign (Phase 5), so parts of this surface are actively changing.
@@ -51,7 +51,7 @@ Signature-level survey only (bodies not read exhaustively):
 - `AGENTS.md` — ownership, one-current-path, data-oriented preference, test location rules
 - `docs/roadmap/audit-guide.md` — preservation contract, forbidden fix forms, freshness
 - `docs/roadmap/audit-kinds/redundancy.md` — full procedure
-- `docs/src/docs/codebase/style-guide/testing.mtf` — read in full, per the audit guide's
+- `docs/src/developer-docs/style-guide/testing.mtf` — read in full, per the audit guide's
   requirement for reviews of test ownership
 
 ## Existing findings and active plans checked

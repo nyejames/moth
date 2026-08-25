@@ -25,8 +25,8 @@ IMPLEMENTATION_SCOPE: frontend types, AST folding, HIR numeric ops, JS lowering,
 
 - `docs/compiler-design-overview.md` for numeric ownership, HIR numeric domain, target validation and per-function link facts
 - `docs/build-system-design.md` for build-owned target assignment and root selection
-- `docs/src/docs/codebase/language/overview.mtf` and its numeric references for source syntax
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/developer-docs/language/overview.mtf` and its numeric references for source syntax
+- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 
 ## Required architecture alignment
@@ -280,7 +280,7 @@ See `docs/compiler-design-overview.md` "Generated concrete functions" for the si
 
 Context: documentation, tests and implementation status must agree.
 
-- Update the canonical numeric and cast references selected by `docs/src/docs/codebase/language/overview.mtf` with the Number type family, operators, casts and formatting.
+- Update the canonical numeric and cast references selected by `docs/src/developer-docs/language/overview.mtf` with the Number type family, operators, casts and formatting.
 - Update `docs/compiler-design-overview.md` for `numeric_values` owner, HIR numeric domain and numeric analysis side-table ownership.
 - Update progress matrix rows for `Number`, `NumberN`, numeric check elision, `Byte` scaffold, Number follow-ups and Wasm deferral.
 - Add required integration cases: Number literals and diagnostics, arithmetic, mixed Int and Number, cross-scale and Float diagnostics, casts, Error recovery vs trap, Wasm rejection, Byte scaffold, Int check-elision.
@@ -324,7 +324,7 @@ Cover:
 
 ## Documentation and progress-matrix impact
 
-- update the canonical numeric and cast references selected by `docs/src/docs/codebase/language/overview.mtf` with the Number type family, operators, casts and formatting
+- update the canonical numeric and cast references selected by `docs/src/developer-docs/language/overview.mtf` with the Number type family, operators, casts and formatting
 - update `docs/compiler-design-overview.md` for `numeric_values` owner, HIR numeric domain and numeric analysis side-table ownership
 - progress matrix rows: `Number` and `NumberN`, numeric check elision, `Byte` scaffold, Number follow-ups, Wasm deferral
 

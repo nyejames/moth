@@ -2,7 +2,7 @@
 
 Looking for: code that behaves correctly but is hard to read, review, extend or delete.
 
-The [style guide](../../src/docs/codebase/style-guide/style-guide.mtf) is the authority. This is the procedure for auditing against it.
+The [style guide](../../src/developer-docs/style-guide/style-guide.mtf) is the authority. This is the procedure for auditing against it.
 
 **Evidence bar:** concrete code plus a named cost - slows review, obscures data flow, makes an API easy to misuse, or hides a state transition. "Cleaner" and "more idiomatic" are not justifications. Do not record formatting `rustfmt` already decides.
 

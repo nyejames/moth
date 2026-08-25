@@ -1,0 +1,90 @@
+@styles navbar, section, theme_head
+
+page_title #= "Compiler-facing language reference"
+page_description #= "Canonical language references and related compiler design documentation."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Developers) / Compiler-facing language reference
+
+    # Compiler-facing language reference
+
+    Compiler changes should start from the language contract. The unsuffixed
+    references listed below own syntax, semantics, edge cases and deferred
+    language surfaces.
+]
+
+#[section, $md:
+    ## Canonical references
+
+    Each public route groups the references for one language area.
+
+    Foundations:
+
+    - @../../docs/language-overview (Language basics)
+    - @../../docs/bindings (Values and bindings)
+    - @../../docs/numbers (Numbers)
+    - @../../docs/casts (Casts)
+
+    Functions and control flow:
+
+    - @../../docs/functions (Functions)
+    - @../../docs/branching (Branching)
+    - @../../docs/loops (Loops)
+    - @../../docs/errors (Errors, options and assertions)
+
+    Data and compile-time construction:
+
+    - @../../docs/structs (Structs)
+    - @../../docs/choices (Choices)
+    - @../../docs/collections (Collections and maps)
+    - @../../docs/templates (Templates)
+    - @../../docs/constants (Constants and compile-time behaviour)
+
+    Names and static abstraction:
+
+    - @../../docs/aliases (Aliases)
+    - @../../docs/generics (Generics)
+    - @../../docs/traits (Traits)
+
+    UI state:
+
+    - @../../docs/reactivity (Reactivity)
+
+    Projects and imported content:
+
+    - @../../docs/project-structure (Project structure)
+    - @../../docs/packages (Packages and dependencies)
+    - @../../docs/resources (Resources and Path values)
+    - @../../docs/moth-templates (Moth template files)
+    - @../../docs/markdown (Plain Markdown)
+
+    Each route combines a Basic teaching layer with detailed Advanced
+    references. The unsuffixed Moth template files form the canonical language
+    authority. Basic files and route introductions teach that contract without
+    replacing it.
+]
+
+#[section, $md:
+    ## Reference map
+
+    `docs/src/developer-docs/language/overview.mtf` lists every canonical file and
+    routes formal compiler, build and memory ownership.
+]
+
+#[section, $md:
+    ## Related design
+
+    - @../../docs/design-scope (Design scope, public authority): accepted mechanisms and intentionally excluded complexity
+    - @../memory-management/access-and-aliasing (Access and aliasing): shared reads, explicit copies and exclusive access
+    - @../compiler-design (Compiler design overview): stage ownership and cross-stage data flow
+    - @../../docs/progress (Progress matrix): current implementation support and known gaps
+]
+
+#[section, $md:
+    ## More documentation
+
+    See @../../docs/ (All documentation) for tutorials, examples and feature-focused language pages.
+]

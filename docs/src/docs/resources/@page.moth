@@ -1,0 +1,62 @@
+@resource-paths content as resource_paths
+
+@resource-paths-basic content as resource_paths_basic
+
+@path-values content as path_values
+
+@path-values-basic content as path_values_basic
+
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager
+
+page_title #= "Resources and Path values"
+page_description #= "Naming project files with resource paths, and using compile-time Path values in Moth."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Resources and Path values
+
+    # Resources and Path values
+
+    Projects contain more than source. Images, fonts, stylesheets and data files
+    need to reach the output, and the links pointing at them need to be correct
+    from wherever they are read.
+
+    Moth handles this with one small surface. A resource path names a file, the
+    compiler validates it, and a `Path` value carries it until a builder decides
+    where the file lands and what the URL should say.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):resource-paths]
+        [$insert("title"):Resource paths]
+        [$insert("advanced"):[resource_paths]]
+
+        [resource_paths_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):path-values]
+        [$insert("title"):Path values]
+        [$insert("advanced"):[path_values]]
+
+        [path_values_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../packages/]
+        [$insert("previous_title"):Packages and dependencies]
+        [$insert("next_path"):../moth-templates/]
+        [$insert("next_title"):Moth template files]
+    ]
+]

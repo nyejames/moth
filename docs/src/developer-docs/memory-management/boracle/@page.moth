@@ -1,0 +1,16 @@
+@boracle-reference-solver content as reference_content
+@styles navbar, section, theme_head
+
+page_title #= "Boracle reference solver"
+page_description #= "Moth's permanent slow reference borrow solver and borrow-analysis laboratory."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Memory management) / Boracle reference solver
+
+    Boracle is a developer-facing reference model of borrow legality, not a language feature and not a production fallback. It exists so borrow reasoning can be inspected, compared and extended outside the production checker.
+]
+
+#[section, reference_content]

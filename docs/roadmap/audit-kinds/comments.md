@@ -2,7 +2,7 @@
 
 Looking for: missing, stale, misleading or noisy local intent.
 
-The [style guide](../../src/docs/codebase/style-guide/style-guide.mtf) is the authority for comment form. This kind is code-neutral - it changes no executable tokens.
+The [style guide](../../src/developer-docs/style-guide/style-guide.mtf) is the authority for comment form. This kind is code-neutral - it changes no executable tokens.
 
 **Evidence bar:** a specific intent that is missing, wrong or buried. "Add comments" is not a finding; name the intent that needs preserving.
 

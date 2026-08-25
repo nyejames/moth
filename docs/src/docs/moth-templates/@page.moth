@@ -96,8 +96,8 @@ page_head #= language_theme_head
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../packages/]
-        [$insert("previous_title"):Packages and dependencies]
+        [$insert("previous_path"):../resources/]
+        [$insert("previous_title"):Resources and Path values]
         [$insert("next_path"):../markdown/]
         [$insert("next_title"):Plain Markdown]
     ]

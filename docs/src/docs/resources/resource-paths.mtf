@@ -1,0 +1,123 @@
+A resource path is an explicit-extension path written in expression position. It names one regular file that the project owns, and it produces one compile-time resource value.
+
+Resource paths are the only supported way to make the compiler aware that a file participates in a build. Nothing scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover files.
+
+### Syntax
+
+A resource path is an ordinary expression.
+
+[codeblock, $code("moth"):
+    logo #= @images/logo.svg
+    font #Path = @fonts/cmunss.woff2
+
+    icons #{Path} = {
+        @icons/add.svg,
+        @icons/remove.svg,
+    }
+]
+
+A resource path:
+
+- carries one explicit non-source extension on its final component
+- resolves to an existing regular file
+- resolves from the owning module root rather than the physical source-file directory
+- cannot be followed by dependency selections
+- is not a directory
+- is not an external URL
+
+Recognised source kinds such as `.moth`, `.mtf` and `.md` are dependencies rather than resource values. A source extension in expression position is a diagnostic, not a resource.
+
+### Context decides the meaning
+
+The same explicit-extension spelling means different things in different positions.
+
+- In a dependency clause it names an already registered provider target.
+- In expression position it creates a compile-time resource value.
+
+These two owners never reinterpret one another's path family. A dependency clause does not become a resource, and a resource path does not become a provider target. See @../packages/#dependency-paths (Dependency paths).
+
+### Resolution
+
+Resolution starts at the owning module root, exactly like dependency paths. The physical directory of the declaring file has no effect.
+
+[codeblock, $code("moth"):
+    -- in src/internal/deep/renderer.moth, whose module root is src/
+    logo #= @images/logo.svg
+]
+
+That resolves to `src/images/logo.svg`.
+
+The same authored resource path is resolved once. Repeating it in the same module reuses the already resolved result.
+
+### Filesystem ownership
+
+A resource path may address only a regular file inside the current module or package's private filesystem ownership.
+
+- traversal starts at the owning module root
+- ordinary unrooted directories owned by that module may be traversed
+- reaching a child normal module or a support package stops traversal
+- another module's private file cannot be addressed directly
+- the project package facade is not a global resource escape
+- support-package visibility follows the existing scoped-package rules
+- canonical containment rejects symlink escape
+- strict case validation reuses the source-path policy
+
+Cross-module resources travel through exported `Path` values, resource-bearing exported constants or reachable function implementations. There is no public visibility table for files themselves.
+
+### Rejected spellings
+
+These are diagnostics rather than resources:
+
+- `@/` and any other absolute-root spelling
+- `@./` and parent components such as `..`
+- `@@name`
+- a missing extension
+- a recognised source extension
+- a directory target
+- a missing target
+- a path followed by dependency selections
+
+### External and site-root URLs
+
+These remain ordinary untracked strings:
+
+[codeblock, $code("moth"):
+    external  #= "https://example.com/logo.svg"
+    cdn       #= "//cdn.example.com/app.js"
+    site_root #= "/favicon.svg"
+]
+
+They are not checked, copied, rewritten, watched or included in resource unions. Write a URL as a string when you mean a URL.
+
+### Validation is independent of output
+
+Every valid authored resource path is resolved and validated, even when the value is never used. This includes a resource path in:
+
+- an unused private constant
+- a helper template that is never rendered
+- either branch of an ordinary `if`
+- a branch later removed by static Bool specialisation
+- a generic template that is never materialised
+- a function that is unreachable from the selected entry
+
+Validation and emission are separate facts. A resource that no reachable output uses is never read, hashed or emitted.
+
+### Resource identity
+
+Each resolved resource has one stable semantic origin: its owner plus its owner-relative logical path.
+
+Identity deliberately excludes absolute paths, output paths, routes, URLs, content hashes, aliases, export bindings and source locations.
+
+The observable consequences are:
+
+- moving a declaration between ordinary files in one module does not change resource identity
+- moving or renaming the resource itself does change resource identity
+- consumer-local aliases and re-exports preserve identity
+- changing a file's bytes does not change its identity
+
+### Related concepts
+
+- For the `Path` type and where a resource value may be used see @#path-values (Path values).
+- For dependency clause paths see @../packages/#dependency-paths (Dependency paths).
+- For module roots and traversal boundaries see @../project-structure/#module-roots (Module roots).
+- For Markdown link and image behaviour see @../markdown/#markdown-dependencies (Markdown dependencies).

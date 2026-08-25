@@ -3,7 +3,7 @@
 - State: `complete`
 - Kind: `Documentation`
 - Primary scope: the scope registry and freshness matrix in `docs/roadmap/audit-log.md`. This subject is itself unregistered; see `Limitations`.
-- Required context: `docs/roadmap/audit-guide.md`, `docs/roadmap/audit-kinds/documentation.md`, `docs/roadmap/audit-kinds/README.md`, `docs/roadmap/audits/README.md`, `docs/roadmap/open-audit-findings.md`, AUD-0001, AUD-0002, AUD-0003, `docs/compiler-design-overview.md` (`Architectural invariants`, `Public semantic interfaces`, `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records`, `Stage 5: HIR and validation`, `Compiler implementation map`), `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` (`Phase C review`, `Phase C coverage closure`), `docs/src/docs/progress/@page.moth`, `docs/src/docs/codebase/style-guide/validation.mtf`, `.claude/skills/audit/SKILL.md`, `AGENTS.md`, `index.md`
+- Required context: `docs/roadmap/audit-guide.md`, `docs/roadmap/audit-kinds/documentation.md`, `docs/roadmap/audit-kinds/README.md`, `docs/roadmap/audits/README.md`, `docs/roadmap/open-audit-findings.md`, AUD-0001, AUD-0002, AUD-0003, `docs/compiler-design-overview.md` (`Architectural invariants`, `Public semantic interfaces`, `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records`, `Stage 5: HIR and validation`, `Compiler implementation map`), `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` (`Phase C review`, `Phase C coverage closure`), `docs/src/docs/progress/@page.moth`, `docs/src/developer-docs/style-guide/validation.mtf`, `.claude/skills/audit/SKILL.md`, `AGENTS.md`, `index.md`
 - Coverage: `partial`
 - Reviewed: `2026-08`
 - Baseline: no gate was failing at the start of this run. This report changes documentation only, so the documentation release-build gate applies rather than `just validate`. Branch `const-folding-and-type-system-hot-path-optimization` is mid-plan at Phase C, so the frontend surface named in the proposed rows is actively changing.
@@ -84,7 +84,7 @@ Surveyed, not inspected exhaustively:
 - `docs/roadmap/plans/constant-folding-and-type-system-hot-path-optimization-plan.md` — `Phase C
   review`, `Phase C coverage closure`.
 - `docs/src/docs/progress/@page.moth` — searched for audit-framework status rows; there are none.
-- `docs/src/docs/codebase/style-guide/validation.mtf` — `Documentation-only release-build gate`,
+- `docs/src/developer-docs/style-guide/validation.mtf` — `Documentation-only release-build gate`,
   `Fast iteration commands`, `Generated documentation`, `Documentation-only completion checklist`.
 - `.claude/skills/audit/SKILL.md` and `.agents/skills/audit/SKILL.md`.
 - `index.md` — searched for audit-framework references.
@@ -522,7 +522,7 @@ leaf only, with reduced coverage.
 
 #### Required validation or measurement
 
-Documentation release-build gate per `docs/src/docs/codebase/style-guide/validation.mtf` >
+Documentation release-build gate per `docs/src/developer-docs/style-guide/validation.mtf` >
 `Documentation-only release-build gate`: `moth build docs --release`, or
 `cargo run --quiet -- build docs --release`. Not `just validate`.
 
@@ -810,7 +810,7 @@ outside `src/compiler_tests/`, so the next reader does not treat it as a typo. I
 #### Read-only context
 
 `index.md`, `src/compiler_frontend/mod.rs`, `src/compiler_frontend/tests/`,
-`docs/src/docs/codebase/style-guide/testing.mtf`.
+`docs/src/developer-docs/style-guide/testing.mtf`.
 
 #### Must preserve
 
@@ -908,7 +908,7 @@ kinds`.
 
 ## Validation
 
-`docs/src/docs/codebase/style-guide/validation.mtf` > `Documentation-only release-build gate`
+`docs/src/developer-docs/style-guide/validation.mtf` > `Documentation-only release-build gate`
 applies: every changed file is documentation, so `just validate` must not be run and was not run.
 
 **Ran and passed.** `./target/release/moth build docs --release`, using this worktree's release

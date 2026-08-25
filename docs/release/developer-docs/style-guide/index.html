@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Codebase development standards | Moth</title>
+    <meta name="description" content="Rust code style, testing strategy and validation gates for Moth compiler work.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Developers</a> / Codebase development standards</p><h1>Codebase development standards</h1><p>Good compiler work should be easy to read, easy to test and hard to misinterpret.  These references cover implementation style, test design and the validation gates.</p><p>All of these must be followed by all contributors to meet the criteria for an acceptable PR.</p></section>
+<section class="container"><h2>Codebase style guide</h2><p>This document owns implementation style for new and refactored compiler code.</p><p><a href="./testing.mtf">Test strategy and test construction guide</a>.</p><p><a href="./validation.mtf">Final technical gates and completion checks guide</a>.</p><p>Priorities:</p><ol><li>Readability</li><li>Modularity</li><li>Correctness and diagnostics</li></ol><h3>No user-input panics</h3><ul><li>Active frontend stages must reject unsupported syntax and malformed input with structured diagnostics, not <code>panic!</code>, <code>todo!</code> or user-data-driven <code>.unwrap()</code>.</li><li>Panic paths are only for proven internal invariants that indicate a compiler bug.</li></ul><h3>Diagnostics</h3><ul><li>Use <code>CompilerDiagnostic</code> for normal user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics.</li><li>Use <code>CompilerError</code> only for internal compiler, filesystem, backend, dev-server and tooling infrastructure failures.</li><li>Diagnostic payloads and reason enums should carry typed <code>DiagnosticPayload</code> facts and stable diagnostic codes, not pre-rendered prose.</li><li>Include a <code>SourceLocation</code> in every user-facing diagnostic and preserve source labels wherever they add useful context.</li><li>Type diagnostics should carry semantic <code>TypeId</code>s and context enums and render through <code>DiagnosticRenderContext</code>, not cloned <code>DataType</code> values or formatted type names.</li><li>Use <code>DiagnosticBag</code> for stage-local accumulation and <code>CompilerMessages</code> only at build/render boundaries.</li></ul><p>For test assertion policy, see <code>testing.mtf</code>.</p><h3>Naming</h3><ul><li>Use descriptive full names. Avoid abbreviations except simple iterators such as <code>i</code> and <code>j</code>.</li><li>Functions should be self-describing. Compiler passes should use explicit names such as <code>build_ast</code>, <code>generate_hir</code> and <code>emit_wasm</code>.</li><li>Outside tiny scopes, prefer <code>function_signature</code> over <code>sig</code>, <code>expression</code> over <code>expr</code>, <code>data_type</code> over <code>ty</code> and a specific context name over <code>ctx</code> or <code>env</code>.</li></ul><h3><code>format!</code> and printing</h3><p>Use the saying library macro <code>say!()</code> for user-facing stdout that may need colour styling. Use variables directly in <code>format!</code> strings whenever possible.</p><h3>Imports</h3><p>Use inline imports only when they are one level deep and improve local reasoning. Import long paths at the top, including types used once in signatures.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>// ACCEPTABLE: terse and locally clear.</span>
+<span class='moth-code-keyword'>let</span> type_id <span class='moth-code-operator'>=</span> builtin_type_ids<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>BOOL</span>
+
+<span class='moth-code-comment'>// BAD: import this long path at the top.</span>
+<span class='moth-code-keyword'>let</span> type_id <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>crate</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>compiler_frontend<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>datatypes<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>ids<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>builtin_type_ids<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>BOOL</span></code></pre><p>Avoid aliasing unless it clearly improves readability.</p><h3>Code style and organisation</h3><ul><li>Maintain clear separation between compilation stages.</li><li>Each module should have one clear responsibility. Do not mix concerns.</li><li>Split files by task category. Aim for files under ~2000 lines where practical.</li><li><code>mod.rs</code> should be the module entry point and structural map. It exposes the public surface, shows the module flow and points to the files that contain the implementation.</li><li>Keep <code>mod.rs</code> focused on orchestration, re-exports and documentation rather than core implementation.</li><li>A reader should understand the module&#39;s responsibilities and important files by opening <code>mod.rs</code> first. Its documentation should explain structure and data flow and state what the module owns, important exclusions and why the pieces are arranged that way.</li><li>Prefer context structs for shared state instead of noisy or repetitive parameter lists.</li><li>Keep new abstractions small, stage-local and easy to justify.</li><li>Avoid <code>.unwrap()</code> unless it is blatantly safe and tied to an internal invariant.</li><li>Avoid <code>.to_owned()</code> and <code>.clone()</code> whenever possible, prefer borrowing when possible and find patterns that avoid copies.</li></ul><p>For test-file placement, see <code>testing.mtf</code>.</p><h3>Readable Rust style</h3><p>Compiler code should optimise for fast review. Dense code is harder to scan and easier to extend badly.</p><p>Prefer code that reads as a sequence of named steps and makes data flow obvious before every detail is understood. The main function for a module or pass should also read as a sequence of named steps.</p><p>Use named intermediate values, short single-purpose functions, explicit multi-step control flow, narrow helpers, context/input structs, enums for meaningful states, comments as landmarks and visible spacing. Avoid dense expression chains, clever iterator nesting, large inline matches and logic compressed into one expression. Brevity is less important than clarity.</p><h3>Vertical spacing</h3><p>Use vertical spacing to show structure.</p><p>Required:</p><ul><li>one blank line between functions</li><li>one blank line between unrelated statement groups</li><li>one blank line between major control-flow blocks inside long functions</li><li>one blank line between match arms unless the arms are tiny and visually identical</li><li>one blank line before a comment that introduces a new logical step</li></ul><p>Prefer this:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>let</span> source_file <span class='moth-code-operator'>=</span> header.source_file.clone<span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>;
+<span class='moth-code-keyword'>let</span> visibility <span class='moth-code-operator'>=</span> binding_environment.visibility_for<span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>&amp;</span>source_file<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;
+
+<span class='moth-code-comment'>// Resolve type aliases before constants because constant folding may depend on alias-expanded types.</span>
+<span class='moth-code-keyword'>self</span>.resolve_type_aliases<span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>&amp;</span>headers, visibility, string_table<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;
+
+<span class='moth-code-keyword'>self</span>.resolve_constant_headers<span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>&amp;</span>headers, visibility, string_table<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;</code></pre><h3>Comments as reading landmarks</h3><p><strong>Comments must explain non-local intent, not restate the code.</strong> Write for programmers reading the codebase for the first time so they can understand local code without first reading distant owners. Stay comment-positive: keep the comments that carry ownership, invariants and failure context, and drop the ones that only narrate syntax.</p><p>File-level docs are the primary place for subsystem role, ownership, exclusions and detailed WHAT/WHY context. A reader should learn the architecture from the file header and <code>mod.rs</code> map, then use item comments only where local code is not enough.</p><p>Detailed item comments belong on complex functions, stage joins, ordering constraints, invariants, unusual diagnostics and non-obvious data flow. Tiny accessors, constructors, fields, forwarding methods and obvious private helpers need no comment, or at most one short sentence.</p><p>WHAT/WHY headings are optional landmarks, not a required template. Use them when they make a non-local contract easier to find. Do not add them to every item.</p><p>Keep comments aligned with the current design. Migration history belongs in Git. Do not justify obsolete adapters, compatibility wrappers or deleted owners in comments.</p><p>Test-only implementation belongs with tests. Production files must not grow test-only constructors, mutators, semantic variants or convenience lookups just to support fixtures.</p><p>Be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>// Register same-file declarations before dependencies so aliases cannot shadow local names.</span>
+<span class='moth-code-keyword'>for</span> declaration <span class='moth-code-keyword'>in</span> same_file_declarations <span class='moth-code-delimiter'>{</span>
+    visible_names.register_same_file_declaration<span class='moth-code-delimiter'>(</span>declaration<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;
+<span class='moth-code-delimiter'>}</span>
+
+<span class='moth-code-comment'>// Prelude names are registered as reserved names first, then inserted only if not shadowed.</span>
+<span class='moth-code-keyword'>for</span> symbol <span class='moth-code-keyword'>in</span> external_package_registry.prelude_symbols<span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-delimiter'>{</span>
+    visible_names.reserve_prelude_symbol<span class='moth-code-delimiter'>(</span>symbol<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;
+<span class='moth-code-delimiter'>}</span></code></pre><h3>Production layering and stage ownership</h3><p>Stage separation is a dependency rule, not only a naming preference. Production code must respect these directions.</p><ul><li><code>compiler_frontend</code> must not depend on <code>build_system</code>, project builders or the project tool&#39;s configuration containers to perform local semantic compilation. It receives compiler-owned option and input values instead.</li><li><code>build_system/create_project_modules</code> must not assemble interface binding, declaration ordering, AST, public-interface or borrow stages. It builds one compiler input, calls the compiler&#39;s module compilation service and handles the returned outcome.</li><li>Build and project code must not mutate compiler semantic state. No build-owned function installs call summaries, rewrites HIR or reruns a compiler analysis.</li><li>A build or project client that needs a shorter compiler path must call a named compiler service, such as project config compilation or direct Moth template compilation. Composing raw stage functions to make a new short path is not allowed.</li><li>Values whose meaning is &quot;the compiler produced this semantic result&quot; belong to the compiler owner, even when the build system stores, remaps and publishes them. Project aggregation, entry assembly and output records stay build-owned.</li><li>Moving a stage owner means moving its data contracts and deleting the old owner. Do not leave forwarding wrappers, aliases or parallel payload types behind.</li><li>Exceptions are documented on the canonical architecture boundary in <code>docs/compiler-design-overview.md</code> or <code>docs/build-system-design.md</code>. Do not introduce a local exception in a comment.</li></ul><p>Prefer narrowed Rust visibility for these rules wherever the module tree can express them. Use a repository source check only for dependency directions Rust visibility cannot encode.</p><p>Tests may target stage-local APIs from their owning module. Later build, link and backend code may still consume completed HIR, function IDs, link facts and borrow results where the architecture documents that handoff. The rule bans external orchestration of the stages, not legitimate consumption of their final data.</p><h3>Refactor moves</h3><p>When moving code across compiler stages, do not copy the old module shape unchanged. Use the move to correct ownership, names, APIs, comments and data flow.</p><p>Moved code must:</p><ul><li>replace long parameter lists with context/input structs where useful</li><li>split mixed-responsibility modules</li><li>update file-level documentation to match the new owner</li><li>delete the old owner once the new path is wired</li></ul><p>Do not preserve a bad API shape because it already exists.</p><h3>API breakage</h3><ul><li>Moth is pre-release. Backward compatibility isn&#39;t a priority.</li><li>When APIs change, thread the new shape through the compiler and remove the old one.</li><li>Don&#39;t add compatibility wrappers, forwarding shims, parallel structs or defaulted legacy entry points just to preserve an older interface.</li><li>Prefer one current API shape, not transitional layers.</li></ul><h3>Type ordering</h3><p>Order types in a file from higher-level abstractions to lower-level supporting types.</p><h3>Iterators versus loops</h3><ul><li>Use iterators for simple transformations.</li><li>Use explicit loops for complex multi-stage logic where control flow is clearer.</li></ul><h3>Function size</h3><p>Functions should usually stay under ~200 lines. Longer functions are fine when they still represent one coherent operation, such as a compiler transformation, state machine or tightly coupled sequential process.</p><p>Split functions when they mix unrelated responsibilities, are hard to test or no longer match their name.</p><h3>Match readability</h3><p>Large matches should be grouped by meaning.</p><p>Use blank lines and short comments to make each group obvious. If a match grows too large, extract branch handling into named helpers.</p><p>Prefer:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>match</span> resolution <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-comment'>// Constants create dependency edges.</span>
+    <span class='moth-code-nominal'>ConstantReference</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>SourceConstant</span> <span class='moth-code-delimiter'>{</span> path, source_file <span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span>
+        add_constant_dependency<span class='moth-code-delimiter'>(</span>header, path, source_file<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>;
+    <span class='moth-code-delimiter'>}</span>
+
+    <span class='moth-code-comment'>// Type names are valid to resolve but do not create value dependency edges.</span>
+    <span class='moth-code-nominal'>ConstantReference</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>SourceTypeAlias</span> <span class='moth-code-delimiter'>{</span> .. <span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+
+    <span class='moth-code-comment'>// These are structurally invalid in constant initializers.</span>
+    <span class='moth-code-nominal'>ConstantReference</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>SourceNonConstant</span> <span class='moth-code-delimiter'>{</span> path <span class='moth-code-delimiter'>}</span>
+    <span class='moth-code-operator'>|</span> <span class='moth-code-nominal'>ConstantReference</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>ExternalNonConstant</span> <span class='moth-code-delimiter'>{</span> .. <span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span>
+        errors.push<span class='moth-code-delimiter'>(</span>non_constant_reference_error<span class='moth-code-delimiter'>(</span>path, location.clone<span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>;
+    <span class='moth-code-delimiter'>}</span>
+
+    <span class='moth-code-comment'>// Unknown names may produce better diagnostics during AST expression parsing.</span>
+    <span class='moth-code-nominal'>ConstantReference</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>Unknown</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>}</span></code></pre><p>Avoid long ungrouped matches where every branch looks equally important.</p><h3>Avoid clever Rust</h3><p>Don&#39;t use advanced Rust features just to make code shorter.</p><p>Avoid:</p><ul><li>nested iterator chains with side effects</li><li>clever <code>Option</code> / <code>Result</code> combinator pipelines for validation logic</li><li>large closures with mutation</li><li>broad generic helpers that hide compiler-stage ownership</li><li>macro abstractions for ordinary compiler flow</li><li>boolean-heavy APIs where an enum would explain the state</li><li>tuple-heavy returns where a named struct would explain the result</li></ul><p>Prefer named types and straightforward flow:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>pub</span><span class='moth-code-delimiter'>(</span><span class='moth-code-keyword'>crate</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>struct</span> <span class='moth-code-nominal'>DependencyResolution</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-keyword'>pub</span><span class='moth-code-delimiter'>(</span><span class='moth-code-keyword'>crate</span><span class='moth-code-delimiter'>)</span> target<span class='moth-code-operator'>:</span> <span class='moth-code-nominal'>ResolvedDependencyTarget</span>,
+    <span class='moth-code-keyword'>pub</span><span class='moth-code-delimiter'>(</span><span class='moth-code-keyword'>crate</span><span class='moth-code-delimiter'>)</span> local_name<span class='moth-code-operator'>:</span> <span class='moth-code-nominal'>StringId</span>,
+    <span class='moth-code-keyword'>pub</span><span class='moth-code-delimiter'>(</span><span class='moth-code-keyword'>crate</span><span class='moth-code-delimiter'>)</span> location<span class='moth-code-operator'>:</span> <span class='moth-code-nominal'>SourceLocation</span>,
+<span class='moth-code-delimiter'>}</span></code></pre><p>Instead of:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Result</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-delimiter'>(</span><span class='moth-code-nominal'>ResolvedDependencyTarget</span>, <span class='moth-code-nominal'>StringId</span>, <span class='moth-code-nominal'>SourceLocation</span><span class='moth-code-delimiter'>)</span>, <span class='moth-code-nominal'>CompilerError</span><span class='moth-code-operator'>&gt;</span></code></pre><p>A few more lines are fine when the result is easier to inspect and harder to misuse.</p><h3>Macros</h3><p>Keep macro usage minimal. Use small declarative macros only where they clearly reduce repetition and avoid creating procedural macros.</p><h3>Warnings and lints</h3><ul><li>Use <code>clippy</code> and the default Rust formatter.</li><li>Keep unused variables and dead code to a minimum.</li><li>Any lint suppression must be justified and documented. Use <code>allow(dead_code)</code> only for clearly identified planned work or test-only code.</li></ul><h3>Section banners</h3><p>Use section banners only for real phase boundaries in long functions, large files or complex orchestration such as parsing, lowering, template folding, dependency resolution, diagnostic rendering or build flow.</p><p>Use exactly this format:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>// ------------------------</span>
+<span class='moth-code-comment'>//  Resolve template slots</span>
+<span class='moth-code-comment'>// ------------------------</span></code></pre><p>The banner has three lines. The title starts with <code>//  </code> and uses title case or a clear imperative name. The top and bottom start with <code>// </code> and their dashes extend equally beyond the title on both sides. Do not use banners around small helpers or to hide a file that should be split.</p><h3>Returning errors</h3><p>The diagnostic lane rules above apply to every local error boundary.</p><ul><li>New user-facing diagnostics must use typed <code>CompilerDiagnostic</code> constructors in <code>compiler_diagnostic.rs</code>. Do not add <code>CompilerError</code> variants for syntax, type, rule, import, borrow or config failures.</li><li>Use <code>return_compiler_error!</code> only for internal compiler bugs or broken invariants.</li><li>When a local <code>Result</code> boundary carrying <code>CompilerDiagnostic</code> or <code>CompilerError</code> triggers <code>result_large_err</code>, box the payload inside that boundary enum or use a stage-local boxed diagnostic result alias.</li><li>Keep <code>DiagnosticBag</code> and <code>CompilerMessages</code> owning plain <code>CompilerDiagnostic</code> values at accumulation and render/build boundaries.</li><li>Prefer <code>Option&lt;CompilerDiagnostic&gt;</code> over <code>Result&lt;(), CompilerDiagnostic&gt;</code> for predicate-only validators that report one diagnostic or continue.</li><li>Prefer explicit loops when iterator closures would infer <code>Result&lt;_, CompilerDiagnostic&gt;</code>.</li><li>Keep paths interned until render time. Do not duplicate them as owned <code>PathBuf</code>s.</li><li>Centralise repeated diagnostic construction in the owning typed constructor or narrow helper instead of duplicating it across branches.</li><li>Include exact tokens, types or names and suggest practical corrections where possible.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-comment'>// Typed diagnostic constructor.</span>
+<span class='moth-code-keyword'>return</span> <span class='moth-code-nominal'>Err</span><span class='moth-code-delimiter'>(</span><span class='moth-code-nominal'>CompilerDiagnostic</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>invalid_assignment_target<span class='moth-code-delimiter'>(</span>
+    <span class='moth-code-nominal'>InvalidAssignmentTargetReason</span><span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>ImmutableVariable</span>,
+    variable_name,
+    location,
+<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>;
+
+<span class='moth-code-comment'>// Internal bug path.</span>
+return_compiler_error<span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>(</span>
+    <span class='moth-code-string'>&quot;Unsupported AST node type: {:?}&quot;</span>,
+    node_type; <span class='moth-code-delimiter'>{</span>
+        <span class='moth-code-nominal'>CompilationStage</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-string'>&quot;AST Processing&quot;</span>,
+        <span class='moth-code-nominal'>PrimarySuggestion</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-string'>&quot;This is a compiler bug - please report it&quot;</span>
+    <span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>)</span>;</code></pre><h3>Codebase documentation</h3><p>This section covers codebase doc comments and small requested documentation edits. For substantial documentation work, follow the task&#39;s dedicated writing guidance and the surrounding source.</p><ul><li><code>@page.moth</code> owns website title, introduction, navigation, composition and layout.</li><li><code>overview.mtf</code> owns compact routing and contract reference and must not be imported by <code>@page.moth</code>.</li><li>Topic-named <code>.mtf</code> files own detailed design content, remain useful when read directly and may be imported by website pages. Pages should make subjects easy to explore while compact references reach the contract quickly.</li></ul><p>For small edits:</p><ul><li>Follow the surrounding style and use British English.</li><li>Prefer direct, active constructions and concrete verbs. Keep only information-carrying prose.</li><li>Remove filler, hollow intensifiers, hedging, vague qualifiers, generic transitions, redundant preambles or recaps, restatement, over-description, clichés and dated cultural references.</li><li>Do not add redundant end-of-section summaries.</li><li>Avoid semicolons, Oxford commas and em dashes. Use straight <code>&#39;</code> apostrophes and contractions. Reserve hard <code>must</code> and <code>must not</code> wording for deliberate emphasis.</li><li>Vary sentence rhythm naturally. Preserve exact quotes and code syntax even when they break prose rules.</li><li>Use &quot;Priya&quot; as the first choice for example names.</li></ul></section>
+<section class="container"><h2>Testing standards</h2><p>This document owns test selection, test structure, assertions, fixture design and test pruning for compiler work.</p><p>It does not define the final validation command. For completion gates, read <code>docs/src/developer-docs/style-guide/validation.mtf</code>.</p><p>The primary goal is end-to-end language and artifact correctness. Prefer real usage patterns and complete Moth snippets over narrow implementation-shaped tests.</p><h3>Task-reading guide</h3><p>Heading paths use <code>&gt;</code> to name nested sections. Read the selected heading through the next heading of the same or higher level, including nested subsections unless the route narrows further. Read this document in full for test infrastructure, suite policy, broad fixture cleanup or audits.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Task</strong></p></th><th scope="col" style=""><p> <strong>Read</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Choosing the test owner, level or location</p></td> <td style=""><ul><li><code>Default testing preference</code></li><li><code>Supporting rules</code></li><li><code>Test ownership</code></li><li><code>Test location and module layout</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Unit or subsystem-invariant coverage</p></td> <td style=""><ul><li><code>Unit tests</code></li><li><code>HIR and internal-IR assertions</code> when IR or side-table facts are involved</li><li><code>Fixtures and temporary files</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> User-visible language or project behaviour</p></td> <td style=""><ul><li><code>Integration cases</code></li><li><code>Successful backend intent</code></li><li><code>Focused integration selection and inventory</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Runtime output or reactivity behaviour</p></td> <td style=""><ul><li><code>Runtime output assertions</code></li><li><code>Backend matrices and artifact assertions</code> when structure also matters</li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Threads, shared state, timing or repeated execution</p></td> <td style=""><p> <code>Concurrency and repetition</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Diagnostics or warnings</p></td> <td style=""><ul><li><code>Diagnostics assertions</code></li><li><code>Integration cases</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Backend structure, target parity, Wasm validation or goldens</p></td> <td style=""><ul><li><code>Successful backend intent</code></li><li><code>Backend matrices and artifact assertions</code></li><li><code>HIR and internal-IR assertions</code> only for hidden compiler invariants</li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Manifest policy, suite inventory, filtering or audit behaviour</p></td> <td style=""><ul><li><code>Successful backend intent</code></li><li><code>Focused integration selection and inventory</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Adding or changing a Cargo feature, or a feature- or platform-gated test</p></td> <td style=""><p> <code>Feature and platform lanes</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Asserting on source text, or adding an architecture ban</p></td> <td style=""><p> <code>Source-text assertions</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Fixtures, temporary paths or test support</p></td> <td style=""><p> <code>Fixtures and temporary files</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Removing duplicate or obsolete coverage</p></td> <td style=""><ul><li><code>Pruning and duplicate coverage</code></li><li><code>Benchmarks are not correctness tests</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Final coverage review</p></td> <td style=""><p> <code>Testing checklist</code></p></td>
+        </tr>
+            
+</table><h3>Default testing preference</h3><p>Integration tests written in Moth are the default for user-visible language behaviour. They exercise the real compiler path and usually provide the strongest regression coverage.</p><ul><li>Prefer integration coverage for user-visible language behaviour</li><li>Add or update unit tests only where subsystem-local behaviour genuinely benefits from them</li><li>Avoid redundant fixtures that assert the same behaviour in slightly different forms</li><li>Prefer meaningful end-to-end cases over brittle implementation-shaped assertions</li><li>When backend or runtime behaviour matters, strengthen artifact assertions where goldens alone are too vague</li></ul><h3>Supporting rules</h3><ul><li>Prefer externally observable behaviour over implementation detail.</li><li>Use unit tests for hidden invariants that integration output cannot inspect.</li><li>Use one clear primary test owner per behaviour.</li><li>Do not create multiple fixtures that prove the same contract without a distinct stage or backend reason.</li><li>Prefer realistic end-to-end snippets.</li><li>Tests should remain understandable without reading the implementation first.</li><li>Do not make exact internal layout contractual unless that layout is the invariant.</li><li>When tests compare or report paths, use the shared <code>portable_path_text</code> normalisation helper instead of raw or native path strings. Keep <code>Path</code> or <code>PathBuf</code> values for filesystem operations, converting to portable text only at assertion or display boundaries so tests remain robust across platforms.</li></ul><h3>Test ownership</h3><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Behavior</strong></p></th><th scope="col" style=""><p> <strong>Owner</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Pure data or invariant behavior</p></td> <td style=""><p> Focused unit test near the owning subsystem</p></td>
+        </tr><tr style="">
+             <td style=""><p> Compiler-stage invariant</p></td> <td style=""><p> Stage-local unit test naming the invariant</p></td>
+        </tr><tr style="">
+             <td style=""><p> Stage-boundary orchestration</p></td> <td style=""><p> Minimal pipeline/build smoke test</p></td>
+        </tr><tr style="">
+             <td style=""><p> User-facing language behavior</p></td> <td style=""><p> Integration case under <code>tests/cases/</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Backend artifact behavior</p></td> <td style=""><p> Backend-specific artifact assertions or contractual goldens</p></td>
+        </tr><tr style="">
+             <td style=""><p> Side-table or hidden compiler fact</p></td> <td style=""><p> Focused unit test if external output cannot expose it</p></td>
+        </tr><tr style="">
+             <td style=""><p> Cross-backend semantic parity</p></td> <td style=""><p> One integration input with backend-specific assertions</p></td>
+        </tr>
+            
+</table><p>Each behavior should have one primary owner. Secondary coverage is justified only when it protects a distinct boundary, target, diagnostic lane or internal invariant.</p><h3>Test location and module layout</h3><ul><li>Tests do not live in production implementation files.</li><li>Module-specific tests belong under the module&#39;s test directory, for example:</li></ul><pre style=""><code class='codeblock'>src/compiler_frontend/hir/tests/</code></pre><ul><li>End-to-end or multi-module Rust harness tests belong under:</li></ul><pre style=""><code class='codeblock'>src/compiler_tests/</code></pre><ul><li>Language and project integration cases belong under:</li></ul><pre style=""><code class='codeblock'>tests/cases/</code></pre><ul><li>Test-only utilities should live with the tests that own them.</li><li>Do not create broad shared test utility modules for one or two callers.</li><li>Split cross-stage test support only when actual ownership boundaries justify it.</li></ul><h3>Unit tests</h3><p>Retain unit tests for:</p><ul><li>pure data invariants</li><li>impossible states</li><li>side-table facts</li><li>transfer rules</li><li>backend planning policy not observable from artifacts</li><li>narrow parser or formatter algorithms</li></ul><p>Prefer integration tests for user-visible behavior. Once a subsystem is stable, prune superseded unit tests. Rewrite obsolete tests rather than preserving old API shapes. A unit test should name the invariant it protects. Do not use unit coverage as a substitute for an end-to-end case when user behavior changed.</p><h3>Integration cases</h3><ul><li><code>moth tests</code> runs the integration test runner.</li><li>Use real Moth snippets.</li><li>Each canonical case is one self-contained scenario directory.</li><li>Keep helper source files inside the owning case&#39;s <code>input/</code> directory.</li><li>Do not let helper files become unintended standalone cases.</li><li>Add strong output assertions where behavior is visible.</li><li>Prefer top-level templates to simulate output.</li><li>Avoid <code>io.line(...)</code> unless console behavior is itself under test.</li></ul><h3>Successful backend intent</h3><p>Every successful HTML and HTML-Wasm backend run applies its universal backend baseline. The baseline protects harness and target invariants. It is not the case&#39;s authored semantic contract.</p><p>Use <code>success_contract = &quot;acceptance_only&quot;</code> only when that backend has no stronger case-specific semantic, artifact, golden, absence or expected-warning assertion.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[backends.html]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;success&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;forbid&quot;</span>
+<span class='moth-code-nominal'>success_contract</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;acceptance_only&quot;</span></code></pre><p>Acceptance-only intent does not disable the baseline. The audit records both <code>baseline_applied = true</code> and <code>acceptance_only = true</code>, with <code>backend_baseline</code> and <code>acceptance_only</code> in <code>assertion_kinds</code>.</p><p>Do not combine acceptance-only intent with artifact assertions, golden mode, rendered-output assertions, artifact-absence assertions or an authored expected-warning contract. A whole case whose backends are all acceptance-only uses <code>role = &quot;smoke&quot;</code>. A mixed-backend case may use a boundary or backend role when another backend owns a stronger contract.</p><p>A successful backend with only the universal baseline is invalid. Typed fixture loading rejects it before policy evaluation, listing, audit, or execution.</p><p>For new type-system syntax, include:</p><ul><li>positive usage</li><li>value/type namespace misuse</li><li>binding visibility</li><li>duplicates</li><li>cross-file resolution</li><li>target/backend rejection where relevant</li></ul><p>Canonical fixture shape:</p><pre style=""><code class='codeblock'>tests/cases/
+├── manifest.toml
+└── case_name/
+    ├── input/
+    │   ├── main.moth
+    │   └── helper.moth
+    ├── expect.toml
+    └── golden/
+        ├── html/
+        └── html_wasm/</code></pre><ul><li><code>manifest.toml</code> is the authoritative case order. Every case declares a unique canonical <code>id</code>, unique fixture <code>path</code> and at least one non-empty tag.</li><li>Manifest case paths are relative and may not contain absolute, platform-prefix, parent or current-directory components. Canonicalised fixture roots must remain inside <code>tests/cases/</code>, including through symlinks.</li><li>IDs, paths, tags, contracts, roles and configured entries reject leading or trailing whitespace. Tags within one case must be unique.</li><li>Every canonical case declares a <code>role</code>. Supported roles are <code>primary</code>, <code>boundary</code>, <code>backend</code>, <code>adversarial</code> and <code>smoke</code>.</li><li>Every non-smoke case declares a <code>contract</code>. A whole-case acceptance-only smoke may remain contractless because it has no case-specific semantic owner. Do not invent a contract for it.</li><li>A <code>primary</code> case requires a contract, and one contract may have at most one primary case.</li><li>A contract family without a primary is reported once in manifest order. Backend-only and adversarial-only families are deliberate advisories. Mixed or ordinary secondary-only families remain visible for ownership review.</li><li>Case IDs, tags, contracts and roles are retained as typed runner metadata. Do not reconstruct them from display text or fixture paths.</li><li>One case folder owns all inputs and expectations for that scenario.</li></ul><p>Manifest entry shape:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[[case]]</span>
+<span class='moth-code-nominal'>id</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;borrow_conflict_resolved_by_reordering&quot;</span>
+<span class='moth-code-nominal'>path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;borrow_conflict_resolved_by_reordering&quot;</span>
+<span class='moth-code-nominal'>tags</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;integration&quot;</span>, <span class='moth-code-string'>&quot;borrows&quot;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-nominal'>contract</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;language.bindings.alias_final_use_allows_mutable_rebinding&quot;</span>
+<span class='moth-code-nominal'>role</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;primary&quot;</span></code></pre><h3>Focused integration selection and inventory</h3><p>Use the canonical case ID and retained metadata for local iteration:</p><pre style=""><code class='codeblock'>cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> tests <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>case arithmetic_operator_precedence <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>backend html
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> tests <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>tag borrows <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>tag diagnostics <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>backend html
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> tests <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>contract <span class='moth-code-operator'>&lt;</span>contract<span class='moth-code-operator'>-</span>id<span class='moth-code-operator'>&gt;</span>
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> tests <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>list <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>tag borrows</code></pre><ul><li><code>--case</code> and <code>--contract</code> are exact matches.</li><li>Repeatable <code>--tag</code> filters compose as logical AND.</li><li>Case, tag, contract and backend filters compose and preserve manifest/backend order.</li><li><code>--list</code> accepts selection filters and reports canonical ID, selected backend blocks, tags, contract and role without compiling cases.</li><li>Duplicate singleton options, duplicate tag values, missing values, unknown flags and positional arguments are errors.</li></ul><p>Use the audit mode to validate and inventory the complete canonical suite without compiling cases:</p><pre style=""><code class='codeblock'>cargo run --quiet -- tests --audit</code></pre><p>Audit writes its JSON inventory before returning hard-policy failure. Normal listing and execution use the same policy evaluator and reject hard findings before compiling a case. Missing roles, missing contracts on non-smoke cases, primary cases without contracts and duplicate primary owners are hard findings. Contractless whole-case acceptance-only smoke cases are valid.</p><p>Audit cannot be combined with filters or <code>--list</code>. It writes the reporting-owned JSON inventory to <code>target/test-reports/integration_suite_inventory.json</code>, including canonical metadata, backend expectation facts, hard-policy violations and primary-less contract-family advisories. The report is review input only; it never deletes, merges or rewrites fixtures.</p><p>The schema 8 inventory reports acceptance-only, rendered-output, artifact, golden, absence and expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered and exact-once runtime contracts separately. Per-backend fields keep <code>baseline_applied</code>, <code>acceptance_only</code>, <code>assertion_kinds</code>, <code>golden_present</code>, <code>golden_mode</code>, every rendered-output form, exact warning codes, diagnostic match mode and any contains-mode reason separate so the report matches what ran.</p><p>Schema 7 added the weak-contract review fields. <code>smoke_role_cases</code>, <code>warning_ignore_backend_blocks</code> and <code>diagnostic_contains_backend_blocks</code> count the three legal weak contracts, and <code>weak_contract_review_backend_blocks</code> counts blocks carrying at least one of them. Every backend block lists its own <code>weak_contract_reviews</code>. These are review fields, not policy: a smoke case, an ignored warning contract and a contains-mode failure all remain valid. The canonical suite currently declares none of them, so any non-zero count is a new weaker contract to review rather than an inherited one to explain.</p><p>Schema 8 added report identity. Every report carries <code>run</code> — a run id, the command, the host OS and architecture, the features the binary was built with, the runner thread count and whether the run finished — and the inventory replaced <code>repository_commit</code> with <code>repository_revision</code>, which reports a discovered <code>commit</code>, <code>not_a_repository</code>, or <code>unknown</code> with the reason discovery failed. A failed discovery and a genuine absence are different facts, and a report that names neither its command nor its build cannot be told apart from a stale one.</p><p>Reports are written to a sibling temporary file and renamed into place, so a reader never sees a partial file. Before the work begins, each report is replaced by one whose run says `completed: false`; an interrupted run therefore leaves a report that says it did not finish rather than the previous run&#39;s passing output.</p><p>Hard policy has one suite-policy owner. Missing roles, missing non-smoke contracts, duplicate primary contracts, a primary without a contract and a whole-case acceptance-only fixture without <code>role = &quot;smoke&quot;</code> are hard findings. Normal list and execution modes reject hard findings before selection or compilation. Audit still writes the complete JSON report, then returns failure. Primary-less contract-family advisories remain non-fatal.</p><h3>Runtime output assertions</h3><p>Runtime assertions use one Node harness. It records console output and HTML fragment inserts in one event array when each event happens, then joins their text with newlines in that same order. Channel views are derived from the event array. They never reconstruct chronology after execution.</p><p>The harness runs only when a backend declares a rendered-output assertion. It executes the emitted page scripts and waits for one documented microtask tick so scheduled reactive updates can flush. Do not make extra scheduler turns or incidental microtask counts contractual.</p><p>Choose the narrowest field that owns the behaviour:</p><ul><li><code>rendered_output_exact</code> protects the complete combined output. It is mutually exclusive with the other rendered-output fields. Exact comparison normalizes line endings only and preserves every other whitespace difference.</li><li><code>rendered_output_contains_in_order</code> protects the relative order of two or more fragments.</li><li><code>rendered_output_contains_exactly_once</code> protects activation, mounting and helper output from duplication.</li><li><code>rendered_output_contains</code> and <code>rendered_output_not_contains</code> protect required and forbidden fragments when complete output isn&#39;t the contract.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[backends.html]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;success&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;forbid&quot;</span>
+<span class='moth-code-nominal'>rendered_output_contains</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;active-root&quot;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-nominal'>rendered_output_not_contains</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;imported-root&quot;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-nominal'>rendered_output_contains_in_order</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;before-loop&quot;</span>, <span class='moth-code-string'>&quot;after-loop&quot;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-nominal'>rendered_output_contains_exactly_once</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;active-root&quot;</span>, <span class='moth-code-string'>&quot;mounted&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><p>Use exact output for small deterministic behaviours such as loop or map operation results. Use ordered and exact-once fragments when unrelated output may coexist. Prefer these runtime contracts over generated JavaScript text or a whole-page golden when execution is the real owner.</p><p>An exact mismatch is reported escaped, post-normalization, with the byte offset of the first difference, so a whitespace-only difference does not print as two identical lines.</p><h4>What the harness will execute</h4><p>The harness parses the emitted page for a supported script shape and rejects everything else rather than guessing:</p><ul><li>a classic inline script is executed</li><li><code>type=&quot;module&quot;</code> is rejected as unsupported. The harness materializes no emitted glue, provider or runtime module and no import map, so it cannot run the module graph the HTML backend emits when a bundle import preamble is present. Executing it as a classic script would report a failure that did not happen</li><li>an external <code>src</code>, an unknown <code>type</code>, <code>nomodule</code>, <code>async</code>, and a malformed or unterminated tag are each rejected by name</li><li>the page script include must appear exactly once inside the body</li></ul><h4>Harness failure classes</h4><p>A harness problem is never reported as a case failure. <code>RenderHarnessError</code> names which boundary broke: <code>Artifact</code>, <code>Workspace</code>, <code>Spawn</code>, <code>Timeout</code>, <code>ExitStatus</code>, <code>OutputDecoding</code>, <code>OutputProtocol</code>, <code>ScriptShape</code> or <code>Cleanup</code>. Execution is bounded by a 30-second deadline with kill-and-reap, stdout and stderr are drained on their own threads under a 4 MiB bound, and a stderr decode failure never replaces the boundary that actually failed.</p><h4>Goldens carry their own artifact kind</h4><p>A golden file&#39;s extension decides the artifact kind it expects, and a cross-kind match is rejected before content is read. Identical bytes emitted as a different artifact kind do not satisfy a golden. Text goldens require strict UTF-8; invalid UTF-8 is a harness failure, not a rewrite.</p><h3>Concurrency and repetition</h3><p>A test that waits for a thread to reach a state must observe that state, not guess how long reaching it takes.</p><ul><li>Use a condition variable or a channel for an expected transition.</li><li>Use a bounded wall-clock deadline only as deadlock protection, never as the thing being measured.</li><li>A deadline failure must name the observed state, so the report says what did not happen.</li><li>Join every spawned worker, so a panic inside one is the reported cause rather than a discarded result.</li><li>Do not make an arbitrary sleep, a yield count or a machine-speed threshold part of a contract.</li></ul><p>Stateful owners — the timing collector, the frontend counter stores, output writes, current-directory guards and the Node harness — only misbehave under a thread schedule or a repeat that one default-parallelism run never produces. That schedule has an owned command:</p><pre style=""><code class='codeblock'>just stress</code></pre><p>It repeats the unit and integration suites at one thread, default parallelism and sixteen threads, and keeps running after a failing lane so the whole matrix is visible.</p><h3>Diagnostics assertions</h3><ul><li>Ordinary source/config/import/type/rule/borrow failures should assert stable <code>diagnostic_codes</code>.</li><li><code>diagnostic_codes</code> is an exact unordered multiset by default. Repeat a code when the diagnostic must occur more than once.</li><li>Add rendered message fragments only when wording or rendered labels are part of the contract.</li><li>Infrastructure-boundary tests may assert infrastructure <code>ErrorType</code>.</li><li>Preserve source location assertions where location behavior is important.</li><li>Do not use full rendered diagnostic snapshots when a stable code and structured assertion are sufficient.</li><li>Do not weaken a diagnostic case into a generic &quot;must fail&quot; assertion.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[backends.html]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;failure&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;forbid&quot;</span>
+<span class='moth-code-nominal'>diagnostic_codes</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;MOTH-RULE-0033&quot;</span>, <span class='moth-code-string'>&quot;MOTH-RULE-0033&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><p>Use <code>diagnostic_assertions</code> when a broad code needs a compiler-owned reason or when source remapping is part of the contract. Each table selects one diagnostic by stable code and one-based occurrence. A unique code may omit <code>occurrence</code>. Repeat the code in <code>diagnostic_codes</code> to preserve its exact multiplicity.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[[backends.html.diagnostic_assertions]]</span>
+<span class='moth-code-nominal'>code</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;MOTH-RULE-0057&quot;</span>
+<span class='moth-code-nominal'>reason</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;invalid_generic_instantiation.recursive_function_instantiation&quot;</span>
+<span class='moth-code-nominal'>path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;input/@page.moth&quot;</span>
+<span class='moth-code-nominal'>line</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
+<span class='moth-code-nominal'>count</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
+
+<span class='moth-code-keyword'>[[backends.html.diagnostic_assertions.secondary_labels]]</span>
+<span class='moth-code-nominal'>occurrence</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-nominal'>path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;input/helpers.moth&quot;</span>
+<span class='moth-code-nominal'>line</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>2</span></code></pre><ul><li>Reason keys come from the compiler payload identity. The runner must not invent a parallel reason taxonomy or derive identity from rendered text.</li><li>Paths are normalized relative to the owning fixture and lines are one-based display lines.</li><li>Assert columns only when exact token-span precision is the contract.</li><li>A secondary-label occurrence is one-based among that diagnostic&#39;s secondary labels in emitted order. Assert only the labels whose location or ordering is the behaviour owner.</li><li>Keep <code>message_contains</code> only when rendered wording or label prose is itself contractual.</li></ul><p>Use <code>diagnostic_match = &quot;contains&quot;</code> only when intentional independent recovery or cascades make additional diagnostics part of the accepted current behaviour. Every contains-mode block needs a substantive <code>diagnostic_match_reason</code>. The suite audit reports the reason and treats a missing or blank reason as a hard policy finding.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>diagnostic_match</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;contains&quot;</span>
+<span class='moth-code-nominal'>diagnostic_match_reason</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Independent recovery may emit additional diagnostics from another source unit.&quot;</span></code></pre><p>Warnings use a separate backend-local contract:</p><ul><li><code>warnings = &quot;forbid&quot;</code> rejects every warning and accepts no <code>warning_codes</code> field.</li><li><code>warnings = &quot;ignore&quot;</code> deliberately makes warnings non-contractual and accepts no <code>warning_codes</code> field.</li><li><code>warnings = &quot;exact&quot;</code> requires <code>warning_codes</code> as an exact unordered multiset. Repeat duplicate codes to preserve their required count.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-keyword'>[backends.html]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;success&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;exact&quot;</span>
+<span class='moth-code-nominal'>warning_codes</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;MOTH-RULE-0022&quot;</span>, <span class='moth-code-string'>&quot;MOTH-RULE-0022&quot;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-nominal'>rendered_output_contains</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;warning-contract result=one&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><h3>Backend matrices and artifact assertions</h3><p>Use one <code>expect.toml</code> per case with backend-specific assertion blocks.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>entry</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;.&quot;</span>
+
+<span class='moth-code-keyword'>[backends.html]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;success&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;forbid&quot;</span>
+<span class='moth-code-nominal'>artifacts_must_not_exist</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;unexpected.html&quot;</span><span class='moth-code-delimiter'>]</span>
+
+<span class='moth-code-keyword'>[backends.html_wasm]</span>
+<span class='moth-code-nominal'>mode</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;success&quot;</span>
+<span class='moth-code-nominal'>warnings</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;forbid&quot;</span>
+
+<span class='moth-code-keyword'>[[backends.html_wasm.artifact_assertions]]</span>
+<span class='moth-code-nominal'>path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;page.wasm&quot;</span>
+<span class='moth-code-nominal'>kind</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;wasm&quot;</span>
+<span class='moth-code-nominal'>validate_wasm</span> <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>
+<span class='moth-code-nominal'>must_export</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;memory&quot;</span>, <span class='moth-code-string'>&quot;moth_str_ptr&quot;</span>, <span class='moth-code-string'>&quot;moth_str_len&quot;</span>, <span class='moth-code-string'>&quot;moth_release&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><ul><li>Use backend-specific blocks within one case.</li><li><code>entry = &quot;.&quot;</code> is the one supported current-directory sentinel and selects the case&#39;s <code>input/</code> directory. Every other entry is a relative contained path with no absolute, platform-prefix, parent or current-directory component. Its canonical path must remain inside the owning <code>input/</code> directory, including through symlinks.</li><li>Store strict goldens in:</li></ul><pre style=""><code class='codeblock'>golden/&lt;backend&gt;/</code></pre><ul><li>Use artifact assertions for structure: file presence, Wasm validity, exports, imports, expected snippets, absence of forbidden output.</li><li>Use <code>artifacts_must_not_exist</code> for success cases whose contract requires an exact normalized output path to be absent. Paths reported as <code>NotBuilt</code> are ignored because they were never emitted.</li><li>Use strict goldens only where exact emitted text is contractual.</li><li>The canonical suite currently has no file-backed golden blocks. A future golden needs an explicit exact-artifact rationale that a runtime or narrow artifact assertion cannot express.</li><li>Golden discovery recursively counts actual files. Empty or directory-only golden trees do not create a contract. Nested files do.</li><li><code>golden_mode</code> without at least one discovered file is invalid. When files exist, strict is the default if no mode is authored. When no files exist, audit reports <code>golden_present = false</code> and <code>golden_mode = null</code>.</li><li>Prefer semantic or rendered-output assertions for behavior-first cases.</li><li>Strengthen artifact assertions when a golden can pass while structural behavior is wrong.</li><li>Do not require unsupported backends to succeed merely for matrix symmetry. Assert the intended rejection contract.</li></ul><h3>HIR and internal-IR assertions</h3><ul><li>Assert semantic relationships rather than incidental indexes.</li><li>Prefer branch joins, merge-local relationships, jump arguments, region ownership, side-table keys, stable call targets and required operation kinds.</li><li>Avoid exact block IDs or vector offsets unless exact layout is the invariant.</li><li>Do not make temporary lowering order part of the public test contract.</li><li>For HIR validation, distinguish malformed-HIR invariant tests from user-facing source diagnostic tests.</li></ul><h3>Feature and platform lanes</h3><p>A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a lane, and every lane is one executed command:</p><pre style=""><code class='codeblock'>just test<span class='moth-code-operator'>-</span>feature<span class='moth-code-operator'>-</span>matrix</code></pre><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Lane</strong></p></th><th scope="col" style=""><p> <strong>Features</strong></p></th><th scope="col" style=""><p> <strong>Only this lane covers</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>default</code></p></td> <td style=""><p> none</p></td> <td style=""><p> the shipped configuration and every <code>cfg(not(feature = ...))</code> branch</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timers</code></p></td> <td style=""><p> <code>timers</code></p></td> <td style=""><p> the timing collector, boundary identities and command/build timing tests</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>detailed-timers</code></p></td> <td style=""><p> <code>detailed_timers</code></p></td> <td style=""><p> AST substage timings and the detailed-only summary shape</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>counters</code></p></td> <td style=""><p> <code>benchmark_counters</code></p></td> <td style=""><p> counter-only builds, where counters record without a timing collector</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timers-counters</code></p></td> <td style=""><p> <code>timers</code>, <code>benchmark_counters</code></p></td> <td style=""><p> collector-backed counters and the counter summary carried by a timing session</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>scoped-blocks</code></p></td> <td style=""><p> <code>checked_blocks</code>, <code>async_blocks</code></p></td> <td style=""><p> the deferred-feature diagnostics for <code>checked:</code> and <code>async:</code> blocks</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>dev-output</code></p></td> <td style=""><p> every <code>show_*</code> feature</p></td> <td style=""><p> the developer stage-dump branches, which no other lane compiles</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>xtask</code></p></td> <td style=""><p> none</p></td> <td style=""><p> the benchmark, profiling and process-runner tests in the <code>xtask</code> package</p></td>
+        </tr>
+            
+</table><p>Lanes are package-scoped, and that is not a stylistic choice. Cargo unifies features across one resolve graph, and <code>xtask</code> depends on <code>moth</code> with <code>features = timers</code>, so <code>cargo test --workspace</code> always builds the compiler with <code>timers</code> enabled. It can never run the default configuration, and <code>--features benchmark_counters</code> on a workspace command is really <code>timers</code> plus counters. Only <code>cargo test -p moth</code> with an explicit feature list configures the crate the way a lane claims.</p><p>Feature coverage is checked mechanically, without running a lane:</p><pre style=""><code class='codeblock'>just feature<span class='moth-code-operator'>-</span>lane<span class='moth-code-operator'>-</span>check</code></pre><p>The check reads <code>Cargo.toml</code> and every <code>cfg</code> attribute in <code>src</code> and <code>xtask/src</code>, then fails when a declared feature has no lane, when a lane names a feature its package does not declare, or when a <code>cfg</code> names a feature that does not exist. A misspelled feature name in a <code>cfg</code> is a test that can never compile and never reports, which is why the check reads the tree instead of a list in prose. It writes <code>target/test-reports/feature_lane_coverage.json</code>, which names, for every feature, the lanes that enable it and the files whose <code>cfg</code> attributes mention it. That report is a coverage map and states no lane outcome, because the check that writes it runs no lane. Running the lanes is <code>just test-feature-matrix</code>, which writes the outcome for every lane to <code>target/test-reports/feature_matrix_results.json</code>.</p><p>Adding a Cargo feature means adding it to a lane in the same change. The gate fails otherwise.</p><p>Platform-gated tests are owned by the platform that has the API:</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Gate</strong></p></th><th scope="col" style=""><p> <strong>Runs on</strong></p></th><th scope="col" style=""><p> <strong>Owns</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>cfg(unix)</code></p></td> <td style=""><p> Linux and macOS</p></td> <td style=""><p> symlink identity and retargeting, non-regular nodes, unreadable paths and non-UTF-8 names</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>cfg(windows)</code></p></td> <td style=""><p> Windows</p></td> <td style=""><p> extended-length path prefixes, Windows canonicalisation and hard-link inspection</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>cfg(any(unix, windows))</code></p></td> <td style=""><p> all three</p></td> <td style=""><p> the portable policy shared by both families, asserted on each</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>cfg(target_os = &quot;linux&quot;)</code></p></td> <td style=""><p> Linux</p></td> <td style=""><p> non-UTF-8 filesystem identity, which macOS rejects at the filesystem boundary</p></td>
+        </tr>
+            
+</table><p>CI runs every gate on Linux, macOS and Windows, so a platform-gated owner executes wherever its API exists. A platform-specific test may be absent only when the underlying API does not exist there; an equivalent portable policy test should still run everywhere. Windows results are currently non-blocking — <code>validation.mtf</code> owns that status and the conditions that end it.</p><h3>Source-text assertions</h3><p>A test that reads source text and asserts on it proves what the text says, not what the code does. An alias, a reformat or an equivalent reimplementation all pass it.</p><ul><li>Do not make a source-text assertion the only evidence for runtime or semantic behaviour.</li><li>A ban whose scope is &quot;no file anywhere may contain this&quot; belongs to <code>just source-audit</code>, which walks the tree once and reports typed findings. <code>validation.mtf &gt; Source audit</code> owns it.</li><li>Reading a non-Rust asset a test then parses or executes is not a source-text assertion. The asset is the input, and the behaviour under test is the parse or the execution.</li></ul><h3>Fixtures and temporary files</h3><ul><li>Prefer <code>tempfile::tempdir()</code> for temporary directories and files.</li><li>Use unmanaged paths only when the test intentionally owns cleanup.</li><li>Keep fixtures local to their owner.</li><li>Do not commit generated <code>dev/</code> or <code>release/</code> outputs from test or benchmark projects.</li><li>Avoid shared fixture builders that hide important source shape.</li></ul><h3>Pruning and duplicate coverage</h3><ul><li>Remove tests tied only to deleted implementation paths.</li><li>Avoid several fixtures that differ only cosmetically.</li><li>Preserve duplicates only when they protect different stages, diagnostic reasons, backends, source locations or artifact contracts.</li><li>Localize one-caller fixtures.</li><li>When two tests overlap, identify the primary owner and either merge them, narrow each to a distinct invariant or delete the weaker one.</li><li>Do not preserve obsolete fixtures for historical compatibility.</li></ul><h3>Benchmarks are not correctness tests</h3><p>Benchmark fixtures are performance evidence, not correctness coverage.</p><p>Do not use benchmark coverage as a substitute for unit or integration tests. Negative diagnostics belong in <code>tests/cases</code>, not benchmark fixtures.</p><p>Use <code>bench-check</code> to detect broad performance regressions after correctness has already been established by ordinary tests.</p><h3>Testing checklist</h3><p>Before considering test coverage complete, check:</p><ul><li>The behavior has one clear primary test owner.</li><li>User-visible behavior has end-to-end integration coverage.</li><li>Internal-only invariants have focused unit coverage where needed.</li><li>Failure cases assert stable diagnostic codes.</li><li>Rendered text is asserted only when it is contractual.</li><li>Backend behavior uses the narrowest useful artifact assertions.</li><li>Goldens are used only where exact output is a contract.</li><li>HIR tests avoid incidental block and local numbering.</li><li>Multi-file fixtures remain inside one case directory.</li><li>Temporary files use owned cleanup.</li><li>No benchmark fixture is being used as a correctness substitute.</li><li>Redundant or obsolete coverage has been removed.</li><li>Every new Cargo feature was added to a lane in the same change.</li><li>Every platform-gated test names the API that makes the gate necessary.</li><li>No source-text assertion is the only evidence for a behaviour.</li><li>No concurrency test waits on a sleep or a machine-speed threshold.</li></ul></section>
+<section class="container"><h2>Validation gates</h2><p>This document defines the technical gates a completed compiler or documentation slice must pass.</p><p>The required final gate depends on whether the slice changes implementation or is strictly documentation-only.</p><h3>Task-reading guide</h3><p>Start every completion decision with <code>Choose the final gate by scope</code>. Heading paths use <code>&gt;</code> to name nested sections. Read the selected heading through the next heading of the same or higher level, including nested subsections unless the route narrows further. Read this document in full when changing validation infrastructure or auditing the complete gate policy.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Task</strong></p></th><th scope="col" style=""><p> <strong>Read</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Select the required final gate</p></td> <td style=""><p> <code>Choose the final gate by scope</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Choose direct compiler or Cargo invocation</p></td> <td style=""><p> <code>Compiler invocation</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Complete or review code-bearing work</p></td> <td style=""><ul><li><code>Code-bearing final gate</code></li><li><code>Formatting</code></li><li><code>Manual architecture audits</code> when its trigger applies</li><li><code>Progress-matrix review</code></li><li><code>Benchmark safety</code></li><li><code>Failure handling</code></li><li><code>Code-bearing completion checklist</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Complete or review documentation-only work</p></td> <td style=""><ul><li><code>Documentation-only release-build gate</code></li><li><code>Generated documentation</code></li><li><code>Failure handling</code></li><li><code>Documentation-only completion checklist</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Add or change a Cargo feature, or a feature-gated test</p></td> <td style=""><p> <code>Feature lanes</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Add or change a broad-source architecture ban</p></td> <td style=""><p> <code>Source audit</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Read, change or interpret a CI gate</p></td> <td style=""><ul><li><code>CI gates</code></li><li><code>Platform policy</code></li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Pick a targeted iteration command</p></td> <td style=""><p> <code>Fast iteration commands</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Performance or benchmark validation</p></td> <td style=""><ul><li><code>Benchmark safety</code></li><li><code>Code-bearing final gate</code> when the slice is being completed</li></ul></td>
+        </tr><tr style="">
+             <td style=""><p> Review a failed gate or a validation claim</p></td> <td style=""><ul><li><code>Failure handling</code></li><li>the checklist for the selected final gate</li></ul></td>
+        </tr>
+            
+</table><h3>Compiler invocation</h3><p>Use an up-to-date release build of the compiler when one is available. The <code>moth</code> command in PATH is the usual direct form:</p><pre style=""><code class='codeblock'>moth check docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse
+moth build docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>If a suitable release build is not available, run the same operations through Cargo from the repository root:</p><pre style=""><code class='codeblock'>cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> check docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>terse
+cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>quiet <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> build docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><h3>Choose the final gate by scope</h3><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Slice</strong></p></th><th scope="col" style=""><p> <strong>Required final gate</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Code-bearing or mixed change</p></td> <td style=""><p> <code>just validate</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Strictly documentation-only change</p></td> <td style=""><p> <code>moth build docs --release</code> or the equivalent Cargo invocation</p></td>
+        </tr>
+            
+</table><p>The <code>justfile</code> is the executable authority for the full code-bearing gate.</p><h3>Code-bearing final gate</h3><p>A slice is code-bearing if it changes Rust, compiler or build-system sources, libraries, tests, benchmarks, manifests, scripts, configuration or any other non-documentation implementation file.</p><p>Before declaring a non-trivial code-bearing slice complete, run:</p><pre style=""><code class='codeblock'>just validate</code></pre><h4>What just validate runs</h4><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Gate</strong></p></th><th scope="col" style=""><p> <strong>Current command</strong></p></th><th scope="col" style=""><p> <strong>Purpose</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Clippy</p></td> <td style=""><p> <code>just ci-clippy-native</code></p></td> <td style=""><p> Native-host linting of every workspace target under every feature, warnings denied</p></td>
+        </tr><tr style="">
+             <td style=""><p> Feature lane coverage</p></td> <td style=""><p> <code>just feature-lane-check</code></p></td> <td style=""><p> Proves every declared Cargo feature has an executing lane, and that no <code>cfg</code> names         a feature that does not exist</p></td>
+        </tr><tr style="">
+             <td style=""><p> Rust unit tests</p></td> <td style=""><p> <code>cargo test --workspace --quiet -- --format terse</code></p></td> <td style=""><p> Rust unit and subsystem tests across the complete workspace, in the         workspace-unified feature configuration</p></td>
+        </tr><tr style="">
+             <td style=""><p> Compiler integration tests</p></td> <td style=""><p> <code>cargo run --quiet -- tests --terse</code></p></td> <td style=""><p> Canonical suite policy followed by end-to-end compiler cases</p></td>
+        </tr><tr style="">
+             <td style=""><p> Documentation check</p></td> <td style=""><p> <code>cargo run --quiet -- check docs --terse</code></p></td> <td style=""><p> Moth docs-source checking inside the full gate</p></td>
+        </tr><tr style="">
+             <td style=""><p> Benchmark sanity check</p></td> <td style=""><p> <code>cargo run --package xtask --bin xtask -- bench-ci</code></p></td> <td style=""><p> Complete benchmark preflight followed by bounded non-recording measurements</p></td>
+        </tr><tr style="">
+             <td style=""><p> Complexity budgets</p></td> <td style=""><p> <code>cargo run --package xtask --bin xtask -- bench-scaling</code></p></td> <td style=""><p> Fits the growth exponent of every declared scaling series against         its declared input sizes and fails when one exceeds its budget</p></td>
+        </tr><tr style="">
+             <td style=""><p> Source audit</p></td> <td style=""><p> <code>just source-audit</code></p></td> <td style=""><p> The one broad-source architecture audit: <code>cfg!</code> timer checks, direct         clocks, collector and runtime calls outside the facade, closure         wrappers, unguarded timer-only fields, obsolete timer macros,         provisional and hard-coded metric names, and the removed-name         tripwires. Reports typed findings and writes <code>source_audit.json</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Timer erasure gate</p></td> <td style=""><p> <code>just timers-erasure-check</code></p></td> <td style=""><p> Builds a no-timer release binary and proves that no timer-only         marker, and no name from the schema-owned metric inventory, survives         into its bytes</p></td>
+        </tr>
+            
+</table><ul><li><code>ci-clippy-native</code> lints the native host only, across every workspace target and every feature.</li><li>Warnings are denied.</li><li>Cross-target linting is CI&#39;s job: the gate matrix runs <code>clippy</code> on Linux, macOS and Windows.</li><li>The workspace test command includes the compiler, CLI and <code>xtask</code> packages.</li><li>That command is not the default configuration. <code>xtask</code> depends on <code>moth</code> with <code>features = timers</code>, and Cargo unifies features across one resolve graph, so <code>cargo test --workspace</code> always builds the compiler with <code>timers</code> enabled. The default configuration and each feature configuration are covered by <code>just test-feature-matrix</code>, not by <code>just validate</code>.</li><li><code>bench-ci</code> preflights every benchmark manifest case once, then measures only the quick CLI and frontend subsets with three iterations.</li><li><code>bench-ci</code> does not update local history or tracked benchmark summaries.</li><li><code>bench-scaling</code> answers the question history cannot. Every other benchmark mode compares a case against its own recorded past, so it detects change; a cost that has been superlinear since the day it was written never changes and never reports. The scaling lane measures the same metric at several declared input sizes and holds the fitted exponent to a budget. It writes no history either. <code>benchmarks/README.md &gt; Scaling Series</code> owns the authoring rules.</li></ul><p>The integration command loads the complete canonical suite and applies the shared hard-policy evaluator before selection or compilation. This makes missing ownership, duplicate primaries and other hard suite-policy findings part of the normal validation gate.</p><h3>Test honesty audit</h3><p>The campaign that hardened this suite is owned by one command:</p><pre style=""><code class='codeblock'>just test<span class='moth-code-operator'>-</span>honesty<span class='moth-code-operator'>-</span>audit</code></pre><p>It writes the canonical inventory to <code>target/test-reports/test_honesty_inventory.json</code>, and it is the single owner of what that file says. The inventory has four parts:</p><ul><li>Hard findings. Shapes with no honest use in this tree: the retired <code>temp_dir</code> helper, a <code>/tmp</code> literal handed to a call that touches the filesystem, a discarded current-directory or environment restoration, a discarded thread join, an <code>ignore</code> attribute with no reason, and a report written straight to its final path. Every hit fails the audit.</li><li>Review findings. Shapes that can hide a weak contract and are also correct in most of their uses. The audit counts them, names the files, and records the disposition the campaign decided for the category. These never fail the audit. <code>is_err</code>, <code>contains</code> and <code>any</code> are review categories on purpose: a gate that failed on each of them would be turned off within a week.</li><li>The declared ledger, read from <code>docs/roadmap/evidence/honesty_ledger.json</code>. Every entry must carry a severity, a status, a description, a disposition and an owning phase; a duplicate code, a missing decision or an open hard finding fails the audit.</li><li>The composed audits. The source audit and the feature-lane check are run, not read, so the verdict never depends on when somebody last ran them. The integration suite inventory is read, because the compiler binary writes it, and its state is reported as one of absent, unusable or present so a missing report can never be read as a clean one.</li></ul><p>The tracked durable copy under <code>docs/roadmap/evidence/</code> is refreshed by the same owner, never by hand:</p><pre style=""><code class='codeblock'>just test<span class='moth-code-operator'>-</span>honesty<span class='moth-code-operator'>-</span>evidence</code></pre><h3>What a report guarantees</h3><p>Every machine-readable report is written to a sibling temporary file and renamed into place, so a reader never observes a partial file and a failed write leaves the previous report intact.</p><p>Every report also carries the identity of the run that produced it: an id unique within the process without depending on the wall clock, the command, the OS and architecture, the features the linked compiler was built with, a thread count where the command owns one, and whether the run finished.</p><p>Completion state is what separates the reports, and the distinction is real:</p><ul><li><code>test_honesty_inventory.json</code>, <code>source_audit.json</code> and <code>integration_suite_inventory.json</code> are replaced by a <code>completed: false</code> report before their owned work starts. A run interrupted partway leaves a report that says so rather than a previous successful one that looks current.</li><li><code>feature_matrix_results.json</code> starts with every lane <code>pending</code> and is rewritten as each lane resolves, so an interrupted matrix reports the lanes it measured and the lanes it never reached.</li><li><code>feature_lane_coverage.json</code> is a coverage map, not an outcome table. It answers which lane covers which declared feature, which <code>just feature-lane-check</code> establishes without running a single lane, so it is complete the moment it is written and never states a lane result. Lane outcomes live in <code>feature_matrix_results.json</code>.</li></ul><h3>Source audit</h3><p>An architecture ban whose scope is &quot;no file anywhere may contain this&quot; is not a behaviour claim, and a unit test that reads one file&#39;s text and asserts on it is not behaviour evidence. Those bans have one owner:</p><pre style=""><code class='codeblock'>just source<span class='moth-code-operator'>-</span>audit</code></pre><p>It walks <code>src</code> and <code>xtask/src</code> once, applies every broad-source rule, and reports typed findings with the file each was found in. Only the audit&#39;s own implementation files are exempt, because they necessarily contain the fragments the rules search for; their rules are proved against fixture text instead. A source file that cannot be read is a finding, not a file the audit skips.</p><p>Add a broad-source ban here rather than as a test. A ban that lives in a test reads one file, calls that evidence, and stops applying the moment the code moves.</p><h3>Feature lanes</h3><p><code>just validate</code> runs one feature configuration. The lanes run all of them:</p><pre style=""><code class='codeblock'>just test<span class='moth-code-operator'>-</span>feature<span class='moth-code-operator'>-</span>matrix</code></pre><p>Eight package-scoped lanes cover the default configuration, <code>timers</code>, <code>detailed_timers</code>, <code>benchmark_counters</code>, <code>timers</code> with <code>benchmark_counters</code>, the scoped-block features, every <code>show_*</code> feature and the <code>xtask</code> package. <code>testing.mtf &gt; Feature and platform lanes</code> owns the lane table and what each lane uniquely covers.</p><p>Lanes use <code>cargo test -p &lt;package&gt;</code> rather than <code>--workspace</code> because Cargo unifies features across one resolve graph. <code>xtask</code> requires <code>moth</code> with <code>timers</code>, so no workspace-wide command can run the default configuration.</p><p><code>just feature-lane-check</code> proves the mapping without running a lane, and is part of <code>just validate</code>. Adding a Cargo feature means adding it to a lane in the same change; the check fails otherwise.</p><h3>CI gates</h3><p><code>just validate</code> is the local gate and is deliberately fail-fast: the first failure stops the run.</p><p>CI does not work that way. Each validation family is its own job, so one failure never stops another from reporting:</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Gate</strong></p></th><th scope="col" style=""><p> <strong>Command</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>clippy</code></p></td> <td style=""><p> <code>just ci-gate-clippy</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>unit-tests</code></p></td> <td style=""><p> <code>just ci-gate-unit-tests</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>feature-matrix</code></p></td> <td style=""><p> <code>just ci-gate-feature-matrix</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>integration</code></p></td> <td style=""><p> <code>just ci-gate-integration</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>docs</code></p></td> <td style=""><p> <code>just ci-gate-docs</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>benchmarks</code></p></td> <td style=""><p> <code>just ci-gate-benchmarks</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>scaling</code></p></td> <td style=""><p> <code>just ci-gate-scaling</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>timers-erasure</code></p></td> <td style=""><p> <code>just ci-gate-timers-erasure</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>source-audit</code></p></td> <td style=""><p> <code>just ci-gate-source-audit</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>honesty-audit</code></p></td> <td style=""><p> <code>just ci-gate-honesty-audit</code></p></td>
+        </tr>
+            
+</table><p>Each gate runs on Linux, macOS and Windows. The workflow result is still failed when any blocking gate fails. The <code>integration</code>, <code>feature-matrix</code> and <code>honesty-audit</code> gates upload <code>target/test-reports/</code> whether they passed or failed, because a failed run&#39;s report is the evidence a reviewer needs most.</p><p><code>unit-tests</code> and <code>feature-matrix</code> overlap on purpose. <code>unit-tests</code> runs the workspace-unified command a developer runs locally; <code>feature-matrix</code> runs the configurations that command cannot reach.</p><p>The release workflow keeps the single fail-fast <code>just validate</code>. A tag build only needs to know whether the revision is releasable, and the split gates have already reported on every push to the default branch.</p><h3>Platform policy</h3><p>Linux and macOS gates are blocking. Windows gates are non-blocking: a Windows failure is reported but does not fail the workflow or hold back deployment.</p><p>Windows becomes blocking when both hold:</p><ul><li>every gate has passed on <code>windows-latest</code> in one run of the default branch</li><li>no Windows-only failure is open in the exposed-failure ledger</li></ul><p>The change is then removing <code>continue-on-error</code> from the gate job. Until that happens, a Windows result is evidence to act on, not a gate that can be ignored: a Windows-only failure belongs in the ledger like any other.</p><p>A platform-specific test may be absent only when the underlying API does not exist on that platform. An equivalent portable policy test should still run everywhere. `testing.mtf &gt; Feature and platform lanes` owns which gate owns which platform behaviour.</p><h3>Documentation-only release-build gate</h3><p>A slice is documentation-only only when every modified file is documentation source or generated documentation.</p><p>Allowed examples include:</p><ul><li>files under <code>docs/**</code></li><li>an explicitly requested root documentation file such as <code>README.md</code>, <code>CONTRIBUTING.md</code> or <code>AGENTS.md</code></li><li>generated files under <code>docs/release/**</code></li></ul><p>A documentation-only slice must not change Rust, tests, libraries, build configuration, manifests, scripts, benchmark code or fixtures, compiler configuration or other executable project sources.</p><p>For a strictly documentation-only slice, run one documentation release build using a current compiler.</p><p>The direct release-binary form is:</p><pre style=""><code class='codeblock'>moth build docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>If no suitable release build is available, use <code>cargo run --quiet -- build docs --release</code> instead.</p><p>Then:</p><ul><li>inspect every changed route</li><li>inspect the generated diff</li><li>verify links, tables and code examples</li><li>confirm generated output came from source changes</li><li>confirm the changed-file list contains documentation only.</li></ul><p>Do not additionally run <code>just validate</code>, Clippy, unit tests, integration tests or benchmark checks for a documentation-only slice. A Cargo invocation of the compiler is an alternative way to run the same documentation gate, not an extra gate.</p><p>If any non-documentation file changed, the documentation-only exception does not apply. Use the full code-bearing gate.</p><h3>Fast iteration commands</h3><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Task</strong></p></th><th scope="col" style=""><p> <strong>Command</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Unit-test iteration</p></td> <td style=""><p> <code>cargo test --workspace --quiet -- --format terse</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Integration iteration</p></td> <td style=""><p> <code>moth tests</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Clippy iteration</p></td> <td style=""><p> <code>just ci-clippy-native</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Feature lane coverage</p></td> <td style=""><p> <code>just feature-lane-check</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Every feature lane</p></td> <td style=""><p> <code>just test-feature-matrix</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Broad-source architecture audit</p></td> <td style=""><p> <code>just source-audit</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Test honesty audit and inventory</p></td> <td style=""><p> <code>just test-honesty-audit</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Durable honesty evidence refresh</p></td> <td style=""><p> <code>just test-honesty-evidence</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Docs-source iteration</p></td> <td style=""><p> <code>moth check docs --terse</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Bounded benchmark sanity</p></td> <td style=""><p> <code>just bench-ci</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Benchmark-only preflight</p></td> <td style=""><p> <code>just bench-validate</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Full CLI benchmark check</p></td> <td style=""><p> <code>just bench-check</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Full frontend benchmark check</p></td> <td style=""><p> <code>just bench-frontend-check</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Documentation release-build iteration</p></td> <td style=""><p> <code>moth build docs --release</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> Complete code-bearing gate</p></td> <td style=""><p> <code>just validate</code></p></td>
+        </tr>
+            
+</table><p>Passing one targeted command does not imply a code-bearing slice passes the complete gate.</p><h3>Formatting</h3><ul><li>Run <code>cargo fmt</code> when Rust files changed.</li><li><code>just validate</code> does not currently format source automatically.</li><li>Do not solve formatting failures through lint suppression.</li><li>Documentation-only changes do not require Rust formatting.</li></ul><p>The <code>ship</code> recipe formats before validation, while <code>validate</code> itself does not.</p><h3>Generated documentation</h3><p>Do not edit files under <code>docs/release/**</code> directly.</p><p>The documentation release build is:</p><pre style=""><code class='codeblock'>moth build docs <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>A generated diff must result from documentation source changes, not manual HTML edits.</p><h3>Manual architecture audits</h3><p>When a code-bearing slice changes stage ownership, frontend boundaries, HIR, diagnostics, types or backend handoff, perform a manual architecture audit in addition to the automated gate.</p><p>Audit that:</p><ul><li>stage ownership remains narrow</li><li>AST and HIR type representation still respect <code>TypeEnvironment</code> and <code>TypeId</code></li><li>user-facing failures use <code>CompilerDiagnostic</code></li><li>internal and infrastructure failures use <code>CompilerError</code></li><li>no obsolete API or duplicated path remains</li><li>no backend reparses source syntax</li><li>no analysis mutates HIR when its contract is side-table based</li><li>comments and documentation name the current owner</li><li>no compatibility shim preserves an obsolete path</li></ul><p>This full architecture audit is not required for a prose-only documentation change.</p><h3>Progress-matrix review</h3><p>Review the progress matrix whenever behaviour, support, rejection, backend coverage or test coverage changes.</p><p>Update it when current status changed. Do not make a meaningless edit for a pure refactor or prose-only correction.</p><h3>Benchmark safety</h3><ul><li><code>just validate</code> uses non-recording <code>bench-ci</code>.</li><li><code>bench-ci</code> validates every benchmark case before it measures the quick subset. It replaces the full ten-iteration CLI and frontend checks inside the normal validation gate.</li><li>Use <code>just bench-check</code> and <code>just bench-frontend-check</code> for deliberate full-suite performance evidence. Both commands remain non-recording.</li><li>Do not run or commit recording benchmark output unless performance history is intentionally being updated.</li><li>A benchmark fluctuation does not replace correctness evidence.</li><li>Generated benchmark history is outside this standards split.</li></ul><h3>Failure handling</h3><ul><li>Do not ignore or suppress a failed required gate.</li><li>Do not remove tests merely to make validation pass.</li><li>Do not use lint allowances without documented justification.</li><li>If a required command fails for environmental reasons, report the exact command, failure, completed checks and remaining uncertainty.</li><li>Do not claim full validation when only targeted commands or the documentation-only gate ran.</li></ul><h3>Code-bearing completion checklist</h3><p>Before declaring a non-trivial code-bearing slice complete, check:</p><ul><li>Rust source was formatted where applicable.</li><li>The changed code follows <code>style-guide.mtf</code>.</li><li>Test selection and assertions follow <code>testing.mtf</code>.</li><li>Relevant architecture boundaries were reviewed.</li><li>Diagnostics remain structured and stage appropriate.</li><li>The progress matrix was reviewed and updated when status changed.</li><li>Documentation was rebuilt when required.</li><li>Generated output was not edited manually.</li><li>Benchmark history was not changed accidentally.</li><li><code>just validate</code> passes.</li></ul><h3>Documentation-only completion checklist</h3><p>Before declaring a documentation-only slice complete, check:</p><ul><li>The changed-file list contains documentation only.</li><li>The documentation release build succeeds.</li><li>Changed routes, links, tables and examples were inspected.</li><li>Generated output was produced from source changes.</li><li>No generated HTML was edited manually.</li><li>No code, test, build, library, manifest, script, benchmark or configuration file changed.</li></ul></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

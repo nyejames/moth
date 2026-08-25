@@ -1,0 +1,61 @@
+@html table
+@styles navbar, section, theme_head, codeblock
+
+page_title #= "Developer documentation"
+page_description #= "Compiler and build-system references for contributors and anyone reading Moth's internals."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../docs/ (Docs) / Developer documentation
+
+    # Developer documentation
+
+    This section is for contributors working on the compiler, and for anyone who wants to understand Moth beyond using the language.
+
+    It provides a peek behind the curtain at how Moth works under the hood: the staged compiler pipeline, the memory model, and the standards the codebase is held to.
+]
+
+#[section, $md:
+    ## Explore the internals
+
+    - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
+    - @./memory-management (Memory management): reference semantics, borrow validation, lifetime regions, ownership and backend lowering
+    - @./style-guide (Development standards): implementation style, test strategy and validation gates
+    - @../docs/design-scope (Design scope, public authority): accepted mechanisms, constraints and intentionally excluded complexity
+    - @./language (Compiler-facing language reference): bridge to the canonical language overview
+    - @../docs/progress (Progress matrix): current implementation status and known gaps
+    - @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (Roadmap): planned work and design direction
+    - @https://github.com/nyejames/moth/blob/main/index.md (Repository index): quick module and file locator
+]
+
+#[section, $md:
+    ## Compiler flow
+
+    [codeblock, $code("text"):
+        project files
+            -> Stage 0: project structure and source discovery
+            -> Stage 1: tokenization
+            -> Stage 2: header parsing
+            -> Stage 3: dependency sorting
+            -> Stage 4: AST construction
+            -> Stage 5: HIR generation
+            -> Stage 6: borrow validation
+            -> lifetime-region and escape validation
+            -> backend-neutral memory requirements
+            -> build-owned link planning, target partition and target validation
+            -> target/profile-aware compiler-owned memory planning
+            -> ValidatedMemoryPlan
+            -> backend lowering
+            -> output files
+    ]
+]
+
+#[section, $md:
+    ## Design docs vs current support
+
+    Developer documentation describes accepted end-state architecture. Some pages define design that the compiler and backends are still converging on.
+
+    Use the @../docs/progress (progress matrix) to see what is implemented, partial, experimental or still missing. Use the @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (roadmap) for sequencing and proposals not yet accepted as design.
+]

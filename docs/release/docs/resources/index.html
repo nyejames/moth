@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Resources and Path values | Moth</title>
+    <meta name="description" content="Naming project files with resource paths, and using compile-time Path values in Moth.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #44a0cf;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
+}
+
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
+
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
+
+.doc-level__title {
+    margin: 0;
+}
+
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
+
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
+
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-level__panel {
+    display: none;
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
+
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
+
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
+
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
+
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
+    }
+
+    .doc-pager {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
+    }
+
+    .doc-level__panel {
+        display: block;
+    }
+
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
+    }
+
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
+    }
+
+    .doc-level__panel--basic::before {
+        content: "Basic";
+    }
+
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Resources and Path values</p><h1>Resources and Path values</h1><p>Projects contain more than source. Images, fonts, stylesheets and data files need to reach the output, and the links pointing at them need to be correct from wherever they are read.</p><p>Moth handles this with one small surface. A resource path names a file, the compiler validates it, and a <code>Path</code> value carries it until a builder decides where the file lands and what the URL should say.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Resource paths
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="resource-paths-level"
+                id="resource-paths-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="resource-paths-level"
+                id="resource-paths-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="resource-paths">
+                    Resource paths
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="resource-paths-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="resource-paths-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>A resource path tells the compiler that a file belongs to your project. Write the path with its extension, in the place where you would write any other value.</p><h3>Naming a file</h3><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@images/logo.svg</span></code></pre><p><code>@images/logo.svg</code> resolves from the module root, so the same spelling works from any file in the module. The compiler checks that the file exists and is a real file, not a folder.</p><h3>Extensions matter</h3><p>An extension is required, and it must not be a source extension.</p><pre style=""><code class='codeblock'>logo  <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@images/logo.svg</span>
+icon  <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@icons/add.svg</span></code></pre><p><code>@images/logo</code> has no extension and is rejected. So is <code>@pages/about.moth</code>, because <code>.moth</code>, <code>.mtf</code> and <code>.md</code> name source files. Those are bound with dependency clauses instead.</p><h3>URLs stay strings</h3><p>A web address is not a project file, so write it as an ordinary string.</p><pre style=""><code class='codeblock'>external <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;https://example.com/logo.svg&quot;</span></code></pre><p>The compiler leaves strings alone. It never copies, rewrites or watches them.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>A resource path is an explicit-extension path written in expression position. It names one regular file that the project owns, and it produces one compile-time resource value.</p><p>Resource paths are the only supported way to make the compiler aware that a file participates in a build. Nothing scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover files.</p><h3>Syntax</h3><p>A resource path is an ordinary expression.</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@images/logo.svg</span>
+font <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@fonts/cmunss.woff2</span>
+
+icons <span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>{</span><span class='moth-code-nominal'>Path</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-string'>@icons/add.svg</span>,
+    <span class='moth-code-string'>@icons/remove.svg</span>,
+<span class='moth-code-delimiter'>}</span></code></pre><p>A resource path:</p><ul><li>carries one explicit non-source extension on its final component</li><li>resolves to an existing regular file</li><li>resolves from the owning module root rather than the physical source-file directory</li><li>cannot be followed by dependency selections</li><li>is not a directory</li><li>is not an external URL</li></ul><p>Recognised source kinds such as <code>.moth</code>, <code>.mtf</code> and <code>.md</code> are dependencies rather than resource values. A source extension in expression position is a diagnostic, not a resource.</p><h3>Context decides the meaning</h3><p>The same explicit-extension spelling means different things in different positions.</p><ul><li>In a dependency clause it names an already registered provider target.</li><li>In expression position it creates a compile-time resource value.</li></ul><p>These two owners never reinterpret one another&#39;s path family. A dependency clause does not become a resource, and a resource path does not become a provider target. See <a href="../packages/#dependency-paths">Dependency paths</a>.</p><h3>Resolution</h3><p>Resolution starts at the owning module root, exactly like dependency paths. The physical directory of the declaring file has no effect.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- in src/internal/deep/renderer.moth, whose module root is src/</span>
+logo <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@images/logo.svg</span></code></pre><p>That resolves to <code>src/images/logo.svg</code>.</p><p>The same authored resource path is resolved once. Repeating it in the same module reuses the already resolved result.</p><h3>Filesystem ownership</h3><p>A resource path may address only a regular file inside the current module or package&#39;s private filesystem ownership.</p><ul><li>traversal starts at the owning module root</li><li>ordinary unrooted directories owned by that module may be traversed</li><li>reaching a child normal module or a support package stops traversal</li><li>another module&#39;s private file cannot be addressed directly</li><li>the project package facade is not a global resource escape</li><li>support-package visibility follows the existing scoped-package rules</li><li>canonical containment rejects symlink escape</li><li>strict case validation reuses the source-path policy</li></ul><p>Cross-module resources travel through exported <code>Path</code> values, resource-bearing exported constants or reachable function implementations. There is no public visibility table for files themselves.</p><h3>Rejected spellings</h3><p>These are diagnostics rather than resources:</p><ul><li><code>@/</code> and any other absolute-root spelling</li><li><code>@./</code> and parent components such as <code>..</code></li><li><code>@@name</code></li><li>a missing extension</li><li>a recognised source extension</li><li>a directory target</li><li>a missing target</li><li>a path followed by dependency selections</li></ul><h3>External and site-root URLs</h3><p>These remain ordinary untracked strings:</p><pre style=""><code class='codeblock'>external  <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;https://example.com/logo.svg&quot;</span>
+cdn       <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;//cdn.example.com/app.js&quot;</span>
+site_root <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;/favicon.svg&quot;</span></code></pre><p>They are not checked, copied, rewritten, watched or included in resource unions. Write a URL as a string when you mean a URL.</p><h3>Validation is independent of output</h3><p>Every valid authored resource path is resolved and validated, even when the value is never used. This includes a resource path in:</p><ul><li>an unused private constant</li><li>a helper template that is never rendered</li><li>either branch of an ordinary <code>if</code></li><li>a branch later removed by static Bool specialisation</li><li>a generic template that is never materialised</li><li>a function that is unreachable from the selected entry</li></ul><p>Validation and emission are separate facts. A resource that no reachable output uses is never read, hashed or emitted.</p><h3>Resource identity</h3><p>Each resolved resource has one stable semantic origin: its owner plus its owner-relative logical path.</p><p>Identity deliberately excludes absolute paths, output paths, routes, URLs, content hashes, aliases, export bindings and source locations.</p><p>The observable consequences are:</p><ul><li>moving a declaration between ordinary files in one module does not change resource identity</li><li>moving or renaming the resource itself does change resource identity</li><li>consumer-local aliases and re-exports preserve identity</li><li>changing a file&#39;s bytes does not change its identity</li></ul><h3>Related concepts</h3><ul><li>For the <code>Path</code> type and where a resource value may be used see <a href="#path-values">Path values</a>.</li><li>For dependency clause paths see <a href="../packages/#dependency-paths">Dependency paths</a>.</li><li>For module roots and traversal boundaries see <a href="../project-structure/#module-roots">Module roots</a>.</li><li>For Markdown link and image behaviour see <a href="../markdown/#markdown-dependencies">Markdown dependencies</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Path values
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="path-values-level"
+                id="path-values-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="path-values-level"
+                id="path-values-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="path-values">
+                    Path values
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="path-values-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="path-values-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>A resource path produces a <code>Path</code> value. <code>Path</code> is a compile-time type: the compiler uses it while building, and it never exists while your program runs.</p><h3>Using a Path</h3><p>Put a <code>Path</code> straight into a template.</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@assets/logo.svg</span>
+
+image <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[logo]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-operator'>&gt;</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p><code>image</code> is an ordinary <code>String</code>. You can compose it, store it in a constant and pass it around like any other string.</p><h3>The compiler writes the URL</h3><p>You never write the output path yourself. The builder decides where the file is emitted, then writes the link from the page that contains it.</p><p>The same logo becomes <code>./assets/logo.svg</code> on the home page and <code>../../assets/logo.svg</code> on a page two folders deep.</p><h3>Compile-time only</h3><p>A <code>Path</code> cannot be stored at runtime, so these are rejected:</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@assets/logo.svg</span>
+
+<span class='moth-code-function'>show</span> <span class='moth-code-delimiter'>|</span>image <span class='moth-code-nominal'>Path</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A mutable binding and a function parameter both need to hold the value at runtime. If you need link text at runtime, insert the <code>Path</code> into a template and use the resulting <code>String</code>.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><code>Path</code> is one reserved builtin compile-time type. A <code>Path</code> value names one resource that the project owns. It is not a filesystem handle, a string, or a runtime value.</p><h3>Compile-time only</h3><p>A <code>Path</code> exists during compilation and never reaches a running program.</p><p>Allowed:</p><ul><li><code>#Path</code> and inferred <code>Path</code> constants</li><li>transparent aliases to <code>Path</code></li><li>supported compile-time record shapes with <code>Path</code> fields</li><li>compile-time collections containing <code>Path</code>, or supported <code>Path</code>-containing records</li><li>compile-time field access and collection iteration</li><li>exported folded <code>Path</code> constants</li><li>exported public nominal const-record shapes with public compile-time-only fields</li><li>direct template insertion</li><li>compile-time template control flow</li></ul><p>Rejected:</p><ul><li>mutable <code>Path</code> bindings</li><li>ordinary runtime bindings</li><li>function parameters or returns containing <code>Path</code></li><li>runtime struct or choice instances containing <code>Path</code></li><li>receiver methods on <code>Path</code>-containing compile-time-only records</li><li>options, choices, maps and generic applications containing <code>Path</code></li><li>map keys</li><li>equality, ordering and operators</li><li>casts</li><li>implicit <code>Path</code> to <code>String</code> assignment</li><li>runtime filesystem access</li><li>config values</li><li>provider namespace values</li></ul><p>There is no file-versus-directory <code>Path</code> subtype. A resource path always resolves to a regular file.</p><h3>Availability is transitive</h3><p>One recursive classifier decides whether a type may be stored at runtime.</p><ul><li><code>Path</code> is compile-time-only.</li><li>Supported records and collections become compile-time-only when they contain a compile-time-only type.</li><li>Transparent aliases preserve the classification.</li><li>Unsupported aggregate shapes report which shape rejected the compile-time-only type.</li></ul><p>Every runtime receiving boundary consumes that classification, so a <code>Path</code> cannot reach runtime storage through a wrapper record, a collection, an alias or a generic argument.</p><p>Compile-time availability is not part of nominal type identity. <code>Path</code> does not create a parallel type hierarchy.</p><h3>Inserting a Path into a template</h3><p>A template that inserts a <code>Path</code> still has language type <code>String</code>.</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@assets/logo.svg</span>
+
+image <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[logo]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-operator'>&gt;</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p><code>image</code> is an ordinary <code>String</code>. It may be composed, stored in a constant, bound as a dependency, passed and returned like any other string.</p><p>Internally the value stays structural until a builder supplies output placement. Inserting a <code>Path</code> creates a resource anchor rather than an eager URL, because the correct URL depends on which artefact will contain the text.</p><p>The consequences are:</p><ul><li>output paths and URLs are never observable through a cast, formatter or public interface</li><li>a compile-time operation that needs final text is rejected while placement is unresolved</li><li>runtime text operations happen only after the containing artefact has resolved each anchor</li></ul><p>There is no second source-visible string type. A resource-bearing string is a <code>String</code>.</p><h3>URLs are rendered by the builder</h3><p>Resource identity, byte source, emitted output path and rendered URL are four separate facts. The builder chooses the output path, then chooses the artefact whose URL rules observe the rendered text, and renders a relative URL from there.</p><pre style=""><code class='codeblock'>resource: assets/logo.svg
+context:  index.html
+URL:      ./assets/logo.svg
+
+resource: assets/logo.svg
+context:  docs/getting-started/index.html
+URL:      ../../assets/logo.svg
+
+resource: styles/fonts/site.woff2
+context:  styles/site.css
+URL:      ./fonts/site.woff2</code></pre><p>The URL context is the artefact whose URL resolution rules observe the string, not necessarily the file that contains the generated code. Page runtime code uses the active page document, standalone CSS uses the stylesheet, and inline CSS uses the page document.</p><p>Project HTML origin configuration is never prepended to a resource URL. Resource URLs are relative to their context artefact.</p><h3>Moth templates and Markdown</h3><p><code>.mtf</code> files remain declarationless and dependency-clause-free. A resource is used through a nested Moth template inside the implicit Markdown body.</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[@images/ownership.webp]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;Ownership graph&quot;</span><span class='moth-code-operator'>&gt;</span>
+<span class='moth-code-delimiter'>]</span></code></pre><ul><li>plain <code>@images/ownership.webp</code> Markdown text remains ordinary text</li><li>a nested resource path resolves from the <code>.mtf</code> file&#39;s owning module root</li><li>the restricted root scope may expose visible <code>Path</code> constants and resource-bearing const templates</li><li><code>.mtf</code> gains no frontmatter and no general declarations</li><li>plain <code>.md</code> link and image targets remain literal and untracked</li></ul><p>Rendered Markdown and HTML are never scanned to discover files.</p><h3>Direct Moth-template compilation</h3><p>The direct <code>.mtf</code> compiler service has no route and no containing output artefact, so it cannot render final resource URLs.</p><p>It returns structural folded content with its resource facts. Extracting plain text succeeds only when the folded content contains no resource anchors; otherwise the request reports unsupported content rather than guessing a path. A project builder consumes the structural result and applies its normal resource link plan.</p><h3>Static branch specialisation</h3><p>Resource validity and resource output liveness are separate.</p><ul><li>both branches of an ordinary <code>if</code> complete normal validation</li><li>a resource path in a branch removed by known-<code>Bool</code> specialisation is still resolved and validated</li><li>that inactive branch contributes no output</li><li>a runtime branch retains ordinary reachability, so any reachable branch contributes its uses</li></ul><h3>Related concepts</h3><ul><li>For resource path syntax and resolution see <a href="#resource-paths">Resource paths</a>.</li><li>For constant folding and const templates see <a href="../constants/#constant-folding">Constant folding</a>.</li><li>For template composition and directives see <a href="../templates/#template-basics">Template basics</a>.</li><li>For Moth template files see <a href="../moth-templates/#moth-template-files">Moth template files</a>.</li></ul>
+</div>
+</fieldset></section>
+<section class="container"><nav class="doc-pager" aria-label="Language documentation">
+    <a
+        class="doc-pager__link doc-pager__link--previous"
+        href="../packages/"
+                rel="prev"
+            >
+                <span class="doc-pager__direction">← Previous</span>
+                <span class="doc-pager__title">Packages and dependencies</span>
+            </a>
+
+            <a
+                class="doc-pager__link doc-pager__link--next"
+                href="../moth-templates/"
+                rel="next"
+            >
+                <span class="doc-pager__direction">Next →</span>
+                <span class="doc-pager__title">Moth template files</span>
+            </a>
+
+            
+
+
+
+</nav></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

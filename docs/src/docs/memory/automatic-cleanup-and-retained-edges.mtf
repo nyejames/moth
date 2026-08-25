@@ -160,4 +160,4 @@ capable full-control release backend cannot fall back to tracing garbage
 collection.
 
 For the compiler contract, see
-@../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+@../../developer-docs/memory-management/retained-edge-counting (Retained Edge Counting).

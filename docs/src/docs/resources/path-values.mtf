@@ -1,0 +1,134 @@
+`Path` is one reserved builtin compile-time type. A `Path` value names one resource that the project owns. It is not a filesystem handle, a string, or a runtime value.
+
+### Compile-time only
+
+A `Path` exists during compilation and never reaches a running program.
+
+Allowed:
+
+- `#Path` and inferred `Path` constants
+- transparent aliases to `Path`
+- supported compile-time record shapes with `Path` fields
+- compile-time collections containing `Path`, or supported `Path`-containing records
+- compile-time field access and collection iteration
+- exported folded `Path` constants
+- exported public nominal const-record shapes with public compile-time-only fields
+- direct template insertion
+- compile-time template control flow
+
+Rejected:
+
+- mutable `Path` bindings
+- ordinary runtime bindings
+- function parameters or returns containing `Path`
+- runtime struct or choice instances containing `Path`
+- receiver methods on `Path`-containing compile-time-only records
+- options, choices, maps and generic applications containing `Path`
+- map keys
+- equality, ordering and operators
+- casts
+- implicit `Path` to `String` assignment
+- runtime filesystem access
+- config values
+- provider namespace values
+
+There is no file-versus-directory `Path` subtype. A resource path always resolves to a regular file.
+
+### Availability is transitive
+
+One recursive classifier decides whether a type may be stored at runtime.
+
+- `Path` is compile-time-only.
+- Supported records and collections become compile-time-only when they contain a compile-time-only type.
+- Transparent aliases preserve the classification.
+- Unsupported aggregate shapes report which shape rejected the compile-time-only type.
+
+Every runtime receiving boundary consumes that classification, so a `Path` cannot reach runtime storage through a wrapper record, a collection, an alias or a generic argument.
+
+Compile-time availability is not part of nominal type identity. `Path` does not create a parallel type hierarchy.
+
+### Inserting a Path into a template
+
+A template that inserts a `Path` still has language type `String`.
+
+[codeblock, $code("moth"):
+    logo #Path = @assets/logo.svg
+
+    image #= [$html:
+        <img src="[logo]" alt="Moth">
+    ]
+]
+
+`image` is an ordinary `String`. It may be composed, stored in a constant, bound as a dependency, passed and returned like any other string.
+
+Internally the value stays structural until a builder supplies output placement. Inserting a `Path` creates a resource anchor rather than an eager URL, because the correct URL depends on which artefact will contain the text.
+
+The consequences are:
+
+- output paths and URLs are never observable through a cast, formatter or public interface
+- a compile-time operation that needs final text is rejected while placement is unresolved
+- runtime text operations happen only after the containing artefact has resolved each anchor
+
+There is no second source-visible string type. A resource-bearing string is a `String`.
+
+### URLs are rendered by the builder
+
+Resource identity, byte source, emitted output path and rendered URL are four separate facts. The builder chooses the output path, then chooses the artefact whose URL rules observe the rendered text, and renders a relative URL from there.
+
+[codeblock, $code("text"):
+    resource: assets/logo.svg
+    context:  index.html
+    URL:      ./assets/logo.svg
+
+    resource: assets/logo.svg
+    context:  docs/getting-started/index.html
+    URL:      ../../assets/logo.svg
+
+    resource: styles/fonts/site.woff2
+    context:  styles/site.css
+    URL:      ./fonts/site.woff2
+]
+
+The URL context is the artefact whose URL resolution rules observe the string, not necessarily the file that contains the generated code. Page runtime code uses the active page document, standalone CSS uses the stylesheet, and inline CSS uses the page document.
+
+Project HTML origin configuration is never prepended to a resource URL. Resource URLs are relative to their context artefact.
+
+### Moth templates and Markdown
+
+`.mtf` files remain declarationless and dependency-clause-free. A resource is used through a nested Moth template inside the implicit Markdown body.
+
+[codeblock, $code("moth"):
+    [$html:
+        <img src="[@images/ownership.webp]" alt="Ownership graph">
+    ]
+]
+
+- plain `@images/ownership.webp` Markdown text remains ordinary text
+- a nested resource path resolves from the `.mtf` file's owning module root
+- the restricted root scope may expose visible `Path` constants and resource-bearing const templates
+- `.mtf` gains no frontmatter and no general declarations
+- plain `.md` link and image targets remain literal and untracked
+
+Rendered Markdown and HTML are never scanned to discover files.
+
+### Direct Moth-template compilation
+
+The direct `.mtf` compiler service has no route and no containing output artefact, so it cannot render final resource URLs.
+
+It returns structural folded content with its resource facts. Extracting plain text succeeds only when the folded content contains no resource anchors; otherwise the request reports unsupported content rather than guessing a path. A project builder consumes the structural result and applies its normal resource link plan.
+
+### Static branch specialisation
+
+Resource validity and resource output liveness are separate.
+
+- both branches of an ordinary `if` complete normal validation
+- a resource path in a branch removed by known-`Bool` specialisation is still resolved and validated
+- that inactive branch contributes no output
+- a runtime branch retains ordinary reachability, so any reachable branch contributes its uses
+
+### Related concepts
+
+- For resource path syntax and resolution see @#resource-paths (Resource paths).
+- For constant folding and const templates see @../constants/#constant-folding (Constant folding).
+- For template composition and directives see @../templates/#template-basics (Template basics).
+- For Moth template files see @../moth-templates/#moth-template-files (Moth template files).

@@ -33,7 +33,7 @@ It does not override:
 
 - `docs/compiler-design-overview.md` for compiler stage and semantic ownership
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
-- `docs/src/docs/codebase/language/overview.mtf` and its selected canonical references for source-language behaviour
+- `docs/src/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
 - `docs/src/docs/progress/@page.moth` for current implementation status
 - `docs/roadmap/roadmap.md` and the owning implementation plan for sequencing
@@ -1615,10 +1615,10 @@ Implementation of this design requires synchronized changes to:
 - `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries
-- `docs/src/docs/codebase/style-guide/style-guide.mtf` — hard layout and failure-lane rules; remove
+- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; remove
   boxing as the normal `result_large_err` answer
-- `docs/src/docs/codebase/style-guide/testing.mtf` — layout/property/failure-lane ownership
-- `docs/src/docs/codebase/style-guide/validation.mtf` — updated manual architecture audit
+- `docs/src/developer-docs/style-guide/testing.mtf` — layout/property/failure-lane ownership
+- `docs/src/developer-docs/style-guide/validation.mtf` — updated manual architecture audit
 - `docs/src/docs/progress/@page.moth` — current implementation status during and after migration
 - `docs/roadmap/roadmap.md` — sequencing and measured deferrals
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` — dependency and post-layout resume

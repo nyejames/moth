@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Boracle reference solver | Moth</title>
+    <meta name="description" content="Moth's permanent slow reference borrow solver and borrow-analysis laboratory.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Memory management</a> / Boracle reference solver</p><p>Boracle is a developer-facing reference model of borrow legality, not a language feature and not a production fallback. It exists so borrow reasoning can be inspected, compared and extended outside the production checker.</p></section>
+<section class="container"><h1>Boracle reference solver</h1><p>Boracle is Moth&#39;s permanent slow reference borrow solver and borrow-analysis laboratory.</p><p>It exists for compiler developers. It is not a public language feature, a production fallback or a source-visible solver choice.</p><p>The Cargo feature and validation command use the joke name directly:</p><pre style=""><code class='codeblock'>cargo feature: boracle
+validation:    just boracle</code></pre><p>The role is serious even when the name is not. Boracle provides an executable, inspectable model of Moth borrow legality, value provenance, loan liveness and last-use reasoning. It also provides a controlled place to investigate stronger safe analyses before those rules are accepted as reference semantics or implemented in the future production checker.</p><h2>Status and authority</h2><p>This document is the permanent design authority for Boracle.</p><p>Canonical language and memory documents still define Moth semantics. Boracle does not override them. Within compiler testing, Boracle reference mode is the executable reference model against which a future production solver can be compared.</p><p>The current alpha borrow checker remains the normal compiler authority until a later project replaces it. Boracle is compiled and run only through explicit developer and test paths.</p><p>Boracle has an initial implementation milestone but no final research endpoint. It may accumulate new cases, investigations, traces and analysis queries throughout the compiler&#39;s life.</p><h2>Core contract</h2><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Area</strong></p></th><th scope="col" style=""><p> <strong>Boracle owns</strong></p></th><th scope="col" style=""><p> <strong>Boracle does not own</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Normalized input</p></td> <td style=""><p> explicit points, CFG edges, places, origins, access events, copies, calls and source mappings</p></td> <td style=""><p> source parsing, type checking, HIR repair or backend planning</p></td>
+        </tr><tr style="">
+             <td style=""><p> Borrow legality</p></td> <td style=""><p> shared and exclusive loan liveness, place overlap and conflict decisions</p></td> <td style=""><p> lifetime-region ownership or retained-edge legality</p></td>
+        </tr><tr style="">
+             <td style=""><p> Provenance</p></td> <td style=""><p> fresh origins, aliases, projections, copies, rebindings and joined possible origins</p></td> <td style=""><p> physical allocation identity or layout</p></td>
+        </tr><tr style="">
+             <td style=""><p> Last use</p></td> <td style=""><p> future-use classification, all-path final-use proof and structured witnesses</p></td> <td style=""><p> runtime drop emission or mandatory source moves</p></td>
+        </tr><tr style="">
+             <td style=""><p> Experiments</p></td> <td style=""><p> named stronger proof rules and explicit result deltas</p></td> <td style=""><p> silently changing reference semantics</p></td>
+        </tr><tr style="">
+             <td style=""><p> Explanations</p></td> <td style=""><p> structured derivations, issue points, keeping-alive uses and CFG witness paths</p></td> <td style=""><p> a second user-facing diagnostic taxonomy or renderer</p></td>
+        </tr><tr style="">
+             <td style=""><p> Validation</p></td> <td style=""><p> the deterministic <code>just boracle</code> developer gate</p></td> <td style=""><p> standard <code>just validate</code>, standard feature-matrix or CI ownership</p></td>
+        </tr>
+            
+</table><h2>Why Boracle is permanent</h2><p>A production checker is optimized for common cases, compact state and low compile-time cost. Those priorities make its internal reasoning harder to inspect and make implementation bugs easier to correlate with its tests.</p><p>Boracle takes the opposite tradeoff.</p><ul><li>It uses explicit data structures.</li><li>It favours readable fixed-point loops over compact algorithms.</li><li>It retains derivation and witness information that production checking should reconstruct only on failure.</li><li>It can run alternative named rule sets.</li><li>It provides a solver implementation independent from the production algorithm.</li><li>It can explain discrepancies using stable normalized facts.</li><li>It remains useful for future borrow-checker features, diagnostics, optimisation proofs and downstream memory investigations.</li></ul><p>The reference implementation should remain boring. A change that saves Boracle time but makes the reasoning harder to inspect is normally a regression.</p><h2>The engineering rule</h2><p>Canonical documentation defines semantics. Boracle reference mode makes those semantics executable. A future production solver defines performance.</p><p>Neither solver may redefine Moth around an implementation limitation.</p><p>When the implementations disagree:</p><ol><li>Reduce the problem.</li><li>Inspect the normalized input.</li><li>Compare both derivations.</li><li>Check the canonical language and memory contract.</li><li>Classify the result as a Boracle bug, production bug, input-builder bug, current alpha limitation or unsettled design question.</li><li>Add the reduced case to the durable corpus.</li></ol><p>Agreement is evidence. Agreement is not proof when both solvers consume a malformed shared input.</p><h2>Architecture</h2><p>The initial architecture keeps the current checker isolated:</p><pre style=""><code class='codeblock'>validated HIR
+    |
+    +-&gt; current alpha borrow checker
+    |       normal compiler authority
+    |
+    +-&gt; BorrowProblem builder
+            explicit developer/test path only
+            |
+            +-&gt; Boracle reference solver
+                    feature-gated</code></pre><p>A future production checker may consume <code>BorrowProblem</code> or an accepted evolution of it. Boracle does not lock the optimized solver&#39;s storage or algorithm.</p><h3>Planned main paths</h3><pre style=""><code class='codeblock'>src/compiler_frontend/analysis/borrow_checker/problem/
+src/compiler_frontend/analysis/borrow_checker/last_use/
+src/compiler_frontend/analysis/borrow_checker/boracle/</code></pre><p>The shared problem model and common result vocabulary are compiled normally. Boracle&#39;s solver, verbose traces, experiment engine and internal command sit behind the <code>boracle</code> Cargo feature gate:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>[</span>cfg<span class='moth-code-delimiter'>(</span>feature <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;boracle&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span></code></pre><p>Normal compilation must not construct a <code>BorrowProblem</code> merely because its types exist.</p><h2>BorrowProblem</h2><p><code>BorrowProblem</code> is an immutable normalized analysis input for one validated HIR function.</p><p>It is not a second semantic IR. It does not replace HIR and it does not gain source, type, lifetime or backend authority. Its job is to make every fact needed by borrow solving explicit and easy to inspect.</p><p>The problem should answer these questions without requiring a solver to walk arbitrary HIR shapes:</p><ul><li>What are the semantic program points?</li><li>In what order are accesses evaluated?</li><li>Which CFG edges can execute?</li><li>Which place does each access cover?</li><li>Which abstract value origins can each value represent?</li><li>Where are aliases and exclusive capabilities issued?</li><li>Where can they be used again?</li><li>What call effects and result-alias facts were already resolved?</li><li>Which local bindings remain visible?</li><li>Which HIR and source location produced each event?</li></ul><h3>Atomic construction</h3><p>The builder constructs one complete problem and validates it before publication.</p><p>Missing points, malformed edges, out-of-range typed IDs, inconsistent event order, unknown places, impossible source mappings or references to absent HIR facts are internal compiler errors.</p><p>The builder does not repair malformed HIR. HIR validation owns that boundary.</p><h3>Determinism</h3><p>Every ID assignment, row order, dump and witness choice must be deterministic for one input.</p><p>Boracle may use <code>BTreeMap</code> and <code>BTreeSet</code> freely. Dense vectors are also suitable when an ID is an obvious row index. Hash iteration order must never become visible in a report or snapshot.</p><h2>Program points and events</h2><p>A HIR statement is not always one borrow-analysis event.</p><p>A call can evaluate several arguments from left to right, read index expressions, request mutable access and write a result. Two events in one statement may conflict even though they share one HIR statement ID.</p><p><code>BorrowProblem</code> therefore uses semantic program points or an equivalently explicit ordered event stream.</p><p>One acceptable conceptual shape is:</p><pre style=""><code class='codeblock'>block entry
+    -&gt; argument 0 index read
+    -&gt; argument 0 place read
+    -&gt; argument 1 place read
+    -&gt; call access commit
+    -&gt; result origin write
+    -&gt; block terminator</code></pre><p>The exact Rust representation may differ. These invariants do not:</p><ul><li>event order preserves source-defined evaluation order</li><li>CFG edges connect valid event boundaries</li><li>every loan issue, use, kill and conflict can name one point</li><li>every point can map back to its owning HIR/source location</li><li>jump-argument plumbing does not invent a source use</li><li>unreachable blocks do not create live loans or future uses</li></ul><h2>Typed identities</h2><p>The reference model uses separate typed ID spaces. One ID must not carry several unrelated meanings merely because that is compact.</p><h3>PointId</h3><p><code>PointId</code> names one semantic location in the normalized function.</p><p>It is used for CFG reachability, loan liveness, future use and witnesses. It is not a source line number. Several points may map to one source location.</p><h3>PlaceId</h3><p><code>PlaceId</code> names one interned semantic place and projection path.</p><p>A place may represent:</p><ul><li>a local binding cell</li><li>a field projection</li><li>an index projection</li><li>a conservative collection or map receiver domain</li><li>another explicit place shape accepted by HIR</li></ul><p>A place is not a lifetime region or allocation-family identity.</p><h3>ValueOriginId</h3><p><code>ValueOriginId</code> names one abstract source-semantic value lineage or fresh-definition class.</p><p>It separates the value from the binding currently naming it. It must not claim that a heap allocation exists.</p><h3>LoanId</h3><p><code>LoanId</code> names one shared or exclusive source-semantic access capability.</p><p>It is not a runtime reference, counter, memory handle or lifetime owner.</p><h3>UseId and event IDs</h3><p>Additional IDs such as <code>UseId</code>, <code>AccessEventId</code> or <code>OriginEventId</code> are justified when they make witnesses and tests clearer. Do not collapse them into tuples or reuse unrelated HIR IDs merely to reduce type count.</p><h2>Places and overlap</h2><p>Borrow legality checks overlapping places, not only equal local names.</p><p>The initial reference overlap relation should be explicit and conservative where required.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Pair</strong></p></th><th scope="col" style=""><p> <strong>Initial overlap rule</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> same local</p></td> <td style=""><p> overlap</p></td>
+        </tr><tr style="">
+             <td style=""><p> one place is a projection of the other</p></td> <td style=""><p> overlap</p></td>
+        </tr><tr style="">
+             <td style=""><p> different fixed struct fields</p></td> <td style=""><p> disjoint when field semantics and operation shape prove independent access</p></td>
+        </tr><tr style="">
+             <td style=""><p> dynamic indexes under one collection</p></td> <td style=""><p> overlap conservatively</p></td>
+        </tr><tr style="">
+             <td style=""><p> map entry and map mutation</p></td> <td style=""><p> overlap at the map receiver base</p></td>
+        </tr><tr style="">
+             <td style=""><p> growable collection element and structural mutation</p></td> <td style=""><p> overlap at the collection receiver base</p></td>
+        </tr><tr style="">
+             <td style=""><p> separate fresh or copied origins</p></td> <td style=""><p> disjoint even when bindings share a historical source name</p></td>
+        </tr>
+            
+</table><p>Borrow-place precision is independent from lifetime-family splitting.</p><p>Boracle may prove that <code>pair.left</code> and <code>pair.right</code> do not conflict while later lifetime analysis still treats the complete <code>pair</code> as one allocation family. A physical field split may improve cleanup later. It must not be required to make a Stage 6 access legal.</p><h2>Bindings are not origins</h2><p>A source binding is a name and storage cell. It is not a permanent value identity.</p><p>Consider:</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>~=</span> <span class='moth-code-function'>make_first</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+old <span class='moth-code-operator'>=</span> value
+
+value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>make_second</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+current <span class='moth-code-operator'>=</span> value
+
+<span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>old<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>current<span class='moth-code-delimiter'>)</span></code></pre><p>The reference model should show:</p><pre style=""><code class='codeblock'>first definition of value  -&gt; origin O0
+old                        -&gt; origin O0
+
+second definition of value -&gt; origin O1
+current                    -&gt; origin O1</code></pre><p>Rebinding <code>value</code> does not mutate O0 through <code>old</code>. A mutable alias is different. Assignment through a mutable alias writes through to its referent under the accepted source rules.</p><p>This distinction is one of Boracle&#39;s central reasons to exist. The current alpha checker often uses local roots as a compact approximation. The future model must not harden that approximation into language semantics.</p><h2>Origins and provenance</h2><p>Origin analysis records where a value&#39;s observable storage relationship came from.</p><p>The initial reference vocabulary needs at least:</p><ul><li>fresh origin</li><li>alias of one or more existing origins</li><li>projection of an existing origin</li><li>independent copy origin</li><li>joined possible origins</li><li>call result supplied as fresh, aliasing or conservatively unknown preliminary provenance</li></ul><p>This is Stage 6 provenance, not final lifetime result provenance. Detached stored results, result-to-result aliases, retained parameters, outlives relationships and retention cardinality belong to later lifetime analysis unless Boracle is explicitly running a non-reference experiment.</p><h3>Fresh values</h3><p>Literals, templates, constructors, fresh collection/map values, supported computations and fresh call results introduce a fresh origin class.</p><p>A backend may later represent a scalar directly. The abstract origin only distinguishes source-semantic value lineages needed for alias and transfer reasoning.</p><h3>Shared aliases</h3><p>Binding or passing an existing value normally preserves its origins.</p><pre style=""><code class='codeblock'>alias <span class='moth-code-operator'>=</span> source</code></pre><p>The alias does not introduce an independent origin. It may issue or propagate a shared loan depending on the normalized operation.</p><h3>Mutable aliases</h3><p>A mutable declaration from an existing place carries mutation-capable access to the same origins.</p><pre style=""><code class='codeblock'>writer <span class='moth-code-operator'>~=</span> source</code></pre><p>Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias.</p><h3>Joins</h3><p>When control-flow paths meet, the receiving value may represent several possible origins.</p><p>Boracle should retain the explicit set and the path reason for each origin. It must not collapse to the destination binding merely because that is convenient.</p><h2>Explicit copy</h2><p><code>copy</code> is the first required complete provenance family.</p><p>Its two sides are different facts:</p><pre style=""><code class='codeblock'>copy source
+
+source access
+    shared read of source origins
+
+result provenance
+    independent fresh origin graph</code></pre><p>The source read must obey current access rules. An active overlapping exclusive loan can make the read invalid.</p><p>The result shares no mutable origin with the source. Existing source aliases remain aliases of the source graph, not the copy.</p><p>Example:</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>}</span>
+shared <span class='moth-code-operator'>=</span> items
+snapshot <span class='moth-code-operator'>~=</span> <span class='moth-code-keyword'>copy</span> items
+
+<span class='moth-code-operator'>~</span>snapshot.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>shared<span class='moth-code-delimiter'>)</span></code></pre><p>Expected reference explanation:</p><pre style=""><code class='codeblock'>items and shared observe O0
+copy reads O0
+copy creates O1
+snapshot observes O1
+snapshot mutation covers O1
+later shared use covers O0
+O0 and O1 do not overlap</code></pre><h3>Copy graph boundaries</h3><p>Borrow validation owns the access and independence facts. It does not own every graph-level copy rule.</p><ul><li>AST and type checking decide whether the source graph is copyable.</li><li>The copy implementation preserves internal alias topology.</li><li>Lifetime analysis chooses the destination owner.</li><li>A copied cycle must later enter one explicit group.</li><li>Boracle must not legalise a copied cycle&#39;s placement merely because the copy is independent from its source.</li></ul><p>Boracle may represent repeated internal aliases in a copied graph so tests can prove that one source node becomes one corresponding copied node, not several unrelated copies.</p><h2>Rebinding and storage generations</h2><p>Distinct fresh writes to one binding create distinct origin classes.</p><p>Loops make this harder because one definition site can execute many times:</p><pre style=""><code class='codeblock'>value <span class='moth-code-operator'>~=</span> <span class='moth-code-function'>initial</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+
+<span class='moth-code-keyword'>loop</span> condition<span class='moth-code-delimiter'>:</span>
+    previous <span class='moth-code-operator'>=</span> value
+    value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>next</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The first reference model may use one origin class per fresh definition site and carry that class around the loop fixed point. That is an abstraction, not a claim that every runtime iteration shares storage.</p><p>Boracle must investigate whether production-quality reasoning needs another concept such as:</p><ul><li>loop-carried origin generations</li><li>abstract epochs</li><li>iteration-sensitive freshness</li><li>a widened origin class with explicit non-aliasing guarantees between generations</li></ul><p>Do not choose a compact production representation before the reference cases show which distinctions matter.</p><h2>Loans</h2><p>A loan represents a source-semantic capability to observe or mutate overlapping origins through a place.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Loan kind</strong></p></th><th scope="col" style=""><p> <strong>Meaning</strong></p></th><th scope="col" style=""><p> <strong>Conflicts with</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Shared</p></td> <td style=""><p> read-only observation</p></td> <td style=""><p> live overlapping exclusive loan or exclusive access</p></td>
+        </tr><tr style="">
+             <td style=""><p> Exclusive</p></td> <td style=""><p> mutation-capable access</p></td> <td style=""><p> every other live overlapping shared or exclusive loan</p></td>
+        </tr>
+            
+</table><p>A loan records its issue point, covered place/origins, holders, uses, kills and live points.</p><p>Lexical scope alone does not decide liveness. A loan can die before its binding leaves scope when no future source operation can observe that capability under the accepted rule set.</p><h3>Loan issuance</h3><p>Issuance may come from:</p><ul><li>shared alias binding</li><li>mutable alias binding</li><li>shared call argument access</li><li>mutable call argument access</li><li>receiver access</li><li>map <code>get</code> result</li><li>field or element projection</li><li>another normalized source-semantic operation</li></ul><p>Compiler-introduced plumbing must not invent stronger source loans than the source operation requires.</p><h3>Loan uses</h3><p>A use occurs when a later source-semantic operation observes through the loan or a derived value that preserves it.</p><p>Merely keeping a binding visible is not a use.</p><h3>Loan kills</h3><p>A loan can stop being usable through:</p><ul><li>final potential use</li><li>binding leaving visibility</li><li>rebinding that removes the capability from the binding</li><li>control-flow paths that cannot reach another use</li><li>an explicit normalized kill event justified by source semantics</li></ul><p>A physical drop is not required for a loan kill. Loan liveness is a static source-access fact.</p><h2>Loan liveness</h2><p>Boracle computes which loans are live at each point through clear graph/set reasoning.</p><p>The exact algorithm may evolve, but it should remain inspectable. One suitable reference approach is:</p><ol><li>Record each loan issue and every use reachable through holders or derived aliases.</li><li>Traverse CFG paths between issue and uses.</li><li>Stop propagation across valid kills.</li><li>Mark the loan live at points that can still reach a use without crossing a kill.</li><li>Retain one or more witness paths.</li></ol><p>Branches are independent. Joins merge possible live loans. Loops iterate to a fixed point.</p><p>Boracle must model unreachable blocks explicitly so dead source paths do not keep a loan live.</p><h2>Access legality</h2><p>At each access event:</p><pre style=""><code class='codeblock'>shared access
+    reject if an overlapping exclusive loan is live
+
+exclusive access
+    reject if any other overlapping shared or exclusive loan is live</code></pre><p>The conflict report should identify:</p><ul><li>requested access kind</li><li>access point and source location</li><li>requested place and origins</li><li>conflicting loan</li><li>loan issue point</li><li>conflicting place and origins</li><li>one future use or CFG reason keeping the loan live</li></ul><p>A successful check does not need diagnostic prose.</p><h2>Last use and future use</h2><p>Last-use analysis is a first-class compiler product.</p><p>For an origin or loan at point P, the reference result starts with:</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Result</strong></p></th><th scope="col" style=""><p> <strong>Meaning</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>NoFutureUse</code></p></td> <td style=""><p> no relevant reachable path uses it again</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>MayBeUsed</code></p></td> <td style=""><p> at least one path uses it and at least one relevant path does not, or precision is intentionally conservative</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>MustBeUsed</code></p></td> <td style=""><p> every relevant reachable continuation requires another use</p></td>
+        </tr>
+            
+</table><p>Boracle should retain witnesses:</p><ul><li>explored exits for <code>NoFutureUse</code></li><li>one use path and one no-use path for <code>MayBeUsed</code></li><li>one required later use for <code>MustBeUsed</code></li></ul><h3>Optional transfer</h3><p>Moth has no ordinary mandatory-consuming value operation.</p><p>A call, assignment, return or aggregate insertion may receive affine cleanup responsibility only when every relevant path proves no later source use and all other transfer preconditions hold.</p><pre style=""><code class='codeblock'>transfer proven
+    -&gt; record optional transfer eligibility
+
+transfer unproven or path-dependent
+    -&gt; remain a borrow
+    -&gt; source program remains valid</code></pre><p>Transfer does not change alias semantics. It changes who may perform cleanup later.</p><h3>Shared liveness substrate</h3><p>The same hardened liveness authority can later inform several systems without merging their responsibilities:</p><pre style=""><code class='codeblock'>borrow validation
+    asks whether a conflicting loan remains usable
+
+optional transfer
+    asks whether every relevant path has no later source use
+
+lifetime analysis
+    asks for final observations and escape relationships
+
+cleanup-frontier analysis
+    asks whether a surviving source can recreate a retained edge
+
+REC planning
+    benefits when static liveness avoids counting altogether</code></pre><p>Boracle owns only the reference borrow and last-use answers. Later systems own their own semantic decisions.</p><h2>Branches, joins and path separation</h2><p>Boracle should exploit path separation whenever the source cannot observe conflicting accesses on one execution path.</p><p>Example:</p><pre style=""><code class='codeblock'>shared <span class='moth-code-operator'>=</span> items
+
+<span class='moth-code-keyword'>if</span> condition<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>shared<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>else</span>
+    <span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>The shared use and exclusive mutation occur on different paths. A reference solver should not reject them merely because both are textually after the alias issue.</p><p>At a join, Boracle retains a loan only when at least one incoming path can still use it. A future exclusive access after the join must respect that possibility.</p><h2>Dead exclusive loans</h2><p>Moth&#39;s accepted general model says alias activity is non-lexical and control-flow-sensitive. The current alpha implementation may conservatively keep some unused mutable aliases active to scope exit.</p><p>Boracle should investigate the stronger rule:</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>}</span>
+writer <span class='moth-code-operator'>~=</span> items
+
+<span class='moth-code-comment'>-- writer is never used</span>
+<span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>Hypothesis:</p><pre style=""><code class='codeblock'>exclusive alias issue is legal
+no future operation observes writer
+writer&#39;s loan ends
+later exclusive access through items is legal</code></pre><p>Keep this as a named experiment until canonical semantics explicitly adopt it. The experiment must show exactly which loan died and why.</p><h2>Same-statement access</h2><p>Different call arguments can overlap within one statement.</p><p>Boracle must preserve evaluation and access-commit order rather than treating a statement as one undifferentiated point.</p><p>It should test:</p><ul><li>the same origin passed twice to shared parameters</li><li>one shared and one mutable parameter</li><li>two mutable parameters</li><li>a result that aliases one argument</li><li>a copy argument alongside a source argument</li><li>field-disjoint arguments</li><li>index expressions that read a collection also passed mutably</li></ul><p>A future production fast path may compress these checks. Boracle should keep them explicit.</p><h2>Aggregates and stored aliases</h2><p>Constructing an aggregate creates a fresh outer value but does not implicitly copy existing child values.</p><pre style=""><code class='codeblock'>item <span class='moth-code-operator'>=</span> source
+pair <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Pair</span><span class='moth-code-delimiter'>(</span>first <span class='moth-code-operator'>=</span> item, second <span class='moth-code-operator'>=</span> item<span class='moth-code-delimiter'>)</span></code></pre><p>The outer <code>pair</code> can have a fresh origin while both fields preserve aliases to the same child origin.</p><p>Boracle should retain enough structure to distinguish:</p><ul><li>fresh outer origin</li><li>direct stored child origins</li><li>repeated aliases to one child</li><li>copied independent child origins</li><li>projection places used by later access</li></ul><p>Final retained-edge cardinality and physical family edges belong to lifetime analysis. Boracle&#39;s stored-child facts are preliminary access/provenance evidence.</p><h2>Collections and maps</h2><p>Builtin collections and maps have compiler-known effects, but the initial borrow reference model should stay conservative about structural mutation.</p><ul><li><code>get</code> creates a temporary shared alias to stored data and keeps the receiver base protected while that alias is live.</li><li><code>set</code> and structural collection mutation require exclusive receiver access.</li><li>a dynamic collection index overlaps other indexes under the same base unless a stronger accepted proof is available.</li><li>map keys and values follow ordinary shared, copy and final-use rules.</li><li>inserting a value does not silently copy it.</li><li>removing a value may create preliminary detached-result provenance, but final lifetime effects belong later.</li><li><code>clear</code> is relevant to future retained-edge frontiers, not ordinary loan counting.</li></ul><p>Boracle must not add per-entry uniqueness scans or runtime alias registries.</p><h2>Calls and summaries</h2><p>Borrow solving is intraprocedural over one normalized function, with stable call summaries at boundaries.</p><p>The initial input may consume current summary facts for:</p><ul><li>parameter access mode</li><li>mutation effect</li><li>optional transfer eligibility/effect category</li><li>preliminary return aliasing</li><li>reactive effect</li><li>external boundary access rules</li></ul><p>Boracle may investigate a richer future summary vocabulary without publishing it as current interface contract.</p><h3>Multiple returns</h3><p>One function-wide union can over-approximate relationships between separate return slots.</p><p>Boracle should investigate per-result facts such as:</p><pre style=""><code class='codeblock'>result 0 -&gt; fresh
+result 1 -&gt; alias of parameter 0
+result 2 -&gt; alias of result 1</code></pre><p>This investigation can shape the future production checker and lifetime summary work. It does not force an immediate public-interface migration.</p><h3>Recursive calls</h3><p>The current alpha checker may publish unknown return aliasing at recursive summary cycles.</p><p>Boracle should investigate monotone SCC solving over a finite reference summary lattice. It should retain why a result remained unknown and whether the uncertainty is fundamental or only an implementation shortcut.</p><p>Do not make Boracle&#39;s first experimental lattice a permanent cross-module contract without separate architecture review.</p><h2>Fallible control flow</h2><p>Recoverable operations already lower to explicit HIR control flow.</p><p>Boracle should preserve:</p><ul><li>separate success and error paths</li><li>unwrap and catch joins</li><li>compiler-created result carriers</li><li>return-success and return-error exits</li><li>branch-local captures and aliases</li></ul><p>Compiler scratch locals are CFG plumbing. They may carry provenance without becoming source-authored mutable aliases.</p><p>A fallible failure path that does not store or return a value must not keep its success-only loan live.</p><h2>Reactivity</h2><p>Reactive subscriptions are read-only dependency metadata. They are not active borrow lifetimes.</p><p>Ordinary source reads and mutations still obey borrow rules. A stable observable reactive source may be ineligible for optional cleanup transfer because later mounted observation can depend on its identity.</p><p>Boracle records the access and observability facts it needs. Builder lifecycle roots and final lifetime ownership belong to later analysis.</p><h2>Structured witnesses</h2><p>Boracle should be able to answer &quot;why&quot; without re-running an unrelated inference.</p><p>Useful witness types include:</p><ul><li>origin derivation</li><li>alias derivation</li><li>loan issue</li><li>loan propagation</li><li>keeping-alive use</li><li>kill reason</li><li>conflict overlap</li><li>future-use path</li><li>no-use exit path</li><li>experiment-only acceptance delta</li></ul><p>Conceptual example:</p><pre style=""><code class='codeblock'>mutation rejected at P30
+
+requested
+    exclusive access to items / O3
+
+conflicting loan L8
+    shared
+    issued by `shared = items` at P12
+    covers O3
+    live at P30 because `inspect(shared)` is reachable at P42
+
+witness path
+    P12 -&gt; P18 -&gt; P30 -&gt; P42</code></pre><p>The production checker should eventually reconstruct equivalent useful evidence only when a diagnostic needs it. Boracle can retain it all the time.</p><h2>Diagnostic boundary</h2><p>Boracle returns typed semantic reasons. The shared compiler diagnostic layer decides user-facing wording, labels, stable codes and rendering.</p><p>Boracle-only dumps may be verbose. They are developer output, not stable diagnostics.</p><p>Do not:</p><ul><li>create Boracle-specific user diagnostic codes for existing conflicts</li><li>render errors inside the solver</li><li>store prose as solver state</li><li>hide an internal invariant behind a user-facing borrow diagnostic</li><li>let missing optional transfer proof become an error</li></ul><h2>Reference solver implementation style</h2><p>Boracle should use the simplest implementation that makes the rule obvious.</p><p>Preferred:</p><ul><li>explicit loops</li><li>named intermediate sets</li><li>small single-purpose functions</li><li>deterministic <code>BTreeMap</code> and <code>BTreeSet</code></li><li>clear worklists</li><li>direct graph traversal</li><li>separate relation-building and decision phases</li><li>typed enums for rule states</li><li>complete debug displays</li></ul><p>Avoid:</p><ul><li>Datafrog or another Datalog runtime</li><li>external graph or solver libraries</li><li>packed bitsets merely for speed</li><li>generic frameworks that hide the Moth rule being implemented</li><li>macro-generated solver logic</li><li>clever iterator chains with mutable side effects</li><li>caching before a real need exists</li><li>sharing the production solver&#39;s algorithm solely to reduce code</li></ul><p>If an external library would save code but hide the reasoning, do not add it.</p><h2>Moth restrictions to exploit</h2><p>Moth deliberately excludes language surface that makes a general Rust-style borrow checker much harder.</p><p>Boracle and the future production design should exploit these facts:</p><ul><li>no source-visible reference types</li><li>no lifetime parameters or annotations</li><li>no explicit move operator</li><li>no mandatory ordinary consuming parameters</li><li>no shadowing</li><li>no general closures or anonymous captured callables</li><li>no general function values</li><li>no trait objects or dynamic trait dispatch</li><li>no unsafe language escape hatch</li><li>no arbitrary user-defined builtin collection storage semantics</li><li>statically resolved calls</li><li>concrete generated generics before borrow validation</li><li>closed external boundary profiles</li><li>reactive subscriptions defined as dependencies rather than loans</li><li>no current async suspension model in accepted borrow semantics</li></ul><p>These restrictions mean Boracle does not need to reproduce Rust&#39;s complete region-in-type, variance, closure-capture, async-generator, trait-object, unsafe or drop-check machinery.</p><p>It still needs precise CFG reasoning, aliases, projections, call summaries, loops, fallible paths and aggregate storage.</p><h2>Lessons from Polonius without copying Rust</h2><p>Rust&#39;s Polonius work provides useful design lessons:</p><ul><li>loan liveness should be flow-sensitive</li><li>control-flow points and type/region relationships must not be blurred</li><li>kills and event order matter</li><li>facts should be separable from the solving algorithm</li><li>sparse and fast representations belong to production work, not the reference model</li><li>a practical subset can improve accepted programs without solving every theoretical case</li><li>different solver approximations can accept different safe subsets, so one implementation should not be treated as the mathematical ideal</li><li>fast paths such as skipping liveness when there are no loans matter greatly in production</li></ul><p>Boracle should borrow the decomposition, not rustc&#39;s source lifetime system or implementation complexity.</p><p>A useful reference implementation for Moth can ask a more direct question:</p><pre style=""><code class='codeblock'>can any future source-semantic operation still observe this loan capability?</code></pre><p>That question is possible because Moth does not encode arbitrary lifetime relationships inside source types.</p><h2>Fast paths belong to the future production solver</h2><p>Boracle may record opportunities such as:</p><ul><li>no alias-producing operation</li><li>no loans</li><li>no exclusive access</li><li>scalar-only function</li><li>no optional-transfer candidate</li><li>acyclic CFG</li><li>no recursive call-summary SCC</li><li>no projection overlap beyond locals</li></ul><p>It should not optimise around them.</p><p>The future production checker can use these observations to skip work. Boracle remains the slow answer used to prove the skipped result.</p><h2>Relationship to lifetime topology</h2><p>Boracle stops before semantic lifetime ownership.</p><p>Its reference handoff may include:</p><ul><li>validated access decisions</li><li>value-origin and projection evidence</li><li>last potential use per path</li><li>optional transfer eligibility</li><li>preliminary call-result alias evidence</li><li>reactive observability facts</li><li>source mappings for later diagnostics</li></ul><p>Lifetime-region and escape validation later owns:</p><ul><li>allocation-family identity</li><li>one semantic lifetime owner</li><li>retained edges</li><li>escape legality</li><li>outlives constraints</li><li>cycle legality</li><li>complete result provenance</li><li>detached stored results</li><li>retention cardinality</li><li>whole-domain kills</li><li>cleanup frontiers and epochs</li></ul><p>Boracle must not reject a borrow-safe program merely because lifetime topology has not yet been implemented.</p><h2>Relationship to Retained Edge Counting</h2><p>REC is a target/profile physical strategy for runtime-many persistent retained edges. It never counts ordinary Boracle loans.</p><p>Better Boracle and last-use facts can reduce later REC use by proving:</p><ul><li>temporary aliases are dead</li><li>final use transfers cleanup responsibility</li><li>no source can recreate a retained edge</li><li>a complete cleanup frontier is possible</li></ul><p>Boracle does not select or simulate REC in reference mode.</p><p>A future named experiment may ask whether a set of borrow/last-use facts would be sufficient for REC elision. Such a result is advisory research, not a memory-plan decision.</p><h2>Reference and experiment result separation</h2><p>Every report records its rule set.</p><p>Conceptual shape:</p><pre style=""><code class='codeblock'>rule_set
+    reference
+
+experiments
+    none</code></pre><p>or:</p><pre style=""><code class='codeblock'>rule_set
+    reference plus experiments
+
+experiments
+    dead_exclusive_loan
+    loop_generation_epoch</code></pre><p>A snapshot without rule-set identity is invalid.</p><p>Reference and experimental results should live in separate fields or report sections so a caller cannot accidentally treat an experiment as the canonical answer.</p><h2>Initial investigation programme</h2><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> <strong>Question</strong></p></th><th scope="col" style=""><p> <strong>Why it matters</strong></p></th><th scope="col" style=""><p> <strong>Initial Boracle treatment</strong></p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Can <code>copy</code> be represented as source read plus independent result?</p></td> <td style=""><p> prevents source roots leaking into copied results</p></td> <td style=""><p> required reference rule</p></td>
+        </tr><tr style="">
+             <td style=""><p> Can old aliases survive a fresh rebind without conflicting with the new value?</p></td> <td style=""><p> separates binding identity from value identity</p></td> <td style=""><p> required reference rule</p></td>
+        </tr><tr style="">
+             <td style=""><p> What origin abstraction is needed for repeated loop definitions?</p></td> <td style=""><p> definition-site origins may merge generations too aggressively</p></td> <td style=""><p> explicit investigation</p></td>
+        </tr><tr style="">
+             <td style=""><p> Can an unused exclusive alias die immediately?</p></td> <td style=""><p> reduces unnecessary mutable-alias friction</p></td> <td style=""><p> named experiment</p></td>
+        </tr><tr style="">
+             <td style=""><p> Can path-separated shared and exclusive access coexist?</p></td> <td style=""><p> avoids flow-insensitive false conflicts</p></td> <td style=""><p> required reference rule</p></td>
+        </tr><tr style="">
+             <td style=""><p> Which projections are safely disjoint?</p></td> <td style=""><p> improves field-level access without changing allocation lifetime</p></td> <td style=""><p> precise fields, conservative dynamic indexes</p></td>
+        </tr><tr style="">
+             <td style=""><p> How should same-statement argument overlap work?</p></td> <td style=""><p> evaluation order and result aliasing can change legality</p></td> <td style=""><p> required reference rule</p></td>
+        </tr><tr style="">
+             <td style=""><p> How should multi-return provenance be expressed?</p></td> <td style=""><p> one union can create false alias relationships</p></td> <td style=""><p> research fact, no immediate public migration</p></td>
+        </tr><tr style="">
+             <td style=""><p> Can recursive summaries reach a precise fixed point?</p></td> <td style=""><p> permanent unknown summaries reduce caller precision</p></td> <td style=""><p> SCC experiment</p></td>
+        </tr><tr style="">
+             <td style=""><p> When can a loop expose a final-iteration fact?</p></td> <td style=""><p> may unlock transfer without changing evaluation order</p></td> <td style=""><p> investigation</p></td>
+        </tr><tr style="">
+             <td style=""><p> What witness data produces useful diagnostics cheaply?</p></td> <td style=""><p> production checking should stay fast on success</p></td> <td style=""><p> required structured evidence</p></td>
+        </tr><tr style="">
+             <td style=""><p> Which solves can production skip?</p></td> <td style=""><p> Moth&#39;s restricted language should produce common fast paths</p></td> <td style=""><p> record opportunities, do not optimise Boracle</p></td>
+        </tr>
+            
+</table><h2>Canonical semantic corpus</h2><p>The durable corpus should grow by semantic family rather than by implementation bug file.</p><h3>Copy and independence</h3><ul><li>copy from a local</li><li>copy from an alias</li><li>copy from a field place</li><li>source use after copy</li><li>source mutation after copy</li><li>destination mutation with source aliases live</li><li>copy across branch joins</li><li>copy in loops</li><li>repeated internal aliases</li></ul><h3>Origins and rebindings</h3><ul><li>fresh declaration</li><li>alias declaration</li><li>mutable alias declaration</li><li>fresh rebind</li><li>alias-preserving rebind</li><li>old alias after fresh rebind</li><li>branch-specific definitions</li><li>joined origin sets</li><li>loop-carried definitions</li></ul><h3>Places</h3><ul><li>same local</li><li>base and field</li><li>two fields</li><li>nested fields</li><li>fixed index</li><li>dynamic index</li><li>collection structural mutation</li><li>map <code>get</code> and later mutation</li></ul><h3>Loans</h3><ul><li>many shared loans</li><li>shared then exclusive</li><li>exclusive then shared</li><li>duplicate exclusive</li><li>final shared use</li><li>path-separated access</li><li>branch join retaining a possible loan</li><li>loop-carried loan</li><li>dead exclusive experiment</li></ul><h3>Calls and results</h3><ul><li>shared parameter</li><li>mutable parameter</li><li>same origin in several arguments</li><li>final-use optional transfer</li><li>result aliases one argument</li><li>unrelated argument still transfers</li><li>fallible success alias</li><li>error path without success alias</li><li>multi-return alias separation</li><li>recursive summary investigation</li></ul><h3>Aggregates</h3><ul><li>fresh outer with aliased child</li><li>repeated child alias</li><li>copied child</li><li>nested aggregate</li><li>collection/map insertion</li><li>detached remove result investigation</li></ul><h3>Reactivity</h3><ul><li>subscription does not create an active loan</li><li>ordinary read still follows access rules</li><li>mutation creates invalidation facts</li><li>stable observable root does not transfer prematurely</li></ul><h2>Generated problems</h2><p>Boracle should support bounded deterministic generated tests without an external fuzzing crate.</p><p>A generator may vary:</p><ul><li>block count</li><li>edge shape</li><li>branch and loop presence</li><li>origin events</li><li>rebindings</li><li>loan issue/use/kill events</li><li>place projection relations</li><li>copy events</li><li>exits</li></ul><p>Each generated run records a stable seed. A failure prints or stores a complete normalized problem that can become a hand-authored regression.</p><p>Useful properties include:</p><ul><li>adding an unreachable use changes nothing</li><li>copying an origin cannot introduce overlap with the source result</li><li>deleting the final use cannot extend a loan</li><li>adding a reachable later use cannot turn <code>MayBeUsed</code> into <code>NoFutureUse</code></li><li>reference results are deterministic</li><li>experiment mode reports every acceptance delta</li><li>malformed input never reaches the solver</li></ul><h2>Developer command and dumps</h2><p>A build with <code>boracle</code> may expose an internal command equivalent to:</p><pre style=""><code class='codeblock'>cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>features boracle <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span> boracle .<span class='moth-code-operator'>/</span>tmp<span class='moth-code-operator'>/</span>example.moth <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>dump loans</code></pre><p>Useful dump categories:</p><ul><li>normalized problem</li><li>CFG points and edges</li><li>places and overlap classes</li><li>origins and provenance derivations</li><li>loans and liveness</li><li>future-use and last-use facts</li><li>conflicts</li><li>witnesses</li><li>experiment deltas</li></ul><p>The command is internal and unstable. It must be absent without the feature and must not appear as normal user documentation.</p><p>The CLI calls one compiler-owned Boracle analysis service. It does not assemble tokenization, AST, HIR or analysis stages itself.</p><h2>Validation</h2><p><code>just boracle</code> is the complete deterministic validation owner for this subsystem.</p><p>It is intentionally excluded from:</p><ul><li><code>just validate</code></li><li>the standard feature matrix</li><li>ordinary CI gates</li><li>normal release requirements</li></ul><p>This avoids making every compiler change pay for a reference solver whose corpus may grow substantially.</p><p>Borrow-checker, last-use, provenance or related memory-analysis work should run <code>just boracle</code> explicitly.</p><p>The command should eventually cover:</p><ul><li>formatting</li><li>Boracle-enabled Clippy</li><li>feature-gated unit tests</li><li>normalized input validation</li><li>HIR extraction</li><li>canonical semantic corpus</li><li>bounded generated problems</li><li>future production differential tests</li><li>an internal source-mode smoke</li></ul><p>Large fuzz or stress runs stay separate.</p><h2>Feature-lane exception</h2><p>Every Cargo feature still needs an owned executable lane.</p><p>The validation system distinguishes:</p><ul><li>standard lanes, which the normal matrix executes</li><li>opt-in lanes, which coverage validates but only their named command executes</li></ul><p><code>boracle</code> is an opt-in lane owned by <code>just boracle</code>.</p><p>Normal native Clippy uses the standard feature set rather than <code>--all-features</code>, otherwise it would compile Boracle during <code>just validate</code>. Boracle Clippy runs inside its own command with warnings denied.</p><p>This exception must remain narrow and explicit. It is not a general mechanism for hiding untested features.</p><h2>Default-path isolation</h2><p>Without the <code>boracle</code> feature:</p><ul><li>no Boracle solver code is compiled</li><li>no Boracle CLI command exists</li><li>no verbose Boracle report types are needed by runtime compiler flow</li><li>normal module compilation does not build <code>BorrowProblem</code></li><li>the alpha checker runs exactly as before</li></ul><p>Shared typed IDs and normalized-input types may compile as permanent infrastructure. They must not add per-function work unless an explicit consumer requests a problem.</p><h2>Ongoing evolution</h2><p>Boracle can evolve after its initial implementation without becoming an unfinished plan forever.</p><p>Durable additions include:</p><ul><li>new reduced cases</li><li>new named experiments</li><li>stronger accepted reference rules</li><li>richer witness types</li><li>project-level source execution</li><li>production differential comparison</li><li>optimisation-equivalence queries</li><li>experimental handoffs to lifetime and REC research</li></ul><p>When a change alters reference semantics, update canonical language or memory documentation first or in the same accepted slice. When a change only improves explanations or adds an experiment, keep reference snapshots stable.</p><h2>Hard invariants</h2><ul><li>Boracle never silently replaces the normal checker.</li><li>Boracle never acts as a fallback after a production-checker error.</li><li>Reference and experimental results are always distinguishable.</li><li><code>copy</code> source access and result provenance are separate facts.</li><li>Bindings and value origins are separate identities.</li><li>Place overlap and lifetime-family identity are separate concerns.</li><li>Loan liveness is control-flow-sensitive.</li><li>Missing optional transfer proof remains a borrow.</li><li>Boracle does not assign lifetime owners.</li><li>Boracle loans are never REC obligations.</li><li>Boracle does not mutate HIR.</li><li>Malformed normalized input is an internal error.</li><li>Reports and dumps are deterministic.</li><li>Solver reasoning does not depend on rendered names.</li><li>Production files contain no test-only fixture APIs.</li><li>No external solver dependency is required.</li><li>Normal validation does not run Boracle.</li></ul><h2>What Boracle must not become</h2><p>Do not turn Boracle into:</p><ul><li>the default borrow checker</li><li>a second source language mode</li><li>a public solver switch</li><li>a Datalog framework project</li><li>an excuse to duplicate parser or HIR semantics</li><li>a lifetime-region solver in disguise</li><li>a REC simulator</li><li>a backend cleanup planner</li><li>a performance benchmark target</li><li>a prose diagnostic renderer</li><li>a place to land unreviewed semantic changes</li><li>a permanent compatibility layer for abandoned experimental APIs</li></ul><h2>Related reading</h2><ul><li><code>docs/compiler-design-overview.md</code>, especially Stage 5 and Stage 6</li><li><code>docs/src/developer-docs/memory-management/overview.mtf</code></li><li><code>docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf</code></li><li><code>docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf</code></li><li><code>docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf</code></li><li><code>docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf</code></li><li><code>docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf</code></li><li><code>docs/src/developer-docs/style-guide/testing.mtf</code></li><li><code>docs/src/developer-docs/style-guide/validation.mtf</code></li></ul><p>Useful external research anchors include the current rustc Polonius implementation under <code>compiler/rustc_borrowck/src/polonius/</code> and Rust&#39;s tests for flow-sensitive loan liveness. These are research inputs, not Moth authorities.</p></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

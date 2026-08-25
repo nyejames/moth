@@ -18,21 +18,21 @@ Read the selected heading through the next heading of the same or higher level. 
 
 ### Task routing
 
-- **Code-bearing implementation or review:** read `docs/src/docs/codebase/style-guide/style-guide.mtf` in full and ensure all touched code follows the rules in this document.
+- **Code-bearing implementation or review:** read `docs/src/developer-docs/style-guide/style-guide.mtf` in full and ensure all touched code follows the rules in this document.
 - **Compiler stages, semantic data or handoffs:** read the opening authority text and `Architectural invariants` in `docs/compiler-design-overview.md`, then its routed task sections and affected producer or consumer handoffs.
 - **Build system and project orchestration:** read the opening authority text and `Architectural invariants` in both `docs/compiler-design-overview.md` and `docs/build-system-design.md`, then routed build sections and relevant compiler handoffs. This includes Stage 0, config, imports, modules, packages, builders, tooling, linking, backend project assembly, outputs, incremental builds and the dev server.
-- **Memory and value flow:** read `docs/src/docs/codebase/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, last use, retained-edge liveness, cleanup frontiers, declared groups, allocation, memory-strategy selection, Retained Edge Counting, drops, reactivity retention, runtime handles and ABI work.
-- **General Moth language understanding or source authoring:** read `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/src/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
-- **Exact language syntax or user-visible semantic work:** read `docs/src/docs/codebase/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
-- **Tests:** read relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
+- **Memory and value flow:** read `docs/src/developer-docs/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, last use, retained-edge liveness, cleanup frontiers, declared groups, allocation, memory-strategy selection, Retained Edge Counting, drops, reactivity retention, runtime handles and ABI work.
+- **General Moth language understanding or source authoring:** read `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/src/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
+- **Exact language syntax or user-visible semantic work:** read `docs/src/developer-docs/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, groups or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
+- **Tests:** read relevant sections of `docs/src/developer-docs/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
 - **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. This is the explicitly invoked audit framework, not the Slice review. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
-- **Final validation:** read `docs/src/docs/codebase/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
+- **Final validation:** read `docs/src/developer-docs/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
 Before changing tokenization, parsing, type checking, language semantics, diagnostics, lowering, semantic tests or authoritative language documentation for a feature, read that feature's canonical unsuffixed reference. Also read the canonical reference when correctness depends on precise feature semantics or edge cases not fully specified by the cheatsheet. Do not infer the exact language contract from examples, tests, compiler behaviour, the cheatsheet or a Basic page.
 
 Use:
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` for compact accepted end-state language orientation and ordinary Moth source authoring
+- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` for compact accepted end-state language orientation and ordinary Moth source authoring
 - `docs/src/docs/progress/@page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, genuinely deferred design, and the rules for adding and maintaining plans
 - `docs/roadmap/audit-log.md` for what has been audited, when, and what has never been audited
@@ -61,7 +61,7 @@ Core contracts:
 - Missing optional transfer proof falls back conservatively without rejecting legal source. Missing mandatory topology proof is a source diagnostic, not a GC fallback.
 - A backend that advertises full memory control must lower release builds without a tracing or reachability collector. A missing physical strategy after successful topology validation is `CompilerError`. There is no source-visible or project-visible no-GC mode.
 - Mandatory lifetime topology and backend-neutral memory requirements are target-independent. Build-owned target partition and target validation happen before target/profile-aware physical memory planning. The compiler-owned memory planner produces one `ValidatedMemoryPlan` per physical variant. Backend lowerers only realise that plan.
-- Retained Edge Counting is a compiler-selected physical representation, never source semantics. Its canonical page is `docs/src/docs/codebase/memory-management/retained-edge-counting/`.
+- Retained Edge Counting is a compiler-selected physical representation, never source semantics. Its canonical page is `docs/src/developer-docs/memory-management/retained-edge-counting/`.
 - Backends do not reparse source, reconstruct imports, infer source semantics or reconsider borrow and lifetime legality.
 
 ## Rules before writing a patch
@@ -90,7 +90,7 @@ For multi-phase work, re-check ownership, duplication, stale paths and test gaps
 
 ## Testing
 
-Follow `docs/src/docs/codebase/style-guide/testing.mtf`.
+Follow `docs/src/developer-docs/style-guide/testing.mtf`.
 
 - User-visible language and project behaviour belongs under `tests/cases/`.
 - Focused subsystem-local invariant tests belong under that module's test directory, not in production implementation files.

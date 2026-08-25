@@ -141,7 +141,7 @@ A candidate may instead be rejected, superseded or blocked on a design decision.
 
 **Verification** is done by someone other than the implementer. Read the original evidence, inspect the changed boundary, confirm no parallel path survives, and confirm linked test or documentation changes were independently authorised. A green suite is necessary and not sufficient.
 
-Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../src/docs/codebase/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
+Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../src/developer-docs/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
 
 ## Recording coverage
 

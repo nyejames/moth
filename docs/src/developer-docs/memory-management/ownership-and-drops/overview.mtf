@@ -1,0 +1,27 @@
+# Affine ownership and drops
+
+Affine cleanup responsibility, the unified two-bit ABI and conditional destruction.
+
+## Contract
+
+- Input: validated HIR, borrow and last-use facts, validated lifetime facts and the selected memory plan
+- Output: affine cleanup lowering decisions, handle-tag encoding and conditional drop placement
+- Decides: runtime realisation of validated transfer facts, handle-tag encoding, unified ABI behaviour, and conditional destruction
+- Must not decide: source legality, lifetime topology, HIR shape, or borrow facts
+- Invariant: cleanup responsibility is affine and never duplicates; collector-free, GC-native and debug paths preserve identical observable behavior
+
+Source legality and lifetime topology are already fixed before ownership lowering. Final lowering must consume a validated memory plan; the current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding to be replaced.
+
+## Main paths
+
+- `src/backends/wasm/hir_to_lir/ownership.rs`
+- `src/backends/wasm/lir/`
+- `src/backends/wasm/runtime/`
+
+## Read next
+
+- `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
+- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`

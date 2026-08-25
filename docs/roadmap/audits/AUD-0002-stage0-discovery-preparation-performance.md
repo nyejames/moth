@@ -650,7 +650,7 @@ authorises no behavioural change in any of those files.
 
 #### Read-only context
 
-`timing.rs`, `xtask/src/timers_erasure_check.rs`, `docs/src/docs/codebase/style-guide/validation.mtf`.
+`timing.rs`, `xtask/src/timers_erasure_check.rs`, `docs/src/developer-docs/style-guide/validation.mtf`.
 
 #### Must preserve
 

@@ -69,7 +69,7 @@ Docs: no progress change.
 ## Validation
 
 - Each code slice ends with `cargo test -p moth --lib` (4392 default, 4504 with `timers`, 4525 with `timers,benchmark_counters`), `cargo run --quiet -- check docs --terse`, and five-run bench medians vs pre-slice baseline.
-- Final slice runs `just validate` (per `docs/src/docs/codebase/style-guide/validation.mtf`) and the `AGENTS.md` Slice review before the plan file is deleted in the completion commit.
+- Final slice runs `just validate` (per `docs/src/developer-docs/style-guide/validation.mtf`) and the `AGENTS.md` Slice review before the plan file is deleted in the completion commit.
 
 ## Sequencing
 

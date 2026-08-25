@@ -8,7 +8,7 @@
 > as one permitted physical representation of an already legal topology, and
 > requires backends that advertise full memory control to lower release builds
 > without a tracing collector. See
-> `docs/src/docs/codebase/memory-management/overview.mtf` and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. The Wasm
+> `docs/src/developer-docs/memory-management/overview.mtf` and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. The Wasm
 > and component-model research in this report remains useful.
 
 ## Moth’s current Wasm pipeline baseline and where it strains today

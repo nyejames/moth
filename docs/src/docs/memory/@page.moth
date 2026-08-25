@@ -43,7 +43,7 @@ page_head #= language_theme_head
     with full memory control produce release builds with no tracing collector.
     Lifetime-topology validation remains deferred in the compiler.
 
-    These pages explain source behaviour. The @../codebase/memory-management (memory model) defines borrow validation and backend lowering.
+    These pages explain source behaviour. The @../../developer-docs/memory-management (memory model) defines borrow validation and backend lowering.
 ]
 
 #[section:

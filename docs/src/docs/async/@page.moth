@@ -132,7 +132,7 @@ page_head #= theme_head
     **Retained Edge Counting stays non-atomic.** REC counters are non-atomic under the accepted coroutine model, which assumes cooperative single-threaded scheduling with visible suspension points. Any future model with genuinely parallel coroutines needs a separate accepted design for atomic counting before it can share counted allocations across them. This is a hard prerequisite, not an implementation detail.
 
     Memory semantics are described in
-    @../codebase/memory-management (Memory management).
+    @../../developer-docs/memory-management (Memory management).
 ]
 
 #[section, $md:

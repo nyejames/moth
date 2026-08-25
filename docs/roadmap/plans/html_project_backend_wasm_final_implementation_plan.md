@@ -26,7 +26,7 @@ IMPLEMENTATION_SCOPE: HTML project builder, JS backend, Wasm backend, output wri
 
 - `docs/compiler-design-overview.md` for HIR, borrow facts, target validation and per-function link facts
 - `docs/build-system-design.md` for HTML project builder, mixed-target planning, physical variants, runtime and memory, output ownership
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - delivered canonical module compilation and scoped packages, for the module graph contract
 - delivered number and numeric semantics, for numeric target validation

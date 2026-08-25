@@ -96,7 +96,7 @@ page_head #= language_theme_head
 #[section, $md:
     ## Related design
 
-    See @../codebase/memory-management (Memory management) for borrow validation, ownership analysis and backend lowering.
+    See @../../developer-docs/memory-management (Memory management) for borrow validation, ownership analysis and backend lowering.
 ]
 
 #[section:

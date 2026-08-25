@@ -31,17 +31,17 @@ More technical details about the language, compiler and build system.
 
 - [Compiler design overview](docs/compiler-design-overview.md)
 - [Build system overview](docs/build-system-design.md)
-- [Memory-management overview](docs/src/docs/codebase/memory-management/overview.mtf)
+- [Memory-management overview](docs/src/developer-docs/memory-management/overview.mtf)
 - [Design scope](docs/src/docs/design-scope/)
 - [Repository index](index.md)
 
 ### Development standards
 
-- [Code style](docs/src/docs/codebase/style-guide/style-guide.mtf)
-- [Testing standards](docs/src/docs/codebase/style-guide/testing.mtf)
-- [Validation gates](docs/src/docs/codebase/style-guide/validation.mtf)
+- [Code style](docs/src/developer-docs/style-guide/style-guide.mtf)
+- [Testing standards](docs/src/developer-docs/style-guide/testing.mtf)
+- [Validation gates](docs/src/developer-docs/style-guide/validation.mtf)
 
-These Moth template files are the development-standard references. The generated web page combines them at `/docs/codebase/style-guide/`.
+These Moth template files are the development-standard references. The generated web page combines them at `/developer-docs/style-guide/`.
 
 ---
 
@@ -58,7 +58,7 @@ These Moth template files are the development-standard references. The generated
 
 ## Testing
 
-The complete testing policy is in [testing.mtf](docs/src/docs/codebase/style-guide/testing.mtf).
+The complete testing policy is in [testing.mtf](docs/src/developer-docs/style-guide/testing.mtf).
 
 In general:
 
@@ -150,7 +150,7 @@ intentionally leaves warnings unchecked.
 
 ## Validation
 
-The executable validation policy is summarized in [validation.mtf](docs/src/docs/codebase/style-guide/validation.mtf).
+The executable validation policy is summarized in [validation.mtf](docs/src/developer-docs/style-guide/validation.mtf).
 
 ### Code-bearing changes
 

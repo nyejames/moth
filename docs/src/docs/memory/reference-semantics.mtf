@@ -58,4 +58,4 @@ A backend may represent a shared alias as a pointer, a handle, a GC reference or
 - @#declared-memory-groups (Declared memory groups)
 
 For the formal memory model, see
-@../codebase/memory-management (Memory management).
+@../../developer-docs/memory-management (Memory management).

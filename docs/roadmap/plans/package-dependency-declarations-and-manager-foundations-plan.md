@@ -55,7 +55,7 @@ Do not infer activation from the presence of this file.
 - `docs/compiler-design-overview.md`
 - delivered build configuration values and project-boundary isolation
 - `docs/build-system-design.md`
-- `docs/src/docs/codebase/language/overview.mtf`
+- `docs/src/developer-docs/language/overview.mtf`
 - canonical package and project-configuration references
 - dependency-clause and path-syntax plan
 - progress matrix and roadmap

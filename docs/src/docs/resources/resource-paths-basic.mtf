@@ -1,0 +1,30 @@
+A resource path tells the compiler that a file belongs to your project. Write the path with its extension, in the place where you would write any other value.
+
+### Naming a file
+
+[codeblock, $code("moth"):
+    logo #= @images/logo.svg
+]
+
+`@images/logo.svg` resolves from the module root, so the same spelling works from any file in the module. The compiler checks that the file exists and is a real file, not a folder.
+
+### Extensions matter
+
+An extension is required, and it must not be a source extension.
+
+[codeblock, $code("moth"):
+    logo  #= @images/logo.svg
+    icon  #= @icons/add.svg
+]
+
+`@images/logo` has no extension and is rejected. So is `@pages/about.moth`, because `.moth`, `.mtf` and `.md` name source files. Those are bound with dependency clauses instead.
+
+### URLs stay strings
+
+A web address is not a project file, so write it as an ordinary string.
+
+[codeblock, $code("moth"):
+    external #= "https://example.com/logo.svg"
+]
+
+The compiler leaves strings alone. It never copies, rewrites or watches them.

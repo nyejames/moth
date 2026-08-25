@@ -40,15 +40,23 @@ page_head #= theme_head
     - @./project-structure (Project structure)
     - @./packages (Packages and dependencies)
     - @./packages/core (Core packages)
+    - @./resources (Resources and Path values)
     - @./moth-templates (Moth template files)
     - @./markdown (Plain Markdown)
     - @./design-scope (Design scope)
 
-    ## Compiler and codebase internals
+    ## Quick reference
 
-    - @./codebase (Codebase overview)
-    - @./codebase/memory-management (Memory management)
-    - @./codebase/style-guide (Development standards)
+    - @./cheatsheet (Language cheatsheet): the whole language surface on one page
+
+    ## Compiler internals
+
+    The @../developer-docs (Developers) section covers the compiler and build
+    system for contributors and anyone reading the internals.
+
+    - @../developer-docs/compiler-design (Compiler design)
+    - @../developer-docs/memory-management (Memory management)
+    - @../developer-docs/style-guide (Development standards)
 
     ## Future design drafts
 

@@ -162,4 +162,4 @@ Immutable and mutable parameters may both receive inferred destruction responsib
 - @#declared-memory-groups (Declared memory groups)
 
 For the formal lifetime-region rules, see
-@../codebase/memory-management/lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+@../../developer-docs/memory-management/lifetime-regions-and-escape-validation (Lifetime regions and escape validation).

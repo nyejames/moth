@@ -1,0 +1,1349 @@
+# Boracle reference solver
+
+Boracle is Moth's permanent slow reference borrow solver and borrow-analysis laboratory.
+
+It exists for compiler developers. It is not a public language feature, a production fallback or a source-visible solver choice.
+
+The Cargo feature and validation command use the joke name directly:
+
+[codeblock, $code("text"):
+    cargo feature: boracle
+    validation:    just boracle
+]
+
+The role is serious even when the name is not. Boracle provides an executable, inspectable model of Moth borrow legality, value provenance, loan liveness and last-use reasoning. It also provides a controlled place to investigate stronger safe analyses before those rules are accepted as reference semantics or implemented in the future production checker.
+
+## Status and authority
+
+This document is the permanent design authority for Boracle.
+
+Canonical language and memory documents still define Moth semantics. Boracle does not override them. Within compiler testing, Boracle reference mode is the executable reference model against which a future production solver can be compared.
+
+The current alpha borrow checker remains the normal compiler authority until a later project replaces it. Boracle is compiled and run only through explicit developer and test paths.
+
+Boracle has an initial implementation milestone but no final research endpoint. It may accumulate new cases, investigations, traces and analysis queries throughout the compiler's life.
+
+## Core contract
+
+[table:
+    [th:
+        [: **Area**]
+        [: **Boracle owns**]
+        [: **Boracle does not own**]
+    ]
+
+    [td:
+        [: Normalized input]
+        [: explicit points, CFG edges, places, origins, access events, copies, calls and source mappings]
+        [: source parsing, type checking, HIR repair or backend planning]
+    ]
+
+    [td:
+        [: Borrow legality]
+        [: shared and exclusive loan liveness, place overlap and conflict decisions]
+        [: lifetime-region ownership or retained-edge legality]
+    ]
+
+    [td:
+        [: Provenance]
+        [: fresh origins, aliases, projections, copies, rebindings and joined possible origins]
+        [: physical allocation identity or layout]
+    ]
+
+    [td:
+        [: Last use]
+        [: future-use classification, all-path final-use proof and structured witnesses]
+        [: runtime drop emission or mandatory source moves]
+    ]
+
+    [td:
+        [: Experiments]
+        [: named stronger proof rules and explicit result deltas]
+        [: silently changing reference semantics]
+    ]
+
+    [td:
+        [: Explanations]
+        [: structured derivations, issue points, keeping-alive uses and CFG witness paths]
+        [: a second user-facing diagnostic taxonomy or renderer]
+    ]
+
+    [td:
+        [: Validation]
+        [: the deterministic `just boracle` developer gate]
+        [: standard `just validate`, standard feature-matrix or CI ownership]
+    ]
+]
+
+## Why Boracle is permanent
+
+A production checker is optimized for common cases, compact state and low compile-time cost. Those priorities make its internal reasoning harder to inspect and make implementation bugs easier to correlate with its tests.
+
+Boracle takes the opposite tradeoff.
+
+- It uses explicit data structures.
+- It favours readable fixed-point loops over compact algorithms.
+- It retains derivation and witness information that production checking should reconstruct only on failure.
+- It can run alternative named rule sets.
+- It provides a solver implementation independent from the production algorithm.
+- It can explain discrepancies using stable normalized facts.
+- It remains useful for future borrow-checker features, diagnostics, optimisation proofs and downstream memory investigations.
+
+The reference implementation should remain boring. A change that saves Boracle time but makes the reasoning harder to inspect is normally a regression.
+
+## The engineering rule
+
+Canonical documentation defines semantics. Boracle reference mode makes those semantics executable. A future production solver defines performance.
+
+Neither solver may redefine Moth around an implementation limitation.
+
+When the implementations disagree:
+
+1. Reduce the problem.
+2. Inspect the normalized input.
+3. Compare both derivations.
+4. Check the canonical language and memory contract.
+5. Classify the result as a Boracle bug, production bug, input-builder bug, current alpha limitation or unsettled design question.
+6. Add the reduced case to the durable corpus.
+
+Agreement is evidence. Agreement is not proof when both solvers consume a malformed shared input.
+
+## Architecture
+
+The initial architecture keeps the current checker isolated:
+
+[codeblock, $code("text"):
+    validated HIR
+        |
+        +-> current alpha borrow checker
+        |       normal compiler authority
+        |
+        +-> BorrowProblem builder
+                explicit developer/test path only
+                |
+                +-> Boracle reference solver
+                        feature-gated
+]
+
+A future production checker may consume `BorrowProblem` or an accepted evolution of it. Boracle does not lock the optimized solver's storage or algorithm.
+
+### Planned main paths
+
+[codeblock, $code("text"):
+    src/compiler_frontend/analysis/borrow_checker/problem/
+    src/compiler_frontend/analysis/borrow_checker/last_use/
+    src/compiler_frontend/analysis/borrow_checker/boracle/
+]
+
+The shared problem model and common result vocabulary are compiled normally. Boracle's solver, verbose traces, experiment engine and internal command sit behind the `boracle` Cargo feature gate:
+
+[codeblock, $code("rust"):
+    #[cfg(feature = "boracle")]
+]
+
+Normal compilation must not construct a `BorrowProblem` merely because its types exist.
+
+## BorrowProblem
+
+`BorrowProblem` is an immutable normalized analysis input for one validated HIR function.
+
+It is not a second semantic IR. It does not replace HIR and it does not gain source, type, lifetime or backend authority. Its job is to make every fact needed by borrow solving explicit and easy to inspect.
+
+The problem should answer these questions without requiring a solver to walk arbitrary HIR shapes:
+
+- What are the semantic program points?
+- In what order are accesses evaluated?
+- Which CFG edges can execute?
+- Which place does each access cover?
+- Which abstract value origins can each value represent?
+- Where are aliases and exclusive capabilities issued?
+- Where can they be used again?
+- What call effects and result-alias facts were already resolved?
+- Which local bindings remain visible?
+- Which HIR and source location produced each event?
+
+### Atomic construction
+
+The builder constructs one complete problem and validates it before publication.
+
+Missing points, malformed edges, out-of-range typed IDs, inconsistent event order, unknown places, impossible source mappings or references to absent HIR facts are internal compiler errors.
+
+The builder does not repair malformed HIR. HIR validation owns that boundary.
+
+### Determinism
+
+Every ID assignment, row order, dump and witness choice must be deterministic for one input.
+
+Boracle may use `BTreeMap` and `BTreeSet` freely. Dense vectors are also suitable when an ID is an obvious row index. Hash iteration order must never become visible in a report or snapshot.
+
+## Program points and events
+
+A HIR statement is not always one borrow-analysis event.
+
+A call can evaluate several arguments from left to right, read index expressions, request mutable access and write a result. Two events in one statement may conflict even though they share one HIR statement ID.
+
+`BorrowProblem` therefore uses semantic program points or an equivalently explicit ordered event stream.
+
+One acceptable conceptual shape is:
+
+[codeblock, $code("text"):
+    block entry
+        -> argument 0 index read
+        -> argument 0 place read
+        -> argument 1 place read
+        -> call access commit
+        -> result origin write
+        -> block terminator
+]
+
+The exact Rust representation may differ. These invariants do not:
+
+- event order preserves source-defined evaluation order
+- CFG edges connect valid event boundaries
+- every loan issue, use, kill and conflict can name one point
+- every point can map back to its owning HIR/source location
+- jump-argument plumbing does not invent a source use
+- unreachable blocks do not create live loans or future uses
+
+## Typed identities
+
+The reference model uses separate typed ID spaces. One ID must not carry several unrelated meanings merely because that is compact.
+
+### PointId
+
+`PointId` names one semantic location in the normalized function.
+
+It is used for CFG reachability, loan liveness, future use and witnesses. It is not a source line number. Several points may map to one source location.
+
+### PlaceId
+
+`PlaceId` names one interned semantic place and projection path.
+
+A place may represent:
+
+- a local binding cell
+- a field projection
+- an index projection
+- a conservative collection or map receiver domain
+- another explicit place shape accepted by HIR
+
+A place is not a lifetime region or allocation-family identity.
+
+### ValueOriginId
+
+`ValueOriginId` names one abstract source-semantic value lineage or fresh-definition class.
+
+It separates the value from the binding currently naming it. It must not claim that a heap allocation exists.
+
+### LoanId
+
+`LoanId` names one shared or exclusive source-semantic access capability.
+
+It is not a runtime reference, counter, memory handle or lifetime owner.
+
+### UseId and event IDs
+
+Additional IDs such as `UseId`, `AccessEventId` or `OriginEventId` are justified when they make witnesses and tests clearer. Do not collapse them into tuples or reuse unrelated HIR IDs merely to reduce type count.
+
+## Places and overlap
+
+Borrow legality checks overlapping places, not only equal local names.
+
+The initial reference overlap relation should be explicit and conservative where required.
+
+[table:
+    [th:
+        [: **Pair**]
+        [: **Initial overlap rule**]
+    ]
+
+    [td:
+        [: same local]
+        [: overlap]
+    ]
+
+    [td:
+        [: one place is a projection of the other]
+        [: overlap]
+    ]
+
+    [td:
+        [: different fixed struct fields]
+        [: disjoint when field semantics and operation shape prove independent access]
+    ]
+
+    [td:
+        [: dynamic indexes under one collection]
+        [: overlap conservatively]
+    ]
+
+    [td:
+        [: map entry and map mutation]
+        [: overlap at the map receiver base]
+    ]
+
+    [td:
+        [: growable collection element and structural mutation]
+        [: overlap at the collection receiver base]
+    ]
+
+    [td:
+        [: separate fresh or copied origins]
+        [: disjoint even when bindings share a historical source name]
+    ]
+]
+
+Borrow-place precision is independent from lifetime-family splitting.
+
+Boracle may prove that `pair.left` and `pair.right` do not conflict while later lifetime analysis still treats the complete `pair` as one allocation family. A physical field split may improve cleanup later. It must not be required to make a Stage 6 access legal.
+
+## Bindings are not origins
+
+A source binding is a name and storage cell. It is not a permanent value identity.
+
+Consider:
+
+[codeblock, $code("moth"):
+    value ~= make_first()
+    old = value
+
+    value = make_second()
+    current = value
+
+    inspect(old)
+    inspect(current)
+]
+
+The reference model should show:
+
+[codeblock, $code("text"):
+    first definition of value  -> origin O0
+    old                        -> origin O0
+
+    second definition of value -> origin O1
+    current                    -> origin O1
+]
+
+Rebinding `value` does not mutate O0 through `old`. A mutable alias is different. Assignment through a mutable alias writes through to its referent under the accepted source rules.
+
+This distinction is one of Boracle's central reasons to exist. The current alpha checker often uses local roots as a compact approximation. The future model must not harden that approximation into language semantics.
+
+## Origins and provenance
+
+Origin analysis records where a value's observable storage relationship came from.
+
+The initial reference vocabulary needs at least:
+
+- fresh origin
+- alias of one or more existing origins
+- projection of an existing origin
+- independent copy origin
+- joined possible origins
+- call result supplied as fresh, aliasing or conservatively unknown preliminary provenance
+
+This is Stage 6 provenance, not final lifetime result provenance. Detached stored results, result-to-result aliases, retained parameters, outlives relationships and retention cardinality belong to later lifetime analysis unless Boracle is explicitly running a non-reference experiment.
+
+### Fresh values
+
+Literals, templates, constructors, fresh collection/map values, supported computations and fresh call results introduce a fresh origin class.
+
+A backend may later represent a scalar directly. The abstract origin only distinguishes source-semantic value lineages needed for alias and transfer reasoning.
+
+### Shared aliases
+
+Binding or passing an existing value normally preserves its origins.
+
+[codeblock, $code("moth"):
+    alias = source
+]
+
+The alias does not introduce an independent origin. It may issue or propagate a shared loan depending on the normalized operation.
+
+### Mutable aliases
+
+A mutable declaration from an existing place carries mutation-capable access to the same origins.
+
+[codeblock, $code("moth"):
+    writer ~= source
+]
+
+Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias.
+
+### Joins
+
+When control-flow paths meet, the receiving value may represent several possible origins.
+
+Boracle should retain the explicit set and the path reason for each origin. It must not collapse to the destination binding merely because that is convenient.
+
+## Explicit copy
+
+`copy` is the first required complete provenance family.
+
+Its two sides are different facts:
+
+[codeblock, $code("text"):
+    copy source
+
+    source access
+        shared read of source origins
+
+    result provenance
+        independent fresh origin graph
+]
+
+The source read must obey current access rules. An active overlapping exclusive loan can make the read invalid.
+
+The result shares no mutable origin with the source. Existing source aliases remain aliases of the source graph, not the copy.
+
+Example:
+
+[codeblock, $code("moth"):
+    items ~= {"Priya"}
+    shared = items
+    snapshot ~= copy items
+
+    ~snapshot.push("Rob")
+    inspect(shared)
+]
+
+Expected reference explanation:
+
+[codeblock, $code("text"):
+    items and shared observe O0
+    copy reads O0
+    copy creates O1
+    snapshot observes O1
+    snapshot mutation covers O1
+    later shared use covers O0
+    O0 and O1 do not overlap
+]
+
+### Copy graph boundaries
+
+Borrow validation owns the access and independence facts. It does not own every graph-level copy rule.
+
+- AST and type checking decide whether the source graph is copyable.
+- The copy implementation preserves internal alias topology.
+- Lifetime analysis chooses the destination owner.
+- A copied cycle must later enter one explicit group.
+- Boracle must not legalise a copied cycle's placement merely because the copy is independent from its source.
+
+Boracle may represent repeated internal aliases in a copied graph so tests can prove that one source node becomes one corresponding copied node, not several unrelated copies.
+
+## Rebinding and storage generations
+
+Distinct fresh writes to one binding create distinct origin classes.
+
+Loops make this harder because one definition site can execute many times:
+
+[codeblock, $code("moth"):
+    value ~= initial()
+
+    loop condition:
+        previous = value
+        value = next()
+    ;
+]
+
+The first reference model may use one origin class per fresh definition site and carry that class around the loop fixed point. That is an abstraction, not a claim that every runtime iteration shares storage.
+
+Boracle must investigate whether production-quality reasoning needs another concept such as:
+
+- loop-carried origin generations
+- abstract epochs
+- iteration-sensitive freshness
+- a widened origin class with explicit non-aliasing guarantees between generations
+
+Do not choose a compact production representation before the reference cases show which distinctions matter.
+
+## Loans
+
+A loan represents a source-semantic capability to observe or mutate overlapping origins through a place.
+
+[table:
+    [th:
+        [: **Loan kind**]
+        [: **Meaning**]
+        [: **Conflicts with**]
+    ]
+
+    [td:
+        [: Shared]
+        [: read-only observation]
+        [: live overlapping exclusive loan or exclusive access]
+    ]
+
+    [td:
+        [: Exclusive]
+        [: mutation-capable access]
+        [: every other live overlapping shared or exclusive loan]
+    ]
+]
+
+A loan records its issue point, covered place/origins, holders, uses, kills and live points.
+
+Lexical scope alone does not decide liveness. A loan can die before its binding leaves scope when no future source operation can observe that capability under the accepted rule set.
+
+### Loan issuance
+
+Issuance may come from:
+
+- shared alias binding
+- mutable alias binding
+- shared call argument access
+- mutable call argument access
+- receiver access
+- map `get` result
+- field or element projection
+- another normalized source-semantic operation
+
+Compiler-introduced plumbing must not invent stronger source loans than the source operation requires.
+
+### Loan uses
+
+A use occurs when a later source-semantic operation observes through the loan or a derived value that preserves it.
+
+Merely keeping a binding visible is not a use.
+
+### Loan kills
+
+A loan can stop being usable through:
+
+- final potential use
+- binding leaving visibility
+- rebinding that removes the capability from the binding
+- control-flow paths that cannot reach another use
+- an explicit normalized kill event justified by source semantics
+
+A physical drop is not required for a loan kill. Loan liveness is a static source-access fact.
+
+## Loan liveness
+
+Boracle computes which loans are live at each point through clear graph/set reasoning.
+
+The exact algorithm may evolve, but it should remain inspectable. One suitable reference approach is:
+
+1. Record each loan issue and every use reachable through holders or derived aliases.
+2. Traverse CFG paths between issue and uses.
+3. Stop propagation across valid kills.
+4. Mark the loan live at points that can still reach a use without crossing a kill.
+5. Retain one or more witness paths.
+
+Branches are independent. Joins merge possible live loans. Loops iterate to a fixed point.
+
+Boracle must model unreachable blocks explicitly so dead source paths do not keep a loan live.
+
+## Access legality
+
+At each access event:
+
+[codeblock, $code("text"):
+    shared access
+        reject if an overlapping exclusive loan is live
+
+    exclusive access
+        reject if any other overlapping shared or exclusive loan is live
+]
+
+The conflict report should identify:
+
+- requested access kind
+- access point and source location
+- requested place and origins
+- conflicting loan
+- loan issue point
+- conflicting place and origins
+- one future use or CFG reason keeping the loan live
+
+A successful check does not need diagnostic prose.
+
+## Last use and future use
+
+Last-use analysis is a first-class compiler product.
+
+For an origin or loan at point P, the reference result starts with:
+
+[table:
+    [th:
+        [: **Result**]
+        [: **Meaning**]
+    ]
+
+    [td:
+        [: `NoFutureUse`]
+        [: no relevant reachable path uses it again]
+    ]
+
+    [td:
+        [: `MayBeUsed`]
+        [: at least one path uses it and at least one relevant path does not, or precision is intentionally conservative]
+    ]
+
+    [td:
+        [: `MustBeUsed`]
+        [: every relevant reachable continuation requires another use]
+    ]
+]
+
+Boracle should retain witnesses:
+
+- explored exits for `NoFutureUse`
+- one use path and one no-use path for `MayBeUsed`
+- one required later use for `MustBeUsed`
+
+### Optional transfer
+
+Moth has no ordinary mandatory-consuming value operation.
+
+A call, assignment, return or aggregate insertion may receive affine cleanup responsibility only when every relevant path proves no later source use and all other transfer preconditions hold.
+
+[codeblock, $code("text"):
+    transfer proven
+        -> record optional transfer eligibility
+
+    transfer unproven or path-dependent
+        -> remain a borrow
+        -> source program remains valid
+]
+
+Transfer does not change alias semantics. It changes who may perform cleanup later.
+
+### Shared liveness substrate
+
+The same hardened liveness authority can later inform several systems without merging their responsibilities:
+
+[codeblock, $code("text"):
+    borrow validation
+        asks whether a conflicting loan remains usable
+
+    optional transfer
+        asks whether every relevant path has no later source use
+
+    lifetime analysis
+        asks for final observations and escape relationships
+
+    cleanup-frontier analysis
+        asks whether a surviving source can recreate a retained edge
+
+    REC planning
+        benefits when static liveness avoids counting altogether
+]
+
+Boracle owns only the reference borrow and last-use answers. Later systems own their own semantic decisions.
+
+## Branches, joins and path separation
+
+Boracle should exploit path separation whenever the source cannot observe conflicting accesses on one execution path.
+
+Example:
+
+[codeblock, $code("moth"):
+    shared = items
+
+    if condition:
+        inspect(shared)
+    else
+        ~items.push("Rob")
+    ;
+]
+
+The shared use and exclusive mutation occur on different paths. A reference solver should not reject them merely because both are textually after the alias issue.
+
+At a join, Boracle retains a loan only when at least one incoming path can still use it. A future exclusive access after the join must respect that possibility.
+
+## Dead exclusive loans
+
+Moth's accepted general model says alias activity is non-lexical and control-flow-sensitive. The current alpha implementation may conservatively keep some unused mutable aliases active to scope exit.
+
+Boracle should investigate the stronger rule:
+
+[codeblock, $code("moth"):
+    items ~= {"Priya"}
+    writer ~= items
+
+    -- writer is never used
+    ~items.push("Rob")
+]
+
+Hypothesis:
+
+[codeblock, $code("text"):
+    exclusive alias issue is legal
+    no future operation observes writer
+    writer's loan ends
+    later exclusive access through items is legal
+]
+
+Keep this as a named experiment until canonical semantics explicitly adopt it. The experiment must show exactly which loan died and why.
+
+## Same-statement access
+
+Different call arguments can overlap within one statement.
+
+Boracle must preserve evaluation and access-commit order rather than treating a statement as one undifferentiated point.
+
+It should test:
+
+- the same origin passed twice to shared parameters
+- one shared and one mutable parameter
+- two mutable parameters
+- a result that aliases one argument
+- a copy argument alongside a source argument
+- field-disjoint arguments
+- index expressions that read a collection also passed mutably
+
+A future production fast path may compress these checks. Boracle should keep them explicit.
+
+## Aggregates and stored aliases
+
+Constructing an aggregate creates a fresh outer value but does not implicitly copy existing child values.
+
+[codeblock, $code("moth"):
+    item = source
+    pair = Pair(first = item, second = item)
+]
+
+The outer `pair` can have a fresh origin while both fields preserve aliases to the same child origin.
+
+Boracle should retain enough structure to distinguish:
+
+- fresh outer origin
+- direct stored child origins
+- repeated aliases to one child
+- copied independent child origins
+- projection places used by later access
+
+Final retained-edge cardinality and physical family edges belong to lifetime analysis. Boracle's stored-child facts are preliminary access/provenance evidence.
+
+## Collections and maps
+
+Builtin collections and maps have compiler-known effects, but the initial borrow reference model should stay conservative about structural mutation.
+
+- `get` creates a temporary shared alias to stored data and keeps the receiver base protected while that alias is live.
+- `set` and structural collection mutation require exclusive receiver access.
+- a dynamic collection index overlaps other indexes under the same base unless a stronger accepted proof is available.
+- map keys and values follow ordinary shared, copy and final-use rules.
+- inserting a value does not silently copy it.
+- removing a value may create preliminary detached-result provenance, but final lifetime effects belong later.
+- `clear` is relevant to future retained-edge frontiers, not ordinary loan counting.
+
+Boracle must not add per-entry uniqueness scans or runtime alias registries.
+
+## Calls and summaries
+
+Borrow solving is intraprocedural over one normalized function, with stable call summaries at boundaries.
+
+The initial input may consume current summary facts for:
+
+- parameter access mode
+- mutation effect
+- optional transfer eligibility/effect category
+- preliminary return aliasing
+- reactive effect
+- external boundary access rules
+
+Boracle may investigate a richer future summary vocabulary without publishing it as current interface contract.
+
+### Multiple returns
+
+One function-wide union can over-approximate relationships between separate return slots.
+
+Boracle should investigate per-result facts such as:
+
+[codeblock, $code("text"):
+    result 0 -> fresh
+    result 1 -> alias of parameter 0
+    result 2 -> alias of result 1
+]
+
+This investigation can shape the future production checker and lifetime summary work. It does not force an immediate public-interface migration.
+
+### Recursive calls
+
+The current alpha checker may publish unknown return aliasing at recursive summary cycles.
+
+Boracle should investigate monotone SCC solving over a finite reference summary lattice. It should retain why a result remained unknown and whether the uncertainty is fundamental or only an implementation shortcut.
+
+Do not make Boracle's first experimental lattice a permanent cross-module contract without separate architecture review.
+
+## Fallible control flow
+
+Recoverable operations already lower to explicit HIR control flow.
+
+Boracle should preserve:
+
+- separate success and error paths
+- unwrap and catch joins
+- compiler-created result carriers
+- return-success and return-error exits
+- branch-local captures and aliases
+
+Compiler scratch locals are CFG plumbing. They may carry provenance without becoming source-authored mutable aliases.
+
+A fallible failure path that does not store or return a value must not keep its success-only loan live.
+
+## Reactivity
+
+Reactive subscriptions are read-only dependency metadata. They are not active borrow lifetimes.
+
+Ordinary source reads and mutations still obey borrow rules. A stable observable reactive source may be ineligible for optional cleanup transfer because later mounted observation can depend on its identity.
+
+Boracle records the access and observability facts it needs. Builder lifecycle roots and final lifetime ownership belong to later analysis.
+
+## Structured witnesses
+
+Boracle should be able to answer "why" without re-running an unrelated inference.
+
+Useful witness types include:
+
+- origin derivation
+- alias derivation
+- loan issue
+- loan propagation
+- keeping-alive use
+- kill reason
+- conflict overlap
+- future-use path
+- no-use exit path
+- experiment-only acceptance delta
+
+Conceptual example:
+
+[codeblock, $code("text"):
+    mutation rejected at P30
+
+    requested
+        exclusive access to items / O3
+
+    conflicting loan L8
+        shared
+        issued by `shared = items` at P12
+        covers O3
+        live at P30 because `inspect(shared)` is reachable at P42
+
+    witness path
+        P12 -> P18 -> P30 -> P42
+]
+
+The production checker should eventually reconstruct equivalent useful evidence only when a diagnostic needs it. Boracle can retain it all the time.
+
+## Diagnostic boundary
+
+Boracle returns typed semantic reasons. The shared compiler diagnostic layer decides user-facing wording, labels, stable codes and rendering.
+
+Boracle-only dumps may be verbose. They are developer output, not stable diagnostics.
+
+Do not:
+
+- create Boracle-specific user diagnostic codes for existing conflicts
+- render errors inside the solver
+- store prose as solver state
+- hide an internal invariant behind a user-facing borrow diagnostic
+- let missing optional transfer proof become an error
+
+## Reference solver implementation style
+
+Boracle should use the simplest implementation that makes the rule obvious.
+
+Preferred:
+
+- explicit loops
+- named intermediate sets
+- small single-purpose functions
+- deterministic `BTreeMap` and `BTreeSet`
+- clear worklists
+- direct graph traversal
+- separate relation-building and decision phases
+- typed enums for rule states
+- complete debug displays
+
+Avoid:
+
+- Datafrog or another Datalog runtime
+- external graph or solver libraries
+- packed bitsets merely for speed
+- generic frameworks that hide the Moth rule being implemented
+- macro-generated solver logic
+- clever iterator chains with mutable side effects
+- caching before a real need exists
+- sharing the production solver's algorithm solely to reduce code
+
+If an external library would save code but hide the reasoning, do not add it.
+
+## Moth restrictions to exploit
+
+Moth deliberately excludes language surface that makes a general Rust-style borrow checker much harder.
+
+Boracle and the future production design should exploit these facts:
+
+- no source-visible reference types
+- no lifetime parameters or annotations
+- no explicit move operator
+- no mandatory ordinary consuming parameters
+- no shadowing
+- no general closures or anonymous captured callables
+- no general function values
+- no trait objects or dynamic trait dispatch
+- no unsafe language escape hatch
+- no arbitrary user-defined builtin collection storage semantics
+- statically resolved calls
+- concrete generated generics before borrow validation
+- closed external boundary profiles
+- reactive subscriptions defined as dependencies rather than loans
+- no current async suspension model in accepted borrow semantics
+
+These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, closure-capture, async-generator, trait-object, unsafe or drop-check machinery.
+
+It still needs precise CFG reasoning, aliases, projections, call summaries, loops, fallible paths and aggregate storage.
+
+## Lessons from Polonius without copying Rust
+
+Rust's Polonius work provides useful design lessons:
+
+- loan liveness should be flow-sensitive
+- control-flow points and type/region relationships must not be blurred
+- kills and event order matter
+- facts should be separable from the solving algorithm
+- sparse and fast representations belong to production work, not the reference model
+- a practical subset can improve accepted programs without solving every theoretical case
+- different solver approximations can accept different safe subsets, so one implementation should not be treated as the mathematical ideal
+- fast paths such as skipping liveness when there are no loans matter greatly in production
+
+Boracle should borrow the decomposition, not rustc's source lifetime system or implementation complexity.
+
+A useful reference implementation for Moth can ask a more direct question:
+
+[codeblock, $code("text"):
+    can any future source-semantic operation still observe this loan capability?
+]
+
+That question is possible because Moth does not encode arbitrary lifetime relationships inside source types.
+
+## Fast paths belong to the future production solver
+
+Boracle may record opportunities such as:
+
+- no alias-producing operation
+- no loans
+- no exclusive access
+- scalar-only function
+- no optional-transfer candidate
+- acyclic CFG
+- no recursive call-summary SCC
+- no projection overlap beyond locals
+
+It should not optimise around them.
+
+The future production checker can use these observations to skip work. Boracle remains the slow answer used to prove the skipped result.
+
+## Relationship to lifetime topology
+
+Boracle stops before semantic lifetime ownership.
+
+Its reference handoff may include:
+
+- validated access decisions
+- value-origin and projection evidence
+- last potential use per path
+- optional transfer eligibility
+- preliminary call-result alias evidence
+- reactive observability facts
+- source mappings for later diagnostics
+
+Lifetime-region and escape validation later owns:
+
+- allocation-family identity
+- one semantic lifetime owner
+- retained edges
+- escape legality
+- outlives constraints
+- cycle legality
+- complete result provenance
+- detached stored results
+- retention cardinality
+- whole-domain kills
+- cleanup frontiers and epochs
+
+Boracle must not reject a borrow-safe program merely because lifetime topology has not yet been implemented.
+
+## Relationship to Retained Edge Counting
+
+REC is a target/profile physical strategy for runtime-many persistent retained edges. It never counts ordinary Boracle loans.
+
+Better Boracle and last-use facts can reduce later REC use by proving:
+
+- temporary aliases are dead
+- final use transfers cleanup responsibility
+- no source can recreate a retained edge
+- a complete cleanup frontier is possible
+
+Boracle does not select or simulate REC in reference mode.
+
+A future named experiment may ask whether a set of borrow/last-use facts would be sufficient for REC elision. Such a result is advisory research, not a memory-plan decision.
+
+## Reference and experiment result separation
+
+Every report records its rule set.
+
+Conceptual shape:
+
+[codeblock, $code("text"):
+    rule_set
+        reference
+
+    experiments
+        none
+]
+
+or:
+
+[codeblock, $code("text"):
+    rule_set
+        reference plus experiments
+
+    experiments
+        dead_exclusive_loan
+        loop_generation_epoch
+]
+
+A snapshot without rule-set identity is invalid.
+
+Reference and experimental results should live in separate fields or report sections so a caller cannot accidentally treat an experiment as the canonical answer.
+
+## Initial investigation programme
+
+[table:
+    [th:
+        [: **Question**]
+        [: **Why it matters**]
+        [: **Initial Boracle treatment**]
+    ]
+
+    [td:
+        [: Can `copy` be represented as source read plus independent result?]
+        [: prevents source roots leaking into copied results]
+        [: required reference rule]
+    ]
+
+    [td:
+        [: Can old aliases survive a fresh rebind without conflicting with the new value?]
+        [: separates binding identity from value identity]
+        [: required reference rule]
+    ]
+
+    [td:
+        [: What origin abstraction is needed for repeated loop definitions?]
+        [: definition-site origins may merge generations too aggressively]
+        [: explicit investigation]
+    ]
+
+    [td:
+        [: Can an unused exclusive alias die immediately?]
+        [: reduces unnecessary mutable-alias friction]
+        [: named experiment]
+    ]
+
+    [td:
+        [: Can path-separated shared and exclusive access coexist?]
+        [: avoids flow-insensitive false conflicts]
+        [: required reference rule]
+    ]
+
+    [td:
+        [: Which projections are safely disjoint?]
+        [: improves field-level access without changing allocation lifetime]
+        [: precise fields, conservative dynamic indexes]
+    ]
+
+    [td:
+        [: How should same-statement argument overlap work?]
+        [: evaluation order and result aliasing can change legality]
+        [: required reference rule]
+    ]
+
+    [td:
+        [: How should multi-return provenance be expressed?]
+        [: one union can create false alias relationships]
+        [: research fact, no immediate public migration]
+    ]
+
+    [td:
+        [: Can recursive summaries reach a precise fixed point?]
+        [: permanent unknown summaries reduce caller precision]
+        [: SCC experiment]
+    ]
+
+    [td:
+        [: When can a loop expose a final-iteration fact?]
+        [: may unlock transfer without changing evaluation order]
+        [: investigation]
+    ]
+
+    [td:
+        [: What witness data produces useful diagnostics cheaply?]
+        [: production checking should stay fast on success]
+        [: required structured evidence]
+    ]
+
+    [td:
+        [: Which solves can production skip?]
+        [: Moth's restricted language should produce common fast paths]
+        [: record opportunities, do not optimise Boracle]
+    ]
+]
+
+## Canonical semantic corpus
+
+The durable corpus should grow by semantic family rather than by implementation bug file.
+
+### Copy and independence
+
+- copy from a local
+- copy from an alias
+- copy from a field place
+- source use after copy
+- source mutation after copy
+- destination mutation with source aliases live
+- copy across branch joins
+- copy in loops
+- repeated internal aliases
+
+### Origins and rebindings
+
+- fresh declaration
+- alias declaration
+- mutable alias declaration
+- fresh rebind
+- alias-preserving rebind
+- old alias after fresh rebind
+- branch-specific definitions
+- joined origin sets
+- loop-carried definitions
+
+### Places
+
+- same local
+- base and field
+- two fields
+- nested fields
+- fixed index
+- dynamic index
+- collection structural mutation
+- map `get` and later mutation
+
+### Loans
+
+- many shared loans
+- shared then exclusive
+- exclusive then shared
+- duplicate exclusive
+- final shared use
+- path-separated access
+- branch join retaining a possible loan
+- loop-carried loan
+- dead exclusive experiment
+
+### Calls and results
+
+- shared parameter
+- mutable parameter
+- same origin in several arguments
+- final-use optional transfer
+- result aliases one argument
+- unrelated argument still transfers
+- fallible success alias
+- error path without success alias
+- multi-return alias separation
+- recursive summary investigation
+
+### Aggregates
+
+- fresh outer with aliased child
+- repeated child alias
+- copied child
+- nested aggregate
+- collection/map insertion
+- detached remove result investigation
+
+### Reactivity
+
+- subscription does not create an active loan
+- ordinary read still follows access rules
+- mutation creates invalidation facts
+- stable observable root does not transfer prematurely
+
+## Generated problems
+
+Boracle should support bounded deterministic generated tests without an external fuzzing crate.
+
+A generator may vary:
+
+- block count
+- edge shape
+- branch and loop presence
+- origin events
+- rebindings
+- loan issue/use/kill events
+- place projection relations
+- copy events
+- exits
+
+Each generated run records a stable seed. A failure prints or stores a complete normalized problem that can become a hand-authored regression.
+
+Useful properties include:
+
+- adding an unreachable use changes nothing
+- copying an origin cannot introduce overlap with the source result
+- deleting the final use cannot extend a loan
+- adding a reachable later use cannot turn `MayBeUsed` into `NoFutureUse`
+- reference results are deterministic
+- experiment mode reports every acceptance delta
+- malformed input never reaches the solver
+
+## Developer command and dumps
+
+A build with `boracle` may expose an internal command equivalent to:
+
+[codeblock, $code("bash"):
+    cargo run --features boracle -- boracle ./tmp/example.moth --dump loans
+]
+
+Useful dump categories:
+
+- normalized problem
+- CFG points and edges
+- places and overlap classes
+- origins and provenance derivations
+- loans and liveness
+- future-use and last-use facts
+- conflicts
+- witnesses
+- experiment deltas
+
+The command is internal and unstable. It must be absent without the feature and must not appear as normal user documentation.
+
+The CLI calls one compiler-owned Boracle analysis service. It does not assemble tokenization, AST, HIR or analysis stages itself.
+
+## Validation
+
+`just boracle` is the complete deterministic validation owner for this subsystem.
+
+It is intentionally excluded from:
+
+- `just validate`
+- the standard feature matrix
+- ordinary CI gates
+- normal release requirements
+
+This avoids making every compiler change pay for a reference solver whose corpus may grow substantially.
+
+Borrow-checker, last-use, provenance or related memory-analysis work should run `just boracle` explicitly.
+
+The command should eventually cover:
+
+- formatting
+- Boracle-enabled Clippy
+- feature-gated unit tests
+- normalized input validation
+- HIR extraction
+- canonical semantic corpus
+- bounded generated problems
+- future production differential tests
+- an internal source-mode smoke
+
+Large fuzz or stress runs stay separate.
+
+## Feature-lane exception
+
+Every Cargo feature still needs an owned executable lane.
+
+The validation system distinguishes:
+
+- standard lanes, which the normal matrix executes
+- opt-in lanes, which coverage validates but only their named command executes
+
+`boracle` is an opt-in lane owned by `just boracle`.
+
+Normal native Clippy uses the standard feature set rather than `--all-features`, otherwise it would compile Boracle during `just validate`. Boracle Clippy runs inside its own command with warnings denied.
+
+This exception must remain narrow and explicit. It is not a general mechanism for hiding untested features.
+
+## Default-path isolation
+
+Without the `boracle` feature:
+
+- no Boracle solver code is compiled
+- no Boracle CLI command exists
+- no verbose Boracle report types are needed by runtime compiler flow
+- normal module compilation does not build `BorrowProblem`
+- the alpha checker runs exactly as before
+
+Shared typed IDs and normalized-input types may compile as permanent infrastructure. They must not add per-function work unless an explicit consumer requests a problem.
+
+## Ongoing evolution
+
+Boracle can evolve after its initial implementation without becoming an unfinished plan forever.
+
+Durable additions include:
+
+- new reduced cases
+- new named experiments
+- stronger accepted reference rules
+- richer witness types
+- project-level source execution
+- production differential comparison
+- optimisation-equivalence queries
+- experimental handoffs to lifetime and REC research
+
+When a change alters reference semantics, update canonical language or memory documentation first or in the same accepted slice. When a change only improves explanations or adds an experiment, keep reference snapshots stable.
+
+## Hard invariants
+
+- Boracle never silently replaces the normal checker.
+- Boracle never acts as a fallback after a production-checker error.
+- Reference and experimental results are always distinguishable.
+- `copy` source access and result provenance are separate facts.
+- Bindings and value origins are separate identities.
+- Place overlap and lifetime-family identity are separate concerns.
+- Loan liveness is control-flow-sensitive.
+- Missing optional transfer proof remains a borrow.
+- Boracle does not assign lifetime owners.
+- Boracle loans are never REC obligations.
+- Boracle does not mutate HIR.
+- Malformed normalized input is an internal error.
+- Reports and dumps are deterministic.
+- Solver reasoning does not depend on rendered names.
+- Production files contain no test-only fixture APIs.
+- No external solver dependency is required.
+- Normal validation does not run Boracle.
+
+## What Boracle must not become
+
+Do not turn Boracle into:
+
+- the default borrow checker
+- a second source language mode
+- a public solver switch
+- a Datalog framework project
+- an excuse to duplicate parser or HIR semantics
+- a lifetime-region solver in disguise
+- a REC simulator
+- a backend cleanup planner
+- a performance benchmark target
+- a prose diagnostic renderer
+- a place to land unreviewed semantic changes
+- a permanent compatibility layer for abandoned experimental APIs
+
+## Related reading
+
+- `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6
+- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
+
+Useful external research anchors include the current rustc Polonius implementation under `compiler/rustc_borrowck/src/polonius/` and Rust's tests for flow-sensitive loan liveness. These are research inputs, not Moth authorities.

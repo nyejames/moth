@@ -149,7 +149,7 @@ The compiler does not recognise user methods by name. A user abstraction earns t
 
 Future collection APIs must preserve narrow, analysable destruction effects. An operation whose effect on stored references cannot be stated precisely weakens memory analysis for every program that uses it.
 
-For the accessible explanation, see @../memory/automatic-cleanup-and-retained-edges (Automatic cleanup and retained edges). The compiler implementation details live in @../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+For the accessible explanation, see @../memory/automatic-cleanup-and-retained-edges (Automatic cleanup and retained edges). The compiler implementation details live in @../../developer-docs/memory-management/retained-edge-counting (Retained Edge Counting).
 
 ### Shared rules
 

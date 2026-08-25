@@ -38,19 +38,19 @@ RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
-- `docs/src/docs/codebase/language/overview.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
+- `docs/src/developer-docs/language/overview.mtf`
 - `docs/src/docs/collections/growable-collections.mtf`
 - `docs/src/docs/collections/fixed-collections.mtf`
 - `docs/src/docs/collections/collection-operations.mtf`
 - `docs/src/docs/errors/propagation.mtf`
 - `docs/src/docs/errors/catch-and-recovery.mtf`
 - `docs/src/docs/bindings/mutable-bindings.mtf`
-- `docs/src/docs/codebase/memory-management/overview.mtf`
-- `docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf`
-- `docs/src/docs/codebase/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/src/developer-docs/memory-management/access-and-aliasing/overview.mtf`
+- `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
 - `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 
@@ -705,7 +705,7 @@ Review every result from the Phase 0 docs inventory. Known affected areas includ
 - [ ] `docs/src/docs/memory/reference-semantics-basic.mtf`
 - [ ] `docs/src/docs/memory/copy-and-exclusive-access.mtf`
 - [ ] `docs/src/docs/memory/copy-and-exclusive-access-basic.mtf`
-- [ ] `docs/src/docs/codebase/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+- [ ] `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
 
 Rules for examples:
 

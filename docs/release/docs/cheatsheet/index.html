@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Cheatsheet | Moth</title>
+    <title>Language cheatsheet | Moth</title>
+    <meta name="description" content="The whole accepted Moth language surface on one page, for humans and coding models.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -166,955 +167,1028 @@ body {
   vertical-align: inherit;
 }
     </style>
-<style>pre {
-    color: #0c032d;
-    background-color: #f8f8f2;
-    border-color: #272822;
-    border: 1px solid;
-    padding: 1em 2em;
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
 }
 
-code {
-    font-family: monospace;
-    font-size: 1.1em;
-    background-color: #f8f8f2;
-    padding: 0.2em 0.4em;
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
 }
 
-body {
-    background-color: #d5e3ea;
-    color: #000000;
-    padding: 2em;
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
 }
 
 a {
-    color: #0700cb;
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #44a0cf;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
+}
+
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
+
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
+
+.doc-level__title {
+    margin: 0;
+}
+
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
+
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
+
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-level__panel {
+    display: none;
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
+
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
+
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
+
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
+
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
+    }
+
+    .doc-pager {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
+    }
+
+    .doc-level__panel {
+        display: block;
+    }
+
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
+    }
+
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
+    }
+
+    .doc-level__panel--basic::before {
+        content: "Basic";
+    }
+
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
 }</style>
   </head>
   <body style="">
-<section class="container"><h1>Moth language cheatsheet</h1>
-<p>Moth is a small, statically typed language with first-class string templates, explicit mutable access and mandatory borrow and lifetime validation. This is a compact reference for humans and coding models writing Moth source.</p>
-<p>This document describes the <strong>accepted end-state language surface</strong>. The current Alpha compiler may not support every accepted feature yet. Use the <a href="../progress/">progress matrix</a> to check implementation and target status.</p>
-<p>Status wording used here:</p>
-<ul>
-<li><strong>Accepted deferred</strong> means the source contract is accepted but implementation is absent, partial or target-limited.</li>
-<li><strong>Design pending</strong> means no final syntax or semantic contract exists. These areas are listed without speculative examples.</li>
-</ul>
-<p>Detailed explanations live throughout the <a href="../">Moth documentation</a>.</p>
-<h2>Rules to internalise first</h2>
-<ul>
-<li><code>:</code> opens a block. <code>;</code> closes it. Semicolons do not end statements.</li>
-<li>Bindings are immutable unless declared with <code>~</code>.</li>
-<li>Existing values use shared read-only access. Rebinding does not copy.</li>
-<li><code>~place</code> requests exclusive access for one operation. It is not a type, reference or move.</li>
-<li><code>copy place</code> creates independent storage. Moth has no explicit move or lifetime syntax.</li>
-<li><code>[]</code> creates strings/templates. <code>{}</code> creates collections/maps.</li>
-<li><code>!</code> is the typed error path. <code>?</code> is the option path. <code>assert</code> is for invariants.</li>
-<li><code>@path</code> starts dependencies and resource paths. Source dependencies omit extensions.</li>
-<li>Names never shadow another visible name.</li>
-<li><code>#Config of T</code> declares an accepted-deferred typed build configuration constant.</li>
-<li>A compile-time-known <code>Bool</code> can specialise an ordinary <code>if</code>; there is no <code>#Config if</code>.</li>
-<li>Source cannot inspect OS, architecture, backend or target identity.</li>
-<li>General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.</li>
-<li>Named monomorphic non-capturing function references remain design pending.</li>
-</ul>
-<h2>Common invalid translations</h2>
-<table><thead><tr><th>Do not write</th><th>Write</th></tr></thead><tbody>
-<tr><td><code>let name = value</code></td><td><code>name = value</code></td></tr>
-<tr><td><code>let mut count = 0</code></td><td><code>count ~= 0</code></td></tr>
-<tr><td><code>fn greet(...)</code></td><td><code>greet |...|</code></td></tr>
-<tr><td><code>import @core/math</code></td><td><code>@core/math</code></td></tr>
-<tr><td><code>pub name</code></td><td>put the declaration inside the module root's <code>export:</code> block</td></tr>
-<tr><td><code>left == right</code></td><td><code>left is right</code></td></tr>
-<tr><td><code>left != right</code></td><td><code>left is not right</code></td></tr>
-<tr><td><code>!ready</code>, <code>a &amp;&amp; b</code>, `a</td><td></td></tr>
-<tr><td><code>{ ... }</code> for a code block</td><td><code>: ... ;</code></td></tr>
-<tr><td><code>statement;</code></td><td><code>statement</code></td></tr>
-<tr><td><code>left + right</code> for strings</td><td><code>[left, right]</code></td></tr>
-<tr><td><code>&amp;value</code></td><td><code>value</code></td></tr>
-<tr><td><code>&amp;mut value</code></td><td><code>~value</code> at an exclusive-access site</td></tr>
-<tr><td><code>move value</code></td><td>no source form, final-use transfer is inferred</td></tr>
-<tr><td><code>value.clone()</code></td><td><code>copy value</code> when independent storage is required</td></tr>
-<tr><td><code>match value</code></td><td><code>if value is:</code></td></tr>
-<tr><td><code>for item in items</code></td><td><code>loop items |item|:</code></td></tr>
-<tr><td><code>while ready</code></td><td><code>loop ready:</code></td></tr>
-<tr><td><code>_ =&gt; fallback</code></td><td><code>else =&gt; fallback</code></td></tr>
-<tr><td><code>items[index]</code></td><td><code>items.get(index)!</code> or <code>~items.set(index, value)!</code></td></tr>
-<tr><td><code>Option&lt;T&gt;</code></td><td><code>T?</code></td></tr>
-<tr><td><code>Result&lt;T, E&gt;</code></td><td>success return slots plus a final <code>E!</code> slot</td></tr>
-<tr><td>tuple return values</td><td>multiple returns and a matching multi-bind</td></tr>
-<tr><td><code>Box&lt;String&gt;</code></td><td><code>Box of String</code></td></tr>
-<tr><td>an inline closure</td><td>a named function, static trait pattern or accepted reactive source/subscription pattern</td></tr>
-</tbody></table>
-<h2>Blocks, comments, scope and names</h2>
-<pre><code class="language-moth">if ready:
-    io.line("ready")
-else
-    io.line("waiting")
-;
-</code></pre>
-<p><code>--</code> starts a single-line comment in ordinary Moth code. Inside template and <code>.mtf</code> bodies, <code>--</code> is output text. Use <code>$note</code> or <code>$todo</code> to discard template-authored content.</p>
-<p>A plain lexical block uses <code>block:</code>:</p>
-<pre><code class="language-moth">name = "Priya"
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
 
-block:
-    label = [: User: [name]]
-    io.line(label)
-;
-</code></pre>
-<p><code>block:</code> creates a child lexical and control-flow scope. Bare labelled blocks are invalid.</p>
-<p>Naming conventions:</p>
-<ul>
-<li>Types, structs, choices, aliases and generic parameters use <code>PascalCase</code>.</li>
-<li>Variables and functions use <code>regular_snake_case</code>.</li>
-<li>Traits use <code>ALL_CAPS</code>.</li>
-<li>A visible name cannot be redeclared while it remains in scope.</li>
-</ul>
-<p><code>Config</code> and its case-insensitive, leading-underscore keyword-shadow variants are reserved. <code>Import</code>
-is an ordinary valid user identifier; there is no <code>import</code> keyword.</p>
-<p>Symbolic binary operators and assignment require spaces on both sides:</p>
-<pre><code class="language-moth">count = left + right
-count += 1
-count //= 2
-count ~= 0 -- ~= stays adjacent
-</code></pre>
-<p><code>count=1</code>, <code>left+right</code>, <code>count+=1</code> and <code>count ~ = 0</code> are invalid.</p>
-<h2>Core values and strings</h2>
-<pre><code class="language-moth">ready = true
-count = 42
-ratio = 1.5
-letter = '🦋'
-text = "Moth"
-message = [: Hello, [text].]
-</code></pre>
-<p>Quoted text creates a read-only string slice. A template creates an owned string. Both use the semantic <code>String</code> type at typed boundaries. <code>Char</code> stores one Unicode scalar value.</p>
-<p>Quoted strings cannot continue across a physical newline. They support only <code>\\</code>, <code>\"</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>. Backticks are not raw source strings. In <code>$md</code> content, paired single backticks delimit inline code.</p>
-<p><code>String + String</code> is invalid. Concatenate and interpolate through templates:</p>
-<pre><code class="language-moth">joined = [left, right]
-greeting = [: Hello [name]]
-</code></pre>
-<p>String equality compares content with <code>is</code> and <code>is not</code>. Strings do not support ordering operators or in-place character mutation.</p>
-<h2>Bindings, mutability and constants</h2>
-<pre><code class="language-moth">name = "Priya"             -- inferred immutable binding
-age Int = 30               -- typed immutable binding
+    </a>
 
-count ~= 0                 -- inferred mutable binding
-names ~{String} = {}       -- typed mutable binding
-count = 1                  -- reassignment
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
 
-site_name #= "Moth"        -- inferred compile-time constant
-version #Int = 1           -- typed compile-time constant
-</code></pre>
-<p>Mutability belongs to a binding or access operation, not to type identity. <code>names ~{String}</code> declares a mutable binding whose semantic type is <code>{String}</code>.</p>
-<p>A constant:</p>
-<ul>
-<li>has an initializer</li>
-<li>is immutable</li>
-<li>may depend only on visible compile-time values</li>
-<li>must fully fold</li>
-<li>cannot use a same-file forward reference</li>
-</ul>
-<p>Visible dependency-bound constants are already folded and may be used. Cross-file constants in the same module follow the module's declaration dependency ordering. <code>#</code> controls compile-time evaluation, not visibility.</p>
-<h2>Reference semantics, copying and ownership</h2>
-<p>Existing values use shared read-only access:</p>
-<pre><code class="language-moth">items ~= {"Priya", "Rob"}
-shared_items = items
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
 
-count = shared_items.length()
-~items.push("Emmy") -- valid: shared_items has no later use
-</code></pre>
-<p>A later use of <code>shared_items</code> would keep the alias live and make the mutation invalid. Borrow lifetimes follow control flow.</p>
-<p>A mutable declaration from an existing place creates a write-through alias. One from a fresh expression creates an independent slot:</p>
-<pre><code class="language-moth">writer ~= items
-~writer.push("Rob")
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / Language cheatsheet</p><h1>Moth language cheatsheet</h1><p>Moth is a small, statically typed language with first-class string templates, explicit mutable access and mandatory borrow and lifetime validation. This page is a compact reference for humans and coding models writing Moth source.</p><p>It describes the accepted language surface. The <a href="../progress">progress matrix</a> is the authority on what the current Alpha compiler implements and which targets support it.</p></section>
+<section class="container"><p>Everything below is accepted language surface. Where a design question is still open, this page says so and gives no speculative syntax: <strong>design pending</strong> means no final contract exists yet, so do not invent one. Detailed explanations live throughout the <a href="../">Moth documentation</a>.</p><h2>Rules to internalise first</h2><ul><li><code>:</code> opens a block. <code>;</code> closes it. Semicolons do not end statements.</li><li>Bindings are immutable unless declared with <code>~</code>.</li><li>Existing values use shared read-only access. Rebinding does not copy.</li><li><code>~place</code> requests exclusive access for one operation. It is not a type, reference or move.</li><li><code>copy place</code> creates independent storage. Moth has no explicit move or lifetime syntax.</li><li>Square brackets create strings and templates. Curly braces create collections and maps.</li><li><code>!</code> is the typed error path. <code>?</code> is the option path. <code>assert</code> is for invariants.</li><li><code>@path</code> starts dependencies and resource paths. Source dependencies omit extensions.</li><li>Names never shadow another visible name.</li><li><code>#Config of T</code> declares a typed build configuration constant.</li><li>A compile-time-known <code>Bool</code> can specialise an ordinary <code>if</code>; there is no <code>#Config if</code>.</li><li>Source cannot inspect OS, architecture, backend or target identity.</li><li>General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.</li><li>Named monomorphic non-capturing function references remain design pending.</li></ul><h2>Common invalid translations</h2><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> Do not write</p></th><th scope="col" style=""><p> Write</p></th>
+        
+</tr>
 
-fresh ~= {"Emmy"}
-</code></pre>
-<p>Only <code>copy</code> creates independent storage from an existing place:</p>
-<pre><code class="language-moth">independent ~= copy items
-</code></pre>
-<p><code>copy</code> accepts a binding, field projection or parenthesised place. It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source. Fresh literals, templates, calls and computations are invalid <code>copy</code> operands.</p>
-<p>Moth has no move operator. The compiler may transfer cleanup responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region.</p>
-<p>Memory safety comes from static proof, not from a collector. Borrow validation and lifetime-topology validation are mandatory on every backend and every build profile, so every target accepts and rejects exactly the same programs. Garbage collection is one permitted way to represent a topology the compiler has already proven legal; it can never make an illegal program legal.</p>
-<p>Backends that advertise full memory control lower release builds without a tracing collector. That is a property of the backend and the emitted artefact, not a language mode: there is no source or project setting that turns GC on or off, and nothing about it appears in your code.</p>
-<p>The compiler may use internal Retained Edge Counting when a runtime-dependent number of persistent stored aliases disappear independently. Ordinary local aliases and <code>get()</code> borrows are never counted, and no REC mechanism appears in source.</p>
-<h3>Declared memory groups - accepted deferred</h3>
-<pre><code class="language-moth">group request:
-    parsed ParsedPost into request = parse_post(post)
-    html String into request = render_post(parsed)
-;
-</code></pre>
-<p><code>into group_name</code> appears after access/type syntax and before <code>=</code>. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. Everything in a group is released together when the group exits, never individually. A group is also the only place a program may build a reference cycle. V1 has no expression placement, extraction or unrestricted group transfer.</p>
-<h2>Numbers and operators</h2>
-<p>Current numeric types:</p>
-<ul>
-<li><code>Int</code>: signed 32-bit integer</li>
-<li><code>Float</code>: finite IEEE-754 <code>f64</code>. <code>NaN</code> and infinities are invalid</li>
-</ul>
-<pre><code class="language-moth">count Int = 42
-ratio Float = 0.5
-</code></pre>
-<p>Whole literals naturally infer <code>Int</code>. Decimal literals infer <code>Float</code>. Exponents use lowercase <code>e</code>. Uppercase <code>E</code>, unary <code>+</code> and spaced negation such as <code>- count</code> are invalid.</p>
-<h3>Number and Byte - accepted deferred</h3>
-<ul>
-<li><code>Number</code> and <code>Number0</code>: arbitrary-precision scale-zero integers</li>
-<li><code>Number1</code> through <code>Number256</code>: fixed-scale arbitrary-precision decimals</li>
-<li><code>Byte</code>: unsigned <code>0..255</code> scaffold. Broader runtime semantics remain unsettled</li>
-</ul>
-<pre><code class="language-moth">large Number = 1000000000000000000000
-price Number2 = 12.50
-byte Byte = 255
-</code></pre>
-<p>A receiving <code>NumberN</code> context requires an exact literal. <code>price Number2 = 1.239</code> is invalid rather than rounded.</p>
-<p>Arithmetic rules:</p>
-<ul>
-<li><code>Int / Int -&gt; Float</code>, while <code>Int // Int -&gt; Int</code></li>
-<li>mixed <code>Int</code> and <code>Float</code> arithmetic produces <code>Float</code></li>
-<li><code>NumberN</code> combines with the same scale or <code>Int</code>. Different scales need <code>cast</code></li>
-<li><code>NumberN</code> and <code>Float</code> do not mix</li>
-<li>positive-scale <code>NumberN</code> uses <code>/</code> and <code>%</code>. Scale zero uses <code>//</code> and <code>%</code></li>
-<li><code>NumberN ^ Int</code> requires a non-negative exponent</li>
-<li>positive-scale multiply, divide and exponentiation round half to even per operation</li>
-<li><code>^</code> is right-associative</li>
-</ul>
-<p>Numeric operations are checked. Statically known failure is a diagnostic. Supported runtime failure enters builtin <code>Error!</code> only when that is the function's final error slot. Otherwise it traps.</p>
-<p>Precedence: unary <code>not</code>/<code>-</code>, <code>^</code>, <code>* / // %</code>, <code>+ -</code>, comparisons, <code>and</code>, <code>or</code>.</p>
-<pre><code class="language-moth">same = left is right
-ready = has_input and is_valid
-blocked = not ready
-</code></pre>
-<h2>Explicit casts</h2>
-<p><code>cast</code> takes its target from the immediate typed receiving boundary:</p>
-<pre><code class="language-moth">ratio Float = cast 3
-fallback Int = cast text catch then 0
-label String = cast value
-</code></pre>
-<p>Propagation needs a complete function context:</p>
-<pre><code class="language-moth">parse_count |text String| -&gt; Int, Error!:
-    count Int = cast! text
-    return count
-;
-</code></pre>
-<p>Forms:</p>
-<pre><code class="language-moth">value Target = cast expression
-value Target = cast! expression
 
-value Target = cast expression catch |err|:
-    then fallback
-;
-</code></pre>
-<p>Rules:</p>
-<ul>
-<li>Plain <code>cast</code> requires infallible evidence.</li>
-<li><code>cast!</code> requires the enclosing function's final error slot to be builtin <code>Error!</code>.</li>
-<li><code>cast ... catch</code> handles only cast failure.</li>
-<li><code>cast! ... catch</code> is invalid.</li>
-<li>Same-type casts are invalid.</li>
-<li>Generic inference does not look through <code>cast</code>.</li>
-<li>Scalar conversion constructors such as <code>Int(value)</code> and <code>String(value)</code> are invalid.</li>
-<li><code>NumberN</code> scale widening is exact and infallible. Narrowing is exact-or-fail and never rounds.</li>
-<li><code>Float &lt;-&gt; NumberN</code> has no accepted helper name or lossy conversion policy yet. Do not invent one.</li>
-<li>Numeric text casts consume the whole string and reject surrounding whitespace, uppercase <code>E</code>, <code>NaN</code> and infinity spellings.</li>
-<li>Same-file nominal types may provide compiler-owned cast evidence for supported builtin targets. Users cannot create new cast target families.</li>
-</ul>
-<h2>Functions and calls</h2>
-<pre><code class="language-moth">greet |name String, punctuation String = "!"| -&gt; String:
-    return [: Hello [name][punctuation]]
-;
 
-message = greet("Priya")
-custom = greet(name = "Rob", punctuation = "?")
-</code></pre>
-<p>Parameters use <code>|...|</code>. No parameters use <code>||</code>. Omit <code>-&gt;</code> when there are no success values. Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults. Host functions and compiler-owned builtin members are positional-only.</p>
-<p>Mutable parameters require <code>~place</code> for existing storage, but accept fresh rvalues plainly:</p>
-<pre><code class="language-moth">increment |value ~Int|:
-    value += 1
-;
+                <tr style="">
+             <td style=""><p> <code>let name = value</code></p></td> <td style=""><p> <code>name = value</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>let mut count = 0</code></p></td> <td style=""><p> <code>count ~= 0</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>fn greet(...)</code></p></td> <td style=""><p> <code>greet |...|</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>import @core/math</code></p></td> <td style=""><p> <code>@core/math</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>pub name</code></p></td> <td style=""><p> put the declaration inside the module root&#39;s <code>export:</code> block</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>left == right</code></p></td> <td style=""><p> <code>left is right</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>left != right</code></p></td> <td style=""><p> <code>left is not right</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>!ready</code>, <code>a &amp;&amp; b</code>, `a</p></td> <td style=""></td> <td style=""><p> b`</p></td> <td style=""><p> <code>not ready</code>, <code>a and b</code>, <code>a or b</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>{ ... }</code> for a code block</p></td> <td style=""><p> <code>: ... ;</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>statement;</code></p></td> <td style=""><p> <code>statement</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>left + right</code> for strings</p></td> <td style=""><p> <code>[left, right]</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>&amp;value</code></p></td> <td style=""><p> <code>value</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>&amp;mut value</code></p></td> <td style=""><p> <code>~value</code> at an exclusive-access site</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>move value</code></p></td> <td style=""><p> no source form, final-use transfer is inferred</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>value.clone()</code></p></td> <td style=""><p> <code>copy value</code> when independent storage is required</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>match value</code></p></td> <td style=""><p> <code>if value is:</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>for item in items</code></p></td> <td style=""><p> <code>loop items |item|:</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>while ready</code></p></td> <td style=""><p> <code>loop ready:</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>_ =&gt; fallback</code></p></td> <td style=""><p> <code>else =&gt; fallback</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>items[index]</code></p></td> <td style=""><p> <code>items.get(index)!</code> or <code>~items.set(index, value)!</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>Option&lt;T&gt;</code></p></td> <td style=""><p> <code>T?</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>Result&lt;T, E&gt;</code></p></td> <td style=""><p> success return slots plus a final <code>E!</code> slot</p></td>
+        </tr><tr style="">
+             <td style=""><p> tuple return values</p></td> <td style=""><p> multiple returns and a matching multi-bind</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>Box&lt;String&gt;</code></p></td> <td style=""><p> <code>Box of String</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> an inline closure</p></td> <td style=""><p> a named function, static trait pattern or accepted reactive source/subscription pattern</p></td>
+        </tr>
+            
+</table><h2>Blocks, comments, scope and names</h2><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> ready<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;ready&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>else</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;waiting&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>--</code> starts a single-line comment in ordinary Moth code. Inside template and <code>.mtf</code> bodies, <code>--</code> is output text. Use <code>$note</code> or <code>$todo</code> to discard template-authored content.</p><p>A plain lexical block uses <code>block:</code>:</p><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
-count ~= 1
-increment(~count)
-increment(1)
-</code></pre>
-<p>Mutable receivers always require an existing mutable place.</p>
-<p>Multiple returns are not tuples:</p>
-<pre><code class="language-moth">pair || -&gt; String, Int:
-    return "Priya", 2
-;
+<span class='moth-code-keyword'>block</span><span class='moth-code-delimiter'>:</span>
+    label <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>User</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>label<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>block:</code> creates a child lexical and control-flow scope. Bare labelled blocks are invalid.</p><p>Naming conventions:</p><ul><li>Types, structs, choices, aliases and generic parameters use <code>PascalCase</code>.</li><li>Variables and functions use <code>regular_snake_case</code>.</li><li>Traits use <code>ALL_CAPS</code>.</li><li>A visible name cannot be redeclared while it remains in scope.</li></ul><p><code>Config</code> and its case-insensitive, leading-underscore keyword-shadow variants are reserved. <code>Import</code> is an ordinary valid user identifier; there is no <code>import</code> keyword.</p><p>Symbolic binary operators and assignment require spaces on both sides:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
+count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+count <span class='moth-code-operator'>//=</span> <span class='moth-code-number'>2</span>
+count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span> <span class='moth-code-comment'>-- ~= stays adjacent</span></code></pre><p><code>count=1</code>, <code>left+right</code>, <code>count+=1</code> and <code>count ~ = 0</code> are invalid.</p><h2>Core values and strings</h2><pre style=""><code class='codeblock'>ready <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>
+count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+ratio <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.5</span>
+letter <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&#39;🦋&#39;</span>
+text <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
+message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>text<span class='moth-code-delimiter'>]</span>.<span class='moth-code-delimiter'>]</span></code></pre><p>Quoted text creates a read-only string slice. A template creates an owned string. Both use the semantic <code>String</code> type at typed boundaries. <code>Char</code> stores one Unicode scalar value.</p><p>Quoted strings cannot continue across a physical newline. They support only <code>\\</code>, <code>\&quot;</code>, <code>\n</code>, <code>\r</code> and <code>\t</code>. Backticks are not raw source strings. In <code>$md</code> content, paired single backticks delimit inline code.</p><p><code>String + String</code> is invalid. Concatenate and interpolate through templates:</p><pre style=""><code class='codeblock'>joined <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span>left, right<span class='moth-code-delimiter'>]</span>
+greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p>String equality compares content with <code>is</code> and <code>is not</code>. Strings do not support ordering operators or in-place character mutation.</p><h2>Bindings, mutability and constants</h2><pre style=""><code class='codeblock'>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>             <span class='moth-code-comment'>-- inferred immutable binding</span>
+age <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>30</span>               <span class='moth-code-comment'>-- typed immutable binding</span>
 
-name, count = pair()
-</code></pre>
-<p>Receive them through matching multi-bind, return or value-producing syntax. General closure/function-value systems are outside scope. Narrow named function references remain design pending.</p>
-<h2>Options: <code>T?</code>, <code>none</code> and postfix <code>?</code></h2>
-<p><code>T?</code> is an optional value. <code>none</code> needs an immediate optional receiving context.</p>
-<pre><code class="language-moth">find_name |id String| -&gt; String?:
-    if id is "":
-        return none
-    ;
+count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>                 <span class='moth-code-comment'>-- inferred mutable binding</span>
+names <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>       <span class='moth-code-comment'>-- typed mutable binding</span>
+count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>                  <span class='moth-code-comment'>-- reassignment</span>
 
-    return "Priya"
-;
-</code></pre>
-<p>A <code>T</code> value may be used where <code>T?</code> is expected. Optional values do not unwrap implicitly.</p>
-<p>Postfix <code>?</code> unwraps a present value or immediately returns <code>none</code>:</p>
-<pre><code class="language-moth">load_label |id String| -&gt; String?:
-    name = find_name(id)?
-    return [: User: [name]]
-;
-</code></pre>
-<p>Postfix <code>?</code> requires an enclosing function with exactly one compatible optional success return slot. It cannot be combined with <code>catch</code>.</p>
-<p>Inspect options explicitly:</p>
-<pre><code class="language-moth">label = if maybe_name is |name| then name else "guest"
+site_name <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>        <span class='moth-code-comment'>-- inferred compile-time constant</span>
+version <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span>           <span class='moth-code-comment'>-- typed compile-time constant</span></code></pre><p>Mutability belongs to a binding or access operation, not to type identity. <code>names ~{String}</code> declares a mutable binding whose semantic type is <code>{String}</code>.</p><p>A constant:</p><ul><li>has an initializer</li><li>is immutable</li><li>may depend only on visible compile-time values</li><li>must fully fold</li><li>cannot use a same-file forward reference</li></ul><p>Visible dependency-bound constants are already folded and may be used. Cross-file constants in the same module follow the module&#39;s declaration dependency ordering. <code>#</code> controls compile-time evaluation, not visibility.</p><h2>Reference semantics, copying and ownership</h2><p>Existing values use shared read-only access:</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>}</span>
+shared_items <span class='moth-code-operator'>=</span> items
 
-label = if maybe_name is |name|:
-    then name
-else
-    then "guest"
-;
+count <span class='moth-code-operator'>=</span> shared_items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-comment'>-- valid: shared_items has no later use</span></code></pre><p>A later use of <code>shared_items</code> would keep the alias live and make the mutation invalid. Borrow lifetimes follow control flow.</p><p>A mutable declaration from an existing place creates a write-through alias. One from a fresh expression creates an independent slot:</p><pre style=""><code class='codeblock'>writer <span class='moth-code-operator'>~=</span> items
+<span class='moth-code-operator'>~</span>writer.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span>
 
-if maybe_name is none:
-    io.line("missing")
-;
+fresh <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>}</span></code></pre><p>Only <code>copy</code> creates independent storage from an existing place:</p><pre style=""><code class='codeblock'>independent <span class='moth-code-operator'>~=</span> <span class='moth-code-keyword'>copy</span> items</code></pre><p><code>copy</code> accepts a binding, field projection or parenthesised place. It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source. Fresh literals, templates, calls and computations are invalid <code>copy</code> operands.</p><p>Moth has no move operator. The compiler may transfer cleanup responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region.</p><p>Memory safety comes from static proof, not from a collector. Borrow validation and lifetime-topology validation are mandatory on every backend and every build profile, so every target accepts and rejects exactly the same programs. Garbage collection is one permitted way to represent a topology the compiler has already proven legal; it can never make an illegal program legal.</p><p>Backends that advertise full memory control lower release builds without a tracing collector. That is a property of the backend and the emitted artefact, not a language mode: there is no source or project setting that turns GC on or off, and nothing about it appears in your code.</p><p>The compiler may use internal Retained Edge Counting when a runtime-dependent number of persistent stored aliases disappear independently. Ordinary local aliases and <code>get()</code> borrows are never counted, and no REC mechanism appears in source.</p><h3>Declared memory groups</h3><pre style=""><code class='codeblock'>group request<span class='moth-code-delimiter'>:</span>
+    parsed <span class='moth-code-nominal'>ParsedPost</span> into request <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_post</span><span class='moth-code-delimiter'>(</span>post<span class='moth-code-delimiter'>)</span>
+    html <span class='moth-code-type'>String</span> into request <span class='moth-code-operator'>=</span> <span class='moth-code-function'>render_post</span><span class='moth-code-delimiter'>(</span>parsed<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>into group_name</code> appears after access/type syntax and before <code>=</code>. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. Everything in a group is released together when the group exits, never individually. A group is also the only place a program may build a reference cycle. V1 has no expression placement, extraction or unrestricted group transfer.</p><h2>Numbers and operators</h2><p>Current numeric types:</p><ul><li><code>Int</code>: signed 32-bit integer</li><li><code>Float</code>: finite IEEE-754 <code>f64</code>. <code>NaN</code> and infinities are invalid</li></ul><pre style=""><code class='codeblock'>count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
+ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span></code></pre><p>Whole literals naturally infer <code>Int</code>. Decimal literals infer <code>Float</code>. Exponents use lowercase <code>e</code>. Uppercase <code>E</code>, unary <code>+</code> and spaced negation such as <code>- count</code> are invalid.</p><h3>Number and Byte</h3><ul><li><code>Number</code> and <code>Number0</code>: arbitrary-precision scale-zero integers</li><li><code>Number1</code> through <code>Number256</code>: fixed-scale arbitrary-precision decimals</li><li><code>Byte</code>: unsigned <code>0..255</code> scaffold. Broader runtime semantics remain unsettled</li></ul><pre style=""><code class='codeblock'>large <span class='moth-code-nominal'>Number</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1000000000000000000000</span>
+price <span class='moth-code-nominal'>Number2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>12.50</span>
+byte <span class='moth-code-nominal'>Byte</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>255</span></code></pre><p>A receiving <code>NumberN</code> context requires an exact literal. <code>price Number2 = 1.239</code> is invalid rather than rounded.</p><p>Arithmetic rules:</p><ul><li><code>Int / Int -&gt; Float</code>, while <code>Int // Int -&gt; Int</code></li><li>mixed <code>Int</code> and <code>Float</code> arithmetic produces <code>Float</code></li><li><code>NumberN</code> combines with the same scale or <code>Int</code>. Different scales need <code>cast</code></li><li><code>NumberN</code> and <code>Float</code> do not mix</li><li>positive-scale <code>NumberN</code> uses <code>/</code> and <code>%</code>. Scale zero uses <code>//</code> and <code>%</code></li><li><code>NumberN ^ Int</code> requires a non-negative exponent</li><li>positive-scale multiply, divide and exponentiation round half to even per operation</li><li><code>^</code> is right-associative</li></ul><p>Numeric operations are checked. Statically known failure is a diagnostic. Supported runtime failure enters builtin <code>Error!</code> only when that is the function&#39;s final error slot. Otherwise it traps.</p><p>Precedence: unary <code>not</code>/<code>-</code>, <code>^</code>, <code>* / // %</code>, <code>+ -</code>, comparisons, <code>and</code>, <code>or</code>.</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> right
+ready <span class='moth-code-operator'>=</span> has_input <span class='moth-code-operator'>and</span> is_valid
+blocked <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>not</span> ready</code></pre><h2>Explicit casts</h2><p><code>cast</code> takes its target from the immediate typed receiving boundary:</p><pre style=""><code class='codeblock'>ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-number'>3</span>
+fallback <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> text <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+label <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> value</code></pre><p>Propagation needs a complete function context:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_count</span> <span class='moth-code-delimiter'>|</span>text <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> text
+    <span class='moth-code-keyword'>return</span> count
+<span class='moth-code-delimiter'>;</span></code></pre><p>Forms:</p><pre style=""><code class='codeblock'>value <span class='moth-code-nominal'>Target</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> expression
+value <span class='moth-code-nominal'>Target</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> expression
 
-if maybe_name is:
-    "Priya" =&gt; io.line("admin")
-    |name| =&gt; io.line(name)
-    none =&gt; io.line("guest")
-;
-</code></pre>
-<p>An option match is exhaustive without <code>else =&gt;</code> only when it contains both an unguarded <code>none</code> arm and an unguarded <code>|name|</code> present-value capture. Options support equality when their inner type supports equality.</p>
-<h2>Errors, propagation and recovery</h2>
-<p>A fallible function has one final <code>!</code> return slot:</p>
-<pre><code class="language-moth">MissingName #Error = Error("Missing name", 404)
+value <span class='moth-code-nominal'>Target</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> expression <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span>err<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> fallback
+<span class='moth-code-delimiter'>;</span></code></pre><p>Rules:</p><ul><li>Plain <code>cast</code> requires infallible evidence.</li><li><code>cast!</code> requires the enclosing function&#39;s final error slot to be builtin <code>Error!</code>.</li><li><code>cast ... catch</code> handles only cast failure.</li><li><code>cast! ... catch</code> is invalid.</li><li>Same-type casts are invalid.</li><li>Generic inference does not look through <code>cast</code>.</li><li>Scalar conversion constructors such as <code>Int(value)</code> and <code>String(value)</code> are invalid.</li><li><code>NumberN</code> scale widening is exact and infallible. Narrowing is exact-or-fail and never rounds.</li><li><code>Float &lt;-&gt; NumberN</code> has no accepted helper name or lossy conversion policy yet. Do not invent one.</li><li>Numeric text casts consume the whole string and reject surrounding whitespace, uppercase <code>E</code>, <code>NaN</code> and infinity spellings.</li><li>Same-file nominal types may provide compiler-owned cast evidence for supported builtin targets. Users cannot create new cast target families.</li></ul><h2>Functions and calls</h2><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span>, punctuation <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;!&quot;</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>[</span>punctuation<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span>
 
-load_name |id String| -&gt; String, Error!:
-    if id is "":
-        return! MissingName
-    ;
+message <span class='moth-code-operator'>=</span> <span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>)</span>
+custom <span class='moth-code-operator'>=</span> <span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Rob&quot;</span>, punctuation <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;?&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>Parameters use <code>|...|</code>. No parameters use <code>||</code>. Omit <code>-&gt;</code> when there are no success values. Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults. Host functions and compiler-owned builtin members are positional-only.</p><p>Mutable parameters require <code>~place</code> for existing storage, but accept fresh rvalues plainly:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>increment</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-operator'>~</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-delimiter'>;</span>
 
-    return "Priya"
-;
-</code></pre>
-<p>Builtin <code>Error</code> exposes <code>message String</code> and <code>code Int = 0</code>. A constant may store a reusable value. Runtime construction may use dynamic text.</p>
-<pre><code class="language-moth">load_page |id String| -&gt; String, Error!:
-    name = load_name(id)!
-    return [: Hello [name]]
-;
+count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>count<span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>increment</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span><span class='moth-code-delimiter'>)</span></code></pre><p>Mutable receivers always require an existing mutable place.</p><p>Multiple returns are not tuples:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>pair</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-number'>2</span>
+<span class='moth-code-delimiter'>;</span>
 
-name = load_name(id) catch |err|:
-    io.warn(err.message)
-    then "guest"
-;
-</code></pre>
-<p><code>return!</code> returns failure, postfix <code>!</code> propagates and <code>catch</code> recovers. A multi-success handler produces matching arity:</p>
-<pre><code class="language-moth">name, score = load_user(id) catch |err|:
-    io.warn(err.message)
-    then "guest", 0.0
-;
-</code></pre>
-<p>An error-only function may fall through successfully. Custom error slots use ordinary nominal types. Postfix <code>!</code> requires an exactly compatible caller error slot. Convert error types explicitly with <code>catch</code> and <code>return!</code>.</p>
-<p><code>Error!</code> is not a first-class <code>Result</code>. Define a choice for explicit result-like domain values.</p>
-<h3>Assertions</h3>
-<pre><code class="language-moth">assert(index &lt; items.length())
-assert(index &lt; items.length(), "index must be in bounds")
-assert(false, "unimplemented path")
-</code></pre>
-<p><code>assert</code> is statement-only and always checked. Its optional message is a <code>String?</code> expression that defaults to <code>none</code>; named and positional arguments use ordinary call rules. Failure is unrecoverable. <code>assert(false)</code> is statically terminal. A literal-<code>true</code> message is fully type/generic/evidence checked and normalized, then discarded before HIR, so it publishes no TIR, runtime handoff, reactive metadata, generated request or executable fact. Message construction cannot escape its evaluation through <code>!</code>, <code>?</code>, <code>return</code>, <code>break</code> or <code>continue</code>. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts unreachable literal-true runtime messages but currently rejects reachable runtime construction.</p>
-<h2><code>if</code>, matching and value-producing blocks</h2>
-<p>Statement <code>if</code>:</p>
-<pre><code class="language-moth">if ready:
-    io.line("ready")
-else
-    io.line("waiting")
-;
-</code></pre>
-<p>A compile-time-known Bool can specialise this ordinary <code>if</code> after both branches are frontend-valid;
-the selected lexical scope remains intact and inactive executable work does not reach HIR. Runtime
-conditions remain runtime branches.</p>
-<pre><code class="language-moth">enabled #= false
+name, count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>pair</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>Receive them through matching multi-bind, return or value-producing syntax. General closure/function-value systems are outside scope. Narrow named function references remain design pending.</p><h2>Options: <code>T?</code>, <code>none</code> and postfix <code>?</code></h2><p><code>T?</code> is an optional value. <code>none</code> needs an immediate optional receiving context.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>find_name</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> id <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-literal'>none</span>
+    <span class='moth-code-delimiter'>;</span>
 
-if enabled:
-    perform_optional_work()
-;
-</code></pre>
-<p>There is no statement-level <code>else if</code>. Nest another <code>if</code>.</p>
-<p>Full match:</p>
-<pre><code class="language-moth">if value is:
-    &lt; 0 =&gt; io.line("negative")
-    0 =&gt; io.line("zero")
-    else =&gt; io.line("positive")
-;
-</code></pre>
-<p>Patterns include literals, relational scalars, choice variants/payloads and option captures. Guards follow the pattern:</p>
-<pre><code class="language-moth">Response ::
-    Pending | retry_count Int, message String |,
-    Complete,
-;
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A <code>T</code> value may be used where <code>T?</code> is expected. Optional values do not unwrap implicitly.</p><p>Postfix <code>?</code> unwraps a present value or immediately returns <code>none</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>load_label</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span><span class='moth-code-delimiter'>:</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-function'>find_name</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>?</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>User</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Postfix <code>?</code> requires an enclosing function with exactly one compatible optional success return slot. It cannot be combined with <code>catch</code>.</p><p>Inspect options explicitly:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span> <span class='moth-code-keyword'>then</span> name <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;guest&quot;</span>
 
-response = Response::Pending(2, "offline")
+label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> name
+<span class='moth-code-keyword'>else</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+<span class='moth-code-delimiter'>;</span>
 
-if response is:
-    Pending(retry_count, message as pending_message) if retry_count &gt; 0 =&gt;
-        io.warn(pending_message)
-    Complete =&gt; io.line("done")
-    else =&gt;
-;
-</code></pre>
-<p>Payload captures list every field in declaration order. <code>as</code> renames only the local binding. Arms have no colon or individual semicolon. <code>else =&gt;</code> is the only catch-all, <code>_ =&gt;</code> is invalid and guarded choice matches need <code>else =&gt;</code>.</p>
-<p>Value-producing forms send values with <code>then</code>:</p>
-<pre><code class="language-moth">label = if ready then "ready" else "waiting"
+<span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-literal'>none</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;missing&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-label = if maybe_name is |name|:
-    then name
-else
-    then "guest"
-;
+<span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;admin&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>name<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-literal'>none</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;guest&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>An option match is exhaustive without <code>else =&gt;</code> only when it contains both an unguarded <code>none</code> arm and an unguarded <code>|name|</code> present-value capture. Options support equality when their inner type supports equality.</p><h2>Errors, propagation and recovery</h2><p>A fallible function has one final <code>!</code> return slot:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>MissingName</span> <span class='moth-code-operator'>#</span><span class='moth-code-type'>Error</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Missing name&quot;</span>, <span class='moth-code-number'>404</span><span class='moth-code-delimiter'>)</span>
 
-status = "ready"
-label = if status is:
-    "ready" =&gt; then "ready"
-    "failed" =&gt; then "failed"
-    else =&gt; then "other"
-;
-</code></pre>
-<p>They work only at closed receiving declarations, assignments, multi-binds and returns. Nested <code>then</code> receivers are deferred. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver's arity and types. Mixed producing and terminating paths are complete; a real fallthrough path is rejected.</p>
-<h2>Loops</h2>
-<p>Moth uses one <code>loop</code> keyword.</p>
-<p>Conditional loop:</p>
-<pre><code class="language-moth">count ~= 0
+<span class='moth-code-function'>load_name</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>if</span> id <span class='moth-code-operator'>is</span> <span class='moth-code-string'>&quot;&quot;</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return!</span> <span class='moth-code-nominal'>MissingName</span>
+    <span class='moth-code-delimiter'>;</span>
 
-loop count &lt; 3:
-    io.line([: [count]])
-    count += 1
-;
-</code></pre>
-<p>Collection loops may omit bindings or bind the item and optional zero-based index:</p>
-<pre><code class="language-moth">count ~= 0
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Builtin <code>Error</code> exposes <code>message String</code> and <code>code Int = 0</code>. A constant may store a reusable value. Runtime construction may use dynamic text.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>load_page</span> <span class='moth-code-delimiter'>|</span>id <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_name</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span>
 
-loop items:
-    count += 1
-;
+name <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_name</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span>err<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>warn</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p><code>return!</code> returns failure, postfix <code>!</code> propagates and <code>catch</code> recovers. A multi-success handler produces matching arity:</p><pre style=""><code class='codeblock'>name, score <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_user</span><span class='moth-code-delimiter'>(</span>id<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span>err<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>warn</span><span class='moth-code-delimiter'>(</span>err.message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>, <span class='moth-code-number'>0.0</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>An error-only function may fall through successfully. Custom error slots use ordinary nominal types. Postfix <code>!</code> requires an exactly compatible caller error slot. Convert error types explicitly with <code>catch</code> and <code>return!</code>.</p><p><code>Error!</code> is not a first-class <code>Result</code>. Define a choice for explicit result-like domain values.</p><h3>Assertions</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>index <span class='moth-code-operator'>&lt;</span> items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>, <span class='moth-code-string'>&quot;index must be in bounds&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-literal'>false</span>, <span class='moth-code-string'>&quot;unimplemented backend path&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p><code>assert</code> is statement-only and always checked. Parentheses are required. Failure is unrecoverable, and <code>assert(false)</code> is statically terminal.</p><p>The optional message is a <code>String?</code> expression defaulting to <code>none</code>, and <code>none</code> selects the default text <code>&quot;assertion failed&quot;</code>. Moth does not implicitly stringify other types. The message is fully checked even when the condition folds to <code>true</code>, but is evaluated only on the failure edge, so it is not a reactive sink. Message construction cannot escape through <code>!</code>, <code>?</code>, <code>return</code>, <code>break</code> or <code>continue</code>; handle fallible work before the assertion and pass its infallible value.</p><h2><code>if</code>, matching and value-producing blocks</h2><p>Statement <code>if</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> ready<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;ready&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-keyword'>else</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;waiting&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A compile-time-known Bool can specialise this ordinary <code>if</code> after both branches are frontend-valid; the selected lexical scope remains intact and inactive executable work does not reach HIR. Runtime conditions remain runtime branches.</p><pre style=""><code class='codeblock'>enabled <span class='moth-code-operator'>#=</span> <span class='moth-code-literal'>false</span>
 
-loop items |item, index|:
-    io.line([: [index]: [item]])
-;
-</code></pre>
-<p>Collection loops capture the source and its length once before iteration. They operate on Moth collections, not a general iterable protocol. Maps are not collection-loop sources.</p>
-<p>Range loop:</p>
-<pre><code class="language-moth">loop 0 to 10 by 2 |value, index|:
-    io.line([: [index]: [value]])
-;
-</code></pre>
-<ul>
-<li><code>to</code> excludes the end. <code>to &amp;</code> includes it.</li>
-<li><code>loop to n</code> starts at <code>0</code>.</li>
-<li>Direction follows the bounds. <code>by</code> supplies a positive magnitude.</li>
-<li>A literal zero step is a diagnostic. A dynamic zero step fails before the first iteration.</li>
-<li>Any range using <code>Float</code> requires an explicit <code>by</code>.</li>
-<li>Start, end and explicit step expressions are evaluated once from left to right.</li>
-<li><code>break</code> and <code>continue</code> target the nearest ordinary loop.</li>
-</ul>
-<h2>Structs and receiver methods</h2>
-<pre><code class="language-moth">Person = |
-    name String,
-    age Int = 0,
-|
+<span class='moth-code-keyword'>if</span> enabled<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>perform_optional_work</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>There is no statement-level <code>else if</code>. Nest another <code>if</code>.</p><p>Full match:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> value <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>0</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;negative&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-number'>0</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;zero&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>else</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;positive&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Patterns include literals, relational scalars, choice variants/payloads and option captures. Guards follow the pattern:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Response</span> <span class='moth-code-operator'>::</span>
+    <span class='moth-code-nominal'>Pending</span> <span class='moth-code-delimiter'>|</span> retry_count <span class='moth-code-type'>Int</span>, message <span class='moth-code-type'>String</span> <span class='moth-code-delimiter'>|</span>,
+    <span class='moth-code-nominal'>Complete</span>,
+<span class='moth-code-delimiter'>;</span>
 
-person ~= Person(name = "Priya", age = 30)
-person.age += 1
-</code></pre>
-<p>Structs are nominal. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.</p>
-<p>A receiver method is a top-level function whose first parameter is <code>this</code>:</p>
-<pre><code class="language-moth">birthday |this ~Person|:
-    this.age += 1
-;
+response <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Response</span><span class='moth-code-operator'>::</span><span class='moth-code-nominal'>Pending</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>2</span>, <span class='moth-code-string'>&quot;offline&quot;</span><span class='moth-code-delimiter'>)</span>
 
-label |this Person| -&gt; String:
-    return [: [this.name], age [this.age]]
-;
+<span class='moth-code-keyword'>if</span> response <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Pending</span><span class='moth-code-delimiter'>(</span>retry_count, message <span class='moth-code-keyword'>as</span> pending_message<span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>if</span> retry_count <span class='moth-code-operator'>&gt;</span> <span class='moth-code-number'>0</span> <span class='moth-code-operator'>=&gt;</span>
+        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>warn</span><span class='moth-code-delimiter'>(</span>pending_message<span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-nominal'>Complete</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;done&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>else</span> <span class='moth-code-operator'>=&gt;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Payload captures list every field in declaration order. <code>as</code> renames only the local binding. Arms have no colon or individual semicolon. <code>else =&gt;</code> is the only catch-all, <code>_ =&gt;</code> is invalid and guarded choice matches need <code>else =&gt;</code>.</p><p>Value-producing forms send values with <code>then</code>:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> ready <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;ready&quot;</span> <span class='moth-code-keyword'>else</span> <span class='moth-code-string'>&quot;waiting&quot;</span>
 
-~person.birthday()
-text = person.label()
-</code></pre>
-<p><code>this T</code> is shared. <code>this ~T</code> is mutable. Mutable receiver calls need <code>~place.method(...)</code>. Source methods live in the same file as their nominal struct or choice and cannot extend types owned elsewhere. Methods remain attached to the type and are not imported separately.</p>
-<p>Aligned generic receiver methods are supported:</p>
-<pre><code class="language-moth">Box type A = |
-    value A,
-|
+label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>then</span> name
+<span class='moth-code-keyword'>else</span>
+    <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+<span class='moth-code-delimiter'>;</span>
 
-get type A |this Box of A| -&gt; A:
-    return this.value
-;
-</code></pre>
-<p>Methods specialised to one concrete instance are invalid.</p>
-<h3>Runtime anonymous records - accepted deferred</h3>
-<pre><code class="language-moth">point = |
-    x = 10,
-    y = 20,
-|
+status <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;ready&quot;</span>
+label <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>if</span> status <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-string'>&quot;ready&quot;</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;ready&quot;</span>
+    <span class='moth-code-string'>&quot;failed&quot;</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;failed&quot;</span>
+    <span class='moth-code-keyword'>else</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;other&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>They work only at closed receiving declarations, assignments, multi-binds and returns. Nested <code>then</code> receivers are deferred. They are not general call, operator, constructor, collection or template expressions. Every producing path matches the receiver&#39;s arity and types. Mixed producing and terminating paths are complete; a real fallthrough path is rejected.</p><h2>Loops</h2><p>Moth uses one <code>loop</code> keyword.</p><p>Conditional loop:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>
 
-x = point.x
-</code></pre>
-<p>Each literal site creates a distinct hidden nominal type. It supports local binding, fields, ordinary access and <code>copy</code>, but has no source-visible type name, constructor, methods or conformance. It cannot enter signatures, returns, aliases, public surfaces, named aggregate fields or trait evidence. The first implementation also rejects collection/map storage and generic arguments. Wider local storage is unsettled.</p>
-<h2>Choices</h2>
-<p>Choices are nominal tagged unions:</p>
-<pre><code class="language-moth">Status ::
-    Ready,
-    Loading | progress Float |,
-    Failed | message String, code Int |,
-;
+<span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Collection loops may omit bindings or bind the item and optional zero-based index:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>
 
-ready = Status::Ready
-failed = Status::Failed(message = "offline", code = 503)
-</code></pre>
-<p>Unit variants are values without <code>()</code>. Payload variants use constructor arguments. Payload fields have no defaults and are immutable.</p>
-<p>Pattern matching is the supported payload-access form:</p>
-<pre><code class="language-moth">if status is:
-    Ready =&gt; io.line("ready")
-    Loading(progress) =&gt; io.line([: [progress]%])
-    Failed(message, code) =&gt; io.error([: [code]: [message]])
-;
-</code></pre>
-<p>Direct payload field access with narrowing, nested payload patterns and recursive choices are accepted deferred work, but their complete source contracts are not yet documented. Do not infer unrestricted <code>status.message</code> access or nested pattern syntax.</p>
-<p>Choice equality is available only when every possible payload type supports equality.</p>
-<h2>Collections</h2>
-<pre><code class="language-moth">names ~= {"Priya", "Rob"}
-empty ~{Int} = {}
-fixed ~{3 Int} = {10, 20}
+<span class='moth-code-keyword'>loop</span> items<span class='moth-code-delimiter'>:</span>
+    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-delimiter'>;</span>
 
-capacity #Int = 4
-scratch ~{capacity String} = {}
-labels {capacity} = {"a", "b"}
-</code></pre>
-<p><code>{T}</code> is growable. <code>{N T}</code> has fixed capacity <code>N</code>, which is part of type identity. Capacity is a positive literal or bare visible <code>#Int</code> constant. Empty literals need a receiving type, and an empty fixed binding must be mutable. Collections have no indexing or builtin equality.</p>
-<pre><code class="language-moth">~names.push("Emmy")
-first = names.get(0) catch then "guest"
-~names.set(0, "Huw") catch:
-    io.error("invalid index")
-;
-removed = ~names.remove(1) catch then "guest"
-count = names.length()
-</code></pre>
-<p>Accepted end state: growable <code>push</code> and <code>length()</code> are infallible. <code>get</code>, <code>set</code>, fixed <code>push</code> and <code>remove</code> are fallible. Growable allocation exhaustion traps. Fixed <code>push</code> handles full capacity with <code>catch</code> or postfix <code>!</code>. The push split is accepted deferred until its plan lands.</p>
-<h2>Hash maps</h2>
-<pre><code class="language-moth">scores ~{String = Int} = {
-    "Priya" = 10,
-    "Rob" = 8,
-}
+<span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>item<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Collection loops capture the source and its length once before iteration. They operate on Moth collections, not a general iterable protocol. Maps are not collection-loop sources.</p><p>Range loop:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>2</span> <span class='moth-code-delimiter'>|</span>value, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>value<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><ul><li><code>to</code> excludes the end. <code>to &amp;</code> includes it.</li><li><code>loop to n</code> starts at <code>0</code>.</li><li>Direction follows the bounds. <code>by</code> supplies a positive magnitude.</li><li>A literal zero step is a diagnostic. A dynamic zero step fails before the first iteration.</li><li>Any range using <code>Float</code> requires an explicit <code>by</code>.</li><li>Start, end and explicit step expressions are evaluated once from left to right.</li><li><code>break</code> and <code>continue</code> target the nearest ordinary loop.</li></ul><h2>Structs and receiver methods</h2><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Person</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    name <span class='moth-code-type'>String</span>,
+    age <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
+<span class='moth-code-delimiter'>|</span>
 
-score = scores.get("Priya") catch then 0
+person <span class='moth-code-operator'>~=</span> <span class='moth-code-nominal'>Person</span><span class='moth-code-delimiter'>(</span>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>, age <span class='moth-code-operator'>=</span> <span class='moth-code-number'>30</span><span class='moth-code-delimiter'>)</span>
+person.age <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span></code></pre><p>Structs are nominal. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.</p><p>A receiver method is a top-level function whose first parameter is <code>this</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>birthday</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Person</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>this</span>.age <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-delimiter'>;</span>
 
-~scores.set("Emmy", 12) catch:
-    io.error("set failed")
-;
+<span class='moth-code-function'>label</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Person</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>this</span>.name<span class='moth-code-delimiter'>]</span>, age <span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>this</span>.age<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span>
 
-found = scores.contains("Rob")
-count = scores.length
-removed = ~scores.remove("Rob") catch then 0
-~scores.clear()
-</code></pre>
-<ul>
-<li><code>{Key = Value}</code> is a map type. <code>{key = value}</code> is a map literal.</li>
-<li>Empty maps need an explicit map type.</li>
-<li>Maps preserve insertion order. Replacing a value does not move its entry.</li>
-<li>Builtin keys are limited to <code>String</code>, <code>Int</code>, <code>Bool</code> and <code>Char</code>.</li>
-<li><code>get</code>, <code>set</code> and <code>remove</code> are fallible.</li>
-<li><code>contains</code>, read-only <code>length</code> and <code>clear</code> are infallible.</li>
-<li><code>get</code> returns shared access to the stored value. The map cannot mutate while that alias remains live.</li>
-<li>Maps have no indexing, mutable entry APIs, fixed-capacity form, equality, builtin sets or user-defined key/hash policy.</li>
-<li>Maps are not collection-loop sources. Read-only map iteration remains a possible deferred follow-up with no syntax yet.</li>
-</ul>
-<h2>Compile-time records and const templates</h2>
-<h3>Anonymous const records - accepted deferred</h3>
-<p>An anonymous record in a compile-time receiving context is a field-access-only const value:</p>
-<pre><code class="language-moth">metadata #= |
-    channel = "alpha",
-    nested = |
-        enabled = true,
-    |,
-|
+<span class='moth-code-operator'>~</span>person.<span class='moth-code-function'>birthday</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+text <span class='moth-code-operator'>=</span> person.<span class='moth-code-function'>label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p><code>this T</code> is shared. <code>this ~T</code> is mutable. Mutable receiver calls need <code>~place.method(...)</code>. Source methods live in the same file as their nominal struct or choice and cannot extend types owned elsewhere. Methods remain attached to the type and are not imported separately.</p><p>Aligned generic receiver methods are supported:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-nominal'>A</span>,
+<span class='moth-code-delimiter'>|</span>
 
-channel #= metadata.channel
-</code></pre>
-<p>Every field must fully fold. Const records may nest and may be exported when every reachable field is representable in the public folded-value vocabulary. The complete record is not a runtime value: it cannot be passed, returned, stored in runtime data or used through receiver methods.</p>
-<p>A fully folded named struct constant may also act as a data-only const record.</p>
-<h3>Const templates</h3>
-<p>A constant may store a folded template string:</p>
-<pre><code class="language-moth">site_name #= "Moth"
+<span class='moth-code-function'>get</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.value
+<span class='moth-code-delimiter'>;</span></code></pre><p>Methods specialised to one concrete instance are invalid.</p><h3>Runtime anonymous records</h3><pre style=""><code class='codeblock'>point <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>,
+    y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span>,
+<span class='moth-code-delimiter'>|</span>
 
-heading #= [$md:
-    # [site_name]
-]
-</code></pre>
-<p>A direct top-level const fragment uses <code>#[...]</code>:</p>
-<pre><code class="language-moth">#[$md:
-    # Compile-time page fragment
-]
-</code></pre>
-<p>The direct form is valid only as entry-selected top-level fragment syntax and must fully fold. It contributes page content but does not become runtime HIR.</p>
-<p>Const control flow keeps the same template shape:</p>
-<pre><code class="language-moth">#[if show_heading:
-    Visible
-[else]
-    Hidden
-]
+x <span class='moth-code-operator'>=</span> point.x</code></pre><p>Each literal site creates a distinct hidden nominal type. It supports local binding, fields, ordinary access and <code>copy</code>, but has no source-visible type name, constructor, methods or conformance. It cannot enter signatures, returns, aliases, public surfaces, named aggregate fields or trait evidence. The first implementation also rejects collection/map storage and generic arguments. Wider local storage is unsettled.</p><h2>Choices</h2><p>Choices are nominal tagged unions:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Status</span> <span class='moth-code-operator'>::</span>
+    <span class='moth-code-nominal'>Ready</span>,
+    <span class='moth-code-nominal'>Loading</span> <span class='moth-code-delimiter'>|</span> progress <span class='moth-code-type'>Float</span> <span class='moth-code-delimiter'>|</span>,
+    <span class='moth-code-nominal'>Failed</span> <span class='moth-code-delimiter'>|</span> message <span class='moth-code-type'>String</span>, code <span class='moth-code-type'>Int</span> <span class='moth-code-delimiter'>|</span>,
+<span class='moth-code-delimiter'>;</span>
 
-#[loop items |item|:
-    [item]
-]
-</code></pre>
-<p>Every required branch/body is validated. Const loops are subject to the project iteration limit.</p>
-<h2>Type aliases</h2>
-<p>Aliases are transparent compile-time names, not new nominal types:</p>
-<pre><code class="language-moth">Box type A = |
-    value A,
-|
+ready <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Status</span><span class='moth-code-operator'>::</span><span class='moth-code-nominal'>Ready</span>
+failed <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Status</span><span class='moth-code-operator'>::</span><span class='moth-code-nominal'>Failed</span><span class='moth-code-delimiter'>(</span>message <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;offline&quot;</span>, code <span class='moth-code-operator'>=</span> <span class='moth-code-number'>503</span><span class='moth-code-delimiter'>)</span></code></pre><p>Unit variants are values without <code>()</code>. Payload variants use constructor arguments. Payload fields have no defaults and are immutable.</p><p>Pattern matching is the supported payload-access form:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> status <span class='moth-code-operator'>is</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Ready</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;ready&quot;</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-nominal'>Loading</span><span class='moth-code-delimiter'>(</span>progress<span class='moth-code-delimiter'>)</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>progress<span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>%</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-nominal'>Failed</span><span class='moth-code-delimiter'>(</span>message, code<span class='moth-code-delimiter'>)</span> <span class='moth-code-operator'>=&gt;</span> <span class='moth-code-type'>io</span>.<span class='moth-code-function'>error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>code<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>message<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Direct payload field access with narrowing, nested payload patterns and recursive choices are design pending. Do not infer unrestricted <code>status.message</code> access or nested pattern syntax.</p><p>Choice equality is available only when every possible payload type supports equality.</p><h2>Collections</h2><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>}</span>
+empty <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+fixed <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-number'>3</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>}</span>
 
-UserId as Int
-Names as {String}
-MaybeName as String?
-StringBox as Box of String
-</code></pre>
-<p><code>UserId</code> and <code>Int</code> remain interchangeable. An alias introduces no constructor. Construct a struct, choice or generic instance through its canonical nominal name.</p>
-<p>Use a wrapper struct when distinct identity matters:</p>
-<pre><code class="language-moth">UserId = |
-    value Int,
-|
-</code></pre>
-<p>A compact primitive-backed nominal wrapper or newtype syntax remains design pending. Do not invent one.</p>
-<h2>Generics</h2>
-<pre><code class="language-moth">identity type A |value A| -&gt; A:
-    return value
-;
+capacity <span class='moth-code-operator'>#</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span>
+scratch <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span>capacity <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+labels <span class='moth-code-delimiter'>{</span>capacity<span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;a&quot;</span>, <span class='moth-code-string'>&quot;b&quot;</span><span class='moth-code-delimiter'>}</span></code></pre><p><code>{T}</code> is growable. <code>{N T}</code> has fixed capacity <code>N</code>, which is part of type identity. Capacity is a positive literal or bare visible <code>#Int</code> constant. Empty literals need a receiving type, and an empty fixed binding must be mutable. Collections have no indexing or builtin equality.</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>~</span>names.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>)</span>
+first <span class='moth-code-operator'>=</span> names.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>0</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+<span class='moth-code-operator'>~</span>names.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>0</span>, <span class='moth-code-string'>&quot;Huw&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;invalid index&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>names.<span class='moth-code-function'>remove</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-string'>&quot;guest&quot;</span>
+count <span class='moth-code-operator'>=</span> names.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>Growable <code>push</code> and <code>length()</code> are infallible. <code>get</code>, <code>set</code>, fixed <code>push</code> and <code>remove</code> are fallible. Growable allocation exhaustion traps. Fixed <code>push</code> handles full capacity with <code>catch</code> or postfix <code>!</code>.</p><h2>Hash maps</h2><pre style=""><code class='codeblock'>scores <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-string'>&quot;Priya&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>,
+    <span class='moth-code-string'>&quot;Rob&quot;</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>8</span>,
+<span class='moth-code-delimiter'>}</span>
 
-Box type A = |
-    value A,
-|
+score <span class='moth-code-operator'>=</span> scores.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
 
-Maybe type A ::
-    Some | value A |,
-    None,
-;
-</code></pre>
-<p>Concrete types use <code>of</code>. Calls and constructors infer from immediate arguments and the immediate receiving type:</p>
-<pre><code class="language-moth">empty type A || -&gt; {A}:
-    return {}
-;
+<span class='moth-code-operator'>~</span>scores.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Emmy&quot;</span>, <span class='moth-code-number'>12</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;set failed&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-delimiter'>;</span>
 
-box Box of String = Box("Moth")
-value = identity(42)
-items {Int} = empty()
-</code></pre>
-<p>There is no explicit call-site type syntax. Inference does not use later mutation, later uses or distant outer calls.</p>
-<p>Nested inline <code>of</code> is invalid. Name the inner type:</p>
-<pre><code class="language-moth">Pair type A, B = |
-    first A,
-    second B,
-|
+found <span class='moth-code-operator'>=</span> scores.<span class='moth-code-function'>contains</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span>
+count <span class='moth-code-operator'>=</span> scores.length
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>scores.<span class='moth-code-function'>remove</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-operator'>~</span>scores.<span class='moth-code-function'>clear</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><ul><li><code>{Key = Value}</code> is a map type. <code>{key = value}</code> is a map literal.</li><li>Empty maps need an explicit map type.</li><li>Maps preserve insertion order. Replacing a value does not move its entry.</li><li>Builtin keys are limited to <code>String</code>, <code>Int</code>, <code>Bool</code> and <code>Char</code>.</li><li><code>get</code>, <code>set</code> and <code>remove</code> are fallible.</li><li><code>contains</code>, read-only <code>length</code> and <code>clear</code> are infallible.</li><li><code>get</code> returns shared access to the stored value. The map cannot mutate while that alias remains live.</li><li>Maps have no indexing, mutable entry APIs, fixed-capacity form, equality, builtin sets or user-defined key/hash policy.</li><li>Maps are not collection-loop sources. Read-only map iteration remains a possible deferred follow-up with no syntax yet.</li></ul><h2>Compile-time records and const templates</h2><h3>Anonymous const records</h3><p>An anonymous record in a compile-time receiving context is a field-access-only const value:</p><pre style=""><code class='codeblock'>metadata <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
+    channel <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;alpha&quot;</span>,
+    nested <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+        enabled <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>,
+    <span class='moth-code-delimiter'>|</span>,
+<span class='moth-code-delimiter'>|</span>
 
-StringIntPair as Pair of String, Int
-value Box of StringIntPair = Box(Pair("count", 3))
-</code></pre>
-<p>One inline application may appear as a collection element, such as <code>{Box of String}</code>.</p>
-<p>Unconstrained generic code may pass, return and store values, but cannot assume arithmetic, equality, fields, interpolation, IO or methods. Use trait bounds. Moth has no <code>where</code>, parameterised aliases, partial application, higher-kinded types, lifetime parameters or general const generics.</p>
-<h2>Traits and conformance</h2>
-<p>Traits are static nominal method contracts:</p>
-<pre><code class="language-moth">DISPLAY_TEXT must:
-    display |This| -&gt; String
-;
+channel <span class='moth-code-operator'>#=</span> metadata.channel</code></pre><p>Every field must fully fold. Const records may nest and may be exported when every reachable field is representable in the public folded-value vocabulary. The complete record is not a runtime value: it cannot be passed, returned, stored in runtime data or used through receiver methods.</p><p>A fully folded named struct constant may also act as a data-only const record.</p><h3>Const templates</h3><p>A constant may store a folded template string:</p><pre style=""><code class='codeblock'>site_name <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
 
-Label = |
-    text String,
-|
+heading <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$md</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>#</span> <span class='moth-code-delimiter'>[</span>site_name<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p>A direct top-level const fragment prefixes the template with <code>#</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$md</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>#</span> <span class='moth-code-nominal'>Compile</span><span class='moth-code-operator'>-</span>time page fragment
+<span class='moth-code-delimiter'>]</span></code></pre><p>The direct form is valid only as entry-selected top-level fragment syntax and must fully fold. It contributes page content but does not become runtime HIR.</p><p>Const control flow keeps the same template shape:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>if</span> show_heading<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Visible</span>
+<span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>else</span><span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-nominal'>Hidden</span>
+<span class='moth-code-delimiter'>]</span>
 
-display |this Label| -&gt; String:
-    return this.text
-;
+<span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-delimiter'>[</span>item<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p>Every required branch/body is validated. Const loops are subject to the project iteration limit.</p><h2>Type aliases</h2><p>Aliases are transparent compile-time names, not new nominal types:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-nominal'>A</span>,
+<span class='moth-code-delimiter'>|</span>
 
-Label must DISPLAY_TEXT
-</code></pre>
-<p>Requirement receivers use <code>This</code> or <code>~This</code>. A non-receiver <code>This</code> needs a name, such as <code>other This</code>. Concrete methods use lowercase <code>this</code>. Conformance is explicit, same-file and bodyless, with no semicolon. Traits are not value types.</p>
-<p>Generic bounds use <code>is</code>. <code>and</code> adds bounds to one parameter:</p>
-<pre><code class="language-moth">NAMED must:
-    name |This| -&gt; String
-;
+<span class='moth-code-nominal'>UserId</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-type'>Int</span>
+<span class='moth-code-nominal'>Names</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span>
+<span class='moth-code-nominal'>MaybeName</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span>
+<span class='moth-code-nominal'>StringBox</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span></code></pre><p><code>UserId</code> and <code>Int</code> remain interchangeable. An alias introduces no constructor. Construct a struct, choice or generic instance through its canonical nominal name.</p><p>Use a wrapper struct when distinct identity matters:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>UserId</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><p>A compact primitive-backed nominal wrapper or newtype syntax remains design pending. Do not invent one.</p><h2>Generics</h2><pre style=""><code class='codeblock'><span class='moth-code-function'>identity</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> value
+<span class='moth-code-delimiter'>;</span>
 
-render type Item is DISPLAY_TEXT and NAMED |item Item| -&gt; String:
-    return [item.name(), ": ", item.display()]
-;
-</code></pre>
-<p>Bound calls resolve statically to concrete methods.</p>
-<pre><code class="language-moth">READABLE must:
-;
+<span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    value <span class='moth-code-nominal'>A</span>,
+<span class='moth-code-delimiter'>|</span>
 
-WRITABLE must:
-;
+<span class='moth-code-nominal'>Maybe</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>::</span>
+    <span class='moth-code-nominal'>Some</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span>,
+    <span class='moth-code-type'>None</span>,
+<span class='moth-code-delimiter'>;</span></code></pre><p>Concrete types use <code>of</code>. Calls and constructors infer from immediate arguments and the immediate receiving type:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>empty</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-nominal'>A</span><span class='moth-code-delimiter'>}</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+<span class='moth-code-delimiter'>;</span>
 
-READABLE must not WRITABLE
-</code></pre>
-<p>This declares symmetric trait incompatibility. <code>Type must not TRAIT</code> is not negative conformance.</p>
-<p>Use choices for runtime heterogeneity. Moth has no trait objects, dynamic trait dispatch, default methods, associated items, inheritance, trait aliases, generic traits, blanket conformance or specialisation. Static non-method requirements and a broader builtin trait taxonomy remain accepted deferred work without final examples here.</p>
-<h2>Templates</h2>
-<p>Templates are <code>String</code> values:</p>
-<pre><code class="language-moth">message = [: Hello, [name].]
-content = [$md:
-    # Hello [name]
-]
-</code></pre>
-<p>Static templates fold. Runtime templates lower only needed work. A direct top-level template in an entry-selected root is a page fragment. A bound/returned template is not.</p>
-<table><thead><tr><th>Directive</th><th>Purpose</th></tr></thead><tbody>
-<tr><td><code>$slot</code>, <code>$insert</code></td><td>receive and contribute content</td></tr>
-<tr><td><code>$children</code>, <code>$fresh</code></td><td>wrap direct children or skip one</td></tr>
-<tr><td><code>$md</code>, <code>$raw</code></td><td>Markdown or preserved body text</td></tr>
-<tr><td><code>$note</code>, <code>$todo</code>, <code>$doc</code></td><td>comments/documentation</td></tr>
-<tr><td><code>$html</code>, <code>$css</code>, <code>$escape_html</code></td><td>HTML-builder formatting</td></tr>
-<tr><td><code>$code("language")</code></td><td>highlighted literal code</td></tr>
-</tbody></table>
-<p><code>$literal</code> is accepted deferred by the resource plan but is not yet in the canonical directive page. Formatter directives do not flow into nested children. <code>.mtf</code> children default to <code>$md</code>.</p>
-<p>Slots and wrappers:</p>
-<pre><code class="language-moth">card #= [:
-    &lt;h1&gt;[$slot("title")]&lt;/h1&gt;
-    &lt;section&gt;[$slot]&lt;/section&gt;
-]
+box <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Box</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-delimiter'>)</span>
+value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>identity</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>42</span><span class='moth-code-delimiter'>)</span>
+items <span class='moth-code-delimiter'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-function'>empty</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>There is no explicit call-site type syntax. Inference does not use later mutation, later uses or distant outer calls.</p><p>Nested inline <code>of</code> is invalid. Name the inner type:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Pair</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span>, <span class='moth-code-nominal'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    first <span class='moth-code-nominal'>A</span>,
+    second <span class='moth-code-nominal'>B</span>,
+<span class='moth-code-delimiter'>|</span>
 
-[card:
-    [$insert("title"): Welcome]
-    Hello, [name].
-]
-</code></pre>
-<p>Positional slots receive loose head contributions:</p>
-<pre><code class="language-moth">image #= [: &lt;img src="[$slot(1)]" alt="[$slot]"&gt;]
-[image, "logo.png": Moth logo]
-</code></pre>
-<p>Missing slots render empty and repeated slots replay content. Child wrappers are explicit:</p>
-<pre><code class="language-moth">list #= [$children([:&lt;li&gt;[$slot]&lt;/li&gt;]): &lt;ul&gt;[$slot]&lt;/ul&gt;]
-[list: [: one] [$fresh: [: two]]]
-</code></pre>
-<p><code>$children(...)</code> wraps direct children only. <code>$fresh</code> skips one immediate wrapper.</p>
-<p>Template control flow is the final head suffix:</p>
-<pre><code class="language-moth">[if maybe_name is |name|:
-    Hello [name]
-[else if use_fallback]
-    Hello fallback
-[else]
-    Hello guest
-]
+<span class='moth-code-nominal'>StringIntPair</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>Pair</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Int</span>
+value <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>StringIntPair</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Box</span><span class='moth-code-delimiter'>(</span><span class='moth-code-nominal'>Pair</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;count&quot;</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span></code></pre><p>One inline application may appear as a collection element, such as <code>{Box of String}</code>.</p><p>Unconstrained generic code may pass, return and store values, but cannot assume arithmetic, equality, fields, interpolation, IO or methods. Use trait bounds. Moth has no <code>where</code>, parameterised aliases, partial application, higher-kinded types, lifetime parameters or general const generics.</p><h2>Traits and conformance</h2><p>Traits are static nominal method contracts:</p><pre style=""><code class='codeblock'><span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-[loop items |item, index|:
-    [index]: [item]
-]
-</code></pre>
-<p>Template <code>else if</code> is valid even though statement <code>else if</code> is not. Loops support structural <code>[break]</code> and <code>[continue]</code>. A loop-head wrapper wraps the aggregate once.</p>
-<p><code>$md</code> supports headings, paragraphs, lists, emphasis, links and single-backtick inline code. Links use <code>@./path (label)</code> or <code>@https://example.com (label)</code>. It has no fenced code blocks or pipe tables. Use <code>$code</code> for blocks.</p>
-<h2>Reactivity</h2>
-<p>Reactivity V1 is a constrained source, subscription and live-template sink model, not a closure system.</p>
-<pre><code class="language-moth">count $Int = 0
-ready $= false
-names ${String} = {"Priya"}
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    text <span class='moth-code-type'>String</span>,
+<span class='moth-code-delimiter'>|</span>
 
-count = count + 1
-~names.push("Rob")
-</code></pre>
-<p>A plain capture is a snapshot. <code>$(source)</code> records a live read-only dependency:</p>
-<pre><code class="language-moth">snapshot = [: Count: [count]]
-live_string = [: Count: [$(count)]]
-</code></pre>
-<p>The result remains <code>String</code>. Observable updates happen only at supported sinks. V1 supports a direct top-level HTML-JS runtime fragment:</p>
-<pre><code class="language-moth">count $Int = 0
-[: Count: [$(count)]]
-</code></pre>
-<p><code>io.line</code> and <code>assert</code> are not live sinks. HTML-Wasm is deferred.</p>
-<p>A subscription accepts one bare reactive source identifier, not a field path, call or expression. It is dependency metadata, not a mutable borrow or copy.</p>
-<pre><code class="language-moth">counter_view |count $Int| -&gt; String:
-    return [: Count: [$(count)]]
-;
-</code></pre>
-<p>Reactive parameters preserve source identity for reads/subscriptions, grant no mutation and have no defaults. Passing a source to ordinary <code>T</code> takes a snapshot. <code>$T</code> is not a wrapper type.</p>
-<p>Field/path and item subscriptions, expression tracking, derived values, events/actions/effects, <code>$bind(...)</code>, component messages, IO sinks, fine-grained DOM updates and keyed diffing remain design-incomplete.</p>
-<h2><code>.mtf</code> and <code>.md</code> content files</h2>
-<p>A <code>.mtf</code> file is the body of an implicit compile-time <code>$md</code> template. It exposes one generated constant, <code>content #String</code>.</p>
-<p>Bind it extensionlessly:</p>
-<pre><code class="language-moth">@docs/intro content as intro_content
+<span class='moth-code-function'>display</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-delimiter'>;</span>
 
-page = [: [intro_content]]
-</code></pre>
-<p>A <code>.mtf</code> file has no declarations, dependency clauses, frontmatter or runtime scope. It may use nested templates and a restricted compile-time scope supplied by its same-directory module root and the HTML builder.</p>
-<p>A plain <code>.md</code> file also exposes <code>content #String</code>, but has no Moth scope, interpolation or templates. It uses the HTML builder's CommonMark-compatible Markdown renderer with GFM extensions. Its links, images and raw HTML remain literal.</p>
-<p>Use:</p>
-<ul>
-<li><code>.moth</code> for code, composition, declarations and pages</li>
-<li><code>.mtf</code> for Moth-aware Markdown-first content</li>
-<li><code>.md</code> for plain Markdown content</li>
-</ul>
-<h2>Dependencies and aliases</h2>
-<p>There is no <code>import</code> keyword.</p>
-<pre><code class="language-moth">@core/math sin, cos, PI
-@components render as render_component, Button as UiButton
+<span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>DISPLAY_TEXT</span></code></pre><p>Requirement receivers use <code>This</code> or <code>~This</code>. A non-receiver <code>This</code> needs a name, such as <code>other This</code>. Concrete methods use lowercase <code>this</code>. Conformance is explicit, same-file and bodyless, with no semicolon. Traits are not value types.</p><p>Generic bounds use <code>is</code>. <code>and</code> adds bounds to one parameter:</p><pre style=""><code class='codeblock'><span class='moth-code-contract'>NAMED</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-function'>name</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>
+<span class='moth-code-delimiter'>;</span>
 
-@core/text as text
-@vendor/drawing.js as drawing
-</code></pre>
-<p>Direct selections create file-local names. Entry-level <code>as</code> aliases one selection. Clause-level <code>as</code> aliases the whole namespace and cannot combine with selections.</p>
-<p>The path and first selection share a physical line. A comma continues the clause. A trailing comma is invalid:</p>
-<pre><code class="language-moth">@core/math sin,
-    cos
-</code></pre>
-<p>Source namespaces are shallow field-access-only compile-time bindings, not runtime values. Binding-backed packages may expose nested namespaces such as <code>io.input</code>.</p>
-<p>Path rules:</p>
-<ul>
-<li>resolution starts at the declaring file's owning module root, not its directory</li>
-<li><code>.moth</code>, <code>.mtf</code> and <code>.md</code> dependencies omit the extension</li>
-<li>provider files such as annotated <code>.js</code> keep it</li>
-<li><code>@./</code>, <code>@/</code>, parent traversal and <code>@@</code> are invalid</li>
-<li>child modules and support packages stop traversal and expose only <code>export:</code></li>
-<li><code>@core/math/sin</code> is invalid. Select <code>sin</code> after <code>@core/math</code></li>
-<li>one clause resolves one provider. Selections are flat names</li>
-<li>source clauses bind registered roots and never acquire packages</li>
-</ul>
-<p>Aliases cannot shadow another visible name.</p>
-<h2>Resource paths and <code>Path</code> - accepted deferred</h2>
-<p>An explicit non-source extension in expression position creates a compile-time <code>Path</code>:</p>
-<pre><code class="language-moth">logo #= @assets/logo.svg
-font #Path = @assets/fonts/site.woff2
-icons #{Path} = {@assets/add.svg, @assets/remove.svg}
-</code></pre>
-<p>The path resolves from the owning module root to an existing regular file. It cannot use <code>@/</code>, <code>@./</code>, parent components or <code>@@</code>, and cannot be followed by selections. Source extensions such as <code>.moth</code>, <code>.mtf</code> and <code>.md</code> remain dependencies.</p>
-<p>V1 <code>Path</code> is compile-time-only. It may appear in constants, const records, compile-time collections, exports and templates. It is rejected in runtime bindings, signatures, runtime aggregates, options, choices, maps, generic applications, casts and comparisons.</p>
-<pre><code class="language-moth">logo #Path = @assets/logo.svg
+<span class='moth-code-function'>render</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>Item</span> <span class='moth-code-operator'>is</span> <span class='moth-code-contract'>DISPLAY_TEXT</span> <span class='moth-code-operator'>and</span> <span class='moth-code-contract'>NAMED</span> <span class='moth-code-delimiter'>|</span>item <span class='moth-code-nominal'>Item</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>item.<span class='moth-code-function'>name</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>, <span class='moth-code-string'>&quot;: &quot;</span>, item.<span class='moth-code-function'>display</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Bound calls resolve statically to concrete methods.</p><pre style=""><code class='codeblock'><span class='moth-code-contract'>READABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
 
-image #= [$html:
-    &lt;img src="[logo]" alt="Moth"&gt;
-]
-</code></pre>
-<p>The builder keeps the resource structural until output placement. In <code>.mtf</code>, use nested Moth template syntax such as <code>[@images/ownership.webp]</code>. Plain Markdown paths stay text.</p>
-<p>External, protocol-relative and site-root URLs are ordinary untracked strings. Extensionless resource escapes, resource roots outside <code>entry_root</code> and any wider Path-containing type surface remain unsettled.</p>
-<h2>Modules, exports and project-local packages</h2>
-<p>A module is rooted by one directory-scoped <code>@*.moth</code> or <code>+*.moth</code>. The suffix is cosmetic.</p>
-<pre><code class="language-text">project/
+<span class='moth-code-contract'>WRITABLE</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span>
+
+<span class='moth-code-contract'>READABLE</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-operator'>not</span> <span class='moth-code-contract'>WRITABLE</span></code></pre><p>This declares symmetric trait incompatibility. <code>Type must not TRAIT</code> is not negative conformance.</p><p>Use choices for runtime heterogeneity. Moth has no trait objects, dynamic trait dispatch, default methods, associated items, inheritance, trait aliases, generic traits, blanket conformance or specialisation. Static non-method requirements and a broader builtin trait taxonomy are design pending.</p><h2>Templates</h2><p>Templates are <code>String</code> values:</p><pre style=""><code class='codeblock'>message <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>.<span class='moth-code-delimiter'>]</span>
+content <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$md</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>#</span> <span class='moth-code-nominal'>Hello</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p>Static templates fold. Runtime templates lower only needed work. A direct top-level template in an entry-selected root is a page fragment. A bound/returned template is not.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> Directive</p></th><th scope="col" style=""><p> Purpose</p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>$slot</code>, <code>$insert</code></p></td> <td style=""><p> receive and contribute content</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>$children</code>, <code>$fresh</code></p></td> <td style=""><p> wrap direct children or skip one</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>$md</code>, <code>$raw</code></p></td> <td style=""><p> Markdown or preserved body text</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>$note</code>, <code>$todo</code>, <code>$doc</code></p></td> <td style=""><p> comments/documentation</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>$html</code>, <code>$css</code>, <code>$escape_html</code></p></td> <td style=""><p> HTML-builder formatting</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>$code(&quot;language&quot;)</code></p></td> <td style=""><p> highlighted literal code</p></td>
+        </tr>
+            
+</table><p>Formatter directives do not flow into nested children. <code>.mtf</code> children default to <code>$md</code>.</p><p>Slots and wrappers:</p><pre style=""><code class='codeblock'>card <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span>h1<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$slot</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>h1<span class='moth-code-operator'>&gt;</span>
+    <span class='moth-code-operator'>&lt;</span>section<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$slot</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>section<span class='moth-code-operator'>&gt;</span>
+<span class='moth-code-delimiter'>]</span>
+
+<span class='moth-code-delimiter'>[</span>card<span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$insert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;title&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Welcome</span><span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>.
+<span class='moth-code-delimiter'>]</span></code></pre><p>Positional slots receive loose head contributions:</p><pre style=""><code class='codeblock'>image <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot(1)]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[$slot]&quot;</span><span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>[</span>image, <span class='moth-code-string'>&quot;logo.png&quot;</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Moth</span> logo<span class='moth-code-delimiter'>]</span></code></pre><p>Missing slots render empty and repeated slots replay content. Child wrappers are explicit:</p><pre style=""><code class='codeblock'>list <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$children</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span><span class='moth-code-operator'>&lt;</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$slot</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>li<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-operator'>&lt;</span>ul<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$slot</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>ul<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>[</span>list<span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> one<span class='moth-code-delimiter'>]</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$fresh</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> two<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p><code>$children(...)</code> wraps direct children only. <code>$fresh</code> skips one immediate wrapper.</p><p>Template control flow is the final head suffix:</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>if</span> maybe_name <span class='moth-code-operator'>is</span> <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-nominal'>Hello</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>else</span> <span class='moth-code-keyword'>if</span> use_fallback<span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-nominal'>Hello</span> fallback
+<span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>else</span><span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-nominal'>Hello</span> guest
+<span class='moth-code-delimiter'>]</span>
+
+<span class='moth-code-delimiter'>[</span><span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>item<span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p>Template <code>else if</code> is valid even though statement <code>else if</code> is not. Loops support structural <code>[break]</code> and <code>[continue]</code>. A loop-head wrapper wraps the aggregate once.</p><p><code>$md</code> supports headings, paragraphs, lists, emphasis, links and single-backtick inline code. Links use <code>@./path (label)</code> or <code>@https://example.com (label)</code>. It has no fenced code blocks or pipe tables. Use <code>$code</code> for blocks.</p><h2>Reactivity</h2><p>Reactivity V1 is a constrained source, subscription and live-template sink model, not a closure system.</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+ready <span class='moth-code-operator'>$=</span> <span class='moth-code-literal'>false</span>
+names <span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>}</span>
+
+count <span class='moth-code-operator'>=</span> count <span class='moth-code-operator'>+</span> <span class='moth-code-number'>1</span>
+<span class='moth-code-operator'>~</span>names.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Rob&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>A plain capture is a snapshot. <code>$(source)</code> records a live read-only dependency:</p><pre style=""><code class='codeblock'>snapshot <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Count</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+live_string <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Count</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>(</span>count<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p>The result remains <code>String</code>. Observable updates happen only at supported sinks. V1 supports a direct top-level HTML-JS runtime fragment:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>
+<span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Count</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>(</span>count<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p><code>io.line</code> and <code>assert</code> are not live sinks. HTML-Wasm rejects reachable reactive runtime features.</p><p>A subscription accepts one bare reactive source identifier, not a field path, call or expression. It is dependency metadata, not a mutable borrow or copy.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>counter_view</span> <span class='moth-code-delimiter'>|</span>count <span class='moth-code-operator'>$</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Count</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>(</span>count<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Reactive parameters preserve source identity for reads/subscriptions, grant no mutation and have no defaults. Passing a source to ordinary <code>T</code> takes a snapshot. <code>$T</code> is not a wrapper type.</p><p>Field/path and item subscriptions, expression tracking, derived values, events/actions/effects, <code>$bind(...)</code>, component messages, IO sinks, fine-grained DOM updates and keyed diffing remain design-incomplete.</p><h2><code>.mtf</code> and <code>.md</code> content files</h2><p>A <code>.mtf</code> file is the body of an implicit compile-time <code>$md</code> template. It exposes one generated constant, <code>content #String</code>.</p><p>Bind it extensionlessly:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@docs/intro</span> <span class='moth-code-nominal'>content</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>intro_content</span>
+
+page <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>intro_content<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p>A <code>.mtf</code> file has no declarations, dependency clauses, frontmatter or runtime scope. It may use nested templates and a restricted compile-time scope supplied by its same-directory module root and the HTML builder.</p><p>A plain <code>.md</code> file also exposes <code>content #String</code>, but has no Moth scope, interpolation or templates. It uses the HTML builder&#39;s CommonMark-compatible Markdown renderer with GFM extensions. Its links, images and raw HTML remain literal.</p><p>Use:</p><ul><li><code>.moth</code> for code, composition, declarations and pages</li><li><code>.mtf</code> for Moth-aware Markdown-first content</li><li><code>.md</code> for plain Markdown content</li></ul><h2>Dependencies and aliases</h2><p>There is no <code>import</code> keyword.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/math</span> <span class='moth-code-nominal'>sin</span>, <span class='moth-code-nominal'>cos</span>, <span class='moth-code-nominal'>PI</span>
+<span class='moth-code-string'>@components</span> <span class='moth-code-nominal'>render</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>render_component</span>, <span class='moth-code-nominal'>Button</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>UiButton</span>
+
+<span class='moth-code-string'>@core/text</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>text</span>
+<span class='moth-code-string'>@vendor/drawing.js</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>drawing</span></code></pre><p>Direct selections create file-local names. Entry-level <code>as</code> aliases one selection. Clause-level <code>as</code> aliases the whole namespace and cannot combine with selections.</p><p>The path and first selection share a physical line. A comma continues the clause. A trailing comma is invalid:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/math</span> <span class='moth-code-nominal'>sin</span>,
+    <span class='moth-code-nominal'>cos</span></code></pre><p>Source namespaces are shallow field-access-only compile-time bindings, not runtime values. Binding-backed packages may expose nested namespaces such as <code>io.input</code>.</p><p>Path rules:</p><ul><li>resolution starts at the declaring file&#39;s owning module root, not its directory</li><li><code>.moth</code>, <code>.mtf</code> and <code>.md</code> dependencies omit the extension</li><li>provider files such as annotated <code>.js</code> keep it</li><li><code>@./</code>, <code>@/</code>, parent traversal and <code>@@</code> are invalid</li><li>child modules and support packages stop traversal and expose only <code>export:</code></li><li><code>@core/math/sin</code> is invalid. Select <code>sin</code> after <code>@core/math</code></li><li>one clause resolves one provider. Selections are flat names</li><li>source clauses bind registered roots and never acquire packages</li></ul><p>Aliases cannot shadow another visible name.</p><h2>Resource paths and <code>Path</code></h2><p>An explicit non-source extension in expression position creates a compile-time <code>Path</code>:</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>@assets/logo.svg</span>
+font <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@assets/fonts/site.woff2</span>
+icons <span class='moth-code-operator'>#</span><span class='moth-code-delimiter'>{</span><span class='moth-code-nominal'>Path</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>@assets/add.svg</span>, <span class='moth-code-string'>@assets/remove.svg</span><span class='moth-code-delimiter'>}</span></code></pre><p>The path resolves from the owning module root to an existing regular file. It cannot use <code>@/</code>, <code>@./</code>, parent components or <code>@@</code>, and cannot be followed by selections. Source extensions such as <code>.moth</code>, <code>.mtf</code> and <code>.md</code> remain dependencies.</p><p><code>Path</code> is compile-time-only. It may appear in constants, const records, compile-time collections, exports and templates. It is rejected in runtime bindings, signatures, runtime aggregates, options, choices, maps, generic applications, casts and comparisons.</p><pre style=""><code class='codeblock'>logo <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Path</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>@assets/logo.svg</span>
+
+image <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-operator'>&lt;</span>img src<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;[logo]&quot;</span> alt<span class='moth-code-operator'>=</span><span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-operator'>&gt;</span>
+<span class='moth-code-delimiter'>]</span></code></pre><p>The builder keeps the resource structural until output placement. In <code>.mtf</code>, use nested Moth template syntax such as <code>[@images/ownership.webp]</code>. Plain Markdown paths stay text.</p><p>External, protocol-relative and site-root URLs are ordinary untracked strings. Extensionless resource escapes, resource roots outside <code>entry_root</code> and any wider Path-containing type surface remain unsettled.</p><h2>Modules, exports and project-local packages</h2><p>A module is rooted by one directory-scoped <code>@*.moth</code> or <code>+*.moth</code>. The suffix is cosmetic.</p><pre style=""><code class='codeblock'>project/
 ├── config.moth
 ├── +package.moth
 └── src/
     ├── @site.moth
     ├── helpers.moth
     ├── shared/+package.moth
-    └── pages/@page.moth
-</code></pre>
-<p>A normal <code>@</code> root may contain declarations, one <code>export:</code>, entry <code>config:</code>, top-level runtime work and page fragments. Top-level work becomes dormant <code>start</code> code and runs once only when that module is selected as an entry. Depending on a module never runs it. <code>start</code> has no <code>Error!</code> slot, so top-level fallible work uses <code>catch</code>.</p>
-<p><code>export:</code> is the only cross-module public marker:</p>
-<pre><code class="language-moth">private_helper || -&gt; String:
-    return "private"
-;
+    └── pages/@page.moth</code></pre><p>A normal <code>@</code> root may contain declarations, one <code>export:</code>, entry <code>config:</code>, top-level runtime work and page fragments. Top-level work becomes dormant <code>start</code> code and runs once only when that module is selected as an entry. Depending on a module never runs it. <code>start</code> has no <code>Error!</code> slot, so top-level fallible work uses <code>catch</code>.</p><p><code>export:</code> is the only cross-module public marker:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>private_helper</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-string'>&quot;private&quot;</span>
+<span class='moth-code-delimiter'>;</span>
 
-export:
-    public_name #= "Moth"
+<span class='moth-code-keyword'>export</span><span class='moth-code-delimiter'>:</span>
+    public_name <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Moth&quot;</span>
 
-    render || -&gt; String:
-        return private_helper()
-    ;
+    <span class='moth-code-function'>render</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+        <span class='moth-code-keyword'>return</span> <span class='moth-code-function'>private_helper</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-delimiter'>;</span>
 
-    @components/card CardData as Card, render_card
-;
-</code></pre>
-<p>Items outside remain private. Public surfaces cannot expose private types, traits or evidence. Receiver methods become visible with their exported type.</p>
-<p>A source-tree <code>+*.moth</code> creates an API-only scoped support package named by its directory, such as <code>@shared</code>. It has no <code>start</code>, page fragment or route and is the mechanism for sharing declarations between normal siblings. Direct normal-sibling dependencies remain invalid unless a future design explicitly changes this.</p>
-<p>A project-root <code>+*.moth</code> beside <code>config.moth</code> is the optional external package facade. It is API-only, not visible internally and cannot expose public or reachable dependence on private <code>@project</code> values.</p>
-<p>Registered external packages use ordinary file clauses:</p>
-<pre><code class="language-moth">@acme/ui Button, theme
-@community/markdown as markdown
-</code></pre>
-<p>Only direct dependencies are source-visible. Project-level declaration, version and alias syntax is design-gated. The old <code>import @package</code> proposal is invalid.</p>
-<h2>Project configuration - accepted deferred</h2>
-<p><code>config.moth</code> is one self-contained compile-time file, not a module:</p>
-<pre><code class="language-moth">project #= |
-    name = "moth_docs",
-    version #Config of String = "0.1.0",
-    entry_root = "src",
-|
+    <span class='moth-code-string'>@components/card</span> <span class='moth-code-nominal'>CardData</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>Card</span>, <span class='moth-code-nominal'>render_card</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Items outside remain private. Public surfaces cannot expose private types, traits or evidence. Receiver methods become visible with their exported type.</p><p>A source-tree <code>+*.moth</code> creates an API-only scoped support package named by its directory, such as <code>@shared</code>. It has no <code>start</code>, page fragment or route and is the mechanism for sharing declarations between normal siblings. Direct normal-sibling dependencies remain invalid unless a future design explicitly changes this.</p><p>A project-root <code>+*.moth</code> beside <code>config.moth</code> is the optional external package facade. It is API-only, not visible internally and cannot expose public or reachable dependence on private <code>@project</code> values.</p><p>Registered external packages use ordinary file clauses:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@acme/ui</span> <span class='moth-code-nominal'>Button</span>, <span class='moth-code-nominal'>theme</span>
+<span class='moth-code-string'>@community/markdown</span> <span class='moth-code-keyword'>as</span> <span class='moth-code-nominal'>markdown</span></code></pre><p>Only direct dependencies are source-visible. Project-level declaration, version and alias syntax is design-gated. The old <code>import @package</code> proposal is invalid.</p><h2>Project configuration</h2><p><code>config.moth</code> is one self-contained compile-time file, not a module:</p><pre style=""><code class='codeblock'>project <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;moth_docs&quot;</span>,
+    version <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Config</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+<span class='moth-code-delimiter'>|</span>
 
-html #= |
-    dev_output = "dev",
-    release_output = "release",
-|
-</code></pre>
-<p>The command selects the builder first. One <code>project</code> record is required. <code>project.name</code> gives stable identity. Earlier helper constants may feed later fields. Other top-level records are builder/tooling sections. Config has no runtime declarations, functions, named support types, dependencies, fragments or <code>export:</code>.</p>
-<p>Build configuration values use primitive or optional types:</p>
-<pre><code class="language-moth">api_url #Config of String = "http://localhost:8080"
-optional_label #Config of String? = none
-</code></pre>
-<p>A source default is one literal or <code>none</code>, not a name, template, call, cast, operator, collection or record. Pass explicit values with <code>--input name=value</code>.</p>
-<p>CLI inference is immediate: <code>true</code>/<code>false</code> -&gt; <code>Bool</code>, a whole number -&gt; <code>Int</code>, a decimal or exponent -&gt; <code>Float</code>, <code>'c'</code> -&gt; <code>Char</code>, a quoted literal -&gt; <code>String</code>, and anything else -&gt; <code>String</code>. Use an explicitly quoted String for <code>"true"</code> or <code>"42"</code>; omit an optional input to resolve to <code>none</code>. Contracts require exact types, except a present <code>T</code> may satisfy <code>T?</code>; no other coercion occurs.</p>
-<pre><code class="language-bash">moth build . --input analytics=true
-moth build . --input retries=4
-moth build . --input ratio=0.75
-moth build . --input api_url=https://example.com
-moth build . --input 'label="true"'
-moth build . --input "separator=':'"
-</code></pre>
-<p>Project fields enter source through explicit <code>@project</code>:</p>
-<pre><code class="language-moth">@project version
-label = [: Version [version]]
-</code></pre>
-<p><code>@project</code> is never implicit or directly re-exported. Each dependency has its own config and inputs.</p>
-<p>One entry <code>config:</code> block may appear only at a normal root's top level:</p>
-<pre><code class="language-moth">favicon_url #= [@assets/favicon.svg]
+html <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
+    dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
+    release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><p>The command selects the builder first. One <code>project</code> record is required. <code>project.name</code> gives stable identity. Earlier helper constants may feed later fields. Other top-level records are builder/tooling sections. Config has no runtime declarations, functions, named support types, dependencies, fragments or <code>export:</code>.</p><p>Build configuration values use primitive or optional types:</p><pre style=""><code class='codeblock'>api_url <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Config</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;http://localhost:8080&quot;</span>
+optional_label <span class='moth-code-operator'>#</span><span class='moth-code-nominal'>Config</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>String</span><span class='moth-code-operator'>?</span> <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>none</span></code></pre><p>A source default is one literal or <code>none</code>, not a name, template, call, cast, operator, collection or record. Pass explicit values with <code>--input name=value</code>.</p><p>CLI inference is immediate: <code>true</code>/<code>false</code> -&gt; <code>Bool</code>, a whole number -&gt; <code>Int</code>, a decimal or exponent -&gt; <code>Float</code>, <code>&#39;c&#39;</code> -&gt; <code>Char</code>, a quoted literal -&gt; <code>String</code>, and anything else -&gt; <code>String</code>. Use an explicitly quoted String for <code>&quot;true&quot;</code> or <code>&quot;42&quot;</code>; omit an optional input to resolve to <code>none</code>. Contracts require exact types, except a present <code>T</code> may satisfy <code>T?</code>; no other coercion occurs.</p><pre style=""><code class='codeblock'>moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input analytics<span class='moth-code-operator'>=</span><span class='moth-code-literal'>true</span>
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input retries<span class='moth-code-operator'>=</span><span class='moth-code-number'>4</span>
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input ratio<span class='moth-code-operator'>=</span><span class='moth-code-number'>0.75</span>
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input api_url<span class='moth-code-operator'>=</span>https<span class='moth-code-operator'>:</span><span class='moth-code-operator'>/</span><span class='moth-code-operator'>/</span>example.com
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input <span class='moth-code-string'>&#39;label=&quot;true&quot;&#39;</span>
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>input <span class='moth-code-string'>&quot;separator=&#39;:&#39;&quot;</span></code></pre><p>Project fields enter source through explicit <code>@project</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@project</span> <span class='moth-code-nominal'>version</span>
+label <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Version</span> <span class='moth-code-delimiter'>[</span>version<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span></code></pre><p><code>@project</code> is never implicit or directly re-exported. Each dependency has its own config and inputs.</p><p>One entry <code>config:</code> block may appear only at a normal root&#39;s top level:</p><pre style=""><code class='codeblock'>favicon_url <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>@assets/favicon.svg</span><span class='moth-code-delimiter'>]</span>
 
-config:
-    html #= |
-        title = "Moth docs",
-        favicon = favicon_url,
-    |
-;
-</code></pre>
-<p>It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and <code>#Config</code> declarations stay outside. Project and entry schemas do not merge.</p>
-<h2>Builders, targets and commands</h2>
-<p>One command selects one artefact builder, one profile and any tooling overlays. The compiler frontend remains backend-neutral. Builders provide config schemas, packages, directives, source kinds, entry policy, capabilities and output policy.</p>
-<p>The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations, platform/backend query values or target-conditioned source; the builder interprets stable semantics and selects physical targets.</p>
-<p><code>moth check</code> performs the same reachable target validation as a build without writing artefacts.</p>
-<pre><code class="language-bash">moth new html my-site
+config<span class='moth-code-delimiter'>:</span>
+    html <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth docs&quot;</span>,
+        favicon <span class='moth-code-operator'>=</span> favicon_url,
+    <span class='moth-code-delimiter'>|</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and <code>#Config</code> declarations stay outside. Project and entry schemas do not merge.</p><h2>Builders, targets and commands</h2><p>One command selects one artefact builder, one profile and any tooling overlays. The compiler frontend remains backend-neutral. Builders provide config schemas, packages, directives, source kinds, entry policy, capabilities and output policy.</p><p>The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations, platform/backend query values or target-conditioned source; the builder interprets stable semantics and selects physical targets.</p><p><code>moth check</code> performs the same reachable target validation as a build without writing artefacts.</p><pre style=""><code class='codeblock'>moth new html my<span class='moth-code-operator'>-</span>site
 moth dev .
 moth check .
-moth build . --release
-</code></pre>
-<p>Final builder-selection syntax and any Moth-native build-script system remain design pending. Stable builder capabilities may be used without revealing target identity.</p>
-<h2>Core and external packages</h2>
-<p>The prelude exposes <code>io</code> as <code>@core/io</code>. Console helpers accept exactly one <code>String</code>:</p>
-<pre><code class="language-moth">io.line("Hello")
-io.line([: count = [count]])
-</code></pre>
-<p><code>io.set_title</code> is accepted deferred for document-capable JavaScript hosts.</p>
-<p>Annotated project-local JavaScript exposes free functions and optional opaque types:</p>
-<pre><code class="language-js">/**
- * @moth.sig emphasize |text String| -&gt; String
- */
-export const emphasize = (text) =&gt; {
-    return `**${text}**`;
-};
-</code></pre>
-<pre><code class="language-moth">@vendor/format.js emphasize
-label = emphasize("Moth")
-</code></pre>
-<p>JavaScript constants, receiver methods, callbacks, async functions, options, collections, generics and multiple success returns are rejected. Host code receives ordinary Moth values by value and cannot retain references into Moth storage.</p>
-<p>WIT V1 is also value-only. Resources, callbacks, async, futures, streams, shared-memory views, raw pointers and returned/retained aliases remain deferred V1 gaps.</p>
-<h2>No stable syntax yet</h2>
-<p>Do not infer forms for:</p>
-<ul>
-<li>project dependency declarations, versions, lockfiles, registry/local/Git sources</li>
-<li>named non-capturing function references or primitive-backed newtypes</li>
-<li>async scopes, coroutines, channels or suspension</li>
-<li>reactive paths, derived values, events/effects, <code>$bind</code> or component messages</li>
-<li>direct choice payload access/narrowing or nested payload patterns</li>
-<li>lossy <code>Float &lt;-&gt; NumberN</code>, Number formatting helpers or broader Byte APIs</li>
-<li>group capacity, expression placement, extraction, adoption or group transfer</li>
-<li>broader anonymous-record storage</li>
-<li>final builder-selection or build-script syntax</li>
-</ul>
-<p>Roadmaps and design drafts do not create accepted syntax.</p>
-<h2>Deliberate language limits</h2>
-<p>Do not invent shadowing, macros, general closures/function values, exceptions, catchable panic, first-class public <code>Result</code>, operator overloading, trait objects/dynamic dispatch, associated items, broad conformance, reflection/type values, explicit reference/lifetime/move syntax, source RC, parameterised aliases, higher-kinded types, general const generics, cross-owner receiver extensions, wildcard dependencies/exports, extensible builtin maps, string <code>+</code> or <code>_</code> match arms.</p>
-<p>Outside scope also includes target/platform conditional compilation, conditionally present imports,
-declarations or exports, builder-provided target identity flags and backend-specific source legality.</p>
-<p>Use choices for runtime heterogeneity, trait bounds for static reuse, <code>copy</code> for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.</p>
-<p>Further detail: <a href="../language-overview/">language</a>, <a href="../memory/">memory</a>, <a href="../templates/">templates</a>, <a href="../project-structure/">projects</a>, <a href="../packages/">packages</a>, <a href="../progress/">progress</a> and <a href="../design-scope/">design scope</a>.</p>
-</section>
+moth build . <span class='moth-code-operator'>-</span><span class='moth-code-operator'>-</span>release</code></pre><p>Final builder-selection syntax and any Moth-native build-script system remain design pending. Stable builder capabilities may be used without revealing target identity.</p><h2>Core and external packages</h2><p>The prelude exposes <code>io</code> as <code>@core/io</code>. Console helpers accept exactly one <code>String</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Hello&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> count <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><br><p>Annotated project-local JavaScript exposes free functions and optional opaque types:</p><pre style=""><code class='codeblock'><span class='moth-code-operator'>/</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span>
+ <span class='moth-code-operator'>*</span> <span class='moth-code-operator'>@</span>moth.sig emphasize <span class='moth-code-operator'>|</span>text <span class='moth-code-nominal'>String</span><span class='moth-code-operator'>|</span> <span class='moth-code-operator'>-</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-nominal'>String</span>
+ <span class='moth-code-operator'>*</span><span class='moth-code-operator'>/</span>
+export <span class='moth-code-keyword'>const</span> emphasize <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>text<span class='moth-code-delimiter'>)</span> <span class='moth-code-operator'>=</span><span class='moth-code-operator'>&gt;</span> <span class='moth-code-delimiter'>{</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-operator'>`</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>$</span><span class='moth-code-delimiter'>{</span>text<span class='moth-code-delimiter'>}</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>*</span><span class='moth-code-operator'>`</span>;
+<span class='moth-code-delimiter'>}</span>;</code></pre><pre style=""><code class='codeblock'><span class='moth-code-string'>@vendor/format.js</span> <span class='moth-code-nominal'>emphasize</span>
+label <span class='moth-code-operator'>=</span> <span class='moth-code-function'>emphasize</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>JavaScript constants, receiver methods, callbacks, async functions, options, collections, generics and multiple success returns are rejected. Host code receives ordinary Moth values by value and cannot retain references into Moth storage.</p><p>WIT V1 is also value-only. Resources, callbacks, async, futures, streams, shared-memory views, raw pointers and returned/retained aliases remain deferred V1 gaps.</p><h2>No stable syntax yet</h2><p>Do not infer forms for:</p><ul><li>project dependency declarations, versions, lockfiles, registry/local/Git sources</li><li>named non-capturing function references or primitive-backed newtypes</li><li>async scopes, coroutines, channels or suspension</li><li>reactive paths, derived values, events/effects, <code>$bind</code> or component messages</li><li>direct choice payload access/narrowing or nested payload patterns</li><li>lossy <code>Float &lt;-&gt; NumberN</code>, Number formatting helpers or broader Byte APIs</li><li>group capacity, expression placement, extraction, adoption or group transfer</li><li>broader anonymous-record storage</li><li>final builder-selection or build-script syntax</li></ul><p>Roadmaps and design drafts do not create accepted syntax.</p><h2>Deliberate language limits</h2><p>Do not invent shadowing, macros, general closures/function values, exceptions, catchable panic, first-class public <code>Result</code>, operator overloading, trait objects/dynamic dispatch, associated items, broad conformance, reflection/type values, explicit reference/lifetime/move syntax, source RC, parameterised aliases, higher-kinded types, general const generics, cross-owner receiver extensions, wildcard dependencies/exports, extensible builtin maps, string <code>+</code> or <code>_</code> match arms.</p><p>Outside scope also includes target/platform conditional compilation, conditionally present imports, declarations or exports, builder-provided target identity flags and backend-specific source legality.</p><p>Use choices for runtime heterogeneity, trait bounds for static reuse, <code>copy</code> for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.</p><p>Further detail: <a href="../language-overview">language</a>, <a href="../memory">memory</a>, <a href="../templates">templates</a>, <a href="../resources">resources and Path values</a>, <a href="../project-structure">projects</a>, <a href="../packages">packages</a>, <a href="../progress">progress</a> and <a href="../design-scope">design scope</a>.</p></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

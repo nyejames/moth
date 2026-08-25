@@ -9,10 +9,10 @@ This document is the single source of truth for accepted build-system, project g
 Companion authorities:
 
 - `docs/compiler-design-overview.md` for core compiler architecture
-- `docs/src/docs/codebase/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
+- `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
-- `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
+- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
+- `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 

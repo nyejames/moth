@@ -132,7 +132,7 @@ page_head #= language_theme_head
     [doc_pager:
         [$insert("previous_path"):../project-structure/]
         [$insert("previous_title"):Project structure]
-        [$insert("next_path"):../moth-templates/]
-        [$insert("next_title"):Moth template files]
+        [$insert("next_path"):../resources/]
+        [$insert("next_title"):Resources and Path values]
     ]
 ]

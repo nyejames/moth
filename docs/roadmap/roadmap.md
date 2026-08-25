@@ -60,7 +60,7 @@ These items are genuinely deferred. They are not current implementation work. Ea
 
 ## Collector-free memory implementation
 
-Canonical memory design lives under [the memory management design docs](docs/src/docs/codebase/memory-management).
+Canonical memory design lives under [the memory management design docs](docs/src/developer-docs/memory-management).
 
 The accepted end state is mandatory static lifetime topology with a collector-free release guarantee for backends that advertise full memory control. GC is a permitted representation for an already legal topology on debug profiles and GC-native backends. It is not the semantic correctness baseline and it cannot legalise unproven topology.
 

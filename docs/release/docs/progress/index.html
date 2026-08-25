@@ -383,6 +383,18 @@ td {
         </a>
 
         <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
             href="https://github.com/nyejames/moth"
             target="_blank"
             rel="noreferrer"
@@ -730,7 +742,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / HIR / lifetime analysis / all backends</td>
- <td style="padding: 0.1em 0.5em; "> Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/docs/codebase/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/developer-docs/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -843,6 +855,14 @@ td {
  <td style="padding: 0.1em 0.5em; "> Broad source dependency, namespace, flat direct-selection, binding-backed package, public-surface, module-boundary, collision, continuation-diagnostic and legacy-import-migration coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
  <td style="padding: 0.1em 0.5em; "> Source and module namespace records are shallow. External package namespace records support nested symbol paths such as <code>io.input.new</code> and <code>io.input.Input</code>. Direct symbol-path dependencies remain rejected. Cross-module and source-backed package access goes through the target root's <code>export:</code> public surface.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Resource paths and <code>Path</code> values</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted design only. The accepted surface is an explicit-extension path in expression position producing one compile-time-only <code>Path</code> value, one stable owner-relative resource identity, structural resource anchors through folded values, TIR and HIR, and builder-assigned URL contexts. What exists today is the legacy compile-time path literal: it resolves and validates one regular file, renders eagerly through the configured origin, and the HTML builder reconstructs tracked assets from module-wide rendered-path metadata. Current fixtures cover file existence, missing targets, directory rejection, origin rendering, project-root escape and template-head use. Complete when resource identity, <code>Path</code> availability, structural strings and build-owned resource link planning replace that lane.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

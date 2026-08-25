@@ -1,35 +1,25 @@
-@moth-language-cheatsheet content
-@styles section
+@moth-language-cheatsheet content as cheatsheet_content
 
-cheatsheet_theme #= [$css:
-    pre {
-        color: #0c032d;
-        background-color: #f8f8f2;
-        border-color: #272822;
-        border: 1px solid;
-        padding: 1em 2em;
-    }
+@styles navbar, section, language_theme_head
 
-    code {
-        font-family: monospace;
-        font-size: 1.1em;
-        background-color: #f8f8f2;
-        padding: 0.2em 0.4em;
-    }
+page_title #= "Language cheatsheet"
+page_description #= "The whole accepted Moth language surface on one page, for humans and coding models."
+page_head #= language_theme_head
 
-    body {
-        background-color: #d5e3ea;
-        color: #000000;
-        padding: 2em;
-    }
+#[navbar]
 
-    a {
-        color: #0700cb;
-    }
+#[section, $md:
+    @../ (Documentation) / Language cheatsheet
+
+    # Moth language cheatsheet
+
+    Moth is a small, statically typed language with first-class string templates,
+    explicit mutable access and mandatory borrow and lifetime validation. This
+    page is a compact reference for humans and coding models writing Moth source.
+
+    It describes the accepted language surface. The @../progress (progress matrix)
+    is the authority on what the current Alpha compiler implements and which
+    targets support it.
 ]
 
-page_head #= [:<style>[cheatsheet_theme]</style>]
-
-#[section: 
-    [content]
-]
+#[section, cheatsheet_content]

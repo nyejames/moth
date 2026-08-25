@@ -41,11 +41,11 @@ This plan must complete before entry-local config blocks.
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/src/docs/design-scope/design-principles.mtf`
-- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
+- `docs/src/developer-docs/language/overview.mtf` and its relevant canonical references
 - delivered Stage 4 static Bool `if` specialisation and folded-constant ownership
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
 - `docs/src/docs/progress/@page.moth`
 
 ## Vocabulary and ownership

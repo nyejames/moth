@@ -23,6 +23,11 @@ Examples of deferred features:
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
 - field/path reactive subscriptions
+- `Path` options, choices, maps and generic type arguments
+- runtime `Path` values and runtime filesystem access
+- an extensionless resource escape syntax
+- managed plain Markdown resource links and images
+- resource transforms and content-addressed output names
 
 ### Open design question
 

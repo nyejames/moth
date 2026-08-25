@@ -21,7 +21,7 @@ permissions:
 jobs:
   gate:
     # Each (gate, os) pair reports on its own. Windows is non-blocking: see
-    # docs/src/docs/codebase/style-guide/validation.mtf for the criteria that make it blocking.
+    # docs/src/developer-docs/style-guide/validation.mtf for the criteria that make it blocking.
     name: ${{ matrix.gate }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60

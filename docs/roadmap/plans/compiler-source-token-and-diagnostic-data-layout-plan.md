@@ -89,15 +89,15 @@ RELEVANT_DOCS_THIS_SLICE:
 - `docs/compiler-data-layout-design.md`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
 - `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 - delivered compiler diagnostics improvements, and the frontend arena and semantic-invariant work
 - `benchmarks/frontend-optimization-results.md`
-- the relevant canonical unsuffixed language references selected by `docs/src/docs/codebase/language/overview.mtf` only when source-visible diagnostic or span assertions change
-- `docs/src/docs/codebase/memory-management/overview.mtf` only when borrow facts or tooling worker lifetimes change
+- the relevant canonical unsuffixed language references selected by `docs/src/developer-docs/language/overview.mtf` only when source-visible diagnostic or span assertions change
+- `docs/src/developer-docs/memory-management/overview.mtf` only when borrow facts or tooling worker lifetimes change
 
 RELEVANT_CODE:
 - `src/build_system/create_project_modules/source_tree_index.rs`: current single deterministic entry-root traversal to extend with source-registration candidates
@@ -187,9 +187,9 @@ Read in this order before every implementation slice:
 2. this plan and its active context capsule
 3. `docs/compiler-data-layout-design.md`
 4. `docs/compiler-design-overview.md`
-5. `docs/src/docs/codebase/style-guide/style-guide.mtf`
-6. `docs/src/docs/codebase/style-guide/testing.mtf`
-7. `docs/src/docs/codebase/style-guide/validation.mtf`
+5. `docs/src/developer-docs/style-guide/style-guide.mtf`
+6. `docs/src/developer-docs/style-guide/testing.mtf`
+7. `docs/src/developer-docs/style-guide/validation.mtf`
 8. current owner code and current diff
 
 Also read `docs/build-system-design.md` for source registration, module scheduling, graph outcomes,
@@ -373,9 +373,9 @@ The following edits are authorized in their owning phases:
 - `docs/compiler-data-layout-design.md`: replace its broad conceptual context example with the lookup-only frozen identity/report split, then record every benchmark-selected constant
 - `docs/compiler-design-overview.md`: source identity, prepared syntax, diagnostic reports, type-display snapshots and failure lanes
 - `docs/build-system-design.md`: source registration, deterministic merges, graph outcomes and tooling worker ownership
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`: compact-record rules and removal of boxed large-error advice
-- `docs/src/docs/codebase/style-guide/testing.mtf`: layout/property/schema/render-equivalence/failure-worker test ownership
-- `docs/src/docs/codebase/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
+- `docs/src/developer-docs/style-guide/style-guide.mtf`: compact-record rules and removal of boxed large-error advice
+- `docs/src/developer-docs/style-guide/testing.mtf`: layout/property/schema/render-equivalence/failure-worker test ownership
+- `docs/src/developer-docs/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
 - `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`: remove overlapping ownership and stale failure rules
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`: park, then refresh against the final schema APIs
 - `docs/src/docs/progress/@page.moth`: only when current support wording changes

@@ -1,0 +1,251 @@
+# Compiler-facing language reference
+
+This index routes contributors to Moth's canonical source-language references.
+The unsuffixed `.mtf` files listed below own complete source syntax and
+observable semantics for their topics.
+
+## Authority model
+
+- Read every relevant unsuffixed file before writing Moth code or changing the
+  parser, semantic stages, diagnostics or lowering for that feature.
+- Paired `-basic.mtf` files teach a smaller truthful surface. They do not define
+  edge cases or replace the unsuffixed reference.
+- `@page.moth` files own introductions, navigation and website composition.
+- `docs/src/developer-docs/memory-management/**` owns the formal memory model.
+- `docs/compiler-design-overview.md` owns compiler-stage contracts.
+- `docs/build-system-design.md` owns project and build orchestration.
+- `docs/src/docs/progress/@page.moth` owns current implementation and backend
+  support.
+
+## Canonical focused references
+
+### Language basics
+
+- `docs/src/docs/language-overview/blocks-and-statements.mtf`
+- `docs/src/docs/language-overview/comments-and-naming.mtf`
+- `docs/src/docs/language-overview/core-values.mtf`
+- `docs/src/docs/language-overview/strings-and-characters.mtf`
+
+### Values and bindings
+
+- `docs/src/docs/bindings/bindings.mtf`
+- `docs/src/docs/bindings/mutable-bindings.mtf`
+- `docs/src/docs/bindings/shared-access.mtf`
+- `docs/src/docs/bindings/explicit-copies.mtf`
+- `docs/src/docs/bindings/shadowing.mtf`
+
+### Numbers
+
+- `docs/src/docs/numbers/numeric-types.mtf`
+- `docs/src/docs/numbers/numeric-literals.mtf`
+- `docs/src/docs/numbers/operators.mtf`
+- `docs/src/docs/numbers/checked-arithmetic.mtf`
+
+### Casts
+
+- `docs/src/docs/casts/cast-syntax.mtf`
+- `docs/src/docs/casts/cast-targets.mtf`
+- `docs/src/docs/casts/fallible-casts.mtf`
+- `docs/src/docs/casts/cast-evidence.mtf`
+
+### Functions
+
+- `docs/src/docs/functions/function-declarations.mtf`
+- `docs/src/docs/functions/parameters-and-defaults.mtf`
+- `docs/src/docs/functions/calls-and-access.mtf`
+- `docs/src/docs/functions/returns-and-multiple-values.mtf`
+
+### Branching
+
+- `docs/src/docs/branching/statement-if.mtf`
+- `docs/src/docs/branching/value-producing-if.mtf`
+- `docs/src/docs/branching/pattern-matching.mtf`
+- `docs/src/docs/branching/patterns-and-exhaustiveness.mtf`
+
+### Loops
+
+- `docs/src/docs/loops/conditional-loops.mtf`
+- `docs/src/docs/loops/collection-loops.mtf`
+- `docs/src/docs/loops/range-loops.mtf`
+- `docs/src/docs/loops/loop-control.mtf`
+
+### Structs
+
+- `docs/src/docs/structs/struct-declarations.mtf`
+- `docs/src/docs/structs/construction-and-fields.mtf`
+- `docs/src/docs/structs/receiver-methods.mtf`
+- `docs/src/docs/structs/mutable-receivers.mtf`
+
+### Choices
+
+- `docs/src/docs/choices/choice-declarations.mtf`
+- `docs/src/docs/choices/variant-construction.mtf`
+- `docs/src/docs/choices/payload-patterns.mtf`
+- `docs/src/docs/choices/choice-equality.mtf`
+
+### Errors, options and assertions
+
+- `docs/src/docs/errors/error-values.mtf`
+- `docs/src/docs/errors/error-returns.mtf`
+- `docs/src/docs/errors/propagation.mtf`
+- `docs/src/docs/errors/catch-and-recovery.mtf`
+- `docs/src/docs/errors/options.mtf`
+- `docs/src/docs/errors/assertions.mtf`
+
+### Collections and maps
+
+- `docs/src/docs/collections/collection-literals.mtf`
+- `docs/src/docs/collections/growable-collections.mtf`
+- `docs/src/docs/collections/fixed-collections.mtf`
+- `docs/src/docs/collections/collection-operations.mtf`
+- `docs/src/docs/collections/hash-maps.mtf`
+
+### Templates
+
+- `docs/src/docs/templates/template-basics.mtf`
+- `docs/src/docs/templates/template-directives.mtf`
+- `docs/src/docs/templates/template-slots.mtf`
+- `docs/src/docs/templates/child-wrappers.mtf`
+- `docs/src/docs/templates/template-control-flow.mtf`
+- `docs/src/docs/templates/markdown-formatting.mtf`
+
+### Constants and compile-time behaviour
+
+- `docs/src/docs/constants/constant-bindings.mtf`
+- `docs/src/docs/constants/constant-folding.mtf`
+- `docs/src/docs/constants/const-records.mtf`
+- `docs/src/docs/constants/const-templates.mtf`
+
+### Resources and Path values
+
+- `docs/src/docs/resources/resource-paths.mtf`
+- `docs/src/docs/resources/path-values.mtf`
+
+### Aliases
+
+- `docs/src/docs/aliases/type-aliases.mtf`
+- `docs/src/docs/aliases/dependency-aliases.mtf`
+- `docs/src/docs/aliases/payload-capture-aliases.mtf`
+
+### Generics
+
+- `docs/src/docs/generics/generic-declarations.mtf`
+- `docs/src/docs/generics/type-application.mtf`
+- `docs/src/docs/generics/generic-inference.mtf`
+- `docs/src/docs/generics/generic-instances.mtf`
+- `docs/src/docs/generics/generic-limits.mtf`
+
+### Traits
+
+- `docs/src/docs/traits/trait-declarations.mtf`
+- `docs/src/docs/traits/trait-requirements.mtf`
+- `docs/src/docs/traits/conformance.mtf`
+- `docs/src/docs/traits/generic-trait-bounds.mtf`
+- `docs/src/docs/traits/trait-incompatibility.mtf`
+- `docs/src/docs/traits/core-cast-traits.mtf`
+- `docs/src/docs/traits/trait-design-scope.mtf`
+
+### Reactivity
+
+- `docs/src/docs/reactivity/reactive-sources.mtf`
+- `docs/src/docs/reactivity/subscriptions.mtf`
+- `docs/src/docs/reactivity/reactive-parameters.mtf`
+- `docs/src/docs/reactivity/mutation-and-invalidation.mtf`
+- `docs/src/docs/reactivity/runtime-sinks.mtf`
+- `docs/src/docs/reactivity/reactivity-scope.mtf`
+
+### Project structure
+
+- `docs/src/docs/project-structure/project-layout.mtf`
+- `docs/src/docs/project-structure/project-config.mtf`
+- `docs/src/docs/project-structure/module-roots.mtf`
+- `docs/src/docs/project-structure/public-api.mtf`
+- `docs/src/docs/project-structure/entry-runtime-and-fragments.mtf`
+- `docs/src/docs/project-structure/html-routing-and-artifacts.mtf`
+- `docs/src/docs/project-structure/build-inputs.mtf`
+- `docs/src/docs/project-structure/entry-config.mtf`
+- `docs/src/docs/project-structure/project-package-facade.mtf`
+
+### Packages and dependencies
+
+- `docs/src/docs/packages/dependency-paths.mtf`
+- `docs/src/docs/packages/dependency-clauses.mtf`
+- `docs/src/docs/packages/module-visibility.mtf`
+- `docs/src/docs/packages/public-reexports.mtf`
+- `docs/src/docs/packages/project-local-packages.mtf`
+- `docs/src/docs/packages/package-origins-and-backing.mtf`
+- `docs/src/docs/packages/external-binding-contracts.mtf`
+
+### Moth template files
+
+- `docs/src/docs/moth-templates/moth-template-files.mtf`
+- `docs/src/docs/moth-templates/implicit-markdown.mtf`
+- `docs/src/docs/moth-templates/content-dependencies.mtf`
+- `docs/src/docs/moth-templates/template-scope.mtf`
+- `docs/src/docs/moth-templates/moth-template-limits.mtf`
+
+### Plain Markdown
+
+- `docs/src/docs/markdown/markdown-files.mtf`
+- `docs/src/docs/markdown/markdown-dependencies.mtf`
+- `docs/src/docs/markdown/rendering-contract.mtf`
+- `docs/src/docs/markdown/choosing-a-content-format.mtf`
+
+Each unsuffixed file has a paired `-basic.mtf` teaching version. Each public
+route imports both levels.
+
+## Public documentation
+
+`docs/src/docs/**` contains website pages, teaching references, examples and
+topic navigation.
+
+## Design scope
+
+The public Design Scope route forms the sole authority for accepted, open and
+excluded language boundaries:
+
+- `docs/src/docs/design-scope/design-principles.mtf`
+- `docs/src/docs/design-scope/deferred-and-outside-scope.mtf`
+- `docs/src/docs/design-scope/excluded-language-families.mtf`
+
+## Memory and lifetimes
+
+The public Memory route covers source-facing memory behaviour:
+
+- `docs/src/docs/memory/reference-semantics.mtf`
+- `docs/src/docs/memory/reference-semantics-basic.mtf`
+- `docs/src/docs/memory/copy-and-exclusive-access.mtf`
+- `docs/src/docs/memory/copy-and-exclusive-access-basic.mtf`
+- `docs/src/docs/memory/lifetimes-and-result-shapes.mtf`
+- `docs/src/docs/memory/lifetimes-and-result-shapes-basic.mtf`
+- `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf`
+- `docs/src/docs/memory/automatic-cleanup-and-retained-edges-basic.mtf`
+- `docs/src/docs/memory/declared-memory-groups.mtf`
+- `docs/src/docs/memory/declared-memory-groups-basic.mtf`
+
+The formal memory model, borrow validation, lifetime-region analysis and
+backend lowering live under
+`docs/src/developer-docs/memory-management/**`.
+
+## Core packages
+
+Each Core package has a paired Advanced and Basic page:
+
+- `docs/src/docs/packages/core/io/io.mtf` / `io-basic.mtf`
+- `docs/src/docs/packages/core/math/math.mtf` / `math-basic.mtf`
+- `docs/src/docs/packages/core/text/text.mtf` / `text-basic.mtf`
+- `docs/src/docs/packages/core/random/random.mtf` / `random-basic.mtf`
+- `docs/src/docs/packages/core/time/time.mtf` / `time-basic.mtf`
+- `docs/src/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
+- `docs/src/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
+
+## Builder packages
+
+Builder packages have paired Advanced and Basic pages:
+
+- `docs/src/docs/packages/builder/html/html-helpers.mtf` / `html-helpers-basic.mtf`
+- `docs/src/docs/packages/builder/canvas/canvas-drawing.mtf` / `canvas-drawing-basic.mtf`
+
+## Compiler ownership
+
+`docs/compiler-design-overview.md` defines the compiler stages, semantic owners and cross-stage handoff for the language surface.

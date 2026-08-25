@@ -30,8 +30,8 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 
 - `docs/compiler-design-overview.md` for header syntax preparation, AST folding, module artefact metadata and target validation
 - `docs/build-system-design.md` for entry-local `config:` block placement rules, section schemas and entry assembly
-- `docs/src/docs/codebase/language/overview.mtf` and its project-structure references for source syntax
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/developer-docs/language/overview.mtf` and its project-structure references for source syntax
+- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - delivered canonical module compilation and scoped packages, for the module graph
 - `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md` for config schemas

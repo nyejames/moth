@@ -29,10 +29,10 @@ This plan must complete before build configuration values, `@project` and entry-
 
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
-- `docs/src/docs/codebase/language/overview.mtf` and its relevant canonical references
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
+- `docs/src/developer-docs/language/overview.mtf` and its relevant canonical references
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
 - `docs/src/docs/progress/@page.moth`
 
 ## Current implementation to replace

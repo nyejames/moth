@@ -1,0 +1,795 @@
+## Testing standards
+
+This document owns test selection, test structure, assertions, fixture design
+and test pruning for compiler work.
+
+It does not define the final validation command. For completion gates, read
+`docs/src/developer-docs/style-guide/validation.mtf`.
+
+The primary goal is end-to-end language and artifact correctness. Prefer real
+usage patterns and complete Moth snippets over narrow implementation-shaped
+tests.
+
+### Task-reading guide
+
+Heading paths use `>` to name nested sections. Read the selected heading through
+the next heading of the same or higher level, including nested subsections
+unless the route narrows further. Read this document in full for test
+infrastructure, suite policy, broad fixture cleanup or audits.
+
+[table:
+    [th:
+        [: **Task**]
+        [: **Read**]
+    ]
+
+    [td:
+        [: Choosing the test owner, level or location]
+        [:
+            - `Default testing preference`
+            - `Supporting rules`
+            - `Test ownership`
+            - `Test location and module layout`
+        ]
+    ]
+
+    [td:
+        [: Unit or subsystem-invariant coverage]
+        [:
+            - `Unit tests`
+            - `HIR and internal-IR assertions` when IR or side-table facts are involved
+            - `Fixtures and temporary files`
+        ]
+    ]
+
+    [td:
+        [: User-visible language or project behaviour]
+        [:
+            - `Integration cases`
+            - `Successful backend intent`
+            - `Focused integration selection and inventory`
+        ]
+    ]
+
+    [td:
+        [: Runtime output or reactivity behaviour]
+        [:
+            - `Runtime output assertions`
+            - `Backend matrices and artifact assertions` when structure also matters
+        ]
+    ]
+
+    [td:
+        [: Threads, shared state, timing or repeated execution]
+        [: `Concurrency and repetition`]
+    ]
+
+    [td:
+        [: Diagnostics or warnings]
+        [:
+            - `Diagnostics assertions`
+            - `Integration cases`
+        ]
+    ]
+
+    [td:
+        [: Backend structure, target parity, Wasm validation or goldens]
+        [:
+            - `Successful backend intent`
+            - `Backend matrices and artifact assertions`
+            - `HIR and internal-IR assertions` only for hidden compiler invariants
+        ]
+    ]
+
+    [td:
+        [: Manifest policy, suite inventory, filtering or audit behaviour]
+        [:
+            - `Successful backend intent`
+            - `Focused integration selection and inventory`
+        ]
+    ]
+
+    [td:
+        [: Adding or changing a Cargo feature, or a feature- or platform-gated test]
+        [: `Feature and platform lanes`]
+    ]
+
+    [td:
+        [: Asserting on source text, or adding an architecture ban]
+        [: `Source-text assertions`]
+    ]
+
+    [td:
+        [: Fixtures, temporary paths or test support]
+        [: `Fixtures and temporary files`]
+    ]
+
+    [td:
+        [: Removing duplicate or obsolete coverage]
+        [:
+            - `Pruning and duplicate coverage`
+            - `Benchmarks are not correctness tests`
+        ]
+    ]
+
+    [td:
+        [: Final coverage review]
+        [: `Testing checklist`]
+    ]
+]
+
+### Default testing preference
+
+Integration tests written in Moth are the default for user-visible language behaviour. They exercise the real compiler path and usually provide the strongest regression coverage.
+
+- Prefer integration coverage for user-visible language behaviour
+- Add or update unit tests only where subsystem-local behaviour genuinely benefits from them
+- Avoid redundant fixtures that assert the same behaviour in slightly different forms
+- Prefer meaningful end-to-end cases over brittle implementation-shaped assertions
+- When backend or runtime behaviour matters, strengthen artifact assertions where goldens alone are too vague
+
+### Supporting rules
+
+- Prefer externally observable behaviour over implementation detail.
+- Use unit tests for hidden invariants that integration output cannot inspect.
+- Use one clear primary test owner per behaviour.
+- Do not create multiple fixtures that prove the same contract without a distinct stage or backend reason.
+- Prefer realistic end-to-end snippets.
+- Tests should remain understandable without reading the implementation first.
+- Do not make exact internal layout contractual unless that layout is the invariant.
+- When tests compare or report paths, use the shared `portable_path_text` normalisation helper
+  instead of raw or native path strings. Keep `Path` or `PathBuf` values for filesystem
+  operations, converting to portable text only at assertion or display boundaries so tests
+  remain robust across platforms.
+
+### Test ownership
+
+[table:
+    [th:
+        [: **Behavior**]
+        [: **Owner**]
+    ]
+
+    [td:
+        [: Pure data or invariant behavior]
+        [: Focused unit test near the owning subsystem]
+    ]
+
+    [td:
+        [: Compiler-stage invariant]
+        [: Stage-local unit test naming the invariant]
+    ]
+
+    [td:
+        [: Stage-boundary orchestration]
+        [: Minimal pipeline/build smoke test]
+    ]
+
+    [td:
+        [: User-facing language behavior]
+        [: Integration case under `tests/cases/`]
+    ]
+
+    [td:
+        [: Backend artifact behavior]
+        [: Backend-specific artifact assertions or contractual goldens]
+    ]
+
+    [td:
+        [: Side-table or hidden compiler fact]
+        [: Focused unit test if external output cannot expose it]
+    ]
+
+    [td:
+        [: Cross-backend semantic parity]
+        [: One integration input with backend-specific assertions]
+    ]
+]
+
+Each behavior should have one primary owner. Secondary coverage is justified only when it protects a distinct boundary, target, diagnostic lane or internal invariant.
+
+### Test location and module layout
+
+- Tests do not live in production implementation files.
+- Module-specific tests belong under the module's test directory, for example:
+
+[codeblock, $code("text"):
+    src/compiler_frontend/hir/tests/
+]
+
+- End-to-end or multi-module Rust harness tests belong under:
+
+[codeblock, $code("text"):
+    src/compiler_tests/
+]
+
+- Language and project integration cases belong under:
+
+[codeblock, $code("text"):
+    tests/cases/
+]
+
+- Test-only utilities should live with the tests that own them.
+- Do not create broad shared test utility modules for one or two callers.
+- Split cross-stage test support only when actual ownership boundaries justify it.
+
+### Unit tests
+
+Retain unit tests for:
+
+- pure data invariants
+- impossible states
+- side-table facts
+- transfer rules
+- backend planning policy not observable from artifacts
+- narrow parser or formatter algorithms
+
+Prefer integration tests for user-visible behavior.
+Once a subsystem is stable, prune superseded unit tests.
+Rewrite obsolete tests rather than preserving old API shapes.
+A unit test should name the invariant it protects.
+Do not use unit coverage as a substitute for an end-to-end case when user behavior changed.
+
+### Integration cases
+
+- `moth tests` runs the integration test runner.
+- Use real Moth snippets.
+- Each canonical case is one self-contained scenario directory.
+- Keep helper source files inside the owning case's `input/` directory.
+- Do not let helper files become unintended standalone cases.
+- Add strong output assertions where behavior is visible.
+- Prefer top-level templates to simulate output.
+- Avoid `io.line(...)` unless console behavior is itself under test.
+
+### Successful backend intent
+
+Every successful HTML and HTML-Wasm backend run applies its universal backend baseline. The
+baseline protects harness and target invariants. It is not the case's authored semantic contract.
+
+Use `success_contract = "acceptance_only"` only when that backend has no stronger case-specific
+semantic, artifact, golden, absence or expected-warning assertion.
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    success_contract = "acceptance_only"
+]
+
+Acceptance-only intent does not disable the baseline. The audit records both
+`baseline_applied = true` and `acceptance_only = true`, with `backend_baseline` and
+`acceptance_only` in `assertion_kinds`.
+
+Do not combine acceptance-only intent with artifact assertions, golden mode, rendered-output
+assertions, artifact-absence assertions or an authored expected-warning contract. A whole case
+whose backends are all acceptance-only uses `role = "smoke"`. A mixed-backend case may use a
+boundary or backend role when another backend owns a stronger contract.
+
+A successful backend with only the universal baseline is invalid. Typed fixture loading rejects it
+before policy evaluation, listing, audit, or execution.
+
+For new type-system syntax, include:
+
+- positive usage
+- value/type namespace misuse
+- binding visibility
+- duplicates
+- cross-file resolution
+- target/backend rejection where relevant
+
+Canonical fixture shape:
+
+[codeblock, $code("text"):
+    tests/cases/
+    ├── manifest.toml
+    └── case_name/
+        ├── input/
+        │   ├── main.moth
+        │   └── helper.moth
+        ├── expect.toml
+        └── golden/
+            ├── html/
+            └── html_wasm/
+]
+
+- `manifest.toml` is the authoritative case order. Every case declares a unique canonical `id`,
+  unique fixture `path` and at least one non-empty tag.
+- Manifest case paths are relative and may not contain absolute, platform-prefix, parent or
+  current-directory components. Canonicalised fixture roots must remain inside `tests/cases/`,
+  including through symlinks.
+- IDs, paths, tags, contracts, roles and configured entries reject leading or trailing whitespace.
+  Tags within one case must be unique.
+- Every canonical case declares a `role`. Supported roles are `primary`, `boundary`, `backend`,
+  `adversarial` and `smoke`.
+- Every non-smoke case declares a `contract`. A whole-case acceptance-only smoke may remain
+  contractless because it has no case-specific semantic owner. Do not invent a contract for it.
+- A `primary` case requires a contract, and one contract may have at most one primary case.
+- A contract family without a primary is reported once in manifest order. Backend-only and
+  adversarial-only families are deliberate advisories. Mixed or ordinary secondary-only families
+  remain visible for ownership review.
+- Case IDs, tags, contracts and roles are retained as typed runner metadata. Do not reconstruct
+  them from display text or fixture paths.
+- One case folder owns all inputs and expectations for that scenario.
+
+Manifest entry shape:
+
+[codeblock, $code("toml"):
+    [[case]]
+    id = "borrow_conflict_resolved_by_reordering"
+    path = "borrow_conflict_resolved_by_reordering"
+    tags = ["integration", "borrows"]
+    contract = "language.bindings.alias_final_use_allows_mutable_rebinding"
+    role = "primary"
+]
+
+### Focused integration selection and inventory
+
+Use the canonical case ID and retained metadata for local iteration:
+
+[codeblock, $code("bash"):
+    cargo run --quiet -- tests --case arithmetic_operator_precedence --backend html
+    cargo run --quiet -- tests --tag borrows --tag diagnostics --backend html
+    cargo run --quiet -- tests --contract <contract-id>
+    cargo run --quiet -- tests --list --tag borrows
+]
+
+- `--case` and `--contract` are exact matches.
+- Repeatable `--tag` filters compose as logical AND.
+- Case, tag, contract and backend filters compose and preserve manifest/backend order.
+- `--list` accepts selection filters and reports canonical ID, selected backend blocks, tags,
+  contract and role without compiling cases.
+- Duplicate singleton options, duplicate tag values, missing values, unknown flags and positional
+  arguments are errors.
+
+Use the audit mode to validate and inventory the complete canonical suite without compiling cases:
+
+[codeblock, $code("text"):
+    cargo run --quiet -- tests --audit
+]
+
+Audit writes its JSON inventory before returning hard-policy failure. Normal listing and execution
+use the same policy evaluator and reject hard findings before compiling a case. Missing roles,
+missing contracts on non-smoke cases, primary cases without contracts and duplicate primary owners
+are hard findings. Contractless whole-case acceptance-only smoke cases are valid.
+
+Audit cannot be combined with filters or `--list`. It writes the reporting-owned JSON inventory to
+`target/test-reports/integration_suite_inventory.json`, including canonical metadata, backend
+expectation facts, hard-policy violations and primary-less contract-family advisories. The report
+is review input only; it never deletes, merges or rewrites fixtures.
+
+The schema 8 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
+expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered
+and exact-once runtime contracts separately. Per-backend fields keep `baseline_applied`,
+`acceptance_only`, `assertion_kinds`, `golden_present`, `golden_mode`, every rendered-output form,
+exact warning codes, diagnostic match mode and any contains-mode reason separate so the report
+matches what ran.
+
+Schema 7 added the weak-contract review fields. `smoke_role_cases`, `warning_ignore_backend_blocks`
+and `diagnostic_contains_backend_blocks` count the three legal weak contracts, and
+`weak_contract_review_backend_blocks` counts blocks carrying at least one of them. Every backend
+block lists its own `weak_contract_reviews`. These are review fields, not policy: a smoke case, an
+ignored warning contract and a contains-mode failure all remain valid. The canonical suite
+currently declares none of them, so any non-zero count is a new weaker contract to review rather
+than an inherited one to explain.
+
+Schema 8 added report identity. Every report carries `run` — a run id, the command, the host OS and
+architecture, the features the binary was built with, the runner thread count and whether the run
+finished — and the inventory replaced `repository_commit` with `repository_revision`, which reports
+a discovered `commit`, `not_a_repository`, or `unknown` with the reason discovery failed. A failed
+discovery and a genuine absence are different facts, and a report that names neither its command
+nor its build cannot be told apart from a stale one.
+
+Reports are written to a sibling temporary file and renamed into place, so a reader never sees a
+partial file. Before the work begins, each report is replaced by one whose run says `completed:
+false`; an interrupted run therefore leaves a report that says it did not finish rather than the
+previous run's passing output.
+
+Hard policy has one suite-policy owner. Missing roles, missing non-smoke contracts, duplicate
+primary contracts, a primary without a contract and a whole-case acceptance-only fixture without
+`role = "smoke"` are hard findings. Normal list and execution modes reject hard findings before
+selection or compilation. Audit still writes the complete JSON report, then returns failure.
+Primary-less contract-family advisories remain non-fatal.
+
+### Runtime output assertions
+
+Runtime assertions use one Node harness. It records console output and HTML fragment inserts in one
+event array when each event happens, then joins their text with newlines in that same order. Channel
+views are derived from the event array. They never reconstruct chronology after execution.
+
+The harness runs only when a backend declares a rendered-output assertion. It executes the emitted
+page scripts and waits for one documented microtask tick so scheduled reactive updates can flush.
+Do not make extra scheduler turns or incidental microtask counts contractual.
+
+Choose the narrowest field that owns the behaviour:
+
+- `rendered_output_exact` protects the complete combined output. It is mutually exclusive with the
+  other rendered-output fields. Exact comparison normalizes line endings only and preserves every
+  other whitespace difference.
+- `rendered_output_contains_in_order` protects the relative order of two or more fragments.
+- `rendered_output_contains_exactly_once` protects activation, mounting and helper output from
+  duplication.
+- `rendered_output_contains` and `rendered_output_not_contains` protect required and forbidden
+  fragments when complete output isn't the contract.
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    rendered_output_contains = ["active-root"]
+    rendered_output_not_contains = ["imported-root"]
+    rendered_output_contains_in_order = ["before-loop", "after-loop"]
+    rendered_output_contains_exactly_once = ["active-root", "mounted"]
+]
+
+Use exact output for small deterministic behaviours such as loop or map operation results. Use
+ordered and exact-once fragments when unrelated output may coexist. Prefer these runtime contracts
+over generated JavaScript text or a whole-page golden when execution is the real owner.
+
+An exact mismatch is reported escaped, post-normalization, with the byte offset of the first
+difference, so a whitespace-only difference does not print as two identical lines.
+
+#### What the harness will execute
+
+The harness parses the emitted page for a supported script shape and rejects everything else rather
+than guessing:
+
+- a classic inline script is executed
+- `type="module"` is rejected as unsupported. The harness materializes no emitted glue, provider or
+  runtime module and no import map, so it cannot run the module graph the HTML backend emits when a
+  bundle import preamble is present. Executing it as a classic script would report a failure that
+  did not happen
+- an external `src`, an unknown `type`, `nomodule`, `async`, and a malformed or unterminated tag are
+  each rejected by name
+- the page script include must appear exactly once inside the body
+
+#### Harness failure classes
+
+A harness problem is never reported as a case failure. `RenderHarnessError` names which boundary
+broke: `Artifact`, `Workspace`, `Spawn`, `Timeout`, `ExitStatus`, `OutputDecoding`,
+`OutputProtocol`, `ScriptShape` or `Cleanup`. Execution is bounded by a 30-second deadline with
+kill-and-reap, stdout and stderr are drained on their own threads under a 4 MiB bound, and a stderr
+decode failure never replaces the boundary that actually failed.
+
+#### Goldens carry their own artifact kind
+
+A golden file's extension decides the artifact kind it expects, and a cross-kind match is rejected
+before content is read. Identical bytes emitted as a different artifact kind do not satisfy a
+golden. Text goldens require strict UTF-8; invalid UTF-8 is a harness failure, not a rewrite.
+
+### Concurrency and repetition
+
+A test that waits for a thread to reach a state must observe that state, not guess how long
+reaching it takes.
+
+- Use a condition variable or a channel for an expected transition.
+- Use a bounded wall-clock deadline only as deadlock protection, never as the thing being measured.
+- A deadline failure must name the observed state, so the report says what did not happen.
+- Join every spawned worker, so a panic inside one is the reported cause rather than a discarded
+  result.
+- Do not make an arbitrary sleep, a yield count or a machine-speed threshold part of a contract.
+
+Stateful owners — the timing collector, the frontend counter stores, output writes,
+current-directory guards and the Node harness — only misbehave under a thread schedule or a repeat
+that one default-parallelism run never produces. That schedule has an owned command:
+
+[codeblock, $code("bash"):
+    just stress
+]
+
+It repeats the unit and integration suites at one thread, default parallelism and sixteen threads,
+and keeps running after a failing lane so the whole matrix is visible.
+
+### Diagnostics assertions
+
+- Ordinary source/config/import/type/rule/borrow failures should assert stable `diagnostic_codes`.
+- `diagnostic_codes` is an exact unordered multiset by default. Repeat a code when the diagnostic
+  must occur more than once.
+- Add rendered message fragments only when wording or rendered labels are part of the contract.
+- Infrastructure-boundary tests may assert infrastructure `ErrorType`.
+- Preserve source location assertions where location behavior is important.
+- Do not use full rendered diagnostic snapshots when a stable code and structured assertion are sufficient.
+- Do not weaken a diagnostic case into a generic "must fail" assertion.
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "failure"
+    warnings = "forbid"
+    diagnostic_codes = ["MOTH-RULE-0033", "MOTH-RULE-0033"]
+]
+
+Use `diagnostic_assertions` when a broad code needs a compiler-owned reason or when source
+remapping is part of the contract. Each table selects one diagnostic by stable code and one-based
+occurrence. A unique code may omit `occurrence`. Repeat the code in `diagnostic_codes` to preserve
+its exact multiplicity.
+
+[codeblock, $code("toml"):
+    [[backends.html.diagnostic_assertions]]
+    code = "MOTH-RULE-0057"
+    reason = "invalid_generic_instantiation.recursive_function_instantiation"
+    path = "input/@page.moth"
+    line = 3
+    count = 1
+
+    [[backends.html.diagnostic_assertions.secondary_labels]]
+    occurrence = 1
+    path = "input/helpers.moth"
+    line = 2
+]
+
+- Reason keys come from the compiler payload identity. The runner must not invent a parallel
+  reason taxonomy or derive identity from rendered text.
+- Paths are normalized relative to the owning fixture and lines are one-based display lines.
+- Assert columns only when exact token-span precision is the contract.
+- A secondary-label occurrence is one-based among that diagnostic's secondary labels in emitted
+  order. Assert only the labels whose location or ordering is the behaviour owner.
+- Keep `message_contains` only when rendered wording or label prose is itself contractual.
+
+Use `diagnostic_match = "contains"` only when intentional independent recovery or cascades make
+additional diagnostics part of the accepted current behaviour. Every contains-mode block needs a
+substantive `diagnostic_match_reason`. The suite audit reports the reason and treats a missing or
+blank reason as a hard policy finding.
+
+[codeblock, $code("toml"):
+    diagnostic_match = "contains"
+    diagnostic_match_reason = "Independent recovery may emit additional diagnostics from another source unit."
+]
+
+Warnings use a separate backend-local contract:
+
+- `warnings = "forbid"` rejects every warning and accepts no `warning_codes` field.
+- `warnings = "ignore"` deliberately makes warnings non-contractual and accepts no
+  `warning_codes` field.
+- `warnings = "exact"` requires `warning_codes` as an exact unordered multiset. Repeat duplicate
+  codes to preserve their required count.
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "exact"
+    warning_codes = ["MOTH-RULE-0022", "MOTH-RULE-0022"]
+    rendered_output_contains = ["warning-contract result=one"]
+]
+
+### Backend matrices and artifact assertions
+
+Use one `expect.toml` per case with backend-specific assertion blocks.
+
+[codeblock, $code("toml"):
+    entry = "."
+
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    artifacts_must_not_exist = ["unexpected.html"]
+
+    [backends.html_wasm]
+    mode = "success"
+    warnings = "forbid"
+
+    [[backends.html_wasm.artifact_assertions]]
+    path = "page.wasm"
+    kind = "wasm"
+    validate_wasm = true
+    must_export = ["memory", "moth_str_ptr", "moth_str_len", "moth_release"]
+]
+
+- Use backend-specific blocks within one case.
+- `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`
+  directory. Every other entry is a relative contained path with no absolute, platform-prefix,
+  parent or current-directory component. Its canonical path must remain inside the owning
+  `input/` directory, including through symlinks.
+- Store strict goldens in:
+
+[codeblock, $code("text"):
+    golden/<backend>/
+]
+
+- Use artifact assertions for structure: file presence, Wasm validity, exports, imports, expected snippets, absence of forbidden output.
+- Use `artifacts_must_not_exist` for success cases whose contract requires an exact normalized output path to be absent. Paths reported as `NotBuilt` are ignored because they were never emitted.
+- Use strict goldens only where exact emitted text is contractual.
+- The canonical suite currently has no file-backed golden blocks. A future golden needs an explicit
+  exact-artifact rationale that a runtime or narrow artifact assertion cannot express.
+- Golden discovery recursively counts actual files. Empty or directory-only golden trees do not
+  create a contract. Nested files do.
+- `golden_mode` without at least one discovered file is invalid. When files exist, strict is the
+  default if no mode is authored. When no files exist, audit reports `golden_present = false` and
+  `golden_mode = null`.
+- Prefer semantic or rendered-output assertions for behavior-first cases.
+- Strengthen artifact assertions when a golden can pass while structural behavior is wrong.
+- Do not require unsupported backends to succeed merely for matrix symmetry. Assert the intended rejection contract.
+
+### HIR and internal-IR assertions
+
+- Assert semantic relationships rather than incidental indexes.
+- Prefer branch joins, merge-local relationships, jump arguments, region ownership, side-table keys, stable call targets and required operation kinds.
+- Avoid exact block IDs or vector offsets unless exact layout is the invariant.
+- Do not make temporary lowering order part of the public test contract.
+- For HIR validation, distinguish malformed-HIR invariant tests from user-facing source diagnostic tests.
+
+### Feature and platform lanes
+
+A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a
+lane, and every lane is one executed command:
+
+[codeblock, $code("bash"):
+    just test-feature-matrix
+]
+
+[table:
+    [th:
+        [: **Lane**]
+        [: **Features**]
+        [: **Only this lane covers**]
+    ]
+
+    [td:
+        [: `default`]
+        [: none]
+        [: the shipped configuration and every `cfg(not(feature = ...))` branch]
+    ]
+
+    [td:
+        [: `timers`]
+        [: `timers`]
+        [: the timing collector, boundary identities and command/build timing tests]
+    ]
+
+    [td:
+        [: `detailed-timers`]
+        [: `detailed_timers`]
+        [: AST substage timings and the detailed-only summary shape]
+    ]
+
+    [td:
+        [: `counters`]
+        [: `benchmark_counters`]
+        [: counter-only builds, where counters record without a timing collector]
+    ]
+
+    [td:
+        [: `timers-counters`]
+        [: `timers`, `benchmark_counters`]
+        [: collector-backed counters and the counter summary carried by a timing session]
+    ]
+
+    [td:
+        [: `scoped-blocks`]
+        [: `checked_blocks`, `async_blocks`]
+        [: the deferred-feature diagnostics for `checked:` and `async:` blocks]
+    ]
+
+    [td:
+        [: `dev-output`]
+        [: every `show_*` feature]
+        [: the developer stage-dump branches, which no other lane compiles]
+    ]
+
+    [td:
+        [: `xtask`]
+        [: none]
+        [: the benchmark, profiling and process-runner tests in the `xtask` package]
+    ]
+]
+
+Lanes are package-scoped, and that is not a stylistic choice. Cargo unifies features across one
+resolve graph, and `xtask` depends on `moth` with `features = ["timers"]`, so
+`cargo test --workspace` always builds the compiler with `timers` enabled. It can never run the
+default configuration, and `--features benchmark_counters` on a workspace command is really
+`timers` plus counters. Only `cargo test -p moth` with an explicit feature list configures the
+crate the way a lane claims.
+
+Feature coverage is checked mechanically, without running a lane:
+
+[codeblock, $code("bash"):
+    just feature-lane-check
+]
+
+The check reads `Cargo.toml` and every `cfg` attribute in `src` and `xtask/src`, then fails when a
+declared feature has no lane, when a lane names a feature its package does not declare, or when a
+`cfg` names a feature that does not exist. A misspelled feature name in a `cfg` is a test that can
+never compile and never reports, which is why the check reads the tree instead of a list in prose.
+It writes `target/test-reports/feature_lane_coverage.json`, which names, for every feature, the
+lanes that enable it and the files whose `cfg` attributes mention it. That report is a coverage
+map and states no lane outcome, because the check that writes it runs no lane. Running the lanes
+is `just test-feature-matrix`, which writes the outcome for every lane to
+`target/test-reports/feature_matrix_results.json`.
+
+Adding a Cargo feature means adding it to a lane in the same change. The gate fails otherwise.
+
+Platform-gated tests are owned by the platform that has the API:
+
+[table:
+    [th:
+        [: **Gate**]
+        [: **Runs on**]
+        [: **Owns**]
+    ]
+
+    [td:
+        [: `cfg(unix)`]
+        [: Linux and macOS]
+        [: symlink identity and retargeting, non-regular nodes, unreadable paths and non-UTF-8 names]
+    ]
+
+    [td:
+        [: `cfg(windows)`]
+        [: Windows]
+        [: extended-length path prefixes, Windows canonicalisation and hard-link inspection]
+    ]
+
+    [td:
+        [: `cfg(any(unix, windows))`]
+        [: all three]
+        [: the portable policy shared by both families, asserted on each]
+    ]
+
+    [td:
+        [: `cfg(target_os = "linux")`]
+        [: Linux]
+        [: non-UTF-8 filesystem identity, which macOS rejects at the filesystem boundary]
+    ]
+]
+
+CI runs every gate on Linux, macOS and Windows, so a platform-gated owner executes wherever its API
+exists. A platform-specific test may be absent only when the underlying API does not exist there;
+an equivalent portable policy test should still run everywhere. Windows results are currently
+non-blocking — `validation.mtf` owns that status and the conditions that end it.
+
+### Source-text assertions
+
+A test that reads source text and asserts on it proves what the text says, not what the code does.
+An alias, a reformat or an equivalent reimplementation all pass it.
+
+- Do not make a source-text assertion the only evidence for runtime or semantic behaviour.
+- A ban whose scope is "no file anywhere may contain this" belongs to `just source-audit`, which
+  walks the tree once and reports typed findings. `validation.mtf > Source audit` owns it.
+- Reading a non-Rust asset a test then parses or executes is not a source-text assertion. The asset
+  is the input, and the behaviour under test is the parse or the execution.
+
+### Fixtures and temporary files
+
+- Prefer `tempfile::tempdir()` for temporary directories and files.
+- Use unmanaged paths only when the test intentionally owns cleanup.
+- Keep fixtures local to their owner.
+- Do not commit generated `dev/` or `release/` outputs from test or benchmark projects.
+- Avoid shared fixture builders that hide important source shape.
+
+### Pruning and duplicate coverage
+
+- Remove tests tied only to deleted implementation paths.
+- Avoid several fixtures that differ only cosmetically.
+- Preserve duplicates only when they protect different stages, diagnostic reasons, backends, source locations or artifact contracts.
+- Localize one-caller fixtures.
+- When two tests overlap, identify the primary owner and either merge them, narrow each to a distinct invariant or delete the weaker one.
+- Do not preserve obsolete fixtures for historical compatibility.
+
+### Benchmarks are not correctness tests
+
+Benchmark fixtures are performance evidence, not correctness coverage.
+
+Do not use benchmark coverage as a substitute for unit or integration tests.
+Negative diagnostics belong in `tests/cases`, not benchmark fixtures.
+
+Use `bench-check` to detect broad performance regressions after correctness has
+already been established by ordinary tests.
+
+### Testing checklist
+
+Before considering test coverage complete, check:
+
+- The behavior has one clear primary test owner.
+- User-visible behavior has end-to-end integration coverage.
+- Internal-only invariants have focused unit coverage where needed.
+- Failure cases assert stable diagnostic codes.
+- Rendered text is asserted only when it is contractual.
+- Backend behavior uses the narrowest useful artifact assertions.
+- Goldens are used only where exact output is a contract.
+- HIR tests avoid incidental block and local numbering.
+- Multi-file fixtures remain inside one case directory.
+- Temporary files use owned cleanup.
+- No benchmark fixture is being used as a correctness substitute.
+- Redundant or obsolete coverage has been removed.
+- Every new Cargo feature was added to a lane in the same change.
+- Every platform-gated test names the API that makes the gate necessary.
+- No source-text assertion is the only evidence for a behaviour.
+- No concurrency test waits on a sleep or a machine-speed threshold.

@@ -3,7 +3,7 @@
 - State: `complete`
 - Kind: `Correctness`
 - Primary scope: `feature.runtime_assertion_messages_call_arguments`
-- Required context: `contract.assertion_message_runtime_handoff`, `contract.assertion_call_argument_handoff`, `tests.cases`, the assertion and shared-call test owners, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, `docs/src/docs/codebase/style-guide/style-guide.mtf`, and the feature implementation plan
+- Required context: `contract.assertion_message_runtime_handoff`, `contract.assertion_call_argument_handoff`, `tests.cases`, the assertion and shared-call test owners, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, `docs/src/developer-docs/style-guide/style-guide.mtf`, and the feature implementation plan
 - Coverage: `complete`
 - Reviewed: `2026-08`
 - Baseline: focused suites, direct integration regressions, the schema-8 test audit, documentation checks, release documentation, `just bench-check` and `just validate` were green on the corrected tree
@@ -29,7 +29,7 @@ The audit did not authorize or perform a merge or squash. It also did not change
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`: architectural invariants, Stage 4 AST semantics, Templates and TIR, Generated concrete functions and HIR handoff material
 - `docs/build-system-design.md`: architectural invariants and Generated-function boundary
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`, testing guidance and validation guidance
+- `docs/src/developer-docs/style-guide/style-guide.mtf`, testing guidance and validation guidance
 - `docs/roadmap/audit-guide.md`, the Correctness audit guide, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the relevant implementation plan
 - The changed assertion implementation, shared call parser, tests and integration fixtures
 

@@ -2,7 +2,7 @@
 
 Looking for: real contracts with no owner, coverage under the wrong owner, and assertions too weak to catch the failure they imply.
 
-Read [testing standards](../../src/docs/codebase/style-guide/testing.mtf) in full before running this kind.
+Read [testing standards](../../src/developer-docs/style-guide/testing.mtf) in full before running this kind.
 
 **Evidence bar:** a named contract and what does or does not protect it. Test count and line coverage prove nothing.
 

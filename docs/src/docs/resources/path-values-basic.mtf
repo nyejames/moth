@@ -1,0 +1,35 @@
+A resource path produces a `Path` value. `Path` is a compile-time type: the compiler uses it while building, and it never exists while your program runs.
+
+### Using a Path
+
+Put a `Path` straight into a template.
+
+[codeblock, $code("moth"):
+    logo #Path = @assets/logo.svg
+
+    image #= [$html:
+        <img src="[logo]" alt="Moth">
+    ]
+]
+
+`image` is an ordinary `String`. You can compose it, store it in a constant and pass it around like any other string.
+
+### The compiler writes the URL
+
+You never write the output path yourself. The builder decides where the file is emitted, then writes the link from the page that contains it.
+
+The same logo becomes `./assets/logo.svg` on the home page and `../../assets/logo.svg` on a page two folders deep.
+
+### Compile-time only
+
+A `Path` cannot be stored at runtime, so these are rejected:
+
+[codeblock, $code("moth"):
+    logo ~Path = @assets/logo.svg
+
+    show |image Path| -> String:
+        return ""
+    ;
+]
+
+A mutable binding and a function parameter both need to hold the value at runtime. If you need link text at runtime, insert the `Path` into a template and use the resulting `String`.

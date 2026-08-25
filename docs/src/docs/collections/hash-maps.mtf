@@ -208,7 +208,7 @@ Future map APIs must preserve narrow, analysable destruction effects. The full
 contract is explained for users in
 @../memory/automatic-cleanup-and-retained-edges (Automatic cleanup and retained
 edges). Compiler implementation details live in
-@../codebase/memory-management/retained-edge-counting (Retained Edge Counting).
+@../../developer-docs/memory-management/retained-edge-counting (Retained Edge Counting).
 
 ### Outside the builtin map surface
 

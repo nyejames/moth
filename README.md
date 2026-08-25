@@ -164,7 +164,7 @@ See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about th
 <br>
 <li>
     <ul>
-        <a href="https://nyejames.github.io/moth/docs/codebase/memory-management/">Memory management</a>
+        <a href="https://nyejames.github.io/moth/developer-docs/memory-management/">Memory management</a>
     </ul>
 </li>
 <br>

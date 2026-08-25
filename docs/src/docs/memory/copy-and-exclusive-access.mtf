@@ -81,4 +81,4 @@ A fresh rvalue passed to an ordinary mutable parameter is materialised into a co
 - @#declared-memory-groups (Declared memory groups)
 
 For the formal access rules, see
-@../codebase/memory-management/access-and-aliasing (Access and aliasing).
+@../../developer-docs/memory-management/access-and-aliasing (Access and aliasing).

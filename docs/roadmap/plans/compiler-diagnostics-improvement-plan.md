@@ -12,7 +12,7 @@ This is an implementation plan, not a research backlog. Each phase should leave 
 
 - `docs/compiler-design-overview.md` for diagnostic lanes, type rendering and stage ownership
 - `docs/build-system-design.md` when config, graph or output diagnostics are in scope
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 
 ## Architecture alignment
 

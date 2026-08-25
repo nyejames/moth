@@ -351,7 +351,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Frontend / HIR / lifetime analysis / all backends]
-            [: Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/docs/codebase/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.]
+            [: Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/developer-docs/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.]
         ]
 
         [data:
@@ -464,6 +464,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Broad source dependency, namespace, flat direct-selection, binding-backed package, public-surface, module-boundary, collision, continuation-diagnostic and legacy-import-migration coverage.]
             [: Frontend / HTML builder]
             [: Source and module namespace records are shallow. External package namespace records support nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Direct symbol-path dependencies remain rejected. Cross-module and source-backed package access goes through the target root's [$html:<code>export:</code>] public surface.]
+        ]
+
+        [data:
+            [: Resource paths and [$html:<code>Path</code>] values]
+            [: Deferred]
+            [: Targeted]
+            [: Frontend / HTML builder]
+            [: Accepted design only. The accepted surface is an explicit-extension path in expression position producing one compile-time-only [$html:<code>Path</code>] value, one stable owner-relative resource identity, structural resource anchors through folded values, TIR and HIR, and builder-assigned URL contexts. What exists today is the legacy compile-time path literal: it resolves and validates one regular file, renders eagerly through the configured origin, and the HTML builder reconstructs tracked assets from module-wide rendered-path metadata. Current fixtures cover file existence, missing targets, directory rejection, origin rendering, project-root escape and template-head use. Complete when resource identity, [$html:<code>Path</code>] availability, structural strings and build-owned resource link planning replace that lane.]
         ]
 
         [data:

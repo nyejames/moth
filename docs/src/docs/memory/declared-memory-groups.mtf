@@ -176,6 +176,6 @@ Groups give authors explicit control over one allocation and cleanup domain with
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)
 
 For the formal group semantics, see
-@../codebase/memory-management/declared-memory-groups (Declared memory groups).
+@../../developer-docs/memory-management/declared-memory-groups (Declared memory groups).
 For implementation sequencing, see
 @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md (Final memory-management redesign plan).

@@ -6,15 +6,15 @@ This document is the single source of truth for accepted core compiler architect
 
 `docs/build-system-design.md` owns project bootstrap, Stage 0 graph construction, config, module and package topology, command policy, project builders, linking and output ownership. Read both documents when a task crosses the compiler and build-system boundary.
 
-`docs/src/docs/codebase/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Moth. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.
+`docs/src/developer-docs/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Moth. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.
 
 Companion authorities:
 
 - `docs/build-system-design.md` for project and build orchestration
-- `docs/src/docs/codebase/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
+- `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/docs/codebase/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
-- `docs/src/docs/codebase/style-guide/style-guide.mtf` for implementation standards
+- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
+- `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
 
@@ -32,7 +32,7 @@ or thorough reviews.
 | Task | Read in this document | Also read when affected |
 |---|---|---|
 | Module compilation inputs, outcomes, root roles or artefact lanes | `Compiler input and result boundary` | `docs/build-system-design.md` > `Deterministic scheduling and graph outcomes` |
-| Diagnostic lanes, render context or deterministic diagnostic identity | `Diagnostics and deterministic identity` | `docs/src/docs/codebase/style-guide/style-guide.mtf` > `Diagnostics` and `Returning errors` |
+| Diagnostic lanes, render context or deterministic diagnostic identity | `Diagnostics and deterministic identity` | `docs/src/developer-docs/style-guide/style-guide.mtf` > `Diagnostics` and `Returning errors` |
 | Cross-module declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
 | Public surfaces, exported effects, aliases, conformances or project provenance | `Public semantic interfaces` | `Stable semantic identities` and the relevant language reference |
 | Fingerprints, invalidation inputs or compiler-owned reuse facts | `Fingerprints and reuse facts` | `docs/build-system-design.md` > `Incremental and persistent artefacts` |
@@ -40,9 +40,9 @@ or thorough reviews.
 | Tokenization, header syntax, interface binding, source-kind preparation or local declaration ordering | The relevant section under `Frontend stages > Stage 1: tokenization`, `Stage 2: header syntax and interface binding` or `Stage 3: local declaration ordering` | `docs/build-system-design.md` > `Prepared-source orchestration` when Stage 0 consumes or schedules the result |
 | AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
 | HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
-| Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/docs/codebase/memory-management/overview.mtf` |
+| Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/developer-docs/memory-management/overview.mtf` |
 | Lifetime regions, escapes, retention, cleanup frontiers or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
-| Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/docs/codebase/memory-management/retained-edge-counting/` and the backend memory route |
+| Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/developer-docs/memory-management/retained-edge-counting/` and the backend memory route |
 | Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
 | Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
 
@@ -1285,13 +1285,13 @@ validated HIR
 
 `check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering and output emission.
 
-Canonical REC design lives under `docs/src/docs/codebase/memory-management/retained-edge-counting/`, with detailed sequencing in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`.
+Canonical REC design lives under `docs/src/developer-docs/memory-management/retained-edge-counting/`, with detailed sequencing in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`.
 
 ### Backend handoff
 
 Backends receive validated HIR, borrow facts, validated affine cleanup decisions, validated lifetime topology and the complete `ValidatedMemoryPlan` for their target/profile physical variant. That plan carries allocation-family layout, selected physical strategies, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
 
-Canonical design lives under `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/docs/codebase/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
+Canonical design lives under `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/developer-docs/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
 
 When group syntax is implemented:
 

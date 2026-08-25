@@ -60,13 +60,13 @@ Read the current versions of:
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/compiler-data-layout-design.md`
-- `docs/src/docs/codebase/language/overview.mtf`
+- `docs/src/developer-docs/language/overview.mtf`
 - the canonical dependency-path, dependency-clause, constant, template, Moth-template, module, package and project-structure references selected by the language overview
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.md`
+- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`
 - `docs/src/docs/progress/@page.moth`
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf`
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf`
 - `index.md`
 
 At activation, refresh exact implementation paths from `index.md` and the owning module entry points. File paths in this plan are migration hints, not architecture authority.

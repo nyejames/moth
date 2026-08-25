@@ -11,17 +11,17 @@ docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md
 Canonical implementation authority:
 
 ```text
-docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf
+docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf
 ```
 
 Companion to:
 
 - the parent plan `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`
-- `docs/src/docs/codebase/memory-management/overview.mtf`
-- `docs/src/docs/codebase/memory-management/ownership-and-drops/`
-- `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/`
-- `docs/src/docs/codebase/memory-management/declared-memory-groups/`
-- `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/`
+- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/src/developer-docs/memory-management/ownership-and-drops/`
+- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`
+- `docs/src/developer-docs/memory-management/declared-memory-groups/`
+- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/`
 
 The canonical REC page now exists. REC implementation remains deferred and follows the phases in this plan.
 
@@ -1727,7 +1727,7 @@ The documentation migration and consistency pass now use the accepted collector-
 
 ### Tasks
 
-- [x] Update `docs/src/docs/codebase/memory-management/overview.mtf` with the six-part memory model and concise REC role.
+- [x] Update `docs/src/developer-docs/memory-management/overview.mtf` with the six-part memory model and concise REC role.
 - [x] Update `ownership-and-drops` to the Affine Ownership ABI and two-bit handle extension.
 - [x] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
 - [x] Update declared-group docs with hard count-free group ownership and cycle policy.

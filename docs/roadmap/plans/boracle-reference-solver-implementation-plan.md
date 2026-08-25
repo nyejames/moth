@@ -2,7 +2,7 @@
 
 > **Repository path:** `docs/roadmap/plans/boracle-reference-solver-implementation-plan.md`
 >
-> **Permanent design authority:** `docs/src/docs/codebase/memory-management/borrow-validation/boracle-reference-solver.mtf`
+> **Permanent design authority:** `docs/src/developer-docs/memory-management/borrow-validation/boracle-reference-solver.mtf`
 >
 > **Status:** Queued for activation in the dedicated Boracle worktree. The current alpha borrow checker remains the normal compiler authority.
 >
@@ -33,20 +33,20 @@ Before each implementation slice, read these files from the active Boracle workt
 
 1. `AGENTS.md`
 2. this plan and its current phase
-3. `docs/src/docs/codebase/memory-management/borrow-validation/boracle-reference-solver.mtf`
+3. `docs/src/developer-docs/memory-management/borrow-validation/boracle-reference-solver.mtf`
 4. `docs/compiler-design-overview.md`
-5. `docs/src/docs/codebase/memory-management/overview.mtf`
-6. `docs/src/docs/codebase/memory-management/access-and-aliasing/access-and-aliasing.mtf`
-7. `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf`
-8. `docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf`
-9. `docs/src/docs/codebase/style-guide/style-guide.mtf`
-10. the relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf`
-11. `docs/src/docs/codebase/style-guide/validation.mtf` before choosing or reporting a phase gate
+5. `docs/src/developer-docs/memory-management/overview.mtf`
+6. `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+7. `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+8. `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+9. `docs/src/developer-docs/style-guide/style-guide.mtf`
+10. the relevant sections of `docs/src/developer-docs/style-guide/testing.mtf`
+11. `docs/src/developer-docs/style-guide/validation.mtf` before choosing or reporting a phase gate
 12. `docs/src/docs/progress/@page.moth`
 13. `docs/roadmap/roadmap.md`
 14. the current borrow-checker, HIR, CLI, feature-matrix and test owners touched by the slice
 
-When a slice changes exact language semantics rather than only analysis precision, also read the canonical unsuffixed language references routed by `docs/src/docs/codebase/language/overview.mtf`.
+When a slice changes exact language semantics rather than only analysis precision, also read the canonical unsuffixed language references routed by `docs/src/developer-docs/language/overview.mtf`.
 
 The permanent Boracle design document owns the subsystem contract. This plan owns the initial implementation sequence. The progress matrix owns current support. Compiler behaviour does not override accepted design.
 
@@ -513,13 +513,13 @@ Update `docs/roadmap/roadmap.md`:
 
 Add and maintain:
 
-- `docs/src/docs/codebase/memory-management/borrow-validation/boracle-reference-solver.mtf` as the permanent subsystem authority
-- a special developer task route in `docs/src/docs/codebase/memory-management/overview.mtf`
+- `docs/src/developer-docs/memory-management/borrow-validation/boracle-reference-solver.mtf` as the permanent subsystem authority
+- a special developer task route in `docs/src/developer-docs/memory-management/overview.mtf`
 - an optional developer reference in `borrow-validation/overview.mtf`
 - Stage 6 and implementation-map wording in `docs/compiler-design-overview.md` once the shared model exists
 - accurate alpha/Boracle ownership wording in `borrow-validation/borrow-validation.mtf`
-- feature-lane rules in `docs/src/docs/codebase/style-guide/testing.mtf`
-- validation exclusions and `just boracle` in `docs/src/docs/codebase/style-guide/validation.mtf`
+- feature-lane rules in `docs/src/developer-docs/style-guide/testing.mtf`
+- validation exclusions and `just boracle` in `docs/src/developer-docs/style-guide/validation.mtf`
 - Boracle task routing in `AGENTS.md`
 - `index.md` only when the new module paths need location updates
 
