@@ -8,6 +8,9 @@ use super::{
     PlaceOverlap, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use,
     UseId, UseKind, ValueOrigin, ValueOriginId, from_hir,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -26,6 +29,11 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
     PublicCallTransferEffect, PublicCallTransferEligibility,
+};
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
+    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use fixtures::{
@@ -836,6 +844,88 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
             ..
         } if indices.as_ref() == [0]
     )));
+}
+
+#[test]
+fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_summary() {
+    let region = RegionId(0);
+    let source_local = LocalId(0);
+    let result_local = LocalId(1);
+    let generated_identity = GeneratedFunctionIdentity::new(
+        GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("boracle-generated-fallback"),
+                "main".to_owned(),
+                ModuleRootRole::Normal,
+            ),
+            "@page.moth".to_owned(),
+            ModulePrivateExecutableCategory::GenericFunction,
+            "identity".to_owned(),
+            None,
+        )),
+        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([]),
+    );
+    let module = module_with_block(HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![
+            hir_local(source_local, region),
+            hir_local(result_local, region),
+        ],
+        statements: vec![
+            HirStatement {
+                id: HirNodeId(0),
+                kind: HirStatementKind::Assign {
+                    target: HirPlace::Local(source_local),
+                    value: int_expression(0, 1, region),
+                },
+                location: SourceLocation::default(),
+            },
+            HirStatement {
+                id: HirNodeId(1),
+                kind: HirStatementKind::Call {
+                    target: CallTarget::Generated(generated_identity),
+                    args: vec![load_expression(2, source_local, region)],
+                    result: Some(result_local),
+                },
+                location: SourceLocation::default(),
+            },
+        ],
+        terminator: HirTerminator::Return(load_expression(3, result_local, region)),
+    });
+    let function = function_for(HirBlockId(0));
+    let problem = from_hir(&module, &function, None, None)
+        .expect("generated call without a summary should extract conservatively");
+    let effect = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::CallEffect(effect) => Some(effect),
+            _ => None,
+        })
+        .expect("generated call effect should be present");
+
+    assert!(
+        problem.calls()[effect.call.index()]
+            .label
+            .starts_with("Generated(")
+    );
+    assert!(matches!(
+        effect.arguments.as_ref(),
+        [argument] if argument.access == AccessKind::Shared
+    ));
+    let result = effect
+        .result
+        .as_ref()
+        .expect("generated call should retain its result row");
+    assert!(matches!(
+        &problem.origins()[result.origin.index()].kind,
+        OriginKind::CallResult {
+            provenance: CallResultProvenance::Unknown,
+            ..
+        }
+    ));
 }
 
 #[test]

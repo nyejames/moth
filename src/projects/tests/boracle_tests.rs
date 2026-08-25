@@ -550,6 +550,182 @@ result = shared
 }
 
 #[test]
+fn boracle_source_generic_call_exposes_generated_typed_boundary() {
+    let report = solve_source(
+        r#"
+wrap type T |value T| -> {T}:
+    return {value}
+;
+
+item = 1
+result = wrap(value = item)
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function
+                .problem
+                .calls()
+                .iter()
+                .any(|call| call.label.starts_with("Generated("))
+        })
+        .expect("generic source should expose a generated call target");
+    let effect = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::CallEffect(effect)
+                if function.problem.calls()[effect.call.index()]
+                    .label
+                    .starts_with("Generated(") =>
+            {
+                Some(effect)
+            }
+            _ => None,
+        })
+        .expect("generated call should retain its normalized effect");
+
+    assert!(matches!(
+        effect.arguments.as_ref(),
+        [argument] if argument.access == AccessKind::Shared
+    ));
+    let result = effect
+        .result
+        .as_ref()
+        .expect("generic call should retain its result row");
+    assert!(
+        matches!(
+            &function.problem.origins()[result.origin.index()].kind,
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Fresh,
+                ..
+            }
+        ),
+        "generated summary should preserve the fresh wrapper result"
+    );
+}
+
+#[test]
+fn boracle_source_fallible_paths_keep_success_result_loan_out_of_error_handler() {
+    let report = solve_source(
+        r#"
+load_values |value {Int}, fail Bool| -> {Int}, Error!:
+    if fail:
+        return! Error("failed")
+    ;
+
+    return value
+;
+
+items ~= {1}
+should_fail ~= false
+loaded = load_values(value = items, fail = should_fail) catch:
+    ~items.push(2) catch:
+    ;
+    then {0}
+;
+observed = loaded
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function.problem.events().iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    EventKind::CallEffect(effect)
+                        if effect.arguments.len() == 2
+                            && effect
+                                .arguments
+                                .iter()
+                                .all(|argument| argument.access == AccessKind::Shared)
+                            && effect.result.is_some()
+                )
+            })
+        })
+        .expect("fallible source should expose its typed call boundary");
+    let (call_event, call_id, result_place, result_origin) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::CallEffect(effect)
+                if effect.arguments.len() == 2
+                    && effect
+                        .arguments
+                        .iter()
+                        .all(|argument| argument.access == AccessKind::Shared) =>
+            {
+                effect
+                    .result
+                    .as_ref()
+                    .map(|result| (event.id, effect.call, result.place, result.origin))
+            }
+            _ => None,
+        })
+        .expect("fallible call should retain its result provenance");
+    assert!(matches!(
+        &function.problem.origins()[result_origin.index()].kind,
+        OriginKind::CallResult {
+            provenance: CallResultProvenance::Unknown,
+            ..
+        }
+    ));
+
+    let success_result_loan = function
+        .report
+        .loans
+        .loans()
+        .iter()
+        .find(|loan| {
+            loan.issue_event != Some(call_event)
+                && loan.origins.contains(&result_origin)
+                && loan.holders.as_ref() != [result_place]
+                && !loan.uses.is_empty()
+        })
+        .expect("the success result should retain an observed provenance loan");
+    assert!(!success_result_loan.live_points.is_empty());
+
+    let failure_mutation_event = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::CallArgument { call, argument, .. }
+                if *call != call_id && argument.access == AccessKind::Exclusive =>
+            {
+                Some(event.id)
+            }
+            _ => None,
+        })
+        .expect("the error handler should retain its exclusive mutation event");
+    let failure_only_mutation = function
+        .report
+        .loans
+        .decisions()
+        .iter()
+        .find(|decision| decision.event == failure_mutation_event)
+        .expect("the error-handler mutation should retain its access decision");
+    let failure_point = function.problem.events()[failure_only_mutation.event.index()].point;
+    let success_issue_point = function.problem.events()[success_result_loan
+        .issue_event
+        .expect("success loan has an issue event")
+        .index()]
+    .point;
+    assert!(failure_only_mutation.allowed);
+    assert_ne!(
+        function.problem.points()[success_issue_point.index()].block,
+        function.problem.points()[failure_point.index()].block
+    );
+    assert!(!success_result_loan.live_points.contains(&failure_point));
+    assert!(!function.report.has_conflicts());
+}
+
+#[test]
 fn boracle_source_aggregate_field_keeps_stored_alias_live() {
     let output = run_source_dump(
         r#"
