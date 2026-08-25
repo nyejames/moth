@@ -124,7 +124,7 @@ impl BoracleSolver {
 
         let mut last_use_observations = Vec::new();
         for use_row in problem.uses() {
-            if use_row.definition {
+            if use_row.definition && !origin.is_write_through_use(use_row.id) {
                 continue;
             }
             let event_id = event_for_use(problem, use_row.id)?;

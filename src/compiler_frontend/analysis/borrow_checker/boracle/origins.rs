@@ -424,7 +424,7 @@ fn apply_event(
             };
             replace_generation(problem, &mut state.origins, *destination);
             state.origins.insert(*destination, input.clone());
-            set_binding_mode(problem, state, *destination, BindingMode::Alias);
+            set_alias_mode_if_unclassified(problem, state, *destination);
             Ok((rule, Some(*destination), input.into_iter().collect()))
         }
         EventKind::AliasFromPlace {
@@ -451,7 +451,7 @@ fn apply_event(
             };
             replace_generation(problem, &mut state.origins, *destination);
             state.origins.insert(*destination, input.clone());
-            set_binding_mode(problem, state, *destination, BindingMode::Alias);
+            set_alias_mode_if_unclassified(problem, state, *destination);
             Ok((rule, Some(*destination), input.into_iter().collect()))
         }
         EventKind::Copy {
@@ -668,6 +668,17 @@ fn set_binding_mode(
     if place.projections.is_empty() {
         state.modes.insert(place.root, mode);
     }
+}
+
+fn set_alias_mode_if_unclassified(
+    problem: &BorrowProblem,
+    state: &mut FlowState,
+    destination: PlaceId,
+) {
+    let Some(binding) = destination_binding(problem, destination) else {
+        return;
+    };
+    state.modes.entry(binding).or_insert(BindingMode::Alias);
 }
 
 fn write_through_result(

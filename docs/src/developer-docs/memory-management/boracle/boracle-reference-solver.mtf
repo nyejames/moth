@@ -408,7 +408,9 @@ The reference extractor also distinguishes an alias-only binding from a slot-bac
 write through an alias preserves the referent generation and is checked against other holders; a
 write to a slot-backed binding replaces that binding's origin generation. At CFG joins, only the
 paths proven alias-only use the write-through interpretation; mixed or uncertain paths remain
-conservative.
+conservative. Rebinding a slot-backed binding to an existing value does not change the binding's
+slot-backed mode, so a later fresh, copy, aggregate or call-result write still replaces that slot
+generation.
 
 ### Joins
 
