@@ -26,6 +26,7 @@ show_eval = []
 show_hir = []
 show_codegen = []
 show_borrow_checker = []
+boracle = []
 checked_blocks = []
 async_blocks = []
 

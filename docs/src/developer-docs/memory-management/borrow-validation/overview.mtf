@@ -13,10 +13,14 @@ Roots, joins, optional transfer safety and facts.
 ## Main paths
 
 - `src/compiler_frontend/analysis/borrow_checker/`
+- `src/compiler_frontend/analysis/borrow_checker/problem/`
+- `src/compiler_frontend/analysis/borrow_checker/last_use/`
+- `src/compiler_frontend/analysis/borrow_checker/boracle/` (feature-gated developer path)
 
 ## Read next
 
 - `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` for the permanent reference solver and its opt-in developer lane
 - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6

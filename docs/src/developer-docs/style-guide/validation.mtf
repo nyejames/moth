@@ -156,7 +156,8 @@ Before declaring a non-trivial code-bearing slice complete, run:
     [td:
         [: Clippy]
         [: `just ci-clippy-native`]
-        [: Native-host linting of every workspace target under every feature, warnings denied]
+        [: Native-host linting of every workspace target under the explicit standard feature set,
+        warnings denied]
     ]
 
     [td:
@@ -217,7 +218,8 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 ]
 
-- `ci-clippy-native` lints the native host only, across every workspace target and every feature.
+- `ci-clippy-native` lints the native host only, across every workspace target and the explicit
+  standard feature set. It deliberately excludes the opt-in `boracle` feature.
 - Warnings are denied.
 - Cross-target linting is CI's job: the gate matrix runs `clippy` on Linux, macOS and Windows.
 - The workspace test command includes the compiler, CLI and `xtask` packages.
@@ -288,8 +290,10 @@ Completion state is what separates the reports, and the distinction is real:
 - `test_honesty_inventory.json`, `source_audit.json` and `integration_suite_inventory.json` are
   replaced by a `completed: false` report before their owned work starts. A run interrupted partway
   leaves a report that says so rather than a previous successful one that looks current.
-- `feature_matrix_results.json` starts with every lane `pending` and is rewritten as each lane
-  resolves, so an interrupted matrix reports the lanes it measured and the lanes it never reached.
+- `feature_matrix_results.json` starts with every standard lane `pending` and is rewritten as each
+  standard lane resolves, so an interrupted matrix reports the lanes it measured and the lanes it
+  never reached. Opt-in lanes are owned by their named commands and do not appear as unmeasured
+  matrix outcomes.
 - `feature_lane_coverage.json` is a coverage map, not an outcome table. It answers which lane
   covers which declared feature, which `just feature-lane-check` establishes without running a
   single lane, so it is complete the moment it is written and never states a lane result. Lane
@@ -315,23 +319,29 @@ that evidence, and stops applying the moment the code moves.
 
 ### Feature lanes
 
-`just validate` runs one feature configuration. The lanes run all of them:
+`just validate` runs one standard feature configuration. The standard lanes run all standard
+configurations:
 
 [codeblock, $code("bash"):
     just test-feature-matrix
 ]
 
-Eight package-scoped lanes cover the default configuration, `timers`, `detailed_timers`,
+Eight package-scoped standard lanes cover the default configuration, `timers`, `detailed_timers`,
 `benchmark_counters`, `timers` with `benchmark_counters`, the scoped-block features, every `show_*`
 feature and the `xtask` package. `testing.mtf > Feature and platform lanes` owns the lane table and
 what each lane uniquely covers.
+
+The `boracle` feature is an opt-in developer lane. `just boracle` owns its formatting check,
+feature-enabled Clippy and smoke test. It is intentionally excluded from `just validate`,
+`just test-feature-matrix` and ordinary CI gates.
 
 Lanes use `cargo test -p <package>` rather than `--workspace` because Cargo unifies features across
 one resolve graph. `xtask` requires `moth` with `timers`, so no workspace-wide command can run the
 default configuration.
 
 `just feature-lane-check` proves the mapping without running a lane, and is part of `just validate`.
-Adding a Cargo feature means adding it to a lane in the same change; the check fails otherwise.
+The report distinguishes standard and opt-in lane owners. Adding a Cargo feature means adding it
+to a standard or opt-in lane in the same change; the check fails otherwise.
 
 ### CI gates
 

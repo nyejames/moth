@@ -5,9 +5,9 @@
 //! features stops matching the declared features, a feature-gated test silently stops running.
 
 use super::{
-    COVERAGE_REPORT_SCHEMA_VERSION, FEATURE_LANES, FeatureLane, LaneFailure, LaneOutcome,
-    LaneResult, MATRIX_RESULTS_SCHEMA_VERSION, MatrixResultsReport, cfg_feature_names,
-    declared_features, lane_report, lanes_enabling,
+    COVERAGE_REPORT_SCHEMA_VERSION, FEATURE_LANES, FeatureLane, FeatureLaneKind, LaneFailure,
+    LaneOutcome, LaneResult, MATRIX_RESULTS_SCHEMA_VERSION, MatrixResultsReport, cfg_feature_names,
+    declared_features, lane_report, lanes_enabling, standard_execution_lanes,
 };
 use crate::report_file::ReportRunIdentity;
 use std::collections::BTreeSet;
@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 /// from the tree it claims to check.
 const MOTH_MANIFEST: &str = include_str!("../../../Cargo.toml");
 const XTASK_MANIFEST: &str = include_str!("../../Cargo.toml");
+const ROOT_JUSTFILE: &str = include_str!("../../../justfile");
 
 fn lane_features(package: &str) -> BTreeSet<String> {
     FEATURE_LANES
@@ -81,6 +82,7 @@ fn a_lane_without_features_runs_its_package_unconfigured() {
         name: "default",
         package: "moth",
         features: &[],
+        kind: FeatureLaneKind::Standard,
         owns: "the shipped configuration",
     };
 
@@ -96,6 +98,7 @@ fn a_lane_command_names_every_feature_it_enables() {
         name: "timers-counters",
         package: "moth",
         features: &["timers", "benchmark_counters"],
+        kind: FeatureLaneKind::Standard,
         owns: "collector-backed counters",
     };
 
@@ -103,6 +106,283 @@ fn a_lane_command_names_every_feature_it_enables() {
         lane.command_line(),
         "cargo test -p moth --quiet --features timers,benchmark_counters -- --format terse"
     );
+}
+
+#[test]
+fn boracle_is_an_opt_in_lane_owned_by_just_boracle() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+
+    assert_eq!(lane.package, "moth");
+    assert_eq!(lane.features, &["boracle"]);
+    assert_eq!(
+        lane.kind,
+        FeatureLaneKind::OptIn {
+            command: "just boracle"
+        }
+    );
+    assert_eq!(lane.owned_command(), "just boracle");
+    assert_eq!(lane_report(lane).command, "just boracle");
+    assert_eq!(lane_report(lane).lane_kind, "opt_in");
+
+    let coverage = lanes_enabling("moth", "boracle");
+    assert!(coverage.standard_lanes.is_empty());
+    assert_eq!(coverage.opt_in_lanes, vec!["boracle"]);
+    assert!(
+        super::validate_opt_in_lane(lane, ROOT_JUSTFILE).is_ok(),
+        "the declared Boracle owner must remain connected to the Justfile recipe"
+    );
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_missing_recipe() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+
+    let error = super::validate_opt_in_lane(lane, "other:\n    cargo test --features boracle\n")
+        .expect_err("a missing recipe must not count as coverage");
+
+    assert!(error.contains("does not define a recipe"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_non_just_owner_command() {
+    let lane = FeatureLane {
+        name: "boracle",
+        package: "moth",
+        features: &["boracle"],
+        kind: FeatureLaneKind::OptIn {
+            command: "cargo test --features boracle",
+        },
+        owns: "the deterministic Boracle developer gate",
+    };
+
+    let error = super::validate_opt_in_lane(&lane, ROOT_JUSTFILE)
+        .expect_err("an owner outside the Just command contract must be rejected");
+
+    assert!(error.contains("not a `just <recipe>` command"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_recipe_with_the_wrong_feature() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features show_hir\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("a recipe disconnected from the feature must not count as coverage");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_renamed_feature_token() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features boracle_renamed\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("a renamed feature must not count as Boracle coverage");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_non_executing_feature_decoy() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    @echo \"cargo test --features boracle\"\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("a printed command must not count as Boracle coverage");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_feature_text_after_a_shell_comment() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test # --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("commented feature text must not count as Boracle coverage");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_feature_text_after_a_shell_separator() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test; echo --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("a later shell command must not count as Boracle coverage");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_accepts_a_valid_cargo_owner_with_an_inline_comment() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features boracle # explanation; ignored\n";
+
+    assert!(
+        super::validate_opt_in_lane(lane, justfile).is_ok(),
+        "shell punctuation after a valid Cargo command belongs to the ignored comment"
+    );
+}
+
+#[test]
+fn opt_in_ownership_rejects_metadata_without_test_execution() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo metadata -p moth --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("metadata must not count as an executing feature lane");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_no_run_test_command() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --no-run --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("a no-run test command must not count as execution");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_test_command_for_another_package() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p xtask --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("another package must not count as Boracle execution");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_duplicate_feature_selectors() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features boracle --features show_hir\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("duplicate feature selectors must not count as exact ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_duplicate_package_selectors() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --package xtask --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("duplicate package selectors must not count as exact ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_all_features() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features boracle --all-features\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("all-features must not count as exact Boracle ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_an_attached_duplicate_package_selector() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --package=moth --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("attached duplicate package selectors must not count as exact ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_an_attached_duplicate_feature_selector() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -p moth --features boracle --features=show_hir\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("attached duplicate feature selectors must not count as exact ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn opt_in_ownership_rejects_a_compact_package_selector() {
+    let lane = FEATURE_LANES
+        .iter()
+        .find(|lane| lane.name == "boracle")
+        .expect("the Boracle lane should exist");
+    let justfile = "boracle:\n    cargo test -pmoth --features boracle\n";
+
+    let error = super::validate_opt_in_lane(lane, justfile)
+        .expect_err("compact package selectors must not count as exact ownership");
+
+    assert!(error.contains("does not run Cargo with '--features boracle'"));
+}
+
+#[test]
+fn the_standard_execution_set_excludes_boracle() {
+    let standard_names: Vec<&str> = standard_execution_lanes().map(|lane| lane.name).collect();
+
+    assert!(!standard_names.contains(&"boracle"));
+    assert_eq!(standard_names.len(), FEATURE_LANES.len() - 1);
 }
 
 #[test]
@@ -233,12 +513,12 @@ fn scanner_ignores_an_identifier_that_merely_ends_in_cfg() {
 
 #[test]
 fn the_coverage_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(COVERAGE_REPORT_SCHEMA_VERSION, 2);
+    assert_eq!(COVERAGE_REPORT_SCHEMA_VERSION, 3);
 }
 
 #[test]
 fn the_matrix_results_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(MATRIX_RESULTS_SCHEMA_VERSION, 1);
+    assert_eq!(MATRIX_RESULTS_SCHEMA_VERSION, 2);
 }
 
 /// The coverage map must not be able to state a lane outcome.
@@ -256,7 +536,14 @@ fn the_coverage_report_states_lane_coverage_and_never_lane_outcomes() {
     fields.sort_unstable();
     assert_eq!(
         fields,
-        vec!["command", "features", "name", "owns", "package"]
+        vec![
+            "command",
+            "features",
+            "lane_kind",
+            "name",
+            "owns",
+            "package"
+        ]
     );
 }
 

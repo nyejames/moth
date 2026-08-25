@@ -6,11 +6,13 @@
 >
 > **Status:** Active on the `boracle` branch and worktree. Phase 0 is complete and audited. The current alpha borrow checker remains the normal compiler authority. Phase 0 changed no compiler behaviour itself, but the branch carries `7571448bf`, a separately approved fix to the alpha checker's future-use liveness, authored and validated on `main`. Phase 0 working notes live in this worktree's untracked `tmp/boracle-phase0-notes.md` and hold the owner map, baseline record, semantic-case inventory and audit record.
 >
-> **Current slice:** Phase 1.
+> **Current slice:** Phase 1 complete; Phase 2 is the next implementation slice.
 >
 > **Blockers:** None for the initial reference-solver work. Do not start the production borrow-checker replacement, lifetime-topology implementation or REC integration in this plan.
 >
-> **Next action:** Execute Phase 1: declare the `boracle` feature, add the empty feature-gated seam and the shared `problem/` and `last_use/` seams, split the feature matrix into standard and opt-in lanes, and give `just boracle` a real lane.
+> **Coordinator:** `WORK_ID=boracle-reference-solver`, baseline `a92effb1d`; Phase 1 implementation, audit correction cycles and the mandatory gate are complete.
+>
+> **Next action:** Begin Phase 2 by defining `BorrowProblem` and its hand-authored semantic fixtures.
 
 ## Purpose
 
@@ -693,17 +695,17 @@ Create a compilable feature-gated Boracle module and its dedicated validation co
 
 ## Tasks
 
-- [ ] Add `boracle = []` to `Cargo.toml`.
-- [ ] Add an empty, documented `borrow_checker/boracle/mod.rs` behind the feature.
-- [ ] Add the shared `problem/` and `last_use/` module seams outside the feature gate with no normal runtime invocation.
-- [ ] Add an opt-in feature-lane class to `xtask/src/feature_matrix.rs` or the smallest clearer owner.
-- [ ] Keep standard feature coverage strict while recognizing `boracle -> just boracle` as opt-in.
-- [ ] Change normal Clippy from `--all-features` to an explicit standard feature set that excludes Boracle.
-- [ ] Add Boracle-enabled Clippy to `just boracle`.
-- [ ] Add a minimal Boracle compile/test smoke so the command proves the feature really executes.
-- [ ] Add machine-readable feature-lane coverage fields that distinguish standard and opt-in lanes.
-- [ ] Update testing and validation docs in the same slice.
-- [ ] Add source checks or unit tests proving standard matrix execution excludes the opt-in lane without weakening ordinary feature coverage.
+- [x] Add `boracle = []` to `Cargo.toml`.
+- [x] Add an empty, documented `borrow_checker/boracle/mod.rs` behind the feature.
+- [x] Add the shared `problem/` and `last_use/` module seams outside the feature gate with no normal runtime invocation.
+- [x] Add an opt-in feature-lane class to `xtask/src/feature_matrix.rs` or the smallest clearer owner.
+- [x] Keep standard feature coverage strict while recognizing `boracle -> just boracle` as opt-in.
+- [x] Change normal Clippy from `--all-features` to an explicit standard feature set that excludes Boracle.
+- [x] Add Boracle-enabled Clippy to `just boracle`.
+- [x] Add a minimal Boracle compile/test smoke so the command proves the feature really executes.
+- [x] Add machine-readable feature-lane coverage fields that distinguish standard and opt-in lanes.
+- [x] Update testing and validation docs in the same slice.
+- [x] Add source checks or unit tests proving standard matrix execution excludes the opt-in lane without weakening ordinary feature coverage.
 
 The empty command may initially run only formatting, Boracle Clippy and the smoke test. Later phases extend it until it owns the complete deterministic suite.
 
