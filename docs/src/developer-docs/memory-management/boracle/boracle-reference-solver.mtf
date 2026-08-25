@@ -1279,6 +1279,14 @@ Useful properties include:
 - experiment mode reports every acceptance delta
 - malformed input never reaches the solver
 
+The Boracle test lane exercises these properties across bounded deterministic seeds and includes
+the deliberately shared Alpha subset in differential comparisons. Every comparison is classified
+as agreement, an Alpha limitation, a Boracle defect, an input-builder defect, an accepted
+experimental difference or an unsettled semantic question. Generated failures retain the seed,
+normalized problem and complete report, with a smaller property-specific normalized case for
+reproduction. Differential agreement is evidence for investigation, not proof that either solver
+is correct.
+
 ## Developer command and dumps
 
 A build with `boracle` exposes the initial internal command:

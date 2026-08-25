@@ -8,6 +8,7 @@ use super::super::problem::{
     TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -19,6 +20,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[test]
@@ -430,6 +432,1070 @@ fn boracle_generated_problems_preserve_copy_and_rebind_semantics() {
             }
         }
     }
+}
+
+#[test]
+fn boracle_generated_metamorphic_properties_preserve_semantics() {
+    for seed in 0..16 {
+        let alias_without_use = alias_or_copy_property_problem(seed, PropertyValueKind::Alias);
+        let alias_without_use_report = solve_generated_property(
+            &alias_without_use,
+            seed,
+            "unused alias does not retain a loan",
+        );
+        assert_generated_property(
+            !alias_without_use_report.has_conflicts(),
+            seed,
+            "unused alias does not retain a loan",
+            &alias_without_use,
+            &alias_without_use_report,
+        );
+
+        let alias_with_use = append_reachable_value_use(&alias_without_use);
+        let alias_with_use_report = solve_generated_property(
+            &alias_with_use,
+            seed,
+            "a future alias use keeps the loan live",
+        );
+        assert_generated_property(
+            alias_with_use_report.has_conflicts(),
+            seed,
+            "a future alias use keeps the loan live",
+            &alias_with_use,
+            &alias_with_use_report,
+        );
+        assert!(
+            alias_with_use_report.loans.conflicts().len()
+                >= alias_without_use_report.loans.conflicts().len(),
+            "adding a future alias use made the mutation legal for seed={seed}"
+        );
+
+        let copy_without_use = alias_or_copy_property_problem(seed, PropertyValueKind::Copy);
+        let copy_with_use = append_reachable_value_use(&copy_without_use);
+        let copy_with_use_report = solve_generated_property(
+            &copy_with_use,
+            seed,
+            "replacing an alias with a copy cannot add a conflict",
+        );
+        assert_generated_property(
+            !copy_with_use_report.has_conflicts(),
+            seed,
+            "replacing an alias with a copy cannot add a conflict",
+            &copy_with_use,
+            &copy_with_use_report,
+        );
+        assert!(
+            alias_with_use_report.loans.conflicts().len()
+                >= copy_with_use_report.loans.conflicts().len(),
+            "copy replacement introduced a conflict for seed={seed}: alias={:?} copy={:?}",
+            alias_with_use_report.loans.conflicts(),
+            copy_with_use_report.loans.conflicts(),
+        );
+
+        let unreachable_variant = append_unreachable_use(&alias_without_use);
+        let unreachable_report = solve_generated_property(
+            &unreachable_variant,
+            seed,
+            "unreachable use does not change legality",
+        );
+        assert_eq!(
+            report_semantic_signature(&alias_without_use_report),
+            report_reachable_signature(&unreachable_report, alias_without_use.events().len()),
+            "unreachable use changed reachable semantics for seed={seed}\n{}",
+            property_failure_context(
+                seed,
+                "unreachable use does not change legality",
+                &unreachable_variant,
+                &unreachable_report,
+            )
+        );
+
+        let rebound = fresh_rebind_property_problem();
+        let rebound_report =
+            solve_generated_property(&rebound, seed, "fresh rebind separates old aliases");
+        assert_generated_property(
+            !rebound_report.has_conflicts(),
+            seed,
+            "fresh rebind separates old aliases",
+            &rebound,
+            &rebound_report,
+        );
+        assert_ne!(
+            rebound_report
+                .origin
+                .origins_after_event(EventId::new(3), PlaceId::new(1)),
+            rebound_report
+                .origin
+                .origins_after_event(EventId::new(6), PlaceId::new(0)),
+            "fresh rebind did not separate old and new origins for seed={seed}"
+        );
+
+        let renumbered = renumber_bindings(&alias_with_use);
+        let renumbered_report =
+            solve_generated_property(&renumbered, seed, "binding renumbering preserves semantics");
+        assert_eq!(
+            report_semantic_signature(&alias_with_use_report),
+            report_semantic_signature(&renumbered_report),
+            "binding renumbering changed semantics for seed={seed}\n{}",
+            property_failure_context(
+                seed,
+                "binding renumbering preserves semantics",
+                &renumbered,
+                &renumbered_report,
+            )
+        );
+
+        let branch = branch_separation_property_problem(false);
+        let split_branch = branch_separation_property_problem(true);
+        let branch_report =
+            solve_generated_property(&branch, seed, "branch-separated use and mutation are legal");
+        let split_branch_report = solve_generated_property(
+            &split_branch,
+            seed,
+            "equivalent branch splitting preserves semantics",
+        );
+        assert_generated_property(
+            !branch_report.has_conflicts(),
+            seed,
+            "branch-separated use and mutation are legal",
+            &branch,
+            &branch_report,
+        );
+        assert_eq!(
+            report_semantic_signature(&branch_report),
+            report_semantic_signature(&split_branch_report),
+            "equivalent branch splitting changed semantics for seed={seed}\n{}",
+            property_failure_context(
+                seed,
+                "equivalent branch splitting preserves semantics",
+                &split_branch,
+                &split_branch_report,
+            )
+        );
+    }
+}
+
+#[test]
+fn boracle_alpha_shared_subset_differential_disagreements_are_classified() {
+    for (case_name, kind) in [
+        ("copy", SharedSubsetKind::Copy),
+        ("shared alias", SharedSubsetKind::Alias),
+    ] {
+        let (module, function) = hir_shared_subset(kind);
+        let string_table = StringTable::new();
+        let external_packages = ExternalPackageRegistry::new();
+        let alpha_accepts =
+            super::super::check_borrows(&module, &external_packages, &string_table).is_ok();
+        let problem = super::super::problem::from_hir(&module, &function, None, None)
+            .expect("shared differential HIR should extract");
+        let boracle_accepts = !super::BoracleSolver::solve(&problem)
+            .expect("shared differential problem should solve")
+            .has_conflicts();
+        let expected_accepts = true;
+        let disposition = classify_differential(expected_accepts, alpha_accepts, boracle_accepts);
+        assert!(ALL_DIFFERENTIAL_DISPOSITIONS.contains(&disposition));
+
+        assert!(
+            matches!(
+                disposition,
+                DifferentialDisposition::Agreement | DifferentialDisposition::AlphaLimitation
+            ),
+            "unexpected {case_name} shared-subset differential disposition: {disposition:?}; alpha_accepts={alpha_accepts} boracle_accepts={boracle_accepts}\n{}",
+            problem.debug_dump()
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DifferentialDisposition {
+    Agreement,
+    AlphaLimitation,
+    BoracleDefect,
+    InputBuilderDefect,
+    AcceptedExperimentalDifference,
+    UnsettledSemanticQuestion,
+}
+
+// Keep the review taxonomy explicit so a new disagreement class cannot bypass the gate.
+const ALL_DIFFERENTIAL_DISPOSITIONS: &[DifferentialDisposition] = &[
+    DifferentialDisposition::Agreement,
+    DifferentialDisposition::AlphaLimitation,
+    DifferentialDisposition::BoracleDefect,
+    DifferentialDisposition::InputBuilderDefect,
+    DifferentialDisposition::AcceptedExperimentalDifference,
+    DifferentialDisposition::UnsettledSemanticQuestion,
+];
+
+fn classify_differential(
+    expected_accepts: bool,
+    alpha_accepts: bool,
+    boracle_accepts: bool,
+) -> DifferentialDisposition {
+    match (
+        alpha_accepts == expected_accepts,
+        boracle_accepts == expected_accepts,
+    ) {
+        (true, true) => DifferentialDisposition::Agreement,
+        (false, true) => DifferentialDisposition::AlphaLimitation,
+        (true, false) => DifferentialDisposition::BoracleDefect,
+        (false, false) => DifferentialDisposition::UnsettledSemanticQuestion,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SharedSubsetKind {
+    Copy,
+    Alias,
+}
+
+fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
+    let region = RegionId(0);
+    let source = LocalId(0);
+    let result = LocalId(1);
+    let module = HirModule {
+        blocks: vec![HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(source, region), hir_local(result, region)],
+            statements: vec![
+                HirStatement {
+                    id: crate::compiler_frontend::hir::ids::HirNodeId(0),
+                    kind: HirStatementKind::Assign {
+                        target: HirPlace::Local(source),
+                        value: hir_int_expression(0, 1, region),
+                    },
+                    location: SourceLocation::default(),
+                },
+                HirStatement {
+                    id: crate::compiler_frontend::hir::ids::HirNodeId(1),
+                    kind: HirStatementKind::Assign {
+                        target: HirPlace::Local(result),
+                        value: HirExpression {
+                            id: HirValueId(1),
+                            kind: match kind {
+                                SharedSubsetKind::Copy => {
+                                    HirExpressionKind::Copy(HirPlace::Local(source))
+                                }
+                                SharedSubsetKind::Alias => {
+                                    HirExpressionKind::Load(HirPlace::Local(source))
+                                }
+                            },
+                            ty: builtin_type_ids::INT,
+                            value_kind: match kind {
+                                SharedSubsetKind::Copy => ValueKind::RValue,
+                                SharedSubsetKind::Alias => ValueKind::Place,
+                            },
+                            region,
+                        },
+                    },
+                    location: SourceLocation::default(),
+                },
+            ],
+            terminator: HirTerminator::Return(HirExpression {
+                id: HirValueId(2),
+                kind: HirExpressionKind::Load(HirPlace::Local(result)),
+                ty: builtin_type_ids::INT,
+                value_kind: ValueKind::Place,
+                region,
+            }),
+        }],
+        regions: vec![HirRegion::lexical(region, None)],
+        ..HirModule::new()
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: HirBlockId(0),
+        params: Vec::new(),
+        return_type: builtin_type_ids::INT,
+    };
+    (module, function)
+}
+
+fn solve_generated_property(
+    problem: &BorrowProblem,
+    seed: u32,
+    property: &str,
+) -> super::BoracleReport {
+    super::BoracleSolver::solve(problem).unwrap_or_else(|error| {
+        panic!(
+            "generated property {property:?} failed to solve for seed={seed}: {error:?}\nnormalized problem:\n{}\nreduced baseline:\n{}",
+            problem.debug_dump(),
+            reduced_property_problem(seed, property).debug_dump(),
+        )
+    })
+}
+
+fn assert_generated_property(
+    condition: bool,
+    seed: u32,
+    property: &str,
+    problem: &BorrowProblem,
+    report: &super::BoracleReport,
+) {
+    if !condition {
+        panic!(
+            "generated property {property:?} failed for seed={seed}\n{}",
+            property_failure_context(seed, property, problem, report)
+        );
+    }
+}
+
+fn property_failure_context(
+    seed: u32,
+    property: &str,
+    problem: &BorrowProblem,
+    report: &super::BoracleReport,
+) -> String {
+    let reduced = reduced_property_problem(seed, property);
+    format!(
+        "property={property:?} seed={seed}\nnormalized problem:\n{}\nreport:\n{}\nreduced baseline:\n{}",
+        problem.debug_dump(),
+        report.debug_dump(),
+        reduced.debug_dump(),
+    )
+}
+
+fn reduced_property_problem(seed: u32, property: &str) -> BorrowProblem {
+    if property.contains("rebind") {
+        fresh_rebind_property_problem()
+    } else if property.contains("branch") {
+        branch_separation_property_problem(false)
+    } else {
+        alias_or_copy_property_problem(seed, PropertyValueKind::Alias)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DecisionSignature {
+    event: u32,
+    kind: AccessKind,
+    allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConflictSignature {
+    access_event: u32,
+    conflicting_loan: u32,
+    origin_overlap: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SemanticSignature {
+    decisions: Vec<DecisionSignature>,
+    conflicts: Vec<ConflictSignature>,
+}
+
+fn report_semantic_signature(report: &super::BoracleReport) -> SemanticSignature {
+    let decisions = report
+        .loans
+        .decisions()
+        .iter()
+        .map(|decision| DecisionSignature {
+            event: decision.event.raw(),
+            kind: decision.kind,
+            allowed: decision.allowed,
+        })
+        .collect();
+    let conflicts = report
+        .loans
+        .conflicts()
+        .iter()
+        .map(|conflict| ConflictSignature {
+            access_event: conflict.access_event.raw(),
+            conflicting_loan: conflict.conflicting_loan.raw(),
+            origin_overlap: conflict.origin_overlap,
+        })
+        .collect();
+    SemanticSignature {
+        decisions,
+        conflicts,
+    }
+}
+
+fn report_reachable_signature(
+    report: &super::BoracleReport,
+    event_count: usize,
+) -> SemanticSignature {
+    let mut signature = report_semantic_signature(report);
+    signature
+        .decisions
+        .retain(|decision| (decision.event as usize) < event_count);
+    signature
+        .conflicts
+        .retain(|conflict| (conflict.access_event as usize) < event_count);
+    signature
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PropertyValueKind {
+    Alias,
+    Copy,
+}
+
+fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowProblem {
+    let projection = seed % 2;
+    let mut points = vec![ProgramPoint::new(PointId::new(0), BlockId::new(0), 0)];
+    let mut events = Vec::new();
+    let mut uses = Vec::new();
+
+    let push_event = |events: &mut Vec<Event>, point: &mut Vec<ProgramPoint>, kind| {
+        let event_id = EventId::new(events.len() as u32);
+        let point_id = PointId::new(point.len() as u32);
+        point.push(ProgramPoint::new(point_id, BlockId::new(0), point_id.raw()));
+        events.push(Event::new(event_id, point_id, kind, EventSource::none()));
+    };
+
+    push_event(
+        &mut events,
+        &mut points,
+        EventKind::Fresh {
+            destination: PlaceId::new(0),
+            origin: ValueOriginId::new(0),
+        },
+    );
+    uses.push(Use {
+        id: UseId::new(0),
+        point: PointId::new(points.len() as u32),
+        place: PlaceId::new(0),
+        kind: UseKind::Read,
+        definition: false,
+    });
+    push_event(
+        &mut events,
+        &mut points,
+        EventKind::Access {
+            use_id: UseId::new(0),
+        },
+    );
+    uses.push(Use {
+        id: UseId::new(1),
+        point: PointId::new(points.len() as u32),
+        place: PlaceId::new(1),
+        kind: UseKind::Write,
+        definition: true,
+    });
+    push_event(
+        &mut events,
+        &mut points,
+        EventKind::Access {
+            use_id: UseId::new(1),
+        },
+    );
+    if matches!(kind, PropertyValueKind::Alias) {
+        push_event(
+            &mut events,
+            &mut points,
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(0),
+                destination: PlaceId::new(1),
+            },
+        );
+    } else {
+        push_event(
+            &mut events,
+            &mut points,
+            EventKind::Copy {
+                source: PlaceId::new(0),
+                destination: PlaceId::new(1),
+                origin: ValueOriginId::new(1),
+            },
+        );
+    }
+    let mutation_use = UseId::new(2);
+    uses.push(Use {
+        id: mutation_use,
+        point: PointId::new(points.len() as u32),
+        place: PlaceId::new(0),
+        kind: UseKind::Write,
+        definition: false,
+    });
+    push_event(
+        &mut events,
+        &mut points,
+        EventKind::Access {
+            use_id: mutation_use,
+        },
+    );
+    let exit_point = PointId::new(points.len() as u32);
+    points.push(ProgramPoint::new(
+        exit_point,
+        BlockId::new(0),
+        exit_point.raw(),
+    ));
+    let terminator_id = EventId::new(events.len() as u32);
+    events.push(Event::new(
+        terminator_id,
+        exit_point,
+        EventKind::Terminator {
+            kind: TerminatorEventKind::Return,
+        },
+        EventSource::none(),
+    ));
+
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points,
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            exit_point,
+            (0..events.len())
+                .map(|id| EventId::new(id as u32))
+                .collect(),
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(
+                PlaceId::new(0),
+                BindingId::new(0),
+                vec![super::super::problem::ProjectionElem::Field(projection)],
+            ),
+            Place::new(
+                PlaceId::new(1),
+                BindingId::new(1),
+                vec![super::super::problem::ProjectionElem::Field(projection)],
+            ),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                super::super::problem::OriginKind::Copy(
+                    vec![ValueOriginId::new(0)].into_boxed_slice(),
+                ),
+            ),
+        ],
+        uses,
+        events,
+        ..BorrowProblemParts::default()
+    })
+    .expect("generated alias/copy property problem should validate")
+}
+
+fn append_reachable_value_use(problem: &BorrowProblem) -> BorrowProblem {
+    let access_point = PointId::new(problem.points().len() as u32);
+    let exit_point = PointId::new(access_point.raw() + 1);
+    let next_use = UseId::new(problem.uses().len() as u32);
+    let mut points = problem.points().to_vec();
+    points.extend([
+        ProgramPoint::new(access_point, BlockId::new(0), access_point.raw()),
+        ProgramPoint::new(exit_point, BlockId::new(0), exit_point.raw()),
+    ]);
+
+    let mut uses = problem.uses().to_vec();
+    uses.push(Use {
+        id: next_use,
+        point: access_point,
+        place: PlaceId::new(1),
+        kind: UseKind::Read,
+        definition: false,
+    });
+
+    let mut events = problem.events().to_vec();
+    let terminator = events
+        .pop()
+        .expect("alias/copy property problem should end with a terminator");
+    assert!(matches!(&terminator.kind, EventKind::Terminator { .. }));
+    let access_event = EventId::new(events.len() as u32);
+    let terminator_event = EventId::new(events.len() as u32 + 1);
+    events.push(Event::new(
+        access_event,
+        access_point,
+        EventKind::Access { use_id: next_use },
+        EventSource::none(),
+    ));
+    events.push(Event::new(
+        terminator_event,
+        exit_point,
+        terminator.kind,
+        terminator.source,
+    ));
+
+    let existing_block = problem.control_flow().blocks[0].clone();
+    let blocks = vec![CfgBlock::new(
+        existing_block.id,
+        existing_block.entry,
+        exit_point,
+        (0..events.len())
+            .map(|id| EventId::new(id as u32))
+            .collect(),
+    )];
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: problem.bindings().to_vec(),
+        points,
+        blocks,
+        edges: problem.control_flow().edges.to_vec(),
+        entry: problem.control_flow().entry,
+        exits: problem.control_flow().exits.to_vec(),
+        places: problem.places().to_vec(),
+        origins: problem.origins().to_vec(),
+        loans: problem.loans().to_vec(),
+        uses,
+        calls: problem.calls().to_vec(),
+        events,
+    })
+    .expect("reachable alias-use property problem should validate")
+}
+
+fn fresh_rebind_property_problem() -> BorrowProblem {
+    let points = (0..=9)
+        .map(|id| ProgramPoint::new(PointId::new(id), BlockId::new(0), id))
+        .collect::<Vec<_>>();
+    let uses = vec![
+        Use {
+            id: UseId::new(0),
+            point: PointId::new(2),
+            place: PlaceId::new(0),
+            kind: UseKind::Read,
+            definition: false,
+        },
+        Use {
+            id: UseId::new(1),
+            point: PointId::new(3),
+            place: PlaceId::new(1),
+            kind: UseKind::Write,
+            definition: true,
+        },
+        Use {
+            id: UseId::new(2),
+            point: PointId::new(8),
+            place: PlaceId::new(1),
+            kind: UseKind::Read,
+            definition: false,
+        },
+        Use {
+            id: UseId::new(3),
+            point: PointId::new(5),
+            place: PlaceId::new(0),
+            kind: UseKind::Write,
+            definition: true,
+        },
+        Use {
+            id: UseId::new(4),
+            point: PointId::new(7),
+            place: PlaceId::new(0),
+            kind: UseKind::Write,
+            definition: false,
+        },
+    ];
+    let events = vec![
+        Event::new(
+            EventId::new(0),
+            PointId::new(1),
+            EventKind::Fresh {
+                destination: PlaceId::new(0),
+                origin: ValueOriginId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(1),
+            PointId::new(2),
+            EventKind::Access {
+                use_id: UseId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(2),
+            PointId::new(3),
+            EventKind::Access {
+                use_id: UseId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(3),
+            PointId::new(4),
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(0),
+                destination: PlaceId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(4),
+            PointId::new(5),
+            EventKind::Access {
+                use_id: UseId::new(3),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(5),
+            PointId::new(6),
+            EventKind::Rebind {
+                destination: PlaceId::new(0),
+                value: super::super::problem::RebindValue::Fresh(ValueOriginId::new(1)),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(6),
+            PointId::new(7),
+            EventKind::Access {
+                use_id: UseId::new(4),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(7),
+            PointId::new(8),
+            EventKind::Access {
+                use_id: UseId::new(2),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(8),
+            PointId::new(9),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Return,
+            },
+            EventSource::none(),
+        ),
+    ];
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points,
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(9),
+            (0..events.len())
+                .map(|id| EventId::new(id as u32))
+                .collect(),
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::fresh(ValueOriginId::new(1)),
+        ],
+        uses,
+        events,
+        ..BorrowProblemParts::default()
+    })
+    .expect("generated fresh-rebind property problem should validate")
+}
+
+fn append_unreachable_use(problem: &BorrowProblem) -> BorrowProblem {
+    let next_block = BlockId::new(problem.control_flow().blocks.len() as u32);
+    let next_point = problem.points().len() as u32;
+    let next_use = UseId::new(problem.uses().len() as u32);
+    let access_event = EventId::new(problem.events().len() as u32);
+    let terminator_event = EventId::new(problem.events().len() as u32 + 1);
+    let access_point = PointId::new(next_point + 1);
+    let exit_point = PointId::new(next_point + 2);
+    let mut points = problem.points().to_vec();
+    points.extend([
+        ProgramPoint::new(PointId::new(next_point), next_block, 0),
+        ProgramPoint::new(access_point, next_block, 1),
+        ProgramPoint::new(exit_point, next_block, 2),
+    ]);
+    let mut uses = problem.uses().to_vec();
+    uses.push(Use {
+        id: next_use,
+        point: access_point,
+        place: PlaceId::new(0),
+        kind: UseKind::Read,
+        definition: false,
+    });
+    let mut events = problem.events().to_vec();
+    events.push(Event::new(
+        access_event,
+        access_point,
+        EventKind::Access { use_id: next_use },
+        EventSource::none(),
+    ));
+    events.push(Event::new(
+        terminator_event,
+        exit_point,
+        EventKind::Terminator {
+            kind: TerminatorEventKind::Return,
+        },
+        EventSource::none(),
+    ));
+    let mut blocks = problem.control_flow().blocks.to_vec();
+    blocks.push(CfgBlock::new(
+        next_block,
+        PointId::new(next_point),
+        exit_point,
+        vec![access_event, terminator_event],
+    ));
+    let mut exits = problem.control_flow().exits.to_vec();
+    exits.push(next_block);
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: problem.bindings().to_vec(),
+        points,
+        blocks,
+        edges: problem.control_flow().edges.to_vec(),
+        entry: problem.control_flow().entry,
+        exits,
+        places: problem.places().to_vec(),
+        origins: problem.origins().to_vec(),
+        loans: problem.loans().to_vec(),
+        uses,
+        calls: problem.calls().to_vec(),
+        events,
+    })
+    .expect("unreachable-use property problem should validate")
+}
+
+fn renumber_bindings(problem: &BorrowProblem) -> BorrowProblem {
+    assert_eq!(problem.bindings().len(), 2);
+    let mapping = [1_u32, 0_u32];
+    let mut bindings = (0..problem.bindings().len())
+        .map(|id| Binding::synthetic(BindingId::new(id as u32)))
+        .collect::<Vec<_>>();
+    for binding in problem.bindings() {
+        let new_id = mapping[binding.id.index()] as usize;
+        let mut remapped = binding.clone();
+        remapped.id = BindingId::new(new_id as u32);
+        bindings[new_id] = remapped;
+    }
+    let places = problem
+        .places()
+        .iter()
+        .map(|place| {
+            Place::new(
+                place.id,
+                BindingId::new(mapping[place.root.index()]),
+                place.projections.to_vec(),
+            )
+        })
+        .collect();
+    BorrowProblem::new(BorrowProblemParts {
+        bindings,
+        points: problem.points().to_vec(),
+        blocks: problem.control_flow().blocks.to_vec(),
+        edges: problem.control_flow().edges.to_vec(),
+        entry: problem.control_flow().entry,
+        exits: problem.control_flow().exits.to_vec(),
+        places,
+        origins: problem.origins().to_vec(),
+        loans: problem.loans().to_vec(),
+        uses: problem.uses().to_vec(),
+        calls: problem.calls().to_vec(),
+        events: problem.events().to_vec(),
+    })
+    .expect("renumbered property problem should validate")
+}
+
+fn branch_separation_property_problem(split: bool) -> BorrowProblem {
+    let mut points = vec![
+        ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
+        ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
+        ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
+        ProgramPoint::new(PointId::new(3), BlockId::new(0), 3),
+        ProgramPoint::new(PointId::new(4), BlockId::new(0), 4),
+        ProgramPoint::new(PointId::new(5), BlockId::new(0), 5),
+        ProgramPoint::new(PointId::new(6), BlockId::new(1), 0),
+        ProgramPoint::new(PointId::new(7), BlockId::new(1), 1),
+        ProgramPoint::new(PointId::new(8), BlockId::new(1), 2),
+        ProgramPoint::new(PointId::new(9), BlockId::new(2), 0),
+        ProgramPoint::new(PointId::new(10), BlockId::new(2), 1),
+        ProgramPoint::new(PointId::new(11), BlockId::new(2), 2),
+    ];
+    let mut events = vec![
+        Event::new(
+            EventId::new(0),
+            PointId::new(1),
+            EventKind::Fresh {
+                destination: PlaceId::new(0),
+                origin: ValueOriginId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(1),
+            PointId::new(2),
+            EventKind::Access {
+                use_id: UseId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(2),
+            PointId::new(3),
+            EventKind::Access {
+                use_id: UseId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(3),
+            PointId::new(4),
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(0),
+                destination: PlaceId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(4),
+            PointId::new(5),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Branch {
+                    targets: vec![BlockId::new(1), BlockId::new(2)].into_boxed_slice(),
+                },
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(5),
+            PointId::new(7),
+            EventKind::Access {
+                use_id: UseId::new(2),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(6),
+            PointId::new(8),
+            EventKind::Terminator {
+                kind: if split {
+                    TerminatorEventKind::Jump {
+                        target: BlockId::new(3),
+                    }
+                } else {
+                    TerminatorEventKind::Return
+                },
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(7),
+            PointId::new(10),
+            EventKind::Access {
+                use_id: UseId::new(3),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(8),
+            PointId::new(11),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Return,
+            },
+            EventSource::none(),
+        ),
+    ];
+    let mut blocks = vec![
+        CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(5),
+            vec![
+                EventId::new(0),
+                EventId::new(1),
+                EventId::new(2),
+                EventId::new(3),
+                EventId::new(4),
+            ],
+        ),
+        CfgBlock::new(
+            BlockId::new(1),
+            PointId::new(6),
+            PointId::new(8),
+            vec![EventId::new(5), EventId::new(6)],
+        ),
+        CfgBlock::new(
+            BlockId::new(2),
+            PointId::new(9),
+            PointId::new(11),
+            vec![EventId::new(7), EventId::new(8)],
+        ),
+    ];
+    let mut edges = vec![
+        CfgEdge::new(BlockId::new(0), BlockId::new(1)),
+        CfgEdge::new(BlockId::new(0), BlockId::new(2)),
+    ];
+    let mut exits = vec![BlockId::new(1), BlockId::new(2)];
+    if split {
+        points.extend([
+            ProgramPoint::new(PointId::new(12), BlockId::new(3), 0),
+            ProgramPoint::new(PointId::new(13), BlockId::new(3), 1),
+        ]);
+        let event_id = EventId::new(events.len() as u32);
+        events.push(Event::new(
+            event_id,
+            PointId::new(13),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Return,
+            },
+            EventSource::none(),
+        ));
+        blocks[1].exit = PointId::new(8);
+        blocks.push(CfgBlock::new(
+            BlockId::new(3),
+            PointId::new(12),
+            PointId::new(13),
+            vec![event_id],
+        ));
+        edges.push(CfgEdge::new(BlockId::new(1), BlockId::new(3)));
+        exits = vec![BlockId::new(2), BlockId::new(3)];
+    }
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points,
+        blocks,
+        edges,
+        entry: BlockId::new(0),
+        exits,
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![ValueOrigin::fresh(ValueOriginId::new(0))],
+        uses: vec![
+            Use {
+                id: UseId::new(0),
+                point: PointId::new(2),
+                place: PlaceId::new(0),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(1),
+                point: PointId::new(3),
+                place: PlaceId::new(1),
+                kind: UseKind::Write,
+                definition: true,
+            },
+            Use {
+                id: UseId::new(2),
+                point: PointId::new(7),
+                place: PlaceId::new(1),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(3),
+                point: PointId::new(10),
+                place: PlaceId::new(0),
+                kind: UseKind::Write,
+                definition: false,
+            },
+        ],
+        events,
+        ..BorrowProblemParts::default()
+    })
+    .expect("generated branch property problem should validate")
 }
 
 fn generated_problem(seed: u32, cyclic: bool) -> BorrowProblem {
