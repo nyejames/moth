@@ -118,20 +118,7 @@ impl LastUseAnalysis {
         problem.validate()?;
 
         let mut analysis = Self::empty(problem);
-        let mut event_by_use = BTreeMap::<UseId, EventId>::new();
-        for event in problem.events() {
-            match &event.kind {
-                EventKind::Access { use_id } => {
-                    event_by_use.insert(*use_id, event.id);
-                }
-                EventKind::CallEffect(effect) => {
-                    for argument in &effect.arguments {
-                        event_by_use.insert(argument.use_id, event.id);
-                    }
-                }
-                _ => {}
-            }
-        }
+        let event_by_use = use_event_map(problem);
 
         for use_row in problem.uses() {
             let Some(event_id) = event_by_use.get(&use_row.id).copied() else {
@@ -196,6 +183,20 @@ impl LastUseAnalysis {
 
         analysis.sort_observations();
         Ok(analysis)
+    }
+
+    /// Add solver-owned observations to the normalized place and binding observations.
+    pub(crate) fn with_observations(
+        mut self,
+        problem: &BorrowProblem,
+        observations: impl IntoIterator<Item = LastUseObservation>,
+    ) -> Result<Self, CompilerError> {
+        for observation in observations {
+            self.validate_observation(problem, observation)?;
+            self.add_observation(observation);
+        }
+        self.sort_observations();
+        Ok(self)
     }
 
     /// Build an analysis from caller-owned observations, retaining normalized CFG and event
@@ -635,6 +636,36 @@ impl LastUseAnalysis {
         }
         exits.into_iter().collect()
     }
+}
+
+/// Map each normalized use to its exact owning event.
+pub(crate) fn event_for_use(
+    problem: &BorrowProblem,
+    use_id: UseId,
+) -> Result<EventId, CompilerError> {
+    use_event_map(problem).get(&use_id).copied().ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "last-use analysis cannot locate owner of normalized use {:?}",
+            use_id
+        ))
+    })
+}
+
+fn use_event_map(problem: &BorrowProblem) -> BTreeMap<UseId, EventId> {
+    let mut event_by_use = BTreeMap::<UseId, EventId>::new();
+    for event in problem.events() {
+        match &event.kind {
+            EventKind::CallArgument { argument, .. } => {
+                // Granular argument events are the exact boundary for every non-empty call.
+                event_by_use.insert(argument.use_id, event.id);
+            }
+            EventKind::Access { use_id } => {
+                event_by_use.entry(*use_id).or_insert(event.id);
+            }
+            _ => {}
+        }
+    }
+    event_by_use
 }
 
 #[derive(Debug, Clone, Copy)]

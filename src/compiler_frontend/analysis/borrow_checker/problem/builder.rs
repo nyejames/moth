@@ -17,7 +17,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId as HirBlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
@@ -35,7 +35,7 @@ use super::bindings::Binding;
 use super::control_flow::{CfgBlock, CfgEdge, ProgramPoint};
 use super::events::{
     AccessKind, AggregateField, Call, CallArgument, CallEffect, CallResult, Event, EventKind,
-    EventSource, RebindValue, TerminatorEventKind, Use, UseKind,
+    EventSource, TerminatorEventKind, Use, UseKind,
 };
 use super::ids::{BindingId, BlockId, CallId, EventId, PlaceId, PointId, ValueOriginId};
 use super::origins::{CallResultProvenance, OriginKind, ValueOrigin};
@@ -96,8 +96,8 @@ struct FunctionProblemBuilder<'a> {
     blocks: Vec<CfgBlock>,
     edges: Vec<CfgEdge>,
     exits: Vec<BlockId>,
-    written_places: BTreeSet<PlaceId>,
     current_problem_block: Option<BlockId>,
+    next_problem_block_id: u32,
 }
 
 impl<'a> FunctionProblemBuilder<'a> {
@@ -155,8 +155,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             blocks: Vec::new(),
             edges: Vec::new(),
             exits: Vec::new(),
-            written_places: BTreeSet::new(),
             current_problem_block: None,
+            next_problem_block_id: 0,
         };
         builder.assign_problem_block_ids()?;
         builder.collect_bindings()?;
@@ -167,6 +167,8 @@ impl<'a> FunctionProblemBuilder<'a> {
         for hir_block_id in self.reachable_blocks.clone() {
             self.build_block(hir_block_id)?;
         }
+
+        self.blocks.sort_by_key(|block| block.id);
 
         let entry = self.problem_block(self.function.entry)?;
         let mut problem_exits = self.exits.clone();
@@ -196,6 +198,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             let id = dense_id(index, "normalized CFG block")?;
             self.problem_block_by_hir.insert(hir_block.0, id);
         }
+        self.next_problem_block_id =
+            dense_u32(self.reachable_blocks.len(), "normalized CFG block")?;
         Ok(())
     }
 
@@ -230,6 +234,14 @@ impl<'a> FunctionProblemBuilder<'a> {
                 binding_id,
                 Some(local.id),
                 Some(local.region),
+                local.mutable,
+                matches!(
+                    self.module.side_table.local_origin_kind(local.id),
+                    Some(
+                        HirLocalOriginKind::CompilerTemp
+                            | HirLocalOriginKind::CompilerFreshMutableArg
+                    )
+                ),
                 EventSource {
                     hir_node: None,
                     location: local.source_info.clone(),
@@ -247,13 +259,21 @@ impl<'a> FunctionProblemBuilder<'a> {
         let entry = self.new_point(problem_block_id, block_source.clone());
         let mut event_ids = Vec::new();
 
+        if hir_block_id == self.function.entry {
+            self.emit_parameter_origins(&mut event_ids)?;
+        }
+
         for statement in &block.statements {
             self.lower_statement(statement, &mut event_ids)?;
         }
 
-        let successors = terminator_targets(&block.terminator);
+        let mut successors = terminator_targets(&block.terminator);
+        successors.sort_by_key(|successor| successor.0);
+        successors.dedup();
+        if successors.is_empty() {
+            self.emit_scope_exit_events(&block, &mut event_ids, &block_source)?;
+        }
         self.lower_terminator(&block.terminator, hir_block_id, &mut event_ids)?;
-        self.emit_scope_exit_events(&block, &successors, &mut event_ids, &block_source)?;
 
         let exit = self.new_point(problem_block_id, block_source.clone());
         self.blocks
@@ -262,9 +282,20 @@ impl<'a> FunctionProblemBuilder<'a> {
         if successors.is_empty() {
             self.exits.push(problem_block_id);
         }
+        let mut target_blocks = BTreeMap::new();
         for successor in successors {
             let from = problem_block_id;
-            let to = self.problem_block(successor)?;
+            let original_to = self.problem_block(successor)?;
+            let bindings = self.scope_exit_bindings(&block, successor)?;
+            let to = if bindings.is_empty() {
+                original_to
+            } else {
+                let edge_block =
+                    self.new_edge_block(bindings, original_to, block_source.clone())?;
+                self.edges.push(CfgEdge::new(edge_block, original_to));
+                edge_block
+            };
+            target_blocks.insert(original_to, to);
             if !self
                 .edges
                 .iter()
@@ -273,7 +304,39 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.edges.push(CfgEdge::new(from, to));
             }
         }
+        if !target_blocks.is_empty() {
+            self.remap_terminator_targets(problem_block_id, &target_blocks)?;
+        }
 
+        Ok(())
+    }
+
+    fn emit_parameter_origins(
+        &mut self,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<(), CompilerError> {
+        for (index, local) in self.function.params.iter().copied().enumerate() {
+            let binding = self.binding_for_local(local)?;
+            let source = self
+                .bindings
+                .get(binding.index())
+                .map(|binding| binding.source.clone())
+                .unwrap_or_else(EventSource::none);
+            let place = self.local_place(local, &source)?;
+            let origin = self.new_origin(OriginKind::Parameter {
+                index: u32::try_from(index).map_err(|_| {
+                    compiler_error("Boracle parameter origin index exceeds u32::MAX")
+                })?,
+            });
+            self.emit_event(
+                event_ids,
+                source,
+                EventKind::Fresh {
+                    destination: place,
+                    origin,
+                },
+            );
+        }
         Ok(())
     }
 
@@ -443,25 +506,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         }
         let origin = self.new_fresh_origin();
         self.emit_write(target, source, event_ids)?;
-        if self.written_places.insert(target) {
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::Fresh {
-                    destination: target,
-                    origin,
-                },
-            );
-        } else {
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::Rebind {
-                    destination: target,
-                    value: RebindValue::Fresh(origin),
-                },
-            );
-        }
+        self.emit_event(
+            event_ids,
+            source.clone(),
+            EventKind::Fresh {
+                destination: target,
+                origin,
+            },
+        );
         Ok(())
     }
 
@@ -473,28 +525,20 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let fields = self.lower_aggregate_children(expression, source, event_ids)?;
+        for field in &fields {
+            self.project_place(target, field.projection)?;
+        }
         let origin = self.new_fresh_origin();
         self.emit_write(target, source, event_ids)?;
-        if self.written_places.insert(target) {
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::Aggregate {
-                    destination: target,
-                    origin,
-                    fields: fields.into_boxed_slice(),
-                },
-            );
-        } else {
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::Rebind {
-                    destination: target,
-                    value: RebindValue::Fresh(origin),
-                },
-            );
-        }
+        self.emit_event(
+            event_ids,
+            source.clone(),
+            EventKind::Aggregate {
+                destination: target,
+                origin,
+                fields: fields.into_boxed_slice(),
+            },
+        );
         Ok(())
     }
 
@@ -918,7 +962,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         accesses.extend(std::iter::repeat_n(AccessKind::Shared, args.len()));
         let provenance = match op {
             HirMapOp::Get => CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
-            HirMapOp::Remove => CallResultProvenance::Fresh,
+            HirMapOp::Remove => CallResultProvenance::Unknown,
             HirMapOp::Contains | HirMapOp::Set | HirMapOp::Clear | HirMapOp::Length => {
                 CallResultProvenance::Fresh
             }
@@ -976,9 +1020,9 @@ impl<'a> FunctionProblemBuilder<'a> {
         } = spec;
         let call_id = self.next_call_id()?;
         self.calls.push(Call { id: call_id, label });
-        let point = self.new_point(self.current_problem_block()?, source.clone());
         let mut call_arguments = Vec::with_capacity(arguments.len());
-        for (place, access) in arguments.into_iter().zip(accesses) {
+        for (index, (place, access)) in arguments.into_iter().zip(accesses).enumerate() {
+            let point = self.new_point(self.current_problem_block()?, source.clone());
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -989,12 +1033,30 @@ impl<'a> FunctionProblemBuilder<'a> {
                 } else {
                     UseKind::Read
                 },
+                definition: false,
             });
             call_arguments.push(CallArgument {
                 place,
                 access,
                 use_id,
             });
+            let event_id = self.next_event_id()?;
+            self.events.push(Event::new(
+                event_id,
+                point,
+                EventKind::CallArgument {
+                    call: call_id,
+                    index: u32::try_from(index).map_err(|_| {
+                        compiler_error("Boracle call argument index exceeds u32::MAX")
+                    })?,
+                    argument: call_arguments
+                        .last()
+                        .cloned()
+                        .expect("call argument was just appended"),
+                },
+                source.clone(),
+            ));
+            event_ids.push(event_id);
         }
         let result = result_local
             .map(|local| self.local_place(local, source))
@@ -1007,6 +1069,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallResult { place, origin }
         });
         let event_id = self.next_event_id()?;
+        let point = self.new_point(self.current_problem_block()?, source.clone());
         self.events.push(Event::new(
             event_id,
             point,
@@ -1019,12 +1082,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         ));
         event_ids.push(event_id);
         if let Some(result) = result {
+            let point = self.new_point(self.current_problem_block()?, source.clone());
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
                 point,
                 place: result,
                 kind: UseKind::Write,
+                definition: true,
             });
             let event_id = self.next_event_id()?;
             self.events.push(Event::new(
@@ -1140,22 +1205,10 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn emit_scope_exit_events(
         &mut self,
         block: &HirBlock,
-        successors: &[HirBlockId],
         event_ids: &mut Vec<EventId>,
         source: &EventSource,
     ) -> Result<(), CompilerError> {
-        let mut bindings = Vec::new();
-        for local in &block.locals {
-            let binding = self.binding_for_local(local.id)?;
-            let survives_successor = successors.iter().any(|successor| {
-                self.block_by_id
-                    .get(&successor.0)
-                    .is_some_and(|next| self.region_contains(local.region, next.region))
-            });
-            if successors.is_empty() || !survives_successor {
-                bindings.push(binding);
-            }
-        }
+        let mut bindings = self.visible_bindings(block.region);
         bindings.sort_by_key(|binding| binding.raw());
         bindings.dedup();
         if !bindings.is_empty() {
@@ -1166,6 +1219,124 @@ impl<'a> FunctionProblemBuilder<'a> {
                     bindings: bindings.into_boxed_slice(),
                 },
             );
+        }
+        Ok(())
+    }
+
+    fn scope_exit_bindings(
+        &self,
+        block: &HirBlock,
+        successor: HirBlockId,
+    ) -> Result<Box<[BindingId]>, CompilerError> {
+        let next = self.hir_block(successor)?;
+        let next_visible = self
+            .visible_bindings(next.region)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let mut bindings = self
+            .visible_bindings(block.region)
+            .into_iter()
+            .filter(|binding| !next_visible.contains(binding))
+            .collect::<Vec<_>>();
+        bindings.sort_by_key(|binding| binding.raw());
+        bindings.dedup();
+        Ok(bindings.into_boxed_slice())
+    }
+
+    fn visible_bindings(
+        &self,
+        region: crate::compiler_frontend::hir::ids::RegionId,
+    ) -> Vec<BindingId> {
+        self.bindings
+            .iter()
+            .filter_map(|binding| {
+                binding
+                    .region
+                    .filter(|binding_region| self.region_contains(*binding_region, region))
+                    .map(|_| binding.id)
+            })
+            .collect()
+    }
+
+    fn new_edge_block(
+        &mut self,
+        bindings: Box<[BindingId]>,
+        target: BlockId,
+        source: EventSource,
+    ) -> Result<BlockId, CompilerError> {
+        let id = BlockId::new(self.next_problem_block_id);
+        self.next_problem_block_id = self
+            .next_problem_block_id
+            .checked_add(1)
+            .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
+        let entry = self.new_point(id, source.clone());
+        let event_id = self.next_event_id()?;
+        self.events.push(Event::new(
+            event_id,
+            entry,
+            EventKind::ScopeExit { bindings },
+            source.clone(),
+        ));
+        let jump_point = self.new_point(id, source.clone());
+        let jump_event_id = self.next_event_id()?;
+        self.events.push(Event::new(
+            jump_event_id,
+            jump_point,
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { target },
+            },
+            source.clone(),
+        ));
+        let exit = self.new_point(id, source);
+        self.blocks.push(CfgBlock::new(
+            id,
+            entry,
+            exit,
+            vec![event_id, jump_event_id],
+        ));
+        Ok(id)
+    }
+
+    fn remap_terminator_targets(
+        &mut self,
+        block: BlockId,
+        target_blocks: &BTreeMap<BlockId, BlockId>,
+    ) -> Result<(), CompilerError> {
+        let event_id = self
+            .blocks
+            .iter()
+            .find(|candidate| candidate.id == block)
+            .and_then(|candidate| candidate.events.last().copied())
+            .ok_or_else(|| {
+                compiler_error(format!("normalized CFG block {block:?} has no terminator"))
+            })?;
+        let event = self.events.get_mut(event_id.index()).ok_or_else(|| {
+            compiler_error(format!("unknown normalized terminator event {event_id:?}"))
+        })?;
+        let EventKind::Terminator { kind } = &mut event.kind else {
+            return Err(compiler_error(format!(
+                "normalized CFG block {block:?} does not end in a terminator event"
+            )));
+        };
+        let remap = |target: &mut BlockId| {
+            if let Some(replacement) = target_blocks.get(target) {
+                *target = *replacement;
+            }
+        };
+        match kind {
+            TerminatorEventKind::Jump { target }
+            | TerminatorEventKind::Break { target }
+            | TerminatorEventKind::Continue { target } => remap(target),
+            TerminatorEventKind::Branch { targets } => {
+                for target in targets.iter_mut() {
+                    remap(target);
+                }
+            }
+            TerminatorEventKind::Return
+            | TerminatorEventKind::ReturnSuccess
+            | TerminatorEventKind::ReturnError
+            | TerminatorEventKind::RuntimeFailure
+            | TerminatorEventKind::AssertFailure => {}
         }
         Ok(())
     }
@@ -1234,8 +1405,14 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.bindings.len(),
                 "synthetic normalized binding",
             )?);
-            self.bindings
-                .push(Binding::new(binding, None, None, source.clone()));
+            self.bindings.push(Binding::new(
+                binding,
+                None,
+                None,
+                false,
+                false,
+                source.clone(),
+            ));
             self.synthetic_binding_by_value.insert(value_id, binding);
             binding
         };
@@ -1292,19 +1469,45 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         self.emit_write(destination, source, event_ids)?;
-        let event = if self.written_places.insert(destination) {
-            EventKind::AliasFromPlace {
+        let destination_binding = self
+            .places
+            .get(destination.index())
+            .ok_or_else(|| compiler_error(format!("unknown alias destination {destination:?}")))?
+            .root;
+        let destination_access = self.alias_access_kind(destination_binding);
+        let event = if destination_access == AccessKind::Exclusive {
+            EventKind::ExclusiveAliasFromPlace {
                 source: source_place,
                 destination,
             }
         } else {
-            EventKind::Rebind {
+            EventKind::AliasFromPlace {
+                source: source_place,
                 destination,
-                value: RebindValue::AliasFromPlace(source_place),
             }
         };
         self.emit_event(event_ids, source.clone(), event);
         Ok(())
+    }
+
+    fn alias_access_kind(&self, destination_binding: BindingId) -> AccessKind {
+        let Some(binding) = self.bindings.get(destination_binding.index()) else {
+            return AccessKind::Shared;
+        };
+        match binding
+            .hir_local
+            .and_then(|local| self.module.side_table.local_origin_kind(local))
+        {
+            Some(HirLocalOriginKind::CompilerFreshMutableArg) => AccessKind::Exclusive,
+            Some(HirLocalOriginKind::CompilerTemp) => AccessKind::Shared,
+            Some(HirLocalOriginKind::User) | None => {
+                if binding.mutable {
+                    AccessKind::Exclusive
+                } else {
+                    AccessKind::Shared
+                }
+            }
+        }
     }
 
     fn emit_fresh_write(
@@ -1315,16 +1518,9 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<(), CompilerError> {
         let origin = self.new_fresh_origin();
         self.emit_write(destination, source, event_ids)?;
-        let event = if self.written_places.insert(destination) {
-            EventKind::Fresh {
-                destination,
-                origin,
-            }
-        } else {
-            EventKind::Rebind {
-                destination,
-                value: RebindValue::Fresh(origin),
-            }
+        let event = EventKind::Fresh {
+            destination,
+            origin,
         };
         self.emit_event(event_ids, source.clone(), event);
         Ok(())
@@ -1362,6 +1558,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             point,
             place,
             kind,
+            definition: kind == UseKind::Write,
         });
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
@@ -1442,6 +1639,12 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallTarget::External(_) => None,
         };
         let Some(summary) = summary else {
+            if let CallTarget::Local(function_id) = target
+                && let Some(accesses) =
+                    self.local_parameter_accesses(*function_id, argument_count)?
+            {
+                return Ok((accesses, CallResultProvenance::Unknown));
+            }
             return Ok((
                 vec![AccessKind::Shared; argument_count],
                 CallResultProvenance::Unknown,
@@ -1471,6 +1674,51 @@ impl<'a> FunctionProblemBuilder<'a> {
             FunctionReturnAliasSummary::Unknown => CallResultProvenance::Unknown,
         };
         Ok((accesses, provenance))
+    }
+
+    fn local_parameter_accesses(
+        &self,
+        function_id: FunctionId,
+        argument_count: usize,
+    ) -> Result<Option<Vec<AccessKind>>, CompilerError> {
+        let Some(function) = self
+            .module
+            .functions
+            .iter()
+            .find(|function| function.id == function_id)
+        else {
+            return Ok(None);
+        };
+        if function.params.len() != argument_count {
+            return Err(compiler_error(format!(
+                "Boracle local call {:?} has {} arguments but its HIR function has {} parameters",
+                function_id,
+                argument_count,
+                function.params.len()
+            )));
+        }
+
+        let mut accesses = Vec::with_capacity(function.params.len());
+        for parameter in &function.params {
+            let local = self
+                .module
+                .blocks
+                .iter()
+                .flat_map(|block| block.locals.iter())
+                .find(|local| local.id == *parameter)
+                .ok_or_else(|| {
+                    compiler_error(format!(
+                        "Boracle local call {:?} cannot resolve parameter local {:?}",
+                        function_id, parameter
+                    ))
+                })?;
+            accesses.push(if local.mutable {
+                AccessKind::Exclusive
+            } else {
+                AccessKind::Shared
+            });
+        }
+        Ok(Some(accesses))
     }
 
     fn new_fresh_origin(&mut self) -> ValueOriginId {

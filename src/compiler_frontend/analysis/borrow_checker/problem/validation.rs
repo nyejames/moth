@@ -3,10 +3,11 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use super::{
-    BorrowProblem, CallResultProvenance, EventKind, OriginKind, RebindValue, TerminatorEventKind,
+    BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, EventId, EventKind,
+    OriginKind, RebindValue, TerminatorEventKind,
 };
 use super::{LoanId, PointId, ValueOriginId};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
 fn compiler_error(message: impl Into<String>) -> CompilerError {
@@ -133,6 +134,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
 
     let mut incoming = vec![0usize; blocks.len()];
     let mut outgoing = vec![0usize; blocks.len()];
+    let mut outgoing_targets = vec![Vec::<BlockId>::new(); blocks.len()];
     for edge in flow.edges.iter() {
         let from = require_index(
             || edge.from.index(),
@@ -147,6 +149,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             edge.to.raw(),
         )?;
         outgoing[from] += 1;
+        outgoing_targets[from].push(edge.to);
         incoming[to] += 1;
     }
     if incoming[entry] != 0 {
@@ -279,6 +282,65 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         ));
     }
 
+    for block in blocks {
+        let event_id = block.events.last().ok_or_else(|| {
+            compiler_error(format!(
+                "CFG block {:?} must end in a terminator event",
+                block.id
+            ))
+        })?;
+        let event = &events[event_id.index()];
+        let mut expected = outgoing_targets[block.id.index()]
+            .iter()
+            .map(|target| target.raw())
+            .collect::<BTreeSet<_>>();
+        let actual = match &event.kind {
+            EventKind::Terminator { kind } => match kind {
+                TerminatorEventKind::Jump { target }
+                | TerminatorEventKind::Break { target }
+                | TerminatorEventKind::Continue { target } => BTreeSet::from([target.raw()]),
+                TerminatorEventKind::Branch { targets } => {
+                    targets.iter().map(|target| target.raw()).collect()
+                }
+                TerminatorEventKind::Return
+                | TerminatorEventKind::ReturnSuccess
+                | TerminatorEventKind::ReturnError
+                | TerminatorEventKind::RuntimeFailure
+                | TerminatorEventKind::AssertFailure => BTreeSet::new(),
+            },
+            _ => {
+                return Err(compiler_error(format!(
+                    "CFG block {:?} must end in a terminator event",
+                    block.id
+                )));
+            }
+        };
+        if outgoing[block.id.index()] == 0
+            && !matches!(
+                &event.kind,
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::Return
+                        | TerminatorEventKind::ReturnSuccess
+                        | TerminatorEventKind::ReturnError
+                        | TerminatorEventKind::RuntimeFailure
+                        | TerminatorEventKind::AssertFailure
+                }
+            )
+        {
+            return Err(compiler_error(format!(
+                "exit CFG block {:?} must end in a terminal terminator",
+                block.id
+            )));
+        }
+        expected.retain(|target| actual.contains(target));
+        if expected != actual || expected.len() != outgoing_targets[block.id.index()].len() {
+            return Err(compiler_error(format!(
+                "terminator targets for CFG block {:?} do not match its outgoing edges",
+                block.id
+            )));
+        }
+    }
+
     for use_row in uses {
         validate_point(use_row.point, points.len(), "use")?;
         require_index(
@@ -298,9 +360,22 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         )?;
     }
 
+    let mut call_result_owners = BTreeMap::<ValueOriginId, Vec<CallId>>::new();
+    for event in events {
+        if let EventKind::CallEffect(effect) = &event.kind
+            && let Some(result) = effect.result
+        {
+            call_result_owners
+                .entry(result.origin)
+                .or_default()
+                .push(effect.call);
+        }
+    }
+
     for origin in origins {
         match &origin.kind {
             OriginKind::Unknown => {}
+            OriginKind::Parameter { .. } => {}
             OriginKind::Fresh => {}
             OriginKind::Alias(source_origins)
             | OriginKind::ExclusiveAlias(source_origins)
@@ -313,6 +388,18 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             }
             OriginKind::CallResult { call, provenance } => {
                 require_index(|| call.index(), calls.len(), "origin call", call.raw())?;
+                let owners = call_result_owners.get(&origin.id).ok_or_else(|| {
+                    compiler_error(format!(
+                        "call-result origin {:?} is not attached to a CallEffect result",
+                        origin.id
+                    ))
+                })?;
+                if owners.len() != 1 || owners[0] != *call {
+                    return Err(compiler_error(format!(
+                        "call-result origin {:?} has inconsistent call ownership",
+                        origin.id
+                    )));
+                }
                 match provenance {
                     CallResultProvenance::Alias(source_origins) => {
                         validate_origin_set(
@@ -323,6 +410,27 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     }
                     CallResultProvenance::AliasParams(parameter_indices) => {
                         validate_sorted_unique(parameter_indices, "call-result parameter")?;
+                        let argument_count = events.iter().find_map(|event| match &event.kind {
+                            EventKind::CallEffect(effect) if effect.call == *call => {
+                                Some(effect.arguments.len())
+                            }
+                            _ => None,
+                        });
+                        let Some(argument_count) = argument_count else {
+                            return Err(compiler_error(format!(
+                                "call-result origin {:?} has no matching CallEffect",
+                                origin.id
+                            )));
+                        };
+                        if parameter_indices
+                            .iter()
+                            .any(|parameter_index| *parameter_index >= argument_count)
+                        {
+                            return Err(compiler_error(format!(
+                                "call-result origin {:?} references an argument outside call {:?}",
+                                origin.id, call
+                            )));
+                        }
                     }
                     CallResultProvenance::Fresh | CallResultProvenance::Unknown => {}
                 }
@@ -361,6 +469,105 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     let mut use_owners = vec![0usize; uses.len()];
     let mut loan_issues = vec![0usize; loans.len()];
     let mut loan_kills = BTreeSet::new();
+    let granular_call_uses = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::CallArgument { argument, .. } => Some(argument.use_id),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut granular_arguments = BTreeMap::<CallId, Vec<(u32, CallArgument, EventId)>>::new();
+    let mut call_effect_arguments = BTreeMap::<CallId, Box<[CallArgument]>>::new();
+    let mut event_locations = BTreeMap::new();
+    for block in blocks {
+        for (index, event_id) in block.events.iter().enumerate() {
+            event_locations.insert(*event_id, (block.id, index));
+        }
+    }
+    for event in events {
+        match &event.kind {
+            EventKind::CallArgument {
+                call,
+                index,
+                argument,
+            } => granular_arguments.entry(*call).or_default().push((
+                *index,
+                argument.clone(),
+                event.id,
+            )),
+            EventKind::CallEffect(effect)
+                if call_effect_arguments
+                    .insert(effect.call, effect.arguments.clone())
+                    .is_some() =>
+            {
+                return Err(compiler_error(format!(
+                    "call {:?} has more than one CallEffect event",
+                    effect.call
+                )));
+            }
+            _ => {}
+        }
+    }
+    for (call, effect_arguments) in &call_effect_arguments {
+        if effect_arguments.is_empty() {
+            if granular_arguments.contains_key(call) {
+                return Err(compiler_error(format!(
+                    "call {:?} has granular argument events but no CallEffect arguments",
+                    call
+                )));
+            }
+            continue;
+        }
+        let Some(arguments) = granular_arguments.get_mut(call) else {
+            return Err(compiler_error(format!(
+                "call {:?} has CallEffect arguments but no granular argument events",
+                call
+            )));
+        };
+        arguments.sort_by_key(|(_, _, event_id)| event_locations[event_id]);
+        if arguments.len() != effect_arguments.len() {
+            return Err(compiler_error(format!(
+                "granular argument events for call {:?} do not exactly match its CallEffect",
+                call
+            )));
+        }
+        let Some((effect_block, effect_index)) = problem.events().iter().find_map(|event| {
+            matches!(&event.kind, EventKind::CallEffect(effect) if effect.call == *call)
+                .then_some(event_locations[&event.id])
+        }) else {
+            return Err(compiler_error(format!(
+                "call {:?} has no located CallEffect event",
+                call
+            )));
+        };
+        for (expected_index, (index, argument, event_id)) in arguments.iter().enumerate() {
+            let expected_index = u32::try_from(expected_index)
+                .map_err(|_| compiler_error("granular call argument index exceeds u32::MAX"))?;
+            if *index != expected_index
+                || effect_arguments.get(expected_index as usize) != Some(argument)
+            {
+                return Err(compiler_error(format!(
+                    "granular argument events for call {:?} do not exactly match its CallEffect",
+                    call
+                )));
+            }
+            let (argument_block, argument_index) = event_locations[event_id];
+            if argument_block != effect_block || argument_index >= effect_index {
+                return Err(compiler_error(format!(
+                    "granular argument event for call {:?} must precede its CallEffect",
+                    call
+                )));
+            }
+        }
+    }
+    for call in granular_arguments.keys() {
+        if !call_effect_arguments.contains_key(call) {
+            return Err(compiler_error(format!(
+                "call {:?} has granular argument events but no CallEffect event",
+                call
+            )));
+        }
+    }
     for event in events {
         validate_point(event.point, points.len(), "event")?;
         match &event.kind {
@@ -439,6 +646,45 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     validate_place(field.source, places.len(), "aggregate child")?;
                 }
             }
+            EventKind::CallArgument {
+                call,
+                index,
+                argument,
+            } => {
+                require_index(
+                    || call.index(),
+                    calls.len(),
+                    "call argument call",
+                    call.raw(),
+                )?;
+                require_index(
+                    || argument.use_id.index(),
+                    uses.len(),
+                    "call argument use",
+                    argument.use_id.raw(),
+                )?;
+                validate_place(argument.place, places.len(), "call argument place")?;
+                let use_row = uses.get(argument.use_id.index()).ok_or_else(|| {
+                    compiler_error(format!(
+                        "call argument use {:?} is outside the use table",
+                        argument.use_id
+                    ))
+                })?;
+                if argument.access != use_access_kind(use_row.kind) {
+                    return Err(compiler_error(format!(
+                        "call argument use {:?} has an access kind inconsistent with its event",
+                        argument.use_id
+                    )));
+                }
+                if use_row.point != event.point || use_row.place != argument.place {
+                    return Err(compiler_error(format!(
+                        "call argument use {:?} must match its event point and place",
+                        argument.use_id
+                    )));
+                }
+                use_owners[argument.use_id.index()] += 1;
+                let _ = index;
+            }
             EventKind::CallEffect(effect) => {
                 require_index(
                     || effect.call.index(),
@@ -455,17 +701,48 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         argument.use_id.raw(),
                     )?;
                     let use_row = &uses[use_index];
-                    if use_row.point != event.point || use_row.place != argument.place {
+                    if !granular_call_uses.contains(&argument.use_id)
+                        && (use_row.point != event.point || use_row.place != argument.place)
+                    {
                         return Err(compiler_error(format!(
                             "call argument use {:?} must match its event point and place",
                             argument.use_id
                         )));
                     }
-                    use_owners[use_index] += 1;
+                    if !granular_call_uses.contains(&argument.use_id) {
+                        use_owners[use_index] += 1;
+                    }
                 }
                 if let Some(result) = effect.result {
                     validate_place(result.place, places.len(), "call result")?;
                     validate_origin(result.origin, origins.len(), "call result origin")?;
+                    let origin = &origins[result.origin.index()];
+                    let OriginKind::CallResult {
+                        call: origin_call,
+                        provenance,
+                    } = &origin.kind
+                    else {
+                        return Err(compiler_error(format!(
+                            "call result origin {:?} must be a CallResult origin",
+                            result.origin
+                        )));
+                    };
+                    if *origin_call != effect.call {
+                        return Err(compiler_error(format!(
+                            "call result origin {:?} belongs to call {:?}, not {:?}",
+                            result.origin, origin_call, effect.call
+                        )));
+                    }
+                    if let CallResultProvenance::AliasParams(parameter_indices) = provenance {
+                        for parameter_index in parameter_indices {
+                            if effect.arguments.get(*parameter_index).is_none() {
+                                return Err(compiler_error(format!(
+                                    "call result origin {:?} references argument index {} outside call {:?}",
+                                    result.origin, parameter_index, effect.call
+                                )));
+                            }
+                        }
+                    }
                 }
             }
             EventKind::ScopeExit {
@@ -593,4 +870,11 @@ fn validate_origin(
     owner: &str,
 ) -> Result<(), CompilerError> {
     require_index(|| origin.index(), origin_count, owner, origin.raw()).map(|_| ())
+}
+
+fn use_access_kind(kind: super::UseKind) -> super::AccessKind {
+    match kind {
+        super::UseKind::Read | super::UseKind::LoanObservation => super::AccessKind::Shared,
+        super::UseKind::Write => super::AccessKind::Exclusive,
+    }
 }

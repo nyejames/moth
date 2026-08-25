@@ -97,25 +97,47 @@ pub(crate) struct BoracleServiceOptions {
     pub(crate) experiment: BoracleExperiment,
 }
 
+/// One typed function result from the compiler-owned Boracle source boundary.
+#[derive(Debug)]
+pub(crate) struct BoracleFunctionReport {
+    pub(crate) function_id: u32,
+    pub(crate) problem: super::super::problem::BorrowProblem,
+    pub(crate) report: BoracleReport,
+}
+
+/// Typed reports for every HIR function in one source module.
+#[derive(Debug)]
+pub(crate) struct BoracleModuleReport {
+    pub(crate) functions: Box<[BoracleFunctionReport]>,
+}
+
+impl BoracleModuleReport {
+    pub(crate) fn functions(&self) -> &[BoracleFunctionReport] {
+        &self.functions
+    }
+}
+
 /// Run Boracle over every function in one compiler-produced HIR module.
 pub(crate) fn run_hir_module(
     input: &BoracleModuleInput,
     options: BoracleServiceOptions,
 ) -> Result<String, CompilerError> {
-    run_hir_module_parts(
-        &input.hir,
-        &input.external_package_registry,
-        input.entry_point.to_string_lossy().as_ref(),
-        options,
-    )
+    let report = solve_hir_module(input)?;
+    let entry_point = input.entry_point.to_string_lossy();
+    Ok(render_module_report(&report, entry_point.as_ref(), options))
 }
 
-fn run_hir_module_parts(
+/// Solve one compiler-produced HIR module without flattening its typed results into a dump.
+pub(crate) fn solve_hir_module(
+    input: &BoracleModuleInput,
+) -> Result<BoracleModuleReport, CompilerError> {
+    solve_hir_module_parts(&input.hir, &input.external_package_registry)
+}
+
+fn solve_hir_module_parts(
     module: &HirModule,
     external_package_registry: &Arc<ExternalPackageRegistry>,
-    entry_point: &str,
-    options: BoracleServiceOptions,
-) -> Result<String, CompilerError> {
+) -> Result<BoracleModuleReport, CompilerError> {
     if module.functions.is_empty() {
         return Err(CompilerError::compiler_error(
             "Boracle source service received a HIR module without functions",
@@ -125,13 +147,7 @@ fn run_hir_module_parts(
     let mut functions = module.functions.iter().collect::<Vec<_>>();
     functions.sort_by_key(|function| function.id.0);
 
-    let mut output = String::new();
-    output.push_str("Boracle internal developer report\n");
-    output.push_str(&format!("entry = {entry_point}\n"));
-    output.push_str(&format!("dump = {}\n", options.dump.name()));
-    output.push_str(&format!("experiment = {}\n", options.experiment.name()));
-    output.push_str("rule-set = boracle-reference-v1\n");
-
+    let mut reports = Vec::with_capacity(functions.len());
     for function in functions {
         let problem = from_hir(
             module,
@@ -140,11 +156,40 @@ fn run_hir_module_parts(
             Some(external_package_registry.as_ref()),
         )?;
         let report = BoracleSolver::solve(&problem)?;
-        output.push_str(&format!("\nfunction {}\n", function.id.0));
-        output.push_str(&render_dump(&problem, &report, options.dump));
+        reports.push(BoracleFunctionReport {
+            function_id: function.id.0,
+            problem,
+            report,
+        });
     }
 
-    Ok(output)
+    Ok(BoracleModuleReport {
+        functions: reports.into_boxed_slice(),
+    })
+}
+
+fn render_module_report(
+    module_report: &BoracleModuleReport,
+    entry_point: &str,
+    options: BoracleServiceOptions,
+) -> String {
+    let mut output = String::new();
+    output.push_str("Boracle internal developer report\n");
+    output.push_str(&format!("entry = {entry_point}\n"));
+    output.push_str(&format!("dump = {}\n", options.dump.name()));
+    output.push_str(&format!("experiment = {}\n", options.experiment.name()));
+    output.push_str("rule-set = boracle-reference-v1\n");
+
+    for function in module_report.functions() {
+        output.push_str(&format!("\nfunction {}\n", function.function_id));
+        output.push_str(&render_dump(
+            &function.problem,
+            &function.report,
+            options.dump,
+        ));
+    }
+
+    output
 }
 
 fn render_dump(

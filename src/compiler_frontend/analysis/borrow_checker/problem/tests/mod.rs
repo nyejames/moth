@@ -3,9 +3,10 @@
 mod fixtures;
 
 use super::{
-    AccessKind, BlockId, BorrowProblem, CallResultProvenance, Event, EventId, EventKind,
-    EventSource, OriginKind, PlaceId, PlaceOverlap, PointId, ProgramPoint, ProjectionElem,
-    RebindValue, TerminatorEventKind, UseId, ValueOriginId, from_hir,
+    AccessKind, BindingId, BlockId, BorrowProblem, Call, CallArgument, CallEffect, CallId,
+    CallResult, CallResultProvenance, Event, EventId, EventKind, EventSource, OriginKind, PlaceId,
+    PlaceOverlap, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use,
+    UseId, UseKind, ValueOrigin, ValueOriginId, from_hir,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -116,7 +117,7 @@ fn borrow_problem_same_statement_access_fixture_preserves_event_order_at_one_poi
     assert_eq!(problem.events()[0].point, problem.events()[1].point);
     assert_eq!(
         problem.control_flow().blocks[0].events.as_ref(),
-        [EventId::new(0), EventId::new(1),]
+        [EventId::new(0), EventId::new(1), EventId::new(2),]
     );
     assert!(matches!(
         &problem.events()[0].kind,
@@ -143,7 +144,7 @@ fn borrow_problem_malformed_dense_ids_fail_through_the_internal_compiler_error_l
 fn borrow_problem_malformed_unowned_event_fails_atomic_construction() {
     let mut parts = empty();
     parts.events.push(Event::new(
-        EventId::new(0),
+        EventId::new(1),
         PointId::new(1),
         EventKind::Fresh {
             destination: PlaceId::new(0),
@@ -159,6 +160,46 @@ fn borrow_problem_malformed_unowned_event_fails_atomic_construction() {
 }
 
 #[test]
+fn borrow_problem_rejects_exit_block_without_a_terminator() {
+    let mut parts = empty();
+    parts.events.clear();
+    parts.blocks[0].events = Vec::new().into_boxed_slice();
+
+    let error = BorrowProblem::new(parts).expect_err("exit blocks need terminal events");
+
+    assert!(error.msg.contains("must end in a terminator event"));
+}
+
+#[test]
+fn borrow_problem_rejects_nonterminal_terminator_on_an_exit_block() {
+    let mut parts = empty();
+    parts.events[0].kind = EventKind::Terminator {
+        kind: TerminatorEventKind::Jump {
+            target: BlockId::new(0),
+        },
+    };
+
+    let error = BorrowProblem::new(parts).expect_err("exit blocks need terminal terminators");
+
+    assert!(error.msg.contains("must end in a terminal terminator"));
+}
+
+#[test]
+fn borrow_problem_rejects_terminator_edges_that_disagree_with_the_cfg() {
+    let mut parts = branch_join();
+    if let EventKind::Terminator {
+        kind: TerminatorEventKind::Branch { targets },
+    } = &mut parts.events[4].kind
+    {
+        *targets = vec![BlockId::new(1)].into_boxed_slice();
+    }
+
+    let error = BorrowProblem::new(parts).expect_err("terminator edges must match the CFG");
+
+    assert!(error.msg.contains("do not match its outgoing edges"));
+}
+
+#[test]
 fn borrow_problem_rejects_points_outside_their_block_range() {
     let mut parts = empty();
     parts
@@ -169,6 +210,152 @@ fn borrow_problem_rejects_points_outside_their_block_range() {
 
     assert!(matches!(error.error_type, ErrorType::Compiler));
     assert!(error.msg.contains("outside the entry/exit range"));
+}
+
+#[test]
+fn borrow_problem_rejects_call_effect_without_granular_arguments() {
+    let mut parts = granular_call_parts();
+    parts.events.remove(0);
+    parts.events[0].id = EventId::new(0);
+    parts.events[1].id = EventId::new(1);
+    parts.blocks[0].events = vec![EventId::new(0), EventId::new(1)].into();
+
+    let error = BorrowProblem::new(parts).expect_err("non-empty calls need argument events");
+
+    assert!(error.msg.contains("no granular argument events"));
+}
+
+#[test]
+fn borrow_problem_rejects_granular_argument_after_call_effect() {
+    let mut parts = granular_call_parts();
+    parts.events[0].point = PointId::new(2);
+    parts.events[1].point = PointId::new(1);
+    parts.uses[0].point = PointId::new(2);
+    parts.blocks[0].events = vec![EventId::new(1), EventId::new(0), EventId::new(2)].into();
+
+    let error = BorrowProblem::new(parts).expect_err("argument events must precede the effect");
+
+    assert!(error.msg.contains("must precede its CallEffect"));
+}
+
+#[test]
+fn borrow_problem_rejects_call_argument_with_inconsistent_access_kind() {
+    let mut parts = granular_call_parts();
+    if let EventKind::CallArgument { argument, .. } = &mut parts.events[0].kind {
+        argument.access = AccessKind::Exclusive;
+    }
+    if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
+        effect.arguments[0].access = AccessKind::Exclusive;
+    }
+
+    let error = BorrowProblem::new(parts).expect_err("call argument access must match its use");
+
+    assert!(error.msg.contains("access kind inconsistent"));
+}
+
+#[test]
+fn borrow_problem_rejects_granular_argument_without_call_effect() {
+    let mut parts = granular_call_parts();
+    parts.events.remove(1);
+    parts.events[1].id = EventId::new(1);
+    parts.blocks[0].events = vec![EventId::new(0), EventId::new(1)].into();
+
+    let error = BorrowProblem::new(parts).expect_err("argument events need a call effect");
+
+    assert!(error.msg.contains("no CallEffect event"));
+}
+
+#[test]
+fn borrow_problem_rejects_granular_arguments_in_declared_order_only() {
+    let mut parts = two_argument_call_parts();
+    parts.uses[0].point = PointId::new(2);
+    parts.uses[1].point = PointId::new(1);
+    let first_argument = match &parts.events[0].kind {
+        EventKind::CallArgument { argument, .. } => argument.clone(),
+        _ => panic!("first event should be a call argument"),
+    };
+    let second_argument = match &parts.events[1].kind {
+        EventKind::CallArgument { argument, .. } => argument.clone(),
+        _ => panic!("second event should be a call argument"),
+    };
+    parts.events[0].kind = EventKind::CallArgument {
+        call: CallId::new(0),
+        index: 1,
+        argument: second_argument,
+    };
+    parts.events[1].kind = EventKind::CallArgument {
+        call: CallId::new(0),
+        index: 0,
+        argument: first_argument,
+    };
+
+    let error = BorrowProblem::new(parts).expect_err("CFG argument order must be semantic order");
+
+    assert!(error.msg.contains("do not exactly match its CallEffect"));
+}
+
+#[test]
+fn borrow_problem_rejects_call_result_alias_parameter_out_of_range() {
+    let mut parts = granular_call_parts();
+    parts.origins.push(ValueOrigin::new(
+        ValueOriginId::new(1),
+        OriginKind::CallResult {
+            call: CallId::new(0),
+            provenance: CallResultProvenance::AliasParams(vec![1].into_boxed_slice()),
+        },
+    ));
+    if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
+        effect.result = Some(CallResult {
+            place: PlaceId::new(0),
+            origin: ValueOriginId::new(1),
+        });
+    }
+
+    let error = BorrowProblem::new(parts).expect_err("call result parameter index must be valid");
+
+    assert!(error.msg.contains("outside call"));
+}
+
+#[test]
+fn borrow_problem_rejects_detached_call_result_origin() {
+    let mut parts = granular_call_parts();
+    parts.origins.push(ValueOrigin::new(
+        ValueOriginId::new(1),
+        OriginKind::CallResult {
+            call: CallId::new(0),
+            provenance: CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
+        },
+    ));
+
+    let error = BorrowProblem::new(parts).expect_err("call result origins need an owning effect");
+
+    assert!(error.msg.contains("not attached to a CallEffect"));
+}
+
+#[test]
+fn borrow_problem_rejects_call_result_origin_from_another_call() {
+    let mut parts = granular_call_parts();
+    parts.calls.push(Call {
+        id: CallId::new(1),
+        label: "other-call".to_owned(),
+    });
+    parts.origins.push(ValueOrigin::new(
+        ValueOriginId::new(1),
+        OriginKind::CallResult {
+            call: CallId::new(1),
+            provenance: CallResultProvenance::Fresh,
+        },
+    ));
+    if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
+        effect.result = Some(CallResult {
+            place: PlaceId::new(0),
+            origin: ValueOriginId::new(1),
+        });
+    }
+
+    let error = BorrowProblem::new(parts).expect_err("result origin must belong to its call");
+
+    assert!(error.msg.contains("inconsistent call ownership"));
 }
 
 #[test]
@@ -227,6 +414,310 @@ fn borrow_problem_hir_extractor_preserves_ordered_events_and_scope_exit() {
 }
 
 #[test]
+fn borrow_problem_hir_extractor_seeds_parameter_origins() {
+    let local = LocalId(0);
+    let region = RegionId(0);
+    let module = module_with_block(HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![hir_local(local, region)],
+        statements: Vec::new(),
+        terminator: HirTerminator::Return(load_expression(0, local, region)),
+    });
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: HirBlockId(0),
+        params: vec![local],
+        return_type: builtin_type_ids::INT,
+    };
+    let problem = from_hir(&module, &function, None, None).expect("parameter HIR should extract");
+
+    assert!(
+        problem
+            .origins()
+            .iter()
+            .any(|origin| matches!(origin.kind, OriginKind::Parameter { index: 0 }))
+    );
+    assert!(problem.events().iter().any(|event| matches!(
+        event.kind,
+        EventKind::Fresh { destination, .. } if destination.raw() == 0
+    )));
+}
+
+#[test]
+fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
+    let parent = RegionId(0);
+    let child = RegionId(1);
+    let local = LocalId(0);
+    let condition = HirExpression {
+        id: HirValueId(0),
+        kind: HirExpressionKind::Bool(true),
+        ty: builtin_type_ids::BOOL,
+        value_kind: ValueKind::RValue,
+        region: child,
+    };
+    let module = HirModule {
+        blocks: vec![
+            HirBlock {
+                id: HirBlockId(0),
+                region: child,
+                locals: vec![hir_local(local, child)],
+                statements: Vec::new(),
+                terminator: HirTerminator::If {
+                    condition,
+                    then_block: HirBlockId(1),
+                    else_block: HirBlockId(2),
+                },
+            },
+            HirBlock {
+                id: HirBlockId(1),
+                region: child,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::Return(int_expression(1, 1, child)),
+            },
+            HirBlock {
+                id: HirBlockId(2),
+                region: parent,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::Return(int_expression(2, 2, parent)),
+            },
+        ],
+        regions: vec![
+            HirRegion::lexical(parent, None),
+            HirRegion::lexical(child, Some(parent)),
+        ],
+        ..HirModule::new()
+    };
+    let function = function_for(HirBlockId(0));
+    let problem = from_hir(&module, &function, None, None).expect("edge scope HIR should extract");
+
+    let scope_exit_blocks = problem
+        .control_flow()
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.events.iter().any(|event_id| {
+                problem.events()[event_id.index()]
+                    .kind
+                    .eq(&EventKind::ScopeExit {
+                        bindings: vec![BindingId::new(0)].into_boxed_slice(),
+                    })
+            })
+        })
+        .map(|block| block.id)
+        .collect::<Vec<_>>();
+    assert_eq!(scope_exit_blocks.len(), 2);
+    let edge_block = scope_exit_blocks
+        .iter()
+        .copied()
+        .find(|block_id| {
+            problem.control_flow().blocks[block_id.index()]
+                .events
+                .iter()
+                .any(|event_id| {
+                    matches!(
+                        problem.events()[event_id.index()].kind,
+                        EventKind::Terminator {
+                            kind: TerminatorEventKind::Jump { .. }
+                        }
+                    )
+                })
+        })
+        .expect("losing edge should have a synthetic jump block");
+    let incoming_edges = problem
+        .control_flow()
+        .edges
+        .iter()
+        .filter(|edge| edge.to == edge_block)
+        .collect::<Vec<_>>();
+    let outgoing_edges = problem
+        .control_flow()
+        .edges
+        .iter()
+        .filter(|edge| edge.from == edge_block)
+        .collect::<Vec<_>>();
+    assert_eq!(incoming_edges.len(), 1);
+    assert_eq!(outgoing_edges.len(), 1);
+
+    let edge_events = &problem.control_flow().blocks[edge_block.index()].events;
+    assert_eq!(edge_events.len(), 2);
+    assert!(matches!(
+        &problem.events()[edge_events[0].index()].kind,
+        EventKind::ScopeExit { bindings }
+            if bindings.as_ref() == [BindingId::new(0)]
+    ));
+    assert!(matches!(
+        &problem.events()[edge_events[1].index()].kind,
+        EventKind::Terminator {
+            kind: TerminatorEventKind::Jump { target }
+        } if *target == outgoing_edges[0].to
+    ));
+}
+
+#[test]
+fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
+    let parent = RegionId(0);
+    let child = RegionId(1);
+    let local = LocalId(0);
+    let module = HirModule {
+        blocks: vec![
+            HirBlock {
+                id: HirBlockId(0),
+                region: child,
+                locals: vec![hir_local(local, child)],
+                statements: Vec::new(),
+                terminator: HirTerminator::Jump {
+                    target: HirBlockId(1),
+                    args: Vec::new(),
+                },
+            },
+            HirBlock {
+                id: HirBlockId(1),
+                region: child,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::If {
+                    condition: HirExpression {
+                        id: HirValueId(1),
+                        kind: HirExpressionKind::Bool(true),
+                        ty: builtin_type_ids::BOOL,
+                        value_kind: ValueKind::RValue,
+                        region: child,
+                    },
+                    then_block: HirBlockId(2),
+                    else_block: HirBlockId(3),
+                },
+            },
+            HirBlock {
+                id: HirBlockId(2),
+                region: child,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::Return(int_expression(2, 2, child)),
+            },
+            HirBlock {
+                id: HirBlockId(3),
+                region: parent,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::Return(int_expression(3, 3, parent)),
+            },
+        ],
+        regions: vec![
+            HirRegion::lexical(parent, None),
+            HirRegion::lexical(child, Some(parent)),
+        ],
+        ..HirModule::new()
+    };
+    let function = function_for(HirBlockId(0));
+    let problem = from_hir(&module, &function, None, None)
+        .expect("ancestor scope should survive through the intermediate block");
+
+    let scope_exit_blocks = problem
+        .control_flow()
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.events.iter().any(|event_id| {
+                matches!(
+                    &problem.events()[event_id.index()].kind,
+                    EventKind::ScopeExit { bindings }
+                        if bindings.as_ref() == [BindingId::new(0)]
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scope_exit_blocks.len(), 2);
+    assert!(scope_exit_blocks.iter().any(|block| {
+        matches!(
+            problem.events()[block.events.last().expect("edge block has jump").index()].kind,
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { .. }
+            }
+        )
+    }));
+    assert!(scope_exit_blocks.iter().any(|block| {
+        matches!(
+            problem.events()[block
+                .events
+                .last()
+                .expect("return block has terminator")
+                .index()]
+            .kind,
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Return
+            }
+        )
+    }));
+}
+
+#[test]
+fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
+    let parent = RegionId(0);
+    let child = RegionId(1);
+    let local = LocalId(0);
+    let module = HirModule {
+        blocks: vec![
+            HirBlock {
+                id: HirBlockId(0),
+                region: child,
+                locals: vec![hir_local(local, child)],
+                statements: Vec::new(),
+                terminator: HirTerminator::If {
+                    condition: HirExpression {
+                        id: HirValueId(0),
+                        kind: HirExpressionKind::Bool(true),
+                        ty: builtin_type_ids::BOOL,
+                        value_kind: ValueKind::RValue,
+                        region: child,
+                    },
+                    then_block: HirBlockId(1),
+                    else_block: HirBlockId(1),
+                },
+            },
+            HirBlock {
+                id: HirBlockId(1),
+                region: parent,
+                locals: Vec::new(),
+                statements: Vec::new(),
+                terminator: HirTerminator::Return(int_expression(1, 1, parent)),
+            },
+        ],
+        regions: vec![
+            HirRegion::lexical(parent, None),
+            HirRegion::lexical(child, Some(parent)),
+        ],
+        ..HirModule::new()
+    };
+    let function = function_for(HirBlockId(0));
+    let problem = from_hir(&module, &function, None, None)
+        .expect("repeated branch targets should share one edge block");
+
+    let branch_targets = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Branch { targets },
+            } => Some(targets),
+            _ => None,
+        })
+        .expect("HIR branch should be normalized");
+    assert_eq!(branch_targets.len(), 1);
+    assert_eq!(
+        problem
+            .control_flow()
+            .edges
+            .iter()
+            .filter(|edge| edge.from.raw() == 0)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
     let region = RegionId(0);
     let target = LocalId(0);
@@ -257,10 +748,24 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None).expect("aggregate HIR should extract");
 
-    assert!(problem.events().iter().any(|event| matches!(
-        &event.kind,
-        EventKind::Aggregate { fields, .. } if fields.len() == 2
-    )));
+    let (destination, fields) = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Aggregate {
+                destination,
+                fields,
+                ..
+            } if fields.len() == 2 => Some((*destination, fields)),
+            _ => None,
+        })
+        .expect("aggregate event should retain its children");
+    let destination_place = &problem.places()[destination.index()];
+    for field in fields {
+        assert!(problem.places().iter().any(|place| {
+            place.root == destination_place.root && place.projections.as_ref() == [field.projection]
+        }));
+    }
 }
 
 #[test]
@@ -487,5 +992,183 @@ fn load_expression(id: u32, local: LocalId, region: RegionId) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Place,
         region,
+    }
+}
+
+fn granular_call_parts() -> super::BorrowProblemParts {
+    let argument = CallArgument {
+        place: PlaceId::new(0),
+        access: AccessKind::Shared,
+        use_id: UseId::new(0),
+    };
+    super::BorrowProblemParts {
+        bindings: vec![super::Binding::synthetic(BindingId::new(0))],
+        points: vec![
+            ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
+            ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
+            ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
+            ProgramPoint::new(PointId::new(3), BlockId::new(0), 3),
+        ],
+        blocks: vec![super::CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(3),
+            vec![EventId::new(0), EventId::new(1), EventId::new(2)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![super::Place::new(
+            PlaceId::new(0),
+            BindingId::new(0),
+            Vec::new(),
+        )],
+        origins: vec![ValueOrigin::fresh(ValueOriginId::new(0))],
+        uses: vec![Use {
+            id: UseId::new(0),
+            point: PointId::new(1),
+            place: PlaceId::new(0),
+            kind: UseKind::Read,
+            definition: false,
+        }],
+        calls: vec![Call {
+            id: super::CallId::new(0),
+            label: "malformed-call".to_owned(),
+        }],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::CallArgument {
+                    call: super::CallId::new(0),
+                    index: 0,
+                    argument: argument.clone(),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::CallEffect(CallEffect {
+                    call: super::CallId::new(0),
+                    arguments: vec![argument].into_boxed_slice(),
+                    result: None,
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::Return,
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..super::BorrowProblemParts::default()
+    }
+}
+
+fn two_argument_call_parts() -> super::BorrowProblemParts {
+    let first_argument = CallArgument {
+        place: PlaceId::new(0),
+        access: AccessKind::Shared,
+        use_id: UseId::new(0),
+    };
+    let second_argument = CallArgument {
+        place: PlaceId::new(1),
+        access: AccessKind::Shared,
+        use_id: UseId::new(1),
+    };
+    super::BorrowProblemParts {
+        bindings: vec![
+            super::Binding::synthetic(BindingId::new(0)),
+            super::Binding::synthetic(BindingId::new(1)),
+        ],
+        points: vec![
+            ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
+            ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
+            ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
+            ProgramPoint::new(PointId::new(3), BlockId::new(0), 3),
+            ProgramPoint::new(PointId::new(4), BlockId::new(0), 4),
+        ],
+        blocks: vec![super::CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(4),
+            vec![
+                EventId::new(0),
+                EventId::new(1),
+                EventId::new(2),
+                EventId::new(3),
+            ],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            super::Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            super::Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![ValueOrigin::fresh(ValueOriginId::new(0))],
+        uses: vec![
+            Use {
+                id: UseId::new(0),
+                point: PointId::new(1),
+                place: PlaceId::new(0),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(1),
+                point: PointId::new(2),
+                place: PlaceId::new(1),
+                kind: UseKind::Read,
+                definition: false,
+            },
+        ],
+        calls: vec![Call {
+            id: CallId::new(0),
+            label: "two-argument-call".to_owned(),
+        }],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::CallArgument {
+                    call: CallId::new(0),
+                    index: 0,
+                    argument: first_argument.clone(),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::CallArgument {
+                    call: CallId::new(0),
+                    index: 1,
+                    argument: second_argument.clone(),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::CallEffect(CallEffect {
+                    call: CallId::new(0),
+                    arguments: vec![first_argument, second_argument].into_boxed_slice(),
+                    result: None,
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(3),
+                PointId::new(4),
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::Return,
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..super::BorrowProblemParts::default()
     }
 }

@@ -11,7 +11,10 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module,
 };
+#[cfg(test)]
+use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
@@ -21,6 +24,22 @@ pub(crate) fn run_boracle(
     dump: BoracleDump,
     experiment: BoracleExperiment,
 ) -> Result<String, CompilerMessages> {
+    let (input, string_table) = compile_boracle_input(path)?;
+    run_hir_module(&input, BoracleServiceOptions { dump, experiment })
+        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+}
+
+/// Solve the same compiler-owned source payload as [`run_boracle`] without flattening the typed
+/// function reports into a developer dump.
+#[cfg(test)]
+fn solve_boracle(path: &str) -> Result<BoracleModuleReport, CompilerMessages> {
+    let (input, string_table) = compile_boracle_input(path)?;
+    solve_hir_module(&input).map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+}
+
+fn compile_boracle_input(
+    path: &str,
+) -> Result<(BoracleModuleInput, StringTable), CompilerMessages> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
     let mut path_string_table = StringTable::new();
     let valid_path = check_if_valid_path(normalized_path, &mut path_string_table)
@@ -48,14 +67,15 @@ pub(crate) fn run_boracle(
         &mut frontend_surface,
         &mut string_table,
     )?;
-    run_hir_module(&input, BoracleServiceOptions { dump, experiment })
-        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+    Ok((input, string_table))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run_boracle;
-    use crate::compiler_frontend::analysis::borrow_checker::{BoracleDump, BoracleExperiment};
+    use super::{run_boracle, solve_boracle};
+    use crate::compiler_frontend::analysis::borrow_checker::{
+        BoracleDump, BoracleExperiment, BoracleModuleReport, EventKind,
+    };
     use std::fs;
 
     #[test]
@@ -81,5 +101,451 @@ mod tests {
         assert!(first.contains("rule-set = boracle-reference-v1"));
         assert!(first.contains("experiment = dead-exclusive-loan"));
         assert!(first.contains("OriginSolution"));
+    }
+
+    #[test]
+    fn boracle_source_shared_alias_conflict_uses_derived_loan() {
+        let output = run_source_dump(
+            r#"
+items ~= {"a"}
+shared = items
+~items.push("b") catch:
+;
+result = shared
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.contains("ConflictWitness"),
+            "expected a source alias conflict, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_shared_alias_final_use_allows_mutation() {
+        let output = run_source_dump(
+            r#"
+items ~= {"a"}
+shared = items
+result = shared
+~items.push("b") catch:
+;
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.trim_end().ends_with("[]"),
+            "unexpected source conflict:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_copy_is_independent_from_source_alias() {
+        let output = run_source_dump(
+            r#"
+items ~= {"a"}
+shared = items
+snapshot ~= copy items
+~snapshot.push("b") catch:
+;
+result = shared
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.trim_end().ends_with("[]"),
+            "unexpected copy conflict:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_rebind_separates_old_alias_origin() {
+        let output = run_source_dump(
+            r#"
+items ~= {"a"}
+shared = items
+items = {"b"}
+~items.push("c") catch:
+;
+result = shared
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.trim_end().ends_with("[]"),
+            "unexpected rebind conflict:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_local_mutable_parameter_is_exclusive() {
+        let output = run_source_dump(
+            r#"
+increment |value ~Int| -> Int:
+    value = value + 1
+    return value
+;
+
+x ~= 10
+result = increment(value = ~x)
+"#,
+            BoracleDump::Loans,
+        );
+
+        assert!(
+            output.contains("kind: Exclusive"),
+            "expected an exclusive call argument loan, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_unknown_result_does_not_prove_independence() {
+        let output = run_source_dump(
+            r#"
+keep_values |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+shared = items
+unknown ~= keep_values(value = items)
+~unknown.push(2) catch:
+;
+result = shared
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.contains("ConflictWitness"),
+            "expected conservative unknown-result conflict, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_aggregate_field_keeps_stored_alias_live() {
+        let output = run_source_dump(
+            r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+items ~= {1}
+pair ~= Pair(items, items)
+alias = pair.first
+~items.push(2) catch:
+;
+result = alias
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.contains("ConflictWitness"),
+            "expected aggregate field alias conflict, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_aggregate_field_report_keeps_typed_origin_lineage() {
+        let report = solve_source(
+            r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+items ~= {1}
+pair ~= Pair(items, items)
+alias = pair.first
+~items.push(2) catch:
+;
+result = alias
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| {
+                function
+                    .problem
+                    .events()
+                    .iter()
+                    .any(|event| matches!(event.kind, EventKind::Aggregate { .. }))
+            })
+            .expect("source report should contain aggregate storage");
+        let (aggregate_id, aggregate_destination, source_place) = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::Aggregate {
+                    destination,
+                    fields,
+                    ..
+                } if !fields.is_empty() => Some((event.id, *destination, fields[0].source)),
+                _ => None,
+            })
+            .expect("aggregate event should retain its first child");
+        let source_origin = function
+            .report
+            .origin
+            .origins_for_place_after_event(&function.problem, aggregate_id, source_place)
+            .first()
+            .copied()
+            .expect("aggregate child should have a source origin");
+        let field_alias = function
+            .problem
+            .events()
+            .iter()
+            .find_map(|event| match &event.kind {
+                EventKind::AliasFromPlace {
+                    source,
+                    destination,
+                }
+                | EventKind::ExclusiveAliasFromPlace {
+                    source,
+                    destination,
+                } => {
+                    let aggregate_place = &function.problem.places()[aggregate_destination.index()];
+                    let source_place = &function.problem.places()[source.index()];
+                    (source_place.root == aggregate_place.root
+                        && source_place.projections.len() > aggregate_place.projections.len()
+                        && source_place
+                            .projections
+                            .starts_with(&aggregate_place.projections))
+                    .then_some((event.id, *destination))
+                }
+                _ => None,
+            })
+            .expect("source field load should emit an alias from the projected place");
+        let projected_origins = function
+            .report
+            .origin
+            .origins_after_event(field_alias.0, field_alias.1)
+            .expect("projection should publish a destination origin set");
+
+        assert_eq!(projected_origins, [source_origin]);
+        assert!(function.report.loans.conflicts().iter().any(|witness| {
+            witness.origin_overlap && witness.loan_origins.contains(&source_origin)
+        }));
+    }
+
+    #[test]
+    fn boracle_source_alias_used_only_as_call_argument_stays_live() {
+        let report = solve_source(
+            r#"
+observe |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+shared = items
+~items.push(2) catch:
+;
+result = observe(value = shared)
+"#,
+        );
+
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| function.report.has_conflicts())
+            .expect("source module should contain a conflicting function report");
+        assert!(
+            function.report.has_conflicts(),
+            "a user alias used only as a call argument must keep the source loan live: {:?}",
+            function.report.loans.loans()
+        );
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| witness.keeping_use.is_some())
+        );
+    }
+
+    #[test]
+    fn boracle_source_mutable_alias_used_only_as_mutable_call_stays_live() {
+        let report = solve_source(
+            r#"
+items ~= {1}
+writer ~= items
+~items.push(2) catch:
+;
+~writer.push(3) catch:
+;
+result = items
+"#,
+        );
+
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| function.report.has_conflicts())
+            .expect("source module should contain a conflicting function report");
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| witness.keeping_use.is_some())
+        );
+    }
+
+    #[test]
+    fn boracle_source_mutable_alias_write_through_conflicts_with_shared_alias() {
+        let report = solve_source(
+            r#"
+items ~= {1}
+shared = items
+writer ~= items
+writer = {2}
+result = shared
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| !function.report.loans.conflicts().is_empty())
+            .expect("mutable alias write-through should conflict with the shared alias");
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| { witness.origin_overlap && witness.keeping_use.is_some() })
+        );
+    }
+
+    #[test]
+    fn boracle_source_typed_report_connects_origins_loans_and_conflicts() {
+        let report = solve_source(
+            r#"
+items ~= {"a"}
+shared = items
+~items.push("b") catch:
+;
+result = shared
+"#,
+        );
+        let function = report
+            .functions()
+            .iter()
+            .find(|function| function.report.has_conflicts())
+            .expect("source module should contain a conflicting function report");
+
+        assert!(function.problem.debug_dump().contains("AliasFromPlace"));
+        assert!(
+            function
+                .report
+                .loans
+                .loans()
+                .iter()
+                .any(|loan| !loan.origins.is_empty() && !loan.uses.is_empty())
+        );
+        assert!(
+            function
+                .report
+                .loans
+                .conflicts()
+                .iter()
+                .any(|witness| witness.origin_overlap)
+        );
+    }
+
+    #[test]
+    fn boracle_source_map_get_keeps_receiver_protected_while_live() {
+        let output = run_source_dump(
+            r#"
+scores ~{String = Int} = {"Priya" = 10}
+score = scores.get("Priya") catch:
+    then 0
+;
+~scores.set("Linus", 7) catch:
+;
+result = score
+"#,
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.contains("ConflictWitness"),
+            "expected live map-get conflict, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_map_remove_is_not_fresh_provenance() {
+        let output = run_source_dump(
+            r#"
+scores ~{String = Int} = {"Priya" = 10}
+removed = ~scores.remove("Priya") catch:
+    then 0
+;
+result = removed
+"#,
+            BoracleDump::Problem,
+        );
+
+        assert!(
+            output.contains("provenance: Unknown"),
+            "expected conservative map-remove provenance, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_branch_separates_use_and_mutation() {
+        let output = run_source_dump(
+            include_str!("../../tests/cases/branch_reborrow_after_last_use/input/@page.moth"),
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.trim_end().ends_with("[]"),
+            "unexpected branch conflict:\n{output}"
+        );
+    }
+
+    #[test]
+    fn boracle_source_loop_copy_keeps_independent_roots() {
+        let output = run_source_dump(
+            include_str!("../../tests/cases/loop_borrow_independent_roots/input/@page.moth"),
+            BoracleDump::Conflicts,
+        );
+
+        assert!(
+            output.trim_end().ends_with("[]"),
+            "unexpected loop conflict:\n{output}"
+        );
+    }
+
+    fn solve_source(source: &str) -> BoracleModuleReport {
+        let temporary = tempfile::tempdir().expect("temporary source directory should exist");
+        let entry = temporary.path().join("main.moth");
+        fs::write(&entry, source).expect("source should be writable");
+        solve_boracle(entry.to_str().expect("temporary path should be UTF-8"))
+            .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
+    }
+
+    fn run_source_dump(source: &str, dump: BoracleDump) -> String {
+        let temporary = tempfile::tempdir().expect("temporary source directory should exist");
+        let entry = temporary.path().join("main.moth");
+        fs::write(&entry, source).expect("source should be writable");
+        run_boracle(
+            entry.to_str().expect("temporary path should be UTF-8"),
+            dump,
+            BoracleExperiment::Reference,
+        )
+        .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
     }
 }

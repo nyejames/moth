@@ -27,22 +27,27 @@ individual algorithms, not evidence that a Moth program should pass borrow valid
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/boracle-semantic-integration-and-adversarial-hardening-plan.md
-STATUS: queued
-CURRENT_SLICE: Phase 0 - re-anchor over current main and establish the adversarial source corpus
-BLOCKERS: the initial Boracle milestone is not yet a semantic oracle; current main has subsequent test-placement changes to integrate at activation
-NEXT_ACTION: activate on a clean Boracle worktree, establish the baseline, integrate current main, and run the red-first source corpus
+WORK_ID: boracle-semantic-integration
+BASE_REVISION: 1afcf84e8d3efee90b9300d7b8b713e6f3026730
+STATUS: active
+CURRENT_SLICE: Phase 1-5 semantic integration correction checkpoint
+COMPLETED: rebased onto current main; added the red-first source corpus; connected parameter origins, source alias loan derivation, provenance-derived loans, origin-aware overlap, conservative unknown calls, use-driven liveness, exact call-argument events, strict granular-call and call-result validation, origin/loan last-use reporting, stored-child projection provenance through distinct HIR destinations, aggregate generation replacement, generation-aware projection loans, edge-specific scope exits, ancestor-visible terminal/edge kills, duplicate-successor normalization, terminal CFG validation, and CFG-fixed-point alias-only write-through versus slot-backed replacement semantics
+NEXT_ACTION: checkpoint this accepted correction, then complete the typed branch/loop/after-event source corpus and generated semantic properties before final documentation and closeout audits
+VALIDATION: `cargo fmt --all`; `just boracle` passed (format, Boracle clippy, 29 normalized-problem tests, 5 last-use tests, 35 Boracle/source tests); `git diff --check` passed. Full `just validate` remains pending.
+AUDITS: Pass 1 interim audit found five accepted issues and their corrections are applied. Pass 2 found six required issues, all corrected. The correction verification audit found four required issues: distinct-destination stored-child propagation, projection-generation kills/deduplication, complete call/result validation and truthful same-call witnesses. Pass 3 found two more: stale aggregate child generations and detached CallResult ownership. Pass 4 found four more: ancestor scope exits, duplicate successors, terminal CFG validation, and weak source aggregate assertions. Pass 5 found the alias-only write-through/slot-rebind blocker and typed corpus gaps; the write-through correction is implemented and passes focused regressions. Pass 6 was attempted through the configured auditor route but was unavailable because the provider transport reported an invalid peer certificate; no audit edits occurred.
+BLOCKERS: none
+NOTES: Boracle remains non-authoritative until every semantic-gate case and final validation gate pass
 ```
 
 The initial Boracle plan has been retired. Its implementation commits remain the historical record,
-but this plan deliberately starts with a fresh activation baseline. Do not add a baseline commit to
-this status block before activation; record it in the first working checkpoint instead.
+and this plan now starts from the post-rebase activation baseline recorded above.
 
 ## Scope and authority
 
 This plan owns the integration and adversarial-hardening sequence for the feature-gated Boracle
 reference mode. The permanent semantic authority remains:
 
-- `docs/src/docs/codebase/memory-management/borrow-validation/boracle-reference-solver.mtf`
+- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
 
 Read these authorities before activation and reload the relevant sections before every phase:
 
@@ -52,22 +57,22 @@ Read these authorities before activation and reload the relevant sections before
   per-function link facts
 - `docs/build-system-design.md`, including its opening authority, `Architectural invariants`,
   Stage 0/module compilation handoff and `Generated-function boundary`
-- `docs/src/docs/codebase/memory-management/overview.mtf`
-- `docs/src/docs/codebase/memory-management/access-and-aliasing/overview.mtf` and its canonical
+- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/src/developer-docs/memory-management/access-and-aliasing/overview.mtf` and its canonical
   reference
-- `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
-- `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf`
-- `docs/src/docs/codebase/memory-management/borrow-validation/boracle-reference-solver.mtf`
-- `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf` and its canonical
+- `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
+- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
+- `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf` and its canonical
   reference when optional transfer or final-use ownership is touched
-- `docs/src/docs/codebase/style-guide/style-guide.mtf`
-- the relevant sections of `docs/src/docs/codebase/style-guide/testing.mtf`
-- `docs/src/docs/codebase/style-guide/validation.mtf` before selecting or reporting a gate
+- `docs/src/developer-docs/style-guide/style-guide.mtf`
+- the relevant sections of `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/src/developer-docs/style-guide/validation.mtf` before selecting or reporting a gate
 - `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 
 When a source case depends on exact syntax or a user-visible acceptance rule, also read the
-canonical unsuffixed language reference selected by `docs/src/docs/codebase/language/overview.mtf`.
+canonical unsuffixed language reference selected by `docs/src/developer-docs/language/overview.mtf`.
 Do not derive source semantics from the current Alpha implementation or from a Basic teaching page.
 
 ## Locked boundaries
@@ -222,7 +227,6 @@ each binding root as an independent value.
   merely store origin and loan results beside one another in `BoracleReport`.
 - Resolve alias and projection origins before deciding whether a loan covers an access. Structural
   place overlap remains necessary for projections within a binding; related origin overlap handles
-  aliases across different binding roots.
 - Treat independent copy origins and unrelated fresh origins as disjoint even when their bindings
   share a historical source or have similar place shapes.
 - Give unknown/top provenance an explicit relation that overlaps every plausible related origin or

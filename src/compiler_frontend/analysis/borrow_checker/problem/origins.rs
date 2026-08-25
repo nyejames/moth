@@ -8,6 +8,10 @@ use super::places::ProjectionElem;
 pub(crate) enum OriginKind {
     /// Provenance is intentionally unresolved and must be refined by a later Boracle analysis.
     Unknown,
+    /// The value entered the function through one source parameter.
+    Parameter {
+        index: u32,
+    },
     Fresh,
     Alias(Box<[ValueOriginId]>),
     ExclusiveAlias(Box<[ValueOriginId]>),

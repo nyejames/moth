@@ -14,7 +14,11 @@ pub(crate) use loans::{AccessDecision, ConflictWitness, LoanFact, LoanSolution, 
 pub(crate) use origins::{OriginFact, OriginSolution, OriginSolver, OriginTrace, OriginTraceRule};
 #[allow(unused_imports)]
 pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
-pub(crate) use service::{BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module};
+#[allow(unused_imports)]
+pub(crate) use service::{
+    BoracleDump, BoracleExperiment, BoracleFunctionReport, BoracleModuleReport,
+    BoracleServiceOptions, run_hir_module, solve_hir_module,
+};
 
 #[cfg(test)]
 mod tests;

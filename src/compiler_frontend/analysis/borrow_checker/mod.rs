@@ -36,7 +36,14 @@ pub(crate) use types::{
 pub(crate) type BorrowFacts = BorrowAnalysis;
 
 #[cfg(feature = "boracle")]
-pub(crate) use boracle::{BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module};
+#[allow(unused_imports)]
+pub(crate) use boracle::{
+    BoracleDump, BoracleExperiment, BoracleModuleReport, BoracleServiceOptions, run_hir_module,
+    solve_hir_module,
+};
+#[cfg(feature = "boracle")]
+#[allow(unused_imports)]
+pub(crate) use problem::EventKind;
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;

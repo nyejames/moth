@@ -65,6 +65,8 @@ pub(crate) struct Use {
     pub(crate) point: PointId,
     pub(crate) place: PlaceId,
     pub(crate) kind: UseKind,
+    /// True when the access replaces the value generation at this place.
+    pub(crate) definition: bool,
 }
 
 /// The source-semantic reason a place is observed.
@@ -200,6 +202,16 @@ pub(crate) enum EventKind {
     /// A reactive template observes a stable source without creating an active borrow loan.
     ReactiveObserve {
         place: PlaceId,
+    },
+    /// One ordered argument access belonging to a call effect.
+    ///
+    /// The complete [`CallEffect`] remains the result-provenance boundary. Keeping each
+    /// argument as its own event gives last-use and conflict witnesses an exact evaluation
+    /// boundary without duplicating the call's result metadata.
+    CallArgument {
+        call: CallId,
+        index: u32,
+        argument: CallArgument,
     },
     Terminator {
         kind: TerminatorEventKind,
