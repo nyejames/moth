@@ -6,13 +6,13 @@
 >
 > **Status:** Active on the `boracle` branch and worktree. Phase 0 is complete and audited. The current alpha borrow checker remains the normal compiler authority. Phase 0 changed no compiler behaviour itself, but the branch carries `7571448bf`, a separately approved fix to the alpha checker's future-use liveness, authored and validated on `main`. Phase 0 working notes live in this worktree's untracked `tmp/boracle-phase0-notes.md` and hold the owner map, baseline record, semantic-case inventory and audit record.
 >
-> **Current slice:** Phase 1 complete; Phase 2 is the next implementation slice.
+> **Current slice:** Phase 2 complete; the immutable normalized problem vocabulary, atomic validator and direct semantic fixture seam are checkpointed. Phase 3 is next.
 >
 > **Blockers:** None for the initial reference-solver work. Do not start the production borrow-checker replacement, lifetime-topology implementation or REC integration in this plan.
 >
-> **Coordinator:** `WORK_ID=boracle-reference-solver`, baseline `a92effb1d`; Phase 1 implementation, audit correction cycles and the mandatory gate are complete.
+> **Coordinator:** `WORK_ID=boracle-reference-solver`, baseline `a92effb1d`; Phase 1 is checkpointed at `080a18b74`, and the Phase 2 audit and mandatory gate are complete.
 >
-> **Next action:** Begin Phase 2 by defining `BorrowProblem` and its hand-authored semantic fixtures.
+> **Next action:** Define the HIR-to-problem owner and exact event ordering for Phase 3 without invoking it from the alpha checker path.
 
 ## Purpose
 
@@ -737,17 +737,17 @@ Land the permanent normalized input vocabulary and prove its invariants without 
 
 ## Tasks
 
-- [ ] Add dense typed IDs for points, places, origins, loans, uses and any other proven entity.
-- [ ] Define immutable CFG blocks, ordered events, edges, entries and exits.
-- [ ] Define normalized places and projection elements.
-- [ ] Define fresh, alias, exclusive-alias, copy, rebind, aggregate and call-effect events.
-- [ ] Keep source/HIR mapping optional only where a hand-authored fixture has no source owner.
-- [ ] Add `BorrowProblem::validate` or one equivalent atomic validator.
-- [ ] Add deterministic debug formatting that never relies on hash iteration order.
-- [ ] Add test-only fixture builders under `problem/tests/`.
-- [ ] Add direct problems for copy, old aliases across rebind, branches, joins, loops, field projections and same-statement access order.
-- [ ] Assert malformed problems fail through the internal compiler-error lane.
-- [ ] Keep Boracle orchestration as a stub that can accept and print a validated problem.
+- [x] Add dense typed IDs for points, places, origins, loans, uses and any other proven entity.
+- [x] Define immutable CFG blocks, ordered events, edges, entries and exits.
+- [x] Define normalized places and projection elements.
+- [x] Define fresh, alias, exclusive-alias, copy, rebind, aggregate and call-effect events.
+- [x] Keep source/HIR mapping optional only where a hand-authored fixture has no source owner.
+- [x] Add `BorrowProblem::validate` or one equivalent atomic validator.
+- [x] Add deterministic debug formatting that never relies on hash iteration order.
+- [x] Add test-only fixture builders under `problem/tests/`.
+- [x] Add direct problems for copy, old aliases across rebind, branches, joins, loops, field projections and same-statement access order.
+- [x] Assert malformed problems fail through the internal compiler-error lane.
+- [x] Keep Boracle orchestration as a stub that can accept and print a validated problem.
 
 Prefer `BTreeMap` and `BTreeSet` in Boracle-facing fixture and debug structures where ordering clarity wins. Dense vectors are fine where the ID-to-row relationship is clearer.
 
