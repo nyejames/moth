@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Correct and consolidate Moth's permanent memory-management documentation before replacing the current collector-free memory implementation plans.
+Correct and consolidate Moth's permanent memory-management documentation before the collector-free memory implementation roadmap is replaced.
 
-The accepted model is already coherent at the architectural level. This plan does not redesign it. It removes wording that could lead to a wrong implementation, makes ownership boundaries explicit and gives the later implementation plan one precise set of permanent authorities to consume.
+The accepted model is already coherent. This plan does not redesign it. It removes wording that could lead to a wrong implementation, makes every stage owner explicit and gives the later implementation plan one precise set of permanent authorities to consume.
 
-The completed documentation must make these ideas unmistakable:
+The completed documentation must make these points unmistakable:
 
 - borrow and future-use analysis proves access legality and reusable liveness facts
 - lifetime analysis proves one legal topology and owns retained-edge legality, escapes, frontiers and cycles
@@ -19,7 +19,7 @@ The completed documentation must make these ideas unmistakable:
 - a real retained-edge cycle still requires one explicit group
 - path-sensitive edge death and committed-state reasoning may prevent false cycle findings, but do not collect a real cycle
 
-This plan ends with corrected permanent authorities, corrected teaching material and a clean handoff for the later replacement of the collector-free memory implementation roadmap.
+This plan ends with corrected permanent authorities, corrected teaching material and a clean handoff for the later replacement implementation plan.
 
 ## Current state
 
@@ -78,16 +78,13 @@ Read the current versions of:
 
 Use the compiler and build-system task-reading guides. Read adjacent producer and consumer handoffs when an edit changes stage ownership wording.
 
-## Migration inputs, not authorities
+## Migration evidence
 
-Read these files to preserve accepted decisions and identify stale wording:
+At activation, read the current collector-free memory implementation work items linked from `docs/roadmap/roadmap.md`. Use them to preserve accepted implementation decisions and identify stale wording.
 
-- `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`
-- `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`
+Those files are temporary work items. They do not override the permanent memory, compiler or build-system authorities.
 
-They are temporary implementation work items. They do not override the permanent memory, compiler or build-system authorities.
-
-Do not rewrite or delete either implementation plan in this documentation slice. Their replacement is the next planning task. This slice may remove links to them from permanent authorities and may correct roadmap wording that incorrectly calls a plan a semantic authority.
+Do not rewrite or delete them in this documentation slice. Their replacement is the next planning task. This slice may remove links to them from permanent authorities and may correct roadmap wording that incorrectly calls a plan a semantic authority.
 
 ## Scope boundaries
 
@@ -108,7 +105,7 @@ Do not rewrite or delete either implementation plan in this documentation slice.
 ### Out of scope
 
 - Rust implementation changes
-- deleting or replacing the existing memory implementation plans
+- deleting or replacing the current collector-free memory implementation work items
 - changing Moth source syntax or accepted source legality
 - implementing Boracle or selecting a production borrow-checker algorithm
 - implementing lifetime analysis, groups, regions, REC or the memory planner
@@ -126,7 +123,7 @@ Do not rewrite or delete either implementation plan in this documentation slice.
 
 The following wording and ownership decisions are fixed for this documentation work.
 
-### 1. Two questions stay separate
+### 1. Keep legality and representation separate
 
 Permanent documentation must keep these questions separate:
 
@@ -150,7 +147,7 @@ How is one legal topology represented?
 
 No physical strategy may make an illegal topology legal. No planning imprecision may become a source diagnostic. A missing strategy after successful topology validation is `CompilerError`.
 
-### 2. REC obligation invariant
+### 2. Correct the REC obligation invariant
 
 For one REC-selected allocation family `F`, the permanent invariant is:
 
@@ -160,9 +157,9 @@ REC count(F) =
     + optional affine-root obligation(F)
 ```
 
-The affine-root term is either zero or one.
+The affine-root term is zero or one.
 
-Permanent docs must distinguish the reason REC is selected from the complete physical counter invariant:
+Permanent docs must distinguish why REC is selected from the complete physical counter invariant:
 
 - REC is selected because unresolved runtime-many persistent retained edges disappear independently
 - a selected counter also carries at most one affine-root obligation
@@ -174,7 +171,7 @@ Permanent docs must distinguish the reason REC is selected from the complete phy
 
 Remove or replace every unqualified sentence that says REC physically counts persistent retained edges only.
 
-### 3. Planned obligation transitions
+### 3. Put concrete obligation transitions in the memory plan
 
 Retained-edge analysis owns semantic facts:
 
@@ -229,7 +226,7 @@ delta_count =
 
 The planner normalises the complete semantic commit before lowering. The backend must never emit a temporary decrement-to-zero followed by an increment for a same-family replacement whose net transition is zero.
 
-### 4. Cleanup terminology
+### 4. Standardise cleanup terminology
 
 Use these terms consistently:
 
@@ -240,7 +237,7 @@ Use these terms consistently:
 
 Use `discharge_if_owned` as the conceptual operation in permanent documentation. Exact Rust spelling remains open.
 
-Use `DropIfOwned` only when naming the current Wasm scaffolding instruction or its migration debt. Do not use `drop_if_owned`, `release_if_owned` and `discharge_if_owned` as three competing permanent names.
+Use `DropIfOwned` only when naming the current Wasm scaffolding instruction or its migration debt. Do not use `drop_if_owned`, `release_if_owned` and `discharge_if_owned` as competing permanent names.
 
 A discharge does not always destroy:
 
@@ -260,7 +257,7 @@ explicit-group family:
     group exit bulk-reclaims it
 ```
 
-### 5. Committed retained-edge states and cycles
+### 5. Define committed retained-edge states and cycle coexistence
 
 Cycle validation reasons about direct retained edges that may coexist in one reachable committed program state.
 
@@ -270,9 +267,9 @@ Permanent lifetime documentation must define:
 - old edges removed and new edges added atomically on the successful committed path
 - failure paths preserving the old topology
 - path-sensitive or epoch-sensitive facts that may prove two edge sets cannot coexist
-- conservative may-coexist treatment when the analysis cannot disprove coexistence
+- conservative may-coexist treatment when analysis cannot disprove coexistence
 
-Examples that must be covered:
+Required branch example:
 
 ```text
 branch A:
@@ -282,7 +279,9 @@ branch B:
     B -> A
 ```
 
-A path-insensitive union must not automatically be presented as proof that a runtime cycle exists. The analysis may preserve branch separation. If coexistence cannot be disproved, the topology is not proven legal and receives the normal topology diagnostic.
+A path-insensitive union must not automatically be presented as proof that a runtime cycle exists. Analysis may preserve branch separation. If coexistence cannot be disproved, topology is not proven legal and receives the normal topology diagnostic.
+
+Required replacement example:
 
 ```text
 old committed state:
@@ -305,7 +304,7 @@ They do not reclaim a real retained-edge SCC. Every real self-cycle or multi-fam
 
 Field-sensitive family refinement must rebuild the affected direct graph and revalidate affected outlives, family-base and SCC facts.
 
-### 6. Stable borrow-analysis output contract
+### 6. Define a solver-independent borrow-analysis handoff
 
 Permanent borrow documentation must describe stable semantic outputs independently from the current alpha algorithm.
 
@@ -322,17 +321,17 @@ The stable contract includes:
 - reactive invalidation and observability facts
 - resolved external access-boundary classifications
 
-The current alpha lattice and algorithm may still be documented, but only under an explicit current-implementation heading. These details are not permanent language architecture:
+The current alpha lattice and algorithm may still be documented, but only under an explicit current-implementation heading. These details are not permanent architecture:
 
 - `uninitialized`, `slot`, `alias` and `slot + alias`
-- the current LocalId-centred root approximation
+- the current `LocalId`-centred root approximation
 - current per-block may/must future-use precomputation
 - current forward fixed-point transfer implementation
 - current advisory drop candidates
 
 Boracle remains a permanent reference solver and experiment facility. The memory model does not depend on Boracle running during normal compilation or on the future production solver using Boracle's exact storage and algorithm.
 
-### 7. Last use feeds several systems
+### 7. Show how last use feeds several systems
 
 Permanent overview and teaching material must show that one future-use substrate has several consumers without collapsing their ownership:
 
@@ -349,7 +348,7 @@ Permanent overview and teaching material must show that one future-use substrate
 
 Borrow validation supplies facts. Lifetime analysis and memory planning own the later decisions.
 
-### 8. `ValidatedMemoryPlan` conceptual contract
+### 8. Define the complete `ValidatedMemoryPlan` contract
 
 One plan belongs to one target/profile physical-variant scope. It is not:
 
@@ -389,7 +388,7 @@ REC
 HostGC
 ```
 
-Exact Rust enum decomposition remains open. For example, stack or inline placement may be separate from heap cleanup strategy. No accepted outcome may be omitted from the conceptual contract.
+Exact Rust enum decomposition remains open. Stack or inline placement may be separate from heap cleanup strategy. No accepted outcome may be omitted from the conceptual contract.
 
 Before publication, plan validation proves:
 
@@ -412,7 +411,7 @@ Before publication, plan validation proves:
 
 Physical coalescing occurs before final plan validation and fingerprinting. It may retain storage slightly longer, but it never widens semantic topology, changes outlives, changes source legality or changes diagnostics.
 
-### 9. One final affine authority
+### 9. Keep one final affine authority
 
 Borrow and lifetime stages produce:
 
@@ -423,9 +422,9 @@ Borrow and lifetime stages produce:
 
 `ValidatedMemoryPlan` owns the final physical affine decisions.
 
-Backend handoff lists may still include borrow and lifetime facts as validated context. They must not list a separate final `validated affine cleanup decisions` artefact beside the plan as a competing authority.
+Backend handoff lists may include borrow and lifetime facts as validated context. They must not list a separate final `validated affine cleanup decisions` artefact beside the plan as a competing authority.
 
-### 10. Group boundaries
+### 10. Clarify group boundaries
 
 Public and technical group documentation must state:
 
@@ -446,118 +445,302 @@ at group exit:
 
 Group count-free semantics are a property of the target owner, not every edge source located inside a group.
 
-### 11. Authority and plan links
+### 11. Keep temporary plan links out of permanent authorities
 
 Permanent authorities, teaching pages and the progress matrix must not depend on short-lived implementation-plan filenames.
 
-Allowed links to active plan files:
-
-- `docs/roadmap/roadmap.md`
-- a plan's own status or history where needed
-
-Permanent docs should link:
+The roadmap owns links to active and queued plans. Permanent docs should link:
 
 - canonical memory authorities
 - `docs/roadmap/roadmap.md` for sequencing
 - `docs/src/docs/progress/@page.moth` for current support
 
-The roadmap must not call either current memory plan a semantic authority. Until their replacement lands, describe them as temporary implementation work items pending consolidation.
+The roadmap must not call a temporary implementation plan a semantic authority. Until the replacement implementation plan lands, describe the current collector-free work items as temporary implementation plans awaiting consolidation.
 
 ## Exact source edit matrix
 
-The implementation must follow this matrix. If a heading moved, update the plan's working notes and edit the current owner rather than creating a duplicate section.
+The implementation must follow this matrix. If a heading moved, update working notes and edit the current owner rather than creating a duplicate section.
 
 ### Permanent memory authorities
 
-| File | Required headings or area | Required change |
-|---|---|---|
-| `docs/src/docs/codebase/memory-management/overview.mtf` | `The six cooperating mechanisms` | State that REC is selected for unresolved persistent-edge multiplicity and that a selected counter also contains at most one affine-root obligation. |
-| same | `Rules every contributor must know` | Expand the last-use rule with the multi-consumer table or a direct link to one nearby table. Keep later decision ownership with lifetime analysis and planning. |
-| same | `Collector-free correctness argument` | Replace shorthand that implies only persistent edges can contribute to a selected count. Include obligation reclassification as a precision mechanism. |
-| same | `Compiler and backend layers` | State that the planner creates concrete per-family obligation transitions and the backend only encodes them. |
-| same | `Hard invariants` | Replace `REC counts persistent retained edges only` with the complete obligation invariant and ordinary-alias exclusion. |
-| `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf` | `Contract` | Replace advisory-drop-centred output wording with the stable place, origin, loan, future-use, transfer and preliminary provenance fact contract. Label advisory drops as current scaffolding only. |
-| `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf` | `Design contract` and `The last-use contract` | Define the stable downstream fact contract and the several consumers of future-use facts. |
-| same | `Analysis model`, `Future-use and optional transfer safety`, `Control flow and joins` | Move algorithm-specific alpha details under a clear `Current alpha implementation` heading. Do not present its lattice as accepted permanent architecture. |
-| same | `Side-table outputs` | Separate stable required facts from current advisory drop candidates. |
-| same | `Handoff to lifetime validation` | Add capable-source death, temporary-borrow safety and edge-coexistence inputs. |
-| same | `Conservative precision and extension points` | State that stronger production solvers and Boracle may improve precision without changing the stable handoff or source semantics. |
-| `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf` | `Contract` | Add committed retained-edge states and may-coexist cycle facts to the output contract. |
-| `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf` | `Terminology` | Define semantic commit point, committed retained-edge state and may-coexist edge relation. |
-| same | `Retained-edge liveness and cleanup frontiers` | Explain how future-use facts prove edge death and loss of recreation capability. |
-| same | new subsection adjacent to retained-edge liveness | Specify atomic successful commit effects, unchanged failure topology and path or epoch separation. |
-| same | `Cycles and strongly connected graphs` | Define SCC validation over edges that may coexist in one reachable committed state. Explain conservative unproven coexistence and reaffirm group-only real cycles. |
-| same | `Splitting refines an already legal topology` | State that direct graph and may-coexist SCC facts are rebuilt and revalidated after a split. |
-| `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf` | `Contract` | Make final affine decisions plan-owned and use discharge terminology. |
-| `docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf` | `Discharging responsibility is not necessarily destruction` | Preserve the four-term distinction and make it the terminology authority. |
-| same | `Unified ownership ABI` | Explain that responsibility and representation are independent dimensions and local specialisation may remove known tag checks without source-visible overloads. |
-| same | `Conditional destruction` | Rename the conceptual operation to `discharge_if_owned`. Explain that current `DropIfOwned` is only an implementation spelling where referenced elsewhere. |
-| same | `Static specialisation` | Permit local constant folding of responsibility and REC state without requiring whole-function duplication. |
-| same | `Common mistakes` | Add reconstructing transitions in the backend and treating discharge as destruction. |
-| `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf` | `Contract` | Give the planner ownership of concrete normalised transitions and destruction decisions. Limit lowering to encoding. |
-| same | ownership chain diagram | Change the final chain to `memory planner -> selected layout and planned transitions -> backend REC encoding`. |
-| same | `Invariant` | Use the complete counter equation and the ordinary-alias exclusion. |
-| same | `Read next` | Remove the direct REC implementation-plan link and link the roadmap instead. |
-| `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf` | `Design contract` and relationship sections | Separate semantic edge facts, physical plan decisions and backend encoding. |
-| same | `Counter representation and invariant` | Keep the equation and state why selection is about persistent edges while the physical count also carries one root. |
-| same | count-transition sections | Make semantic-commit fusion and per-family normalisation mandatory planner work. Include same-family replacement, final-use insertion, detached results and hidden destinations. |
-| same | boundaries and specialisation sections | State that only retention-sensitive and cleanup-sensitive operations inspect bit 1 and known states may remove local tests. |
-| same | new `Performance contract` section | Record which operations have no count traffic, which operations may update a counter, counter layout costs, non-atomic policy, iterative destruction and the permitted specialisations. Separate hard guarantees from benchmarking choices. |
-| same | related reading | Replace direct plan links with permanent authorities and the roadmap. |
-| `docs/src/docs/codebase/memory-management/declared-memory-groups/overview.mtf` | `Contract` and `Read next` | Keep the external REC edge rule and remove the direct parent-plan link. |
-| `docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf` | group boundary and teardown sections | Verify outgoing external REC obligations are released before bulk reclaim. Remove direct implementation-plan links. |
-| `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/overview.mtf` | `Contract` | Remove separate final affine-decision authority. Add planned obligation transitions, hidden destinations, region/group placement and coalescing to the plan summary. |
-| `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` | `Backend-neutral semantics` and `Planning order` | State that final physical ownership and count transitions come only from the plan. |
-| same | new `ValidatedMemoryPlan contract` section after planning order | Add the conceptual contents, seven outcomes, validation invariants, variant scope and fingerprint order from this plan. |
-| same | `Wasm lowering` | Replace generic retain language with plan-driven persistent-edge transitions. |
-| same | `Drop and retain behaviour` | Rename to `Planned discharge and retained-edge transitions`. Remove generic ARC-like `retain when` wording. |
-| same | `Fact consumption` | Remove a separate final affine-decision input. Keep borrow and lifetime facts as validation context only. |
-| same | `Backend specialisation` | Add local tag-test elimination, base-pointer mask hoisting as a permitted encoding optimisation and transition fusion as plan-owned. |
+#### `docs/src/docs/codebase/memory-management/overview.mtf`
+
+- `The six cooperating mechanisms`
+  - Say REC is selected for unresolved persistent-edge multiplicity.
+  - Say a selected counter also contains at most one affine-root obligation.
+- `Rules every contributor must know`
+  - Add the last-use multi-consumer table or place it immediately nearby and link to it.
+  - Keep later decision ownership with lifetime analysis and planning.
+- `Collector-free correctness argument`
+  - Add obligation reclassification as a precision mechanism.
+- `Compiler and backend layers`
+  - State that the planner creates concrete per-family obligation transitions.
+  - State that the backend only encodes them.
+- `Hard invariants`
+  - Replace `REC counts persistent retained edges only` with the complete obligation invariant and ordinary-alias exclusion.
+
+#### `docs/src/docs/codebase/memory-management/borrow-validation/overview.mtf`
+
+- `Contract`
+  - Replace advisory-drop-centred output wording with stable place, origin, loan, future-use, transfer and preliminary-provenance facts.
+  - Label advisory drops as current scaffolding only.
+
+#### `docs/src/docs/codebase/memory-management/borrow-validation/borrow-validation.mtf`
+
+- `Design contract` and `The last-use contract`
+  - Define the stable downstream fact contract.
+  - Add the several consumers of future-use facts.
+- `Analysis model`, `Future-use and optional transfer safety`, `Control flow and joins`
+  - Move algorithm-specific alpha details under `Current alpha implementation`.
+  - Do not present the current lattice as permanent architecture.
+- `Side-table outputs`
+  - Separate stable required facts from current advisory drop candidates.
+- `Handoff to lifetime validation`
+  - Add capable-source death, temporary-borrow safety and edge-coexistence inputs.
+- `Conservative precision and extension points`
+  - State that stronger production solvers and Boracle may improve precision without changing the stable handoff or source semantics.
+
+#### `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+
+- `Contract`
+  - Add committed retained-edge states and may-coexist cycle facts to the output contract.
+
+#### `docs/src/docs/codebase/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+
+- `Terminology`
+  - Define semantic commit point.
+  - Define committed retained-edge state.
+  - Define may-coexist edge relation.
+- `Retained-edge liveness and cleanup frontiers`
+  - Explain how future-use facts prove edge death and loss of recreation capability.
+- Add `Committed retained-edge effects` beside retained-edge liveness.
+  - Successful mutations remove old edges and add new edges atomically at commit.
+  - Failed mutations preserve the old topology.
+  - Path and epoch separation may prove edge sets cannot coexist.
+- `Cycles and strongly connected graphs`
+  - Define SCC validation over edges that may coexist in one reachable committed state.
+  - Explain conservative unproven coexistence.
+  - Reaffirm that every real cycle is group-only.
+- `Splitting refines an already legal topology`
+  - State that direct graph and may-coexist SCC facts are rebuilt and revalidated after a split.
+
+#### `docs/src/docs/codebase/memory-management/ownership-and-drops/overview.mtf`
+
+- `Contract`
+  - Make final affine decisions plan-owned.
+  - Use discharge terminology.
+
+#### `docs/src/docs/codebase/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+
+- `Discharging responsibility is not necessarily destruction`
+  - Keep the four-term distinction and make this the terminology authority.
+- `Unified ownership ABI`
+  - Explain that responsibility and representation are independent dimensions.
+  - State that local specialisation may remove known tag checks without source-visible overloads.
+- `Conditional destruction`
+  - Rename the conceptual operation to `discharge_if_owned`.
+  - Explain that `DropIfOwned` is only the current implementation spelling where current debt is discussed.
+- `Static specialisation`
+  - Permit local constant folding of responsibility and REC state without requiring whole-function duplication.
+- `Common mistakes`
+  - Add reconstructing transitions in the backend.
+  - Add treating discharge as destruction.
+
+#### `docs/src/docs/codebase/memory-management/retained-edge-counting/overview.mtf`
+
+- `Contract`
+  - Give the planner ownership of concrete normalised transitions and destruction decisions.
+  - Limit lowering to encoding.
+- ownership-chain diagram
+  - Use `memory planner -> selected layout and planned transitions -> backend REC encoding`.
+- `Invariant`
+  - Use the complete counter equation and ordinary-alias exclusion.
+- `Read next`
+  - Replace the direct implementation-plan link with the roadmap.
+
+#### `docs/src/docs/codebase/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+
+- `Design contract` and relationship sections
+  - Separate semantic edge facts, physical plan decisions and backend encoding.
+- `Counter representation and invariant`
+  - Keep the equation.
+  - Explain why selection is about persistent edges while the physical count also carries one root.
+- count-transition sections
+  - Make semantic-commit fusion and per-family normalisation mandatory planner work.
+  - Cover same-family replacement, final-use insertion, detached results and hidden destinations.
+- boundary and specialisation sections
+  - State that only retention-sensitive and cleanup-sensitive operations inspect bit 1.
+  - State that known states may remove local tests.
+- Add `Performance contract`.
+  - Record operations with no count traffic.
+  - Record operations that may update a counter.
+  - Record counter layout cost, non-atomic policy and iterative destruction.
+  - Separate hard guarantees from measured policy.
+- related reading
+  - Replace direct implementation-plan links with permanent authorities and the roadmap.
+
+#### `docs/src/docs/codebase/memory-management/declared-memory-groups/overview.mtf`
+
+- `Contract`
+  - Keep the external REC edge rule.
+- `Read next`
+  - Remove the direct implementation-plan link.
+
+#### `docs/src/docs/codebase/memory-management/declared-memory-groups/declared-memory-groups.mtf`
+
+- group boundary and teardown sections
+  - Verify outgoing external REC obligations are released before bulk reclaim.
+  - Remove direct implementation-plan links.
+
+#### `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/overview.mtf`
+
+- `Contract`
+  - Remove separate final affine-decision authority.
+  - Add planned obligation transitions, hidden destinations, region and group placement and coalescing to the plan summary.
+
+#### `docs/src/docs/codebase/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
+
+- `Backend-neutral semantics` and `Planning order`
+  - State that final physical ownership and count transitions come only from the plan.
+- Add `ValidatedMemoryPlan contract` after planning order.
+  - Add conceptual contents.
+  - Add the seven accepted outcomes.
+  - Add the sixteen validation invariants.
+  - Add variant scope and fingerprint order.
+- `Wasm lowering`
+  - Replace generic retain language with plan-driven persistent-edge transitions.
+- Rename `Drop and retain behaviour` to `Planned discharge and retained-edge transitions`.
+  - Remove generic ARC-like `retain when` wording.
+- `Fact consumption`
+  - Remove a separate final affine-decision input.
+  - Keep borrow and lifetime facts as validation context only.
+- `Backend specialisation`
+  - Add local tag-test elimination.
+  - Add base-pointer mask hoisting as a permitted encoding optimisation.
+  - Keep transition fusion plan-owned.
 
 ### Compiler and build-system authorities
 
-| File | Required headings or area | Required change |
-|---|---|---|
-| `docs/compiler-design-overview.md` | `Frontend stages > Stage 6: borrow validation` | Describe the stable borrow handoff without locking the permanent architecture to the alpha checker lattice. |
-| same | `Lifetime-region and escape validation > Retained-edge analysis` | Add committed-state and may-coexist cycle facts. |
-| same | `Lifetime-region and escape validation > Backend-neutral memory requirements` | Keep candidates and constraints target-independent. Explicitly exclude concrete obligation transitions. |
-| same | `Lifetime-region and escape validation > Memory-strategy planning` | Add the complete plan contents, transition ownership, coalescing-before-final-validation order and plan validation requirement. |
-| same | `Lifetime-region and escape validation > Backend handoff` | Remove separate final affine-decision authority. Remove direct implementation-plan links. |
-| same | `Backend-facing compiler handoff` | List one `ValidatedMemoryPlan` as the final physical authority. Borrow and lifetime facts remain context and assertions only. |
-| `docs/build-system-design.md` | `Fixed bootstrap order` and `HTML project builder > Mixed-target planning and validation` | Preserve the shared/per-variant seam and add explicit plan validation before lowering. |
-| same | `HTML project builder > Physical variants` | Add normalised obligation transitions and hidden-destination plans to the memory-plan fingerprint. State that coalescing is finalised before fingerprinting. |
-| same | `HTML project builder > Link planning and lifetime topology` | Keep topology and backend-neutral requirements shared. Exclude concrete physical transitions. |
-| same | `HTML project builder > Memory-strategy plans` | Add the complete plan contents, seven outcomes and validation invariants. |
-| same | `HTML project builder > Runtime and memory` | State that Wasm lowering consumes planned transitions rather than deriving generic retain or release operations. |
+#### `docs/compiler-design-overview.md`
+
+- `Frontend stages > Stage 6: borrow validation`
+  - Describe the stable borrow handoff without locking permanent architecture to the alpha checker lattice.
+- `Lifetime-region and escape validation > Retained-edge analysis`
+  - Add committed-state and may-coexist cycle facts.
+- `Lifetime-region and escape validation > Backend-neutral memory requirements`
+  - Keep candidates and constraints target-independent.
+  - Explicitly exclude concrete obligation transitions.
+- `Lifetime-region and escape validation > Memory-strategy planning`
+  - Add complete plan contents.
+  - Add transition ownership.
+  - Put coalescing before final validation and fingerprinting.
+  - Require explicit plan validation.
+- `Lifetime-region and escape validation > Backend handoff`
+  - Remove separate final affine-decision authority.
+  - Remove direct implementation-plan links.
+- `Backend-facing compiler handoff`
+  - List one `ValidatedMemoryPlan` as the final physical authority.
+  - Keep borrow and lifetime facts as context and assertions only.
+
+#### `docs/build-system-design.md`
+
+- `Fixed bootstrap order`
+  - Add explicit `ValidatedMemoryPlan` validation before lowering.
+- `HTML project builder > Mixed-target planning and validation`
+  - Preserve the shared/per-variant seam.
+  - Add explicit plan validation before lowering.
+- `HTML project builder > Physical variants`
+  - Add normalised obligation transitions and hidden-destination plans to the memory-plan fingerprint.
+  - State that coalescing is finalised before fingerprinting.
+- `HTML project builder > Link planning and lifetime topology`
+  - Keep topology and backend-neutral requirements shared.
+  - Exclude concrete physical transitions.
+- `HTML project builder > Memory-strategy plans`
+  - Add complete plan contents, seven outcomes and validation invariants.
+- `HTML project builder > Runtime and memory`
+  - State that Wasm lowering consumes planned transitions instead of deriving generic retain or release operations.
 
 ### Teaching and public documentation
 
-| File | Required headings or area | Required change |
-|---|---|---|
-| `docs/src/docs/codebase/compiler-design/memory-management-and-gc/memory-management-and-gc.mtf` | `The proof pipeline` | Add concrete transition planning to the per-variant side of the seam. |
-| same | after `When transfer proof is missing` | Add a compact `One fact, several consumers` table. |
-| same | `Backend representations` | Correct the REC physical invariant and explain zero-traffic reclassification. |
-| `docs/src/docs/codebase/compiler-design/borrow-validation-and-drops/borrow-validation-and-drops.mtf` | `Data-flow facts`, `Future use and inferred transfer`, `Handoff to lifetime validation`, `From facts to lowering` | Separate stable facts from current alpha implementation and show how later stages consume them. |
-| same | `Roadmap and current status` | Keep current advisory `DropIfOwned` debt but avoid presenting advisory drops as final input. |
-| `docs/src/docs/codebase/compiler-design/backend-lowering/backend-lowering.mtf` | `Lowerer inputs` and `External bindings and ownership facts` | State that planned obligation transitions and discharge operations arrive settled. Lowerers do not infer them from borrow facts. |
-| `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf` | `Last use and stored obligations work together` | Keep the existing teaching example and add edge-to-root detachment and same-family zero-net commit wording. |
-| same | `What REC doesn't count` | Replace `ordinary affine transfers` with precise wording that transfer moves or reclassifies one existing obligation without adding another. |
-| same | source visibility section | State that only retention-sensitive commits on REC-selected families update counts. |
-| `docs/src/docs/memory/declared-memory-groups.mtf` | `Bulk cleanup and cycles` or `Nested groups and retained edges` | Add the external REC target rule and group-exit release order. |
-| same | `Read next` | Remove the direct implementation-plan link and link the roadmap. |
+#### `docs/src/docs/codebase/compiler-design/memory-management-and-gc/memory-management-and-gc.mtf`
+
+- `The proof pipeline`
+  - Add concrete transition planning to the per-variant side of the seam.
+- After `When transfer proof is missing`
+  - Add a compact `One fact, several consumers` table.
+- `Backend representations`
+  - Correct the REC physical invariant.
+  - Explain zero-traffic reclassification.
+
+#### `docs/src/docs/codebase/compiler-design/borrow-validation-and-drops/borrow-validation-and-drops.mtf`
+
+- `Data-flow facts`, `Future use and inferred transfer`, `Handoff to lifetime validation`, `From facts to lowering`
+  - Separate stable facts from current alpha implementation.
+  - Show how later stages consume them.
+- `Roadmap and current status`
+  - Keep current advisory `DropIfOwned` debt.
+  - Do not present advisory drops as final input.
+
+#### `docs/src/docs/codebase/compiler-design/backend-lowering/backend-lowering.mtf`
+
+- `Lowerer inputs` and `External bindings and ownership facts`
+  - State that planned obligation transitions and discharge operations arrive settled.
+  - State that lowerers do not infer them from borrow facts.
+
+#### `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf`
+
+- `Last use and stored obligations work together`
+  - Keep the existing teaching example.
+  - Add edge-to-root detachment and same-family zero-net commit wording.
+- `What REC doesn't count`
+  - Replace `ordinary affine transfers` with precise wording that transfer moves or reclassifies one existing obligation without adding another.
+- source visibility section
+  - State that only retention-sensitive commits on REC-selected families update counts.
+
+#### `docs/src/docs/memory/declared-memory-groups.mtf`
+
+- `Bulk cleanup and cycles` or `Nested groups and retained edges`
+  - Add the external REC target rule and group-exit release order.
+- `Read next`
+  - Replace the direct implementation-plan link with the roadmap.
 
 ### Status, routing and generated documentation
 
-| File | Required area | Required change |
-|---|---|---|
-| `docs/src/docs/progress/@page.moth` | memory rows | Keep all status and coverage values unchanged. Remove direct memory-plan file links. Keep current Wasm `DropIfOwned` scaffolding debt explicit. State that `ValidatedMemoryPlan` has no implementation owner yet where useful. |
-| `docs/roadmap/roadmap.md` | `Collector-free memory implementation` | Stop calling a plan a semantic authority. State that canonical design lives in permanent memory docs and that the two current plans are temporary implementation work items awaiting one replacement plan. |
-| same | plan list | While this plan is active or queued, link it under a separate documentation-work heading so it does not distort the hard implementation chain. Remove the link in the completion commit when this plan is deleted. |
-| `docs/src/docs/cheatsheet/moth-language-cheatsheet.md` | reference semantics and groups | Audit only. Keep it concise. Change it only if it contradicts the corrected authorities. Do not add counter equations or backend-plan detail. |
-| `AGENTS.md` | memory core contracts | Audit only. Change it only if the corrected ownership boundaries are not already represented. |
-| `index.md` | navigation | No update is expected because no implementation file or owner moves. Update only if a permanent source documentation path changes. |
-| every relevant `@page.moth` under the memory and compiler-design documentation trees | page introductions and summaries | Audit for duplicated stale wording. Update only summaries that repeat a corrected invariant. Keep detailed contracts in topic-named files. |
-| `docs/release/**` | generated output | Never edit by hand. Regenerate through the documentation release build after source changes. |
+#### `docs/src/docs/progress/@page.moth`
+
+- memory rows
+  - Keep every status and coverage value unchanged.
+  - Remove direct implementation-plan links.
+  - Keep current Wasm `DropIfOwned` scaffolding debt explicit.
+  - State that no `ValidatedMemoryPlan` implementation owner exists yet where useful.
+
+#### `docs/roadmap/roadmap.md`
+
+- `Collector-free memory implementation`
+  - Stop calling a plan a semantic authority.
+  - State that canonical design lives in permanent memory docs.
+  - Describe the current collector-free work items as temporary implementation plans awaiting one replacement plan.
+- plan list
+  - Keep this plan under a separate documentation-work heading while queued or active.
+  - Remove the entry in the completion commit when this plan is deleted.
+
+#### Audit-only files
+
+- `docs/src/docs/cheatsheet/moth-language-cheatsheet.md`
+  - Keep it concise.
+  - Change it only if it contradicts corrected authorities.
+  - Do not add counter equations or backend-plan detail.
+- `AGENTS.md`
+  - Change it only if corrected ownership boundaries are not already represented.
+- `index.md`
+  - No update is expected because no implementation owner moves.
+  - Update only if a permanent source documentation path changes.
+- relevant `@page.moth` files
+  - Audit introductions and summaries for duplicated stale wording.
+  - Keep detailed contracts in topic-named files.
+- `docs/release/**`
+  - Never edit by hand.
+  - Regenerate through the documentation release build.
 
 ## Required REC performance wording
 
@@ -599,16 +782,17 @@ The detailed page may name likely costs such as target-header cache-line writes,
 
 - Record the active branch and revision in working notes.
 - Re-read every required authority from this worktree.
-- Search all non-generated documentation for the stale phrases and direct plan links listed under `Search gates`.
-- Confirm the current Boracle docs still keep lifetime topology and REC outside the reference solver's authority.
+- Read the current collector-free work items through the roadmap.
+- Search non-generated documentation for stale phrases and direct plan links listed under `Search gates`.
+- Confirm Boracle docs still keep lifetime topology and REC outside the reference solver's authority.
 - Confirm no implementation or progress status changed since this plan was written.
 - Produce a working checklist from the exact source edit matrix.
 
-Stop if a canonical authority now contains a conflicting accepted decision. Resolve that design conflict with the user before editing derived pages.
+Stop if a canonical authority now contains a conflicting accepted decision. Resolve that conflict with the user before editing derived pages.
 
 ### Phase 1: Correct detailed memory authorities
 
-Edit the topic-named detailed memory files first:
+Edit detailed topic files first in this order:
 
 1. borrow validation
 2. lifetime regions and escape validation
@@ -617,7 +801,7 @@ Edit the topic-named detailed memory files first:
 5. declared memory groups
 6. runtime and backend lowering
 
-Do not update overview or teaching pages until the detailed owners agree.
+Do not update overviews or teaching pages until the detailed owners agree.
 
 Phase exit gate:
 
@@ -635,19 +819,19 @@ Update:
 - `docs/src/docs/codebase/memory-management/overview.mtf`
 - every affected leaf `overview.mtf`
 
-Keep overviews compact. They should route to the detailed authority rather than duplicate every example.
+Keep overviews compact. Route to detailed authorities instead of duplicating every example.
 
 Phase exit gate:
 
 - no overview contradicts its detailed leaf
-- no overview links a short-lived memory implementation plan
+- no overview links a short-lived implementation plan
 - hard invariants use the complete obligation wording
 
 ### Phase 3: Correct compiler and build-system authorities
 
-Update the exact headings listed in the edit matrix.
+Update the exact headings in the edit matrix.
 
-Preserve the fixed pipeline:
+Preserve this pipeline:
 
 ```text
 validated HIR
@@ -679,33 +863,33 @@ Phase exit gate:
 
 ### Phase 4: Correct teaching and public pages
 
-Update the compiler-design teaching pages and public memory pages from the corrected permanent authorities.
+Update compiler-design teaching pages and public memory pages from corrected permanent authorities.
 
-Use accessible wording. Keep source-language pages focused on what authors need to understand. Do not expose internal type names or every validation invariant in the public memory guide.
+Use accessible wording. Keep source-language pages focused on what authors need. Do not expose internal type names or every validation invariant in the public memory guide.
 
 Phase exit gate:
 
-- the last-use and obligation-reclassification advantage is explained at both compiler and public levels
+- last-use and obligation reclassification are explained at compiler and public levels
 - public group docs explain external REC targets
 - no teaching page implies general ARC retain/release behaviour
 - no teaching page treats Boracle or the alpha checker algorithm as the permanent implementation
 
 ### Phase 5: Correct status and roadmap references
 
-- Update the progress matrix wording without changing status or coverage values.
+- Update progress wording without changing status or coverage values.
 - Update the roadmap's collector-free section to identify permanent authorities correctly.
 - Remove direct memory implementation-plan links from permanent and public docs.
-- Do not edit, delete or replace the two current memory implementation plans.
+- Leave current collector-free implementation work items in place for the next planning task.
 
 Phase exit gate:
 
-- the roadmap is the only permanent source that links active memory implementation plans
+- the roadmap is the only permanent source that links active or queued implementation plans
 - permanent docs link canonical authorities and the roadmap
 - current implementation status remains honest
 
 ### Phase 6: Rebuild generated documentation
 
-Run the documentation release build through the current release compiler or the Cargo equivalent.
+Run the documentation release build through the current release compiler or Cargo equivalent.
 
 Inspect generated changes for:
 
@@ -730,13 +914,15 @@ Re-read in this order:
 7. progress matrix
 8. roadmap
 
-Then perform the `AGENTS.md` Slice review.
+Perform the `AGENTS.md` Slice review.
 
 Delete this plan and remove its roadmap entry in the same completion commit. Do not leave a completed plan in the tree.
 
 ## Search gates
 
-Run these searches against source documentation, excluding generated release output unless the command is checking generated parity.
+Run these searches against source documentation. Exclude generated release output unless checking generated parity.
+
+### Stale REC wording
 
 ```bash
 rg -n \
@@ -747,6 +933,8 @@ rg -n \
 
 Expected result after correction: no stale unqualified wording.
 
+### Competing affine authority
+
 ```bash
 rg -n \
     "validated affine cleanup decisions" \
@@ -756,13 +944,17 @@ rg -n \
 
 Expected result after correction: no backend handoff treats this as a final authority separate from `ValidatedMemoryPlan`. Historical migration text may name the old shape only when clearly labelled.
 
+### Permanent docs linked to temporary plans
+
 ```bash
 rg -n \
-    "final-memory-management-redesign-and-implementation-plan.md|retained-edge-counting-design-and-implementation-plan.md" \
+    "docs/roadmap/plans/" \
     docs/src docs/compiler-design-overview.md docs/build-system-design.md
 ```
 
-Expected result after correction: no permanent or public authority links either short-lived plan file.
+Expected result after correction: no permanent or public authority links a short-lived plan file.
+
+### Cleanup terminology
 
 ```bash
 rg -n \
@@ -777,6 +969,8 @@ Review every result:
 - `DropIfOwned` appears only in current implementation debt or progress wording
 - `drop_if_owned` and `release_if_owned` do not remain as competing permanent names
 
+### Shared and per-variant seam
+
 ```bash
 rg -n \
     "BackendNeutralMemoryRequirements|ValidatedMemoryPlan" \
@@ -787,6 +981,8 @@ rg -n \
 ```
 
 Review every result for the shared/per-variant seam and single final authority.
+
+### Temporary authority wording
 
 ```bash
 rg -n \
@@ -801,7 +997,7 @@ Expected result: no temporary implementation plan is described as permanent sema
 
 ## Required validation
 
-This is a documentation-only plan. The required final gate is:
+This is documentation-only work. The required final gate is:
 
 ```bash
 moth build docs --release
@@ -844,28 +1040,28 @@ Before completion, verify all of the following:
 - Group-owned targets are count-free while outgoing edges to external REC targets remain counted.
 - The stable borrow handoff is independent from the alpha checker algorithm and Boracle execution.
 - `BackendNeutralMemoryRequirements` remains the final target-independent memory artefact.
-- `ValidatedMemoryPlan` is scoped to one physical variant and covers all accepted strategy outcomes.
+- `ValidatedMemoryPlan` is scoped to one physical variant and covers every accepted strategy outcome.
 - Plan validation invariants are listed in permanent architecture documentation.
 - Physical coalescing precedes final plan validation and fingerprinting.
 - Backend handoff contains no competing final affine authority.
 - Current Wasm `DropIfOwned` remains clearly labelled scaffolding debt.
 - Progress statuses and coverage values did not change.
-- No permanent authority links a short-lived memory implementation-plan filename.
-- Generated docs were rebuilt rather than edited manually.
+- No permanent authority links a short-lived implementation-plan filename.
+- Generated docs were rebuilt instead of edited manually.
 - This plan and its roadmap entry are removed in the completion commit.
 
 ## Handoff to the replacement implementation plan
 
 The completion summary for this documentation work must give the next planning task a concise handoff containing:
 
-- the final permanent authority paths
-- the final shared/per-variant pipeline
-- the final stable borrow-analysis input and output contract
-- the final `BackendNeutralMemoryRequirements` boundary
-- the final conceptual `ValidatedMemoryPlan` contents and validation rules
-- the final obligation-transition ownership split
-- the final cycle and group rules
-- the current implementation gaps that remain after documentation-only work
-- confirmation that the two old memory implementation plans were deliberately left for replacement
+- final permanent authority paths
+- final shared/per-variant pipeline
+- final stable borrow-analysis input and output contract
+- final `BackendNeutralMemoryRequirements` boundary
+- final conceptual `ValidatedMemoryPlan` contents and validation rules
+- final obligation-transition ownership split
+- final cycle and group rules
+- current implementation gaps that remain after documentation-only work
+- confirmation that current collector-free implementation work items were deliberately left for replacement
 
-The later replacement implementation plan must consume those permanent authorities, replace the two overlapping memory plans with one implementation sequence and update the roadmap in the same change.
+The later replacement implementation plan must consume those permanent authorities, replace the overlapping collector-free work items with one implementation sequence and update the roadmap in the same change.
