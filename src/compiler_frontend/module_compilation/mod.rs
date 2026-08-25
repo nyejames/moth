@@ -49,6 +49,8 @@ pub(crate) use generated::{
 };
 pub(crate) use options::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 pub(crate) use options::FrontendOptions;
+#[cfg(feature = "boracle")]
+pub(crate) use outcome::BoracleModuleInput;
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};
 pub(crate) use prepared::PreparedModuleInput;
-pub(crate) use service::compile_module;
+pub(crate) use service::{CompilationMode, compile_module};

@@ -80,6 +80,8 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -157,6 +159,38 @@ pub fn compile_project_frontend(
     log_frontend_counters();
 
     result
+}
+
+/// Compile one source file through validated HIR for the internal Boracle service.
+///
+/// WHAT: reuses the ordinary Stage 0 discovery, preparation and compiler-owned semantic service,
+///       selecting its Boracle stop point before alpha borrow acceptance.
+/// WHY: developer analysis must share production frontend ownership and source identity rules
+///      without exposing a project-facing Boracle result or changing normal compilation.
+#[cfg(feature = "boracle")]
+pub(crate) fn compile_single_file_boracle(
+    config: &Config,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    string_table: &mut StringTable,
+) -> Result<BoracleModuleInput, CompilerMessages> {
+    let Some(extension) = config.entry_dir.extension() else {
+        let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
+            &config.entry_dir,
+            format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
+            string_table,
+        );
+        return Err(CompilerMessages::from_error_ref(error, string_table));
+    };
+
+    compilation::compile_single_file_boracle_frontend(
+        config,
+        FrontendBuildProfile::Dev,
+        style_directives,
+        builder_surface,
+        extension,
+        string_table,
+    )
 }
 
 #[cfg(test)]

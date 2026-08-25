@@ -6,6 +6,8 @@ use super::places::ProjectionElem;
 /// How one origin was introduced or derived.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OriginKind {
+    /// Provenance is intentionally unresolved and must be refined by a later Boracle analysis.
+    Unknown,
     Fresh,
     Alias(Box<[ValueOriginId]>),
     ExclusiveAlias(Box<[ValueOriginId]>),
@@ -26,6 +28,7 @@ pub(crate) enum OriginKind {
 pub(crate) enum CallResultProvenance {
     Fresh,
     Alias(Box<[ValueOriginId]>),
+    AliasParams(Box<[usize]>),
     Unknown,
 }
 
@@ -37,6 +40,13 @@ pub(crate) struct ValueOrigin {
 }
 
 impl ValueOrigin {
+    pub(crate) const fn unknown(id: ValueOriginId) -> Self {
+        Self {
+            id,
+            kind: OriginKind::Unknown,
+        }
+    }
+
     pub(crate) const fn fresh(id: ValueOriginId) -> Self {
         Self {
             id,

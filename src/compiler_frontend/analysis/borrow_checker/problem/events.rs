@@ -3,7 +3,9 @@
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::hir::ids::HirNodeId;
 
-use super::ids::{CallId, EventId, LoanId, PlaceId, PointId, UseId, ValueOriginId};
+use super::ids::{
+    BindingId, BlockId, CallId, EventId, LoanId, PlaceId, PointId, UseId, ValueOriginId,
+};
 use super::places::ProjectionElem;
 
 /// Optional mapping retained for diagnostics and inspection.
@@ -11,6 +13,20 @@ use super::places::ProjectionElem;
 pub(crate) struct EventSource {
     pub(crate) hir_node: Option<HirNodeId>,
     pub(crate) location: Option<SourceLocation>,
+}
+
+/// The control-flow meaning attached to a terminator event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TerminatorEventKind {
+    Jump { target: BlockId },
+    Branch { targets: Box<[BlockId]> },
+    Return,
+    ReturnSuccess,
+    ReturnError,
+    Break { target: BlockId },
+    Continue { target: BlockId },
+    RuntimeFailure,
+    AssertFailure,
 }
 
 impl EventSource {
@@ -131,6 +147,7 @@ pub(crate) struct Call {
 pub(crate) enum RebindValue {
     Fresh(ValueOriginId),
     Alias(Box<[ValueOriginId]>),
+    AliasFromPlace(PlaceId),
 }
 
 /// The normalized semantic event vocabulary owned by BorrowProblem.
@@ -145,12 +162,25 @@ pub(crate) enum EventKind {
         destination: PlaceId,
         origins: Box<[ValueOriginId]>,
     },
+    AliasFromPlace {
+        source: PlaceId,
+        destination: PlaceId,
+    },
     ExclusiveAlias {
         source: PlaceId,
         destination: PlaceId,
         origins: Box<[ValueOriginId]>,
     },
+    ExclusiveAliasFromPlace {
+        source: PlaceId,
+        destination: PlaceId,
+    },
     Copy {
+        source: PlaceId,
+        destination: PlaceId,
+        origin: ValueOriginId,
+    },
+    Projection {
         source: PlaceId,
         destination: PlaceId,
         origin: ValueOriginId,
@@ -163,6 +193,16 @@ pub(crate) enum EventKind {
         destination: PlaceId,
         origin: ValueOriginId,
         fields: Box<[AggregateField]>,
+    },
+    ScopeExit {
+        bindings: Box<[BindingId]>,
+    },
+    /// A reactive template observes a stable source without creating an active borrow loan.
+    ReactiveObserve {
+        place: PlaceId,
+    },
+    Terminator {
+        kind: TerminatorEventKind,
     },
     CallEffect(CallEffect),
     Access {

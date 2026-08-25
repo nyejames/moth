@@ -21,8 +21,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     PreparedHeaderSyntax, parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
-    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
-    compile_module,
+    CompilationMode, ModuleCompilationContext, ModuleCompilationOutcome,
+    ProviderMaterialisationRegistry, compile_module,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -558,6 +558,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &compile_context,
         prepared.semantic,
         generated_store.known_generated(),
+        CompilationMode::Normal,
         None,
     );
     #[cfg(not(feature = "timers"))]
@@ -565,6 +566,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         &compile_context,
         prepared.semantic,
         generated_store.known_generated(),
+        CompilationMode::Normal,
     );
     let draft = semantic_result.expect("semantic compilation should succeed");
 
@@ -573,6 +575,10 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         ModuleCompilationOutcome::Diagnosed(diagnostics) => panic!(
             "a generic free-function declaration should compile, not diagnose: {diagnostics:?}"
         ),
+        #[cfg(feature = "boracle")]
+        ModuleCompilationOutcome::Boracle(_) => {
+            panic!("normal semantic compilation should not return a Boracle payload")
+        }
     };
 
     assert_eq!(
@@ -712,6 +718,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &compile_context,
         prepared.semantic,
         generated_store.known_generated(),
+        CompilationMode::Normal,
         None,
     );
     #[cfg(not(feature = "timers"))]
@@ -719,6 +726,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         &compile_context,
         prepared.semantic,
         generated_store.known_generated(),
+        CompilationMode::Normal,
     );
     let outcome =
         semantic_result.expect("API-only semantic compilation should not fail internally");
@@ -726,6 +734,10 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         ModuleCompilationOutcome::Success(draft) => draft,
         ModuleCompilationOutcome::Diagnosed(diagnostics) => {
             panic!("API-only declarations should compile without diagnostics: {diagnostics:?}")
+        }
+        #[cfg(feature = "boracle")]
+        ModuleCompilationOutcome::Boracle(_) => {
+            panic!("normal semantic compilation should not return a Boracle payload")
         }
     };
 

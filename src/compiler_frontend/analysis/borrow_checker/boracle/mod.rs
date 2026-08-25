@@ -6,6 +6,19 @@
 use super::problem::BorrowProblem;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
+mod loans;
+mod origins;
+mod report;
+mod service;
+
+#[allow(unused_imports)]
+pub(crate) use loans::{AccessDecision, ConflictWitness, LoanFact, LoanSolution, LoanSolver};
+#[allow(unused_imports)]
+pub(crate) use origins::{OriginFact, OriginSolution, OriginSolver, OriginTrace, OriginTraceRule};
+#[allow(unused_imports)]
+pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
+pub(crate) use service::{BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module};
+
 /// Validate and format a normalized problem at the Boracle orchestration boundary.
 ///
 /// The real solver and source command will replace this consumer in later phases. Returning

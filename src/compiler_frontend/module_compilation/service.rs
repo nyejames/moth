@@ -44,6 +44,8 @@ use crate::compiler_frontend::module_compilation::generated::requests::install_g
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestFacts,
 };
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::module_compilation::outcome::BoracleModuleInput;
 use crate::compiler_frontend::module_compilation::outcome::{
     ModuleCompilationOutcome, ModuleSemanticResult,
 };
@@ -79,10 +81,18 @@ use std::sync::Arc;
 ///      sequence. Everything the sequence needs arrives as immutable input, and everything it
 ///      produces leaves as one typed outcome, so the build system can schedule it without knowing
 ///      how a module is compiled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompilationMode {
+    Normal,
+    #[cfg(feature = "boracle")]
+    Boracle,
+}
+
 pub(crate) fn compile_module(
     context: &ModuleCompilationContext<'_>,
     prepared: PreparedModuleInput,
     known_generated: KnownGeneratedFunctions<'_>,
+    mode: CompilationMode,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<ModuleCompilationOutcome, CompilerError> {
     // The entry file is a retained preparation identity, so it is resolved from the payload
@@ -139,6 +149,7 @@ pub(crate) fn compile_module(
             source_file_count,
             source_byte_count,
         },
+        mode,
         #[cfg(feature = "timers")]
         timing_context,
     );
@@ -149,7 +160,12 @@ pub(crate) fn compile_module(
     // (an infrastructure failure recovered losslessly from its structured payload). This is
     // the single lossless ownership transfer; graph and render consumers never re-classify.
     match compile_result {
-        Ok((module, public_interface, generated_delta)) => {
+        Ok(SemanticStageOutput::Complete(output)) => {
+            let CompleteSemanticStage {
+                module,
+                public_interface,
+                generated_delta,
+            } = *output;
             let string_table = compiler.string_table;
             Ok(ModuleCompilationOutcome::Success(Box::new(
                 ModuleSemanticResult {
@@ -160,6 +176,8 @@ pub(crate) fn compile_module(
                 },
             )))
         }
+        #[cfg(feature = "boracle")]
+        Ok(SemanticStageOutput::Boracle(input)) => Ok(ModuleCompilationOutcome::Boracle(input)),
         Err(messages) => {
             // The failing stage already cloned the live `compiler.string_table` into the
             // messages, so the diagnosed payload carries every render identity produced so
@@ -189,6 +207,18 @@ struct SemanticStageInputs<'a> {
     source_byte_count: usize,
 }
 
+enum SemanticStageOutput {
+    Complete(Box<CompleteSemanticStage>),
+    #[cfg(feature = "boracle")]
+    Boracle(Box<BoracleModuleInput>),
+}
+
+struct CompleteSemanticStage {
+    module: Module,
+    public_interface: PublicSemanticInterface,
+    generated_delta: GeneratedFunctionDelta,
+}
+
 /// Run the local semantic sequence for one module, from bound headers to a complete result.
 ///
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
@@ -203,8 +233,12 @@ fn run_semantic_stages(
     known_generated: KnownGeneratedFunctions<'_>,
     mut warnings: Vec<CompilerDiagnostic>,
     inputs: SemanticStageInputs<'_>,
+    mode: CompilationMode,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(Module, PublicSemanticInterface, GeneratedFunctionDelta), CompilerMessages> {
+) -> Result<SemanticStageOutput, CompilerMessages> {
+    #[cfg(not(feature = "boracle"))]
+    let _ = mode;
+
     let SemanticStageInputs {
         prepared_header_syntax,
         source_module_origins,
@@ -472,6 +506,15 @@ fn run_semantic_stages(
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
+    #[cfg(feature = "boracle")]
+    if mode == CompilationMode::Boracle {
+        return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
+            hir: hir_module,
+            external_package_registry: Arc::clone(&compiler.external_package_registry),
+            entry_point: entry_file_path.to_path_buf(),
+        })));
+    }
+
     // 8. Run static analysis (Borrow Checker).
     increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
     let bootstrap_borrow_analysis = timed_stage_attributed!(
@@ -583,30 +626,32 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
-    Ok((
-        Module {
-            executable: ModuleExecutable {
-                hir: hir_module,
-                type_environment,
-                borrow_analysis,
+    Ok(SemanticStageOutput::Complete(Box::new(
+        CompleteSemanticStage {
+            module: Module {
+                executable: ModuleExecutable {
+                    hir: hir_module,
+                    type_environment,
+                    borrow_analysis,
+                },
+                link_facts: ModuleLinkFacts {
+                    external_package_registry: Arc::clone(&compiler.external_package_registry),
+                    external_import_candidates,
+                    functions: function_link_facts,
+                },
+                metadata: ModuleCompilerMetadata::from_hir_lowering(
+                    entry_file_path.to_path_buf(),
+                    warnings,
+                    lowering_metadata,
+                    const_top_level_fragments,
+                    root_activity,
+                    materialisation_context,
+                ),
             },
-            link_facts: ModuleLinkFacts {
-                external_package_registry: Arc::clone(&compiler.external_package_registry),
-                external_import_candidates,
-                functions: function_link_facts,
-            },
-            metadata: ModuleCompilerMetadata::from_hir_lowering(
-                entry_file_path.to_path_buf(),
-                warnings,
-                lowering_metadata,
-                const_top_level_fragments,
-                root_activity,
-                materialisation_context,
-            ),
+            public_interface,
+            generated_delta,
         },
-        public_interface,
-        generated_delta,
-    ))
+    )))
 }
 
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces.

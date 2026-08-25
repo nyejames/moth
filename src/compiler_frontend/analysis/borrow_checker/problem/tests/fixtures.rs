@@ -1,6 +1,6 @@
 //! Small deterministic problem constructors used only by the Phase 2 tests.
 
-use super::super::{BindingId, BlockId, EventId};
+use super::super::{Binding, BindingId, BlockId, EventId};
 use super::super::{
     BorrowProblemParts, CfgBlock, CfgEdge, Event, EventKind, EventSource, OriginKind, Place,
     PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue, Use, UseId, UseKind, ValueOrigin,
@@ -35,6 +35,7 @@ pub(crate) fn single_block(
     let event_ids: Vec<EventId> = events.iter().map(|event| event.id).collect();
 
     BorrowProblemParts {
+        bindings: bindings_for_places(&places),
         points,
         blocks: vec![CfgBlock::new(
             BlockId::new(0),
@@ -52,6 +53,16 @@ pub(crate) fn single_block(
         calls: Vec::new(),
         events,
     }
+}
+
+fn bindings_for_places(places: &[Place]) -> Vec<Binding> {
+    let Some(max_root) = places.iter().map(|place| place.root.raw()).max() else {
+        return Vec::new();
+    };
+
+    (0..=max_root)
+        .map(|root| Binding::synthetic(BindingId::new(root)))
+        .collect()
 }
 
 pub(crate) fn empty() -> BorrowProblemParts {
@@ -182,6 +193,10 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
     ];
 
     BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
         points,
         blocks: vec![
             CfgBlock::new(
@@ -267,6 +282,7 @@ pub(crate) fn loop_with_rebind() -> BorrowProblemParts {
     ];
 
     BorrowProblemParts {
+        bindings: vec![Binding::synthetic(BindingId::new(0))],
         points,
         blocks: vec![
             CfgBlock::new(
@@ -332,6 +348,7 @@ pub(crate) fn same_statement_access_order() -> BorrowProblemParts {
     ];
 
     BorrowProblemParts {
+        bindings: vec![Binding::synthetic(BindingId::new(0))],
         points,
         blocks: vec![CfgBlock::new(
             BlockId::new(0),

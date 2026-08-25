@@ -2,7 +2,9 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
-use super::{BorrowProblem, CallResultProvenance, EventKind, OriginKind, RebindValue};
+use super::{
+    BorrowProblem, CallResultProvenance, EventKind, OriginKind, RebindValue, TerminatorEventKind,
+};
 use super::{LoanId, PointId, ValueOriginId};
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -86,6 +88,7 @@ fn validate_point(point: PointId, point_count: usize, owner: &str) -> Result<(),
 
 pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     let flow = problem.control_flow();
+    let bindings = problem.bindings();
     let points = problem.points();
     let places = problem.places();
     let origins = problem.origins();
@@ -106,6 +109,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         ));
     }
 
+    validate_dense_ids(bindings, "binding", |binding| binding.id.raw())?;
     validate_dense_ids(blocks, "CFG block", |block| block.id.raw())?;
     validate_dense_ids(points, "program-point", |point| point.id.raw())?;
     validate_dense_ids(places, "place", |place| place.id.raw())?;
@@ -285,8 +289,18 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         )?;
     }
 
+    for place in places {
+        require_index(
+            || place.root.index(),
+            bindings.len(),
+            "place root binding",
+            place.root.raw(),
+        )?;
+    }
+
     for origin in origins {
         match &origin.kind {
+            OriginKind::Unknown => {}
             OriginKind::Fresh => {}
             OriginKind::Alias(source_origins)
             | OriginKind::ExclusiveAlias(source_origins)
@@ -299,8 +313,18 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             }
             OriginKind::CallResult { call, provenance } => {
                 require_index(|| call.index(), calls.len(), "origin call", call.raw())?;
-                if let CallResultProvenance::Alias(source_origins) = provenance {
-                    validate_origin_set(source_origins, origins.len(), "call-result provenance")?;
+                match provenance {
+                    CallResultProvenance::Alias(source_origins) => {
+                        validate_origin_set(
+                            source_origins,
+                            origins.len(),
+                            "call-result provenance",
+                        )?;
+                    }
+                    CallResultProvenance::AliasParams(parameter_indices) => {
+                        validate_sorted_unique(parameter_indices, "call-result parameter")?;
+                    }
+                    CallResultProvenance::Fresh | CallResultProvenance::Unknown => {}
                 }
             }
         }
@@ -361,6 +385,17 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 validate_place(*destination, places.len(), "alias destination")?;
                 validate_origin_set(event_origins, origins.len(), "alias event")?;
             }
+            EventKind::AliasFromPlace {
+                source,
+                destination,
+            }
+            | EventKind::ExclusiveAliasFromPlace {
+                source,
+                destination,
+            } => {
+                validate_place(*source, places.len(), "place alias source")?;
+                validate_place(*destination, places.len(), "place alias destination")?;
+            }
             EventKind::Copy {
                 source,
                 destination,
@@ -370,6 +405,15 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 validate_place(*destination, places.len(), "copy destination")?;
                 validate_origin(*origin, origins.len(), "copy result")?;
             }
+            EventKind::Projection {
+                source,
+                destination,
+                origin,
+            } => {
+                validate_place(*source, places.len(), "projection source")?;
+                validate_place(*destination, places.len(), "projection destination")?;
+                validate_origin(*origin, origins.len(), "projection result")?;
+            }
             EventKind::Rebind { destination, value } => {
                 validate_place(*destination, places.len(), "rebind destination")?;
                 match value {
@@ -378,6 +422,9 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     }
                     RebindValue::Alias(event_origins) => {
                         validate_origin_set(event_origins, origins.len(), "alias rebind")?;
+                    }
+                    RebindValue::AliasFromPlace(source) => {
+                        validate_place(*source, places.len(), "place rebind source")?;
                     }
                 }
             }
@@ -421,6 +468,50 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     validate_origin(result.origin, origins.len(), "call result origin")?;
                 }
             }
+            EventKind::ScopeExit {
+                bindings: event_bindings,
+            } => {
+                validate_sorted_unique(event_bindings, "scope-exit bindings")?;
+                for binding in event_bindings {
+                    require_index(
+                        || binding.index(),
+                        bindings.len(),
+                        "scope-exit binding",
+                        binding.raw(),
+                    )?;
+                }
+            }
+            EventKind::ReactiveObserve { place } => {
+                validate_place(*place, places.len(), "reactive observation")?;
+            }
+            EventKind::Terminator { kind } => match kind {
+                TerminatorEventKind::Jump { target }
+                | TerminatorEventKind::Break { target }
+                | TerminatorEventKind::Continue { target } => {
+                    require_index(
+                        || target.index(),
+                        blocks.len(),
+                        "terminator target block",
+                        target.raw(),
+                    )?;
+                }
+                TerminatorEventKind::Branch { targets } => {
+                    validate_sorted_unique(targets, "terminator target blocks")?;
+                    for target in targets {
+                        require_index(
+                            || target.index(),
+                            blocks.len(),
+                            "terminator target block",
+                            target.raw(),
+                        )?;
+                    }
+                }
+                TerminatorEventKind::Return
+                | TerminatorEventKind::ReturnSuccess
+                | TerminatorEventKind::ReturnError
+                | TerminatorEventKind::RuntimeFailure
+                | TerminatorEventKind::AssertFailure => {}
+            },
             EventKind::Access { use_id } => {
                 let use_index =
                     require_index(|| use_id.index(), uses.len(), "access use", use_id.raw())?;

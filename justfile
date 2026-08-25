@@ -92,7 +92,13 @@ boracle:
     @echo "clippy: boracle"
     cargo clippy --target-dir target/boracle-clippy -p moth --all-targets --features boracle -- -D warnings
 
-    @echo "boracle integration test"
+    @echo "boracle normalized-problem tests"
+    cargo test -p moth --quiet borrow_problem -- --format terse
+
+    @echo "boracle last-use tests"
+    cargo test -p moth --quiet last_use -- --format terse
+
+    @echo "boracle solver and source-service tests"
     cargo test -p moth --quiet --features boracle boracle -- --format terse
 
 # The canonical test-honesty audit.

@@ -13,6 +13,8 @@
 // that should be removed from the normal compiler path.
 #![allow(dead_code)]
 
+mod bindings;
+mod builder;
 mod control_flow;
 mod events;
 mod ids;
@@ -24,11 +26,15 @@ mod validation;
 #[path = "tests/mod.rs"]
 mod tests;
 
+#[allow(unused_imports)]
+pub(crate) use bindings::Binding;
+#[allow(unused_imports)]
+pub(crate) use builder::from_hir;
 pub(crate) use control_flow::{CfgBlock, CfgEdge, ControlFlow, ProgramPoint};
 #[allow(unused_imports)]
 pub(crate) use events::{
     AccessKind, AggregateField, Call, CallArgument, CallEffect, CallResult, Event, EventKind,
-    EventSource, KillReason, Loan, RebindValue, Use, UseKind,
+    EventSource, KillReason, Loan, RebindValue, TerminatorEventKind, Use, UseKind,
 };
 #[allow(unused_imports)]
 pub(crate) use ids::{
@@ -42,6 +48,7 @@ pub(crate) use places::{Place, PlaceOverlap, ProjectionElem};
 /// Mutable assembly data consumed by the atomic [`BorrowProblem::new`] boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BorrowProblemParts {
+    pub(crate) bindings: Vec<Binding>,
     pub(crate) points: Vec<ProgramPoint>,
     pub(crate) blocks: Vec<CfgBlock>,
     pub(crate) edges: Vec<CfgEdge>,
@@ -58,6 +65,7 @@ pub(crate) struct BorrowProblemParts {
 impl Default for BorrowProblemParts {
     fn default() -> Self {
         Self {
+            bindings: Vec::new(),
             points: Vec::new(),
             blocks: Vec::new(),
             edges: Vec::new(),
@@ -76,6 +84,7 @@ impl Default for BorrowProblemParts {
 /// One complete, immutable normalized borrow-analysis input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BorrowProblem {
+    bindings: Box<[Binding]>,
     control_flow: ControlFlow,
     points: Box<[ProgramPoint]>,
     places: Box<[Place]>,
@@ -92,6 +101,7 @@ impl BorrowProblem {
         parts: BorrowProblemParts,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
         let problem = Self {
+            bindings: parts.bindings.into_boxed_slice(),
             control_flow: ControlFlow::new(parts.blocks, parts.edges, parts.entry, parts.exits),
             points: parts.points.into_boxed_slice(),
             places: parts.places.into_boxed_slice(),
@@ -119,6 +129,10 @@ impl BorrowProblem {
 
     pub(crate) fn control_flow(&self) -> &ControlFlow {
         &self.control_flow
+    }
+
+    pub(crate) fn bindings(&self) -> &[Binding] {
+        &self.bindings
     }
 
     pub(crate) fn points(&self) -> &[ProgramPoint] {

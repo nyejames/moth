@@ -574,6 +574,38 @@ fn check_command_rejects_multiple_paths() {
     assert!(error.contains("at most one path"));
 }
 
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_parses_typed_dump_and_experiment() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let command = get_command(&args(&[
+        "boracle",
+        "main.moth",
+        "--dump",
+        "witnesses",
+        "--experiment",
+        "dead-exclusive-loan",
+    ]))
+    .expect("boracle command should parse");
+    assert_eq!(
+        command,
+        Command::Boracle {
+            path: String::from("main.moth"),
+            dump: crate::compiler_frontend::analysis::borrow_checker::BoracleDump::Witnesses,
+            experiment: crate::compiler_frontend::analysis::borrow_checker::BoracleExperiment::DeadExclusiveLoan,
+        }
+    );
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_rejects_unknown_dump() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let error = get_command(&args(&["boracle", "main.moth", "--dump", "unknown"]))
+        .expect_err("unknown Boracle dump should fail");
+    assert!(error.contains("Invalid value for --dump"));
+}
+
 #[test]
 fn build_command_returns_exact_flags() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

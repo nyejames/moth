@@ -35,6 +35,9 @@ pub(crate) use types::{
 };
 pub(crate) type BorrowFacts = BorrowAnalysis;
 
+#[cfg(feature = "boracle")]
+pub(crate) use boracle::{BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module};
+
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;

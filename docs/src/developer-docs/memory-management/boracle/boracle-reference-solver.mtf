@@ -1202,11 +1202,16 @@ Useful properties include:
 
 ## Developer command and dumps
 
-A build with `boracle` may expose an internal command equivalent to:
+A build with `boracle` exposes the initial internal command:
 
 [codeblock, $code("bash"):
     cargo run --features boracle -- boracle ./tmp/example.moth --dump loans
 ]
+
+The initial implementation accepts `problem`, `origins`, `loans`, `last-use`, `conflicts` and
+`witnesses` dumps, plus the named `reference` and `dead-exclusive-loan` experiment labels. The
+second label is deliberately reference-equivalent until its stronger rule is accepted; reports
+always include the active rule-set and experiment name.
 
 Useful dump categories:
 
@@ -1239,7 +1244,7 @@ This avoids making every compiler change pay for a reference solver whose corpus
 
 Borrow-checker, last-use, provenance or related memory-analysis work should run `just boracle` explicitly.
 
-The command should eventually cover:
+The command currently covers:
 
 - formatting
 - Boracle-enabled Clippy
@@ -1248,8 +1253,10 @@ The command should eventually cover:
 - HIR extraction
 - canonical semantic corpus
 - bounded generated problems
-- future production differential tests
+- deterministic bounded generated problems
 - an internal source-mode smoke
+
+Future production differential tests remain an explicit later extension.
 
 Large fuzz or stress runs stay separate.
 
