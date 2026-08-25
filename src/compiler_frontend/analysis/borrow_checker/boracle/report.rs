@@ -4,8 +4,8 @@
 //! WHY: interactive dumps and future differential checks need typed facts rather than diagnostic
 //! prose or a second semantic renderer.
 
-// The feature-gated CLI and dump selection consume the report in the next phase; keep the
-// compiler target warning-free while this result boundary is assembled.
+// Some report queries remain research-facing rather than appearing in every current dump. Keep
+// the typed result boundary warning-free as those queries evolve.
 #![allow(dead_code)]
 
 use super::super::last_use::{

@@ -5,13 +5,13 @@
 //! WHY: legality depends on the access capability and normalized place overlap, not on binding
 //! names or lexical visibility alone.
 
-// The report/service layers consume these rows in the following phases. Keep the feature lane
-// warning-free while its public result is assembled incrementally.
+// Some research-facing rows are not printed by every current dump. Keep the complete typed
+// result surface warning-free as future investigation queries are added.
 #![allow(dead_code)]
 
 use super::super::problem::{
-    AccessKind, BorrowProblem, CallArgument, Event, EventId, EventKind, KillReason, Loan, LoanId,
-    PlaceId, PlaceOverlap, PointId, UseId, UseKind,
+    AccessKind, BorrowProblem, Event, EventId, EventKind, Loan, LoanId, PlaceId, PlaceOverlap,
+    PointId, UseId, UseKind,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -438,16 +438,3 @@ impl EventGraph {
         false
     }
 }
-
-impl From<&CallArgument> for AccessFact {
-    fn from(argument: &CallArgument) -> Self {
-        Self {
-            use_id: Some(argument.use_id),
-            place: argument.place,
-            kind: argument.access,
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn _keep_kill_reason_visible(_: KillReason) {}

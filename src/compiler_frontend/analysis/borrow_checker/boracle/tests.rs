@@ -1,4 +1,4 @@
-//! Smoke tests for the feature-gated boracle seam.
+//! Focused tests for the feature-gated Boracle reference solver.
 
 use super::super::problem::{
     AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
@@ -6,35 +6,6 @@ use super::super::problem::{
     EventSource, KillReason, Loan, LoanId, Place, PlaceId, PointId, ProgramPoint,
     TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
 };
-
-#[test]
-fn boracle_feature_marker_is_present() {
-    assert_eq!(super::BORACLE_FEATURE_MARKER, "boracle");
-}
-
-#[test]
-fn boracle_dump_accepts_and_formats_a_validated_problem() {
-    let problem = BorrowProblem::new(BorrowProblemParts {
-        points: vec![
-            ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
-            ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
-        ],
-        blocks: vec![CfgBlock::new(
-            BlockId::new(0),
-            PointId::new(0),
-            PointId::new(1),
-            Vec::new(),
-        )],
-        entry: BlockId::new(0),
-        exits: vec![BlockId::new(0)],
-        ..BorrowProblemParts::default()
-    })
-    .expect("minimal problem should validate");
-
-    let dump = super::dump_validated_problem(&problem).expect("dump should validate again");
-
-    assert!(dump.contains("BorrowProblem"));
-}
 
 #[test]
 fn boracle_provenance_copy_keeps_source_and_result_origins_independent() {

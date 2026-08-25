@@ -5,8 +5,8 @@
 //! WHY: a binding can be rebound while older aliases remain meaningful; provenance therefore
 //! belongs to values and event flow, not to local names.
 
-// The feature lane grows the reference report incrementally. Keep the origin vocabulary warning
-// free while the loan/conflict and service consumers are added in later phases.
+// Some provenance rows are consumed by focused tests and future differential queries rather than
+// by every current dump. Keep the complete typed result surface warning-free.
 #![allow(dead_code)]
 
 use super::super::problem::{

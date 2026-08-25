@@ -4,9 +4,8 @@
 //! WHY: the reference solver must inspect explicit CFG/events/places/origins without reparsing HIR
 //!      or recovering meaning from binding names.
 //!
-//! This module is shared infrastructure, not a normal compiler pass. Phase 2 publishes only the
-//! validated input model and hand-authored fixtures; HIR extraction and solving remain later,
-//! feature-gated consumers.
+//! This module is shared infrastructure, not a normal compiler pass. HIR extraction and solving
+//! are explicit consumers, and normal compilation does not construct a problem.
 
 // The alpha checker deliberately does not construct this shared vocabulary yet. Keeping the
 // allowance local documents that these rows are a published future-consumer seam, not dead code
