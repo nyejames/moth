@@ -12,3 +12,4 @@ mod borrow_checker_loop_tests;
 mod borrow_checker_pipeline_tests;
 mod borrow_checker_reactivity_tests;
 mod borrow_checker_scope_tests;
+mod state_tests;

@@ -21,6 +21,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
 - [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
+- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md)
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)

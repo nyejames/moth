@@ -524,4 +524,5 @@ fn collapse_render_roots(
 }
 
 #[cfg(test)]
+#[path = "tests/sites_tests.rs"]
 mod sites_tests;

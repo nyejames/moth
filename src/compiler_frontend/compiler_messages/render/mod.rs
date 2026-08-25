@@ -8,6 +8,9 @@ pub(crate) mod dev_server;
 pub(crate) mod terminal;
 pub(crate) mod terse;
 
+#[cfg(test)]
+mod tests;
+
 mod borrow;
 mod calls;
 mod context;

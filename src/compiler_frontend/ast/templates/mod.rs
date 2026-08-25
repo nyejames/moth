@@ -107,4 +107,5 @@ mod doc_fragments;
 pub(crate) mod error;
 
 #[cfg(test)]
+#[path = "tests/template_folding_tests.rs"]
 mod template_folding_tests;
