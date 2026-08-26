@@ -13,6 +13,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 
+## Queued documentation work
+
+- [Memory management documentation corrections](./plans/memory-management-documentation-corrections-plan.md) - Queued, ready to establish the permanent authority for the replacement collector-free memory implementation plan
+
 ## Queued implementation chain
 
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
