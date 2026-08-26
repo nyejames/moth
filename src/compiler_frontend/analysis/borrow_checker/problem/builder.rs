@@ -1558,7 +1558,11 @@ impl<'a> FunctionProblemBuilder<'a> {
             point,
             place,
             kind,
-            definition: kind == UseKind::Write,
+            definition: kind == UseKind::Write
+                && self
+                    .places
+                    .get(place.index())
+                    .is_some_and(|place| place.projections.is_empty()),
         });
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
@@ -1596,7 +1600,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         if let CallTarget::External(id) = target {
             let Some(registry) = self.external_registry else {
                 return Ok((
-                    vec![AccessKind::Shared; argument_count],
+                    vec![AccessKind::Exclusive; argument_count],
                     CallResultProvenance::Unknown,
                 ));
             };
@@ -1639,6 +1643,11 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallTarget::External(_) => None,
         };
         let Some(summary) = summary else {
+            if let CallTarget::CrossModule(id) = target {
+                return Err(compiler_error(format!(
+                    "Boracle problem extraction is missing the provider call summary for imported function {id:?}"
+                )));
+            }
             if let CallTarget::Local(function_id) = target
                 && let Some(accesses) =
                     self.local_parameter_accesses(*function_id, argument_count)?
@@ -1646,7 +1655,10 @@ impl<'a> FunctionProblemBuilder<'a> {
                 return Ok((accesses, CallResultProvenance::Unknown));
             }
             return Ok((
-                vec![AccessKind::Shared; argument_count],
+                // Missing call metadata must not under-approximate a mutable callee. The
+                // reference path prefers conservative false positives over proving that an
+                // unresolved boundary is shared.
+                vec![AccessKind::Exclusive; argument_count],
                 CallResultProvenance::Unknown,
             ));
         };

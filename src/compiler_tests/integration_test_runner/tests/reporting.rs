@@ -689,9 +689,16 @@ fn the_run_identity_names_the_features_the_binary_was_built_with() {
         feature = "show_eval",
         feature = "show_hir",
         feature = "show_codegen",
-        feature = "show_borrow_checker"
+        feature = "show_borrow_checker",
+        feature = "boracle"
     )))]
     assert_eq!(run.features, Vec::<&str>::new());
+
+    #[cfg(feature = "boracle")]
+    assert!(run.features.contains(&"boracle"), "{:?}", run.features);
+
+    #[cfg(not(feature = "boracle"))]
+    assert!(!run.features.contains(&"boracle"), "{:?}", run.features);
 
     #[cfg(feature = "timers")]
     assert!(run.features.contains(&"timers"), "{:?}", run.features);

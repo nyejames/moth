@@ -9,15 +9,19 @@ mod report;
 mod service;
 
 #[allow(unused_imports)]
-pub(crate) use loans::{AccessDecision, ConflictWitness, LoanFact, LoanSolution, LoanSolver};
+pub(crate) use loans::{
+    AccessDecision, ConflictWitness, ExclusiveLoanLiveness, LoanFact, LoanSolution, LoanSolver,
+};
 #[allow(unused_imports)]
 pub(crate) use origins::{OriginFact, OriginSolution, OriginSolver, OriginTrace, OriginTraceRule};
 #[allow(unused_imports)]
 pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
+#[cfg(test)]
+pub(crate) use service::solve_hir_module;
 #[allow(unused_imports)]
 pub(crate) use service::{
     BoracleDump, BoracleExperiment, BoracleFunctionReport, BoracleModuleReport,
-    BoracleServiceOptions, run_hir_module, solve_hir_module,
+    BoracleServiceOptions, run_hir_module,
 };
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use super::super::last_use::{
     LastUseSubject, event_for_use,
 };
 use super::super::problem::{BorrowProblem, EventId, EventKind, PlaceId, PointId, ValueOriginId};
+use super::service::BoracleExperiment;
 use super::{LoanSolution, OriginSolution};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
@@ -23,9 +24,10 @@ pub(crate) struct ReactiveObservation {
     pub(crate) place: PlaceId,
 }
 
-/// One complete reference-solver report.
+/// One complete Boracle solver report, including the selected experiment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoracleReport {
+    pub(crate) experiment: BoracleExperiment,
     pub(crate) rule_set: &'static str,
     pub(crate) origin: OriginSolution,
     pub(crate) last_use: Box<[LastUseResult]>,
@@ -35,7 +37,7 @@ pub(crate) struct BoracleReport {
     pub(crate) loan_last_use_after_event: Box<[LastUseResult]>,
     pub(crate) loans: LoanSolution,
     pub(crate) reactive_observations: Box<[ReactiveObservation]>,
-    pub(crate) blocked_optional_transfer_places: Box<[PlaceId]>,
+    pub(crate) reactive_transfer_blocked_places: Box<[PlaceId]>,
 }
 
 impl BoracleReport {
@@ -72,17 +74,16 @@ impl BoracleReport {
         !self.loans.conflicts().is_empty()
     }
 
-    pub(crate) fn optional_transfer_allowed(&self, place: PlaceId) -> bool {
-        !self.blocked_optional_transfer_places.contains(&place)
+    pub(crate) fn final_use_candidate_for_place(&self, place: PlaceId) -> bool {
+        !self.reactive_transfer_blocked_places.contains(&place)
     }
 
-    /// Return the conservative optional-transfer decision at one normalized point.
+    /// Return whether a place has a proven final-use candidate at one normalized point.
     ///
-    /// A transfer is only advised when the point is a proven final observation and the place is
-    /// not a stable reactive root. Any missing or path-dependent future-use row falls back to
-    /// borrowing, matching the reference rule without assigning a lifetime owner.
-    pub(crate) fn optional_transfer_allowed_at(&self, place: PlaceId, point: PointId) -> bool {
-        if !self.optional_transfer_allowed(place) {
+    /// This is a last-use proof, not the complete optional-transfer contract. A later caller must
+    /// also combine it with call-boundary transfer metadata, provenance and ownership rules.
+    pub(crate) fn final_use_candidate_at(&self, place: PlaceId, point: PointId) -> bool {
+        if !self.final_use_candidate_for_place(place) {
             return false;
         }
         self.last_use.iter().any(|result| {
@@ -92,8 +93,8 @@ impl BoracleReport {
         })
     }
 
-    /// Query optional transfer at the exact event that consumes an origin.
-    pub(crate) fn optional_transfer_allowed_for_origin_after_event(
+    /// Query a final-use candidate at the exact event that consumes an origin.
+    pub(crate) fn final_use_candidate_for_origin_after_event(
         &self,
         origin: ValueOriginId,
         event: EventId,
@@ -119,8 +120,19 @@ pub(crate) struct BoracleSolver;
 
 impl BoracleSolver {
     pub(crate) fn solve(problem: &BorrowProblem) -> Result<BoracleReport, CompilerError> {
+        Self::solve_with_experiment(problem, BoracleExperiment::Reference)
+    }
+
+    pub(crate) fn solve_with_experiment(
+        problem: &BorrowProblem,
+        experiment: BoracleExperiment,
+    ) -> Result<BoracleReport, CompilerError> {
         let origin = super::OriginSolver::solve(problem)?;
-        let loans = super::LoanSolver::solve(problem, &origin)?;
+        let exclusive_liveness = match experiment {
+            BoracleExperiment::Reference => super::ExclusiveLoanLiveness::Conservative,
+            BoracleExperiment::DeadExclusiveLoan => super::ExclusiveLoanLiveness::UseDriven,
+        };
+        let loans = super::LoanSolver::solve_with_liveness(problem, &origin, exclusive_liveness)?;
 
         let mut last_use_observations = Vec::new();
         for use_row in problem.uses() {
@@ -270,15 +282,16 @@ impl BoracleSolver {
         }
         reactive_observations
             .sort_by_key(|observation| (observation.event.raw(), observation.place.raw()));
-        let mut blocked_optional_transfer_places = reactive_observations
+        let mut reactive_transfer_blocked_places = reactive_observations
             .iter()
             .map(|observation| observation.place)
             .collect::<Vec<_>>();
-        blocked_optional_transfer_places.sort_by_key(|place| place.raw());
-        blocked_optional_transfer_places.dedup();
+        reactive_transfer_blocked_places.sort_by_key(|place| place.raw());
+        reactive_transfer_blocked_places.dedup();
 
         Ok(BoracleReport {
-            rule_set: "boracle-reference-v1",
+            experiment,
+            rule_set: experiment.rule_set(),
             origin,
             last_use: last_use.into_boxed_slice(),
             origin_last_use: origin_last_use.into_boxed_slice(),
@@ -287,7 +300,7 @@ impl BoracleSolver {
             loan_last_use_after_event: loan_last_use_after_event.into_boxed_slice(),
             loans,
             reactive_observations: reactive_observations.into_boxed_slice(),
-            blocked_optional_transfer_places: blocked_optional_transfer_places.into_boxed_slice(),
+            reactive_transfer_blocked_places: reactive_transfer_blocked_places.into_boxed_slice(),
         })
     }
 }

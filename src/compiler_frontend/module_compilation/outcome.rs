@@ -7,18 +7,10 @@
 //!       message bag.
 
 use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-#[cfg(feature = "boracle")]
-use std::path::PathBuf;
-#[cfg(feature = "boracle")]
-use std::sync::Arc;
 
 /// Typed result of one retained module's semantic compilation.
 ///
@@ -31,21 +23,6 @@ pub(crate) enum ModuleCompilationOutcome {
     // the boundary outcome small. The box is transient: the caller unboxes once before merging.
     Success(Box<ModuleSemanticResult>),
     Diagnosed(ModuleDiagnostics),
-    #[cfg(feature = "boracle")]
-    Boracle(Box<BoracleModuleInput>),
-}
-
-/// Validated-HIR payload returned by the internal Boracle source service.
-///
-/// WHAT: carries only the HIR and compiler-owned external metadata needed to build a normalized
-///       Boracle problem, stopping before alpha borrow acceptance and backend-facing assembly.
-/// WHY: the developer path must be able to inspect a source case whose borrow pattern the alpha
-///      checker rejects, without making the reference solver a normal compilation stage.
-#[cfg(feature = "boracle")]
-pub(crate) struct BoracleModuleInput {
-    pub(crate) hir: HirModule,
-    pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    pub(crate) entry_point: PathBuf,
 }
 
 /// Everything one successful module compilation produced, before boundary publication.

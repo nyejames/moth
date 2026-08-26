@@ -25,7 +25,7 @@ fn boracle_service_source_smoke_uses_real_moth_input() {
     .expect("real source should reach Boracle");
 
     assert_eq!(first, second);
-    assert!(first.contains("rule-set = boracle-reference-v1"));
+    assert!(first.contains("rule-set = boracle-dead-exclusive-loan-v1"));
     assert!(first.contains("experiment = dead-exclusive-loan"));
     assert!(first.contains("OriginSolution"));
 }
@@ -65,6 +65,24 @@ result = shared
     assert!(
         output.trim_end().ends_with("[]"),
         "unexpected source conflict:\n{output}"
+    );
+}
+
+#[test]
+fn boracle_source_mutable_alias_issue_checks_existing_shared_alias() {
+    let output = run_source_dump(
+        r#"
+items ~= {"a"}
+shared = items
+writer ~= items
+result = shared
+"#,
+        BoracleDump::Conflicts,
+    );
+
+    assert!(
+        output.contains("ConflictWitness"),
+        "expected mutable alias issuance to conflict with the live shared alias, got:\n{output}"
     );
 }
 
@@ -333,6 +351,9 @@ result = survivor
             .all(|origin| !fresh_origins.contains(origin))
     );
     assert!(slot_alias_event < survivor_alias_event);
+    assert!(function.report.loans.loans().iter().all(|loan| {
+        loan.issue_event != Some(slot_alias_event) || loan.kind != AccessKind::Exclusive
+    }));
 }
 
 #[test]
@@ -384,7 +405,7 @@ writer = {2}
     assert!(
         !function
             .report
-            .optional_transfer_allowed_for_origin_after_event(origin, event_id, point)
+            .final_use_candidate_for_origin_after_event(origin, event_id, point)
     );
 }
 
@@ -419,6 +440,88 @@ writer = {3}
             .conflicts()
             .iter()
             .any(|witness| { witness.keeping_use == Some(write_through_use.id) })
+    );
+}
+
+#[test]
+fn boracle_source_alias_valued_write_through_is_not_a_new_loan() {
+    let report = solve_source(
+        r#"
+items ~= {1}
+writer ~= items
+writer = items
+result = items
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function
+                .problem
+                .events()
+                .iter()
+                .any(|event| function.report.origin.is_write_through_event(event.id))
+        })
+        .expect("alias-valued write-through should produce a typed report");
+    let write_through_event = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| function.report.origin.is_write_through_event(event.id))
+        .expect("write-through event should be classified by origin analysis");
+
+    assert!(
+        function
+            .report
+            .loans
+            .loans()
+            .iter()
+            .all(|loan| { loan.issue_event != Some(write_through_event.id) })
+    );
+}
+
+#[test]
+fn boracle_source_call_result_write_through_is_a_holder_use() {
+    let report = solve_source(
+        r#"
+observe |value {Int}| -> {Int}:
+    return value
+;
+
+items ~= {1}
+writer ~= items
+other ~= {2}
+writer = observe(value = other)
+result = writer
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function.problem.events().iter().any(|event| {
+                matches!(&event.kind, EventKind::CallEffect(effect) if effect.result.is_some())
+            })
+        })
+        .expect("call-result write-through should produce a typed report");
+    let write_through_use = function
+        .problem
+        .uses()
+        .iter()
+        .find(|use_row| {
+            use_row.definition && function.report.origin.is_write_through_use(use_row.id)
+        })
+        .expect("call-result destination write should be classified as write-through");
+
+    assert!(
+        function
+            .report
+            .loans
+            .loans()
+            .iter()
+            .any(|loan| loan.uses.contains(&write_through_use.id)),
+        "call-result write-through should remain a use of the alias holder"
     );
 }
 
@@ -836,6 +939,119 @@ result = alias
 }
 
 #[test]
+fn boracle_source_projected_write_is_not_a_binding_definition() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+pair ~= Pair({1}, {2})
+shared = pair
+pair.first = {3}
+result = shared
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        function.report.has_conflicts(),
+        "expected projected mutation to conflict with the live alias, places={:?} uses={:?} events={:?} loans={:?} decisions={:?}",
+        function.problem.places(),
+        function.problem.uses(),
+        function.problem.events(),
+        function.report.loans.loans(),
+        function.report.loans.decisions()
+    );
+}
+
+#[test]
+fn boracle_source_projected_rebind_separates_old_projection_origin() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+pair ~= Pair({1}, {2})
+old = pair.first
+pair = Pair({3}, {4})
+pair.first = {5}
+result = old
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        !function.report.has_conflicts(),
+        "fresh projected generation should be independent from the old projection: {:?}",
+        function.report.loans.conflicts()
+    );
+}
+
+#[test]
+fn boracle_source_distinct_projected_fields_remain_disjoint() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+pair ~= Pair({1}, {2})
+first = pair.first
+pair.second = {3}
+result = first
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        !function.report.has_conflicts(),
+        "distinct projected fields should not conflict: {:?}",
+        function.report.loans.conflicts()
+    );
+}
+
+#[test]
+fn boracle_source_base_alias_protects_fresh_projected_storage() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {Int},
+    second {Int},
+|
+
+pair ~= Pair({1}, {2})
+pair.first = {3}
+shared = pair
+pair.first = {4}
+result = shared
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        function.report.has_conflicts(),
+        "a base alias should protect a freshly replaced projected field"
+    );
+}
+
+#[test]
 fn boracle_source_alias_used_only_as_call_argument_stays_live() {
     let report = solve_source(
         r#"
@@ -1099,7 +1315,7 @@ result = observe(value = items)
     assert!(
         function
             .report
-            .optional_transfer_allowed_for_origin_after_event(origin, event_id, point)
+            .final_use_candidate_for_origin_after_event(origin, event_id, point)
     );
 }
 

@@ -272,27 +272,50 @@ fn boracle_same_call_conflict_has_one_truthful_witness() {
 }
 
 #[test]
+fn boracle_dead_exclusive_loan_is_only_enabled_by_its_experiment() {
+    let problem = dead_exclusive_alias_problem();
+    let reference = super::BoracleSolver::solve(&problem).expect("reference should solve");
+    let experiment = super::BoracleSolver::solve_with_experiment(
+        &problem,
+        super::BoracleExperiment::DeadExclusiveLoan,
+    )
+    .expect("dead-exclusive experiment should solve");
+
+    assert_eq!(
+        reference.experiment,
+        super::BoracleExperiment::Reference,
+        "the default solver must remain in reference mode"
+    );
+    assert_eq!(
+        experiment.experiment,
+        super::BoracleExperiment::DeadExclusiveLoan
+    );
+    assert!(reference.has_conflicts());
+    assert!(!experiment.has_conflicts());
+}
+
+#[test]
 fn boracle_reactivity_is_observability_metadata_not_a_loan() {
     let report =
         super::BoracleSolver::solve(&reactive_problem()).expect("reactive problem should solve");
 
     assert_eq!(report.reactive_observations.len(), 1);
     assert!(report.loans.loans().is_empty());
-    assert!(!report.optional_transfer_allowed(PlaceId::new(0)));
+    assert!(!report.final_use_candidate_for_place(PlaceId::new(0)));
 }
 
 #[test]
 fn boracle_optional_transfer_requires_a_proven_final_use() {
     let report = super::BoracleSolver::solve(&copy_problem()).expect("copy problem should solve");
 
-    assert!(!report.optional_transfer_allowed_at(PlaceId::new(0), PointId::new(0)));
-    assert!(report.optional_transfer_allowed_at(PlaceId::new(0), PointId::new(5)));
-    assert!(!report.optional_transfer_allowed_for_origin_after_event(
+    assert!(!report.final_use_candidate_at(PlaceId::new(0), PointId::new(0)));
+    assert!(report.final_use_candidate_at(PlaceId::new(0), PointId::new(5)));
+    assert!(!report.final_use_candidate_for_origin_after_event(
         ValueOriginId::new(0),
         EventId::new(1),
         PointId::new(2),
     ));
-    assert!(report.optional_transfer_allowed_for_origin_after_event(
+    assert!(report.final_use_candidate_for_origin_after_event(
         ValueOriginId::new(0),
         EventId::new(2),
         PointId::new(3),
@@ -872,7 +895,7 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
         point: PointId::new(points.len() as u32),
         place: PlaceId::new(1),
         kind: UseKind::Write,
-        definition: true,
+        definition: false,
     });
     push_event(
         &mut events,
@@ -2667,6 +2690,68 @@ fn loan_conflict_problem() -> BorrowProblem {
         ..BorrowProblemParts::default()
     }))
     .expect("loan conflict problem should validate")
+}
+
+fn dead_exclusive_alias_problem() -> BorrowProblem {
+    BorrowProblem::new(with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points: (0..=4)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(4),
+            vec![EventId::new(0), EventId::new(1), EventId::new(2)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![ValueOrigin::fresh(ValueOriginId::new(0))],
+        uses: vec![Use {
+            id: UseId::new(0),
+            point: PointId::new(3),
+            place: PlaceId::new(0),
+            kind: UseKind::Write,
+            definition: false,
+        }],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Fresh {
+                    destination: PlaceId::new(0),
+                    origin: ValueOriginId::new(0),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::ExclusiveAliasFromPlace {
+                    source: PlaceId::new(0),
+                    destination: PlaceId::new(1),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::Access {
+                    use_id: UseId::new(0),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("dead exclusive alias problem should validate")
 }
 
 fn with_return_terminator(mut parts: BorrowProblemParts) -> BorrowProblemParts {

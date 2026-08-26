@@ -59,8 +59,8 @@ impl FromStr for BoracleDump {
 
 /// Named Boracle rule selection.
 ///
-/// `DeadExclusiveLoan` is intentionally reference-equivalent for this initial facility. Naming
-/// it makes the experiment visible in reports without silently changing canonical legality.
+/// The reference mode keeps unused exclusive capabilities conservatively live. The
+/// `DeadExclusiveLoan` mode selects the named use-driven experiment and is never used implicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BoracleExperiment {
     Reference,
@@ -72,6 +72,13 @@ impl BoracleExperiment {
         match self {
             Self::Reference => "reference",
             Self::DeadExclusiveLoan => "dead-exclusive-loan",
+        }
+    }
+
+    pub(crate) fn rule_set(self) -> &'static str {
+        match self {
+            Self::Reference => "boracle-reference-v1",
+            Self::DeadExclusiveLoan => "boracle-dead-exclusive-loan-v1",
         }
     }
 }
@@ -122,21 +129,31 @@ pub(crate) fn run_hir_module(
     input: &BoracleModuleInput,
     options: BoracleServiceOptions,
 ) -> Result<String, CompilerError> {
-    let report = solve_hir_module(input)?;
+    let report = solve_hir_module_parts(
+        &input.hir,
+        &input.external_package_registry,
+        options.experiment,
+    )?;
     let entry_point = input.entry_point.to_string_lossy();
     Ok(render_module_report(&report, entry_point.as_ref(), options))
 }
 
 /// Solve one compiler-produced HIR module without flattening its typed results into a dump.
+#[cfg(test)]
 pub(crate) fn solve_hir_module(
     input: &BoracleModuleInput,
 ) -> Result<BoracleModuleReport, CompilerError> {
-    solve_hir_module_parts(&input.hir, &input.external_package_registry)
+    solve_hir_module_parts(
+        &input.hir,
+        &input.external_package_registry,
+        BoracleExperiment::Reference,
+    )
 }
 
 fn solve_hir_module_parts(
     module: &HirModule,
     external_package_registry: &Arc<ExternalPackageRegistry>,
+    experiment: BoracleExperiment,
 ) -> Result<BoracleModuleReport, CompilerError> {
     if module.functions.is_empty() {
         return Err(CompilerError::compiler_error(
@@ -155,7 +172,7 @@ fn solve_hir_module_parts(
             None,
             Some(external_package_registry.as_ref()),
         )?;
-        let report = BoracleSolver::solve(&problem)?;
+        let report = BoracleSolver::solve_with_experiment(&problem, experiment)?;
         reports.push(BoracleFunctionReport {
             function_id: function.id.0,
             problem,
@@ -178,7 +195,7 @@ fn render_module_report(
     output.push_str(&format!("entry = {entry_point}\n"));
     output.push_str(&format!("dump = {}\n", options.dump.name()));
     output.push_str(&format!("experiment = {}\n", options.experiment.name()));
-    output.push_str("rule-set = boracle-reference-v1\n");
+    output.push_str(&format!("rule-set = {}\n", options.experiment.rule_set()));
 
     for function in module_report.functions() {
         output.push_str(&format!("\nfunction {}\n", function.function_id));

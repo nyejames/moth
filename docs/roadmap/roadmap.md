@@ -61,14 +61,6 @@ This roadmap owns the order. A plan owns its own work and nothing else.
 
 These items are genuinely deferred. They are not current implementation work. Each item links to its owning plan or stays here only when no plan exists yet.
 
-## Boracle semantic integration
-
-[Boracle semantic integration and adversarial hardening](./plans/boracle-semantic-integration-and-adversarial-hardening-plan.md)
-is the queued follow-up for the feature-gated reference solver. It connects normalized HIR facts,
-origin flow, alias-derived loans, origin-aware overlap, use-driven liveness and event-boundary
-optional-transfer evidence before Boracle is used as a semantic oracle. It does not replace the
-Alpha checker or reorder the queued product implementation chain.
-
 ## Collector-free memory implementation
 
 Canonical memory design lives under [the memory management design docs](docs/src/developer-docs/memory-management).

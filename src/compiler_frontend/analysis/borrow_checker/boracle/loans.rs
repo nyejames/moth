@@ -86,16 +86,30 @@ impl LoanSolution {
     }
 }
 
-/// Reference loan solver.
+/// Boracle loan solver with selectable exclusive-capability liveness.
 pub(crate) struct LoanSolver;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExclusiveLoanLiveness {
+    Conservative,
+    UseDriven,
+}
 
 impl LoanSolver {
     pub(crate) fn solve(
         problem: &BorrowProblem,
         origins: &OriginSolution,
     ) -> Result<LoanSolution, CompilerError> {
+        Self::solve_with_liveness(problem, origins, ExclusiveLoanLiveness::Conservative)
+    }
+
+    pub(crate) fn solve_with_liveness(
+        problem: &BorrowProblem,
+        origins: &OriginSolution,
+        exclusive_liveness: ExclusiveLoanLiveness,
+    ) -> Result<LoanSolution, CompilerError> {
         problem.validate()?;
-        let graph = EventGraph::new(problem)?;
+        let graph = EventGraph::new(problem, exclusive_liveness)?;
 
         let mut loans = problem
             .loans()
@@ -135,7 +149,7 @@ impl LoanSolver {
                         continue;
                     }
                     let Some((overlap, origin_overlap)) =
-                        access_conflict_overlap(problem, &access, &access_origins, loan)
+                        access_conflict_overlap(problem, origins, &access, &access_origins, loan)
                     else {
                         continue;
                     };
@@ -225,6 +239,20 @@ fn event_accesses(
             kind: argument.access,
             definition: false,
         }]),
+        EventKind::ExclusiveAlias { source, .. }
+        | EventKind::ExclusiveAliasFromPlace { source, .. }
+            if origins.is_initial_alias_event(event.id) =>
+        {
+            Ok(vec![AccessFact {
+                // Issuing a mutable alias is itself an exclusive access to the represented
+                // source. The later alias loan describes the capability; this event checks that
+                // issuance does not overlap an already-live loan.
+                use_id: None,
+                place: *source,
+                kind: AccessKind::Exclusive,
+                definition: false,
+            }])
+        }
         _ => Ok(Vec::new()),
     }
 }
@@ -238,6 +266,7 @@ fn access_kind_for_use(kind: UseKind) -> AccessKind {
 
 fn access_conflict_overlap(
     problem: &BorrowProblem,
+    origins: &OriginSolution,
     access: &AccessFact,
     access_origins: &[ValueOriginId],
     loan: &LoanFact,
@@ -252,9 +281,11 @@ fn access_conflict_overlap(
     let access_place = problem.places().get(access.place.index())?;
     let loan_place = problem.places().get(loan.place.index())?;
     let structural_overlap = access_place.overlap(loan_place);
-    let origin_overlap = origin_sets_overlap(problem, access_origins, &loan.origins);
-
+    let origin_overlap = origins.origins_overlap(problem, access_origins, &loan.origins);
     if !origin_overlap && !access_origins.is_empty() && !loan.origins.is_empty() {
+        // A known unrelated origin is a different value generation. This exclusion applies to
+        // projected places as well: structural place overlap alone cannot reconnect an old
+        // projected value after its binding has been replaced.
         return None;
     }
     if !origin_overlap && structural_overlap == PlaceOverlap::Disjoint {
@@ -266,49 +297,6 @@ fn access_conflict_overlap(
 
 fn access_kinds_conflict(left: AccessKind, right: AccessKind) -> bool {
     left == AccessKind::Exclusive || right == AccessKind::Exclusive
-}
-
-fn origin_sets_overlap(
-    problem: &BorrowProblem,
-    left: &[ValueOriginId],
-    right: &[ValueOriginId],
-) -> bool {
-    if left.is_empty() || right.is_empty() {
-        // Missing provenance is not evidence of independence. Structural fixed-field separation
-        // is handled by the caller after this conservative result is combined with place overlap.
-        return true;
-    }
-    if left.iter().any(|origin| is_top_origin(problem, *origin))
-        || right.iter().any(|origin| is_top_origin(problem, *origin))
-    {
-        return true;
-    }
-    left.iter().any(|origin| right.contains(origin))
-}
-
-fn is_top_origin(problem: &BorrowProblem, origin_id: ValueOriginId) -> bool {
-    let Some(origin) = problem.origins().get(origin_id.index()) else {
-        return true;
-    };
-    match &origin.kind {
-        super::super::problem::OriginKind::Unknown
-        | super::super::problem::OriginKind::CallResult {
-            provenance: super::super::problem::CallResultProvenance::Unknown,
-            ..
-        } => true,
-        super::super::problem::OriginKind::Alias(origins)
-        | super::super::problem::OriginKind::ExclusiveAlias(origins)
-        | super::super::problem::OriginKind::Join(origins) => {
-            origins.iter().any(|origin| is_top_origin(problem, *origin))
-        }
-        super::super::problem::OriginKind::Projection { source, .. } => {
-            is_top_origin(problem, *source)
-        }
-        super::super::problem::OriginKind::Copy(_) => false,
-        super::super::problem::OriginKind::Parameter { .. }
-        | super::super::problem::OriginKind::Fresh
-        | super::super::problem::OriginKind::CallResult { .. } => false,
-    }
 }
 
 fn origins_for_access(
@@ -331,6 +319,9 @@ fn derive_alias_loans(
         let Some((kind, source, destination)) = alias_event(event) else {
             continue;
         };
+        if !origins.is_initial_alias_event(event.id) {
+            continue;
+        }
         let source_origins = origins_for_access(problem, origins, event.id, source);
         let kills = holder_kills(problem, origins, graph, event.id, destination);
         let uses = holder_uses(problem, origins, graph, event.id, destination, &kills)?;
@@ -380,6 +371,45 @@ fn derive_provenance_loans(
     let mut result = Vec::new();
     for event in problem.events() {
         match &event.kind {
+            EventKind::AliasFromPlace {
+                source,
+                destination,
+            }
+            | EventKind::ExclusiveAliasFromPlace {
+                source,
+                destination,
+            }
+            | EventKind::Alias {
+                source,
+                destination,
+                ..
+            }
+            | EventKind::ExclusiveAlias {
+                source,
+                destination,
+                ..
+            } if origins.is_slot_rebind_event(event.id) => {
+                // A mutable destination can remain slot-backed after an alias-valued rebind.
+                // Preserve the represented value relationship without turning the raw HIR
+                // event into a new write-through exclusive capability.
+                let destination_origins =
+                    origins_for_access(problem, origins, event.id, *destination);
+                push_provenance_loan(
+                    problem,
+                    origins,
+                    graph,
+                    &mut result,
+                    first_id,
+                    ProvenanceLoanSpec {
+                        event,
+                        kind: AccessKind::Shared,
+                        source: *source,
+                        holder: *destination,
+                        loan_origins: destination_origins,
+                        fallback_origin: None,
+                    },
+                )?;
+            }
             EventKind::Projection {
                 destination,
                 origin,
@@ -744,10 +774,12 @@ fn holder_kills(
             EventKind::Access { use_id } => {
                 problem.uses().get(use_id.index()).is_some_and(|use_row| {
                     use_row.kind == UseKind::Write
-                        && (!use_row.definition || origins.is_write_through_use(*use_id))
+                        && use_row.definition
+                        && !origins.is_write_through_use(*use_id)
                         && places_overlap(problem, holder, use_row.place) != PlaceOverlap::Disjoint
                 })
             }
+            _ if origins.is_write_through_event(event.id) => false,
             _ => event_destination(event).is_some_and(|destination| {
                 places_overlap(problem, holder, destination) != PlaceOverlap::Disjoint
             }),
@@ -806,10 +838,14 @@ struct EventGraph {
     event_by_use: BTreeMap<UseId, EventId>,
     call_effect_events: BTreeMap<super::super::problem::CallId, EventId>,
     call_argument_uses: BTreeSet<UseId>,
+    exclusive_liveness: ExclusiveLoanLiveness,
 }
 
 impl EventGraph {
-    fn new(problem: &BorrowProblem) -> Result<Self, CompilerError> {
+    fn new(
+        problem: &BorrowProblem,
+        exclusive_liveness: ExclusiveLoanLiveness,
+    ) -> Result<Self, CompilerError> {
         let mut events_by_block = BTreeMap::new();
         let mut event_location = BTreeMap::new();
         for block in &problem.control_flow().blocks {
@@ -863,6 +899,7 @@ impl EventGraph {
             event_by_use,
             call_effect_events,
             call_argument_uses,
+            exclusive_liveness,
         })
     }
 
@@ -959,6 +996,14 @@ impl EventGraph {
                     until_event,
                     &loan.kills,
                 );
+        }
+        if loan.kind == AccessKind::Exclusive
+            && loan.uses.is_empty()
+            && self.exclusive_liveness == ExclusiveLoanLiveness::Conservative
+        {
+            // The reference rule keeps a dead exclusive capability conservative. The named
+            // dead-exclusive experiment opts into use-driven liveness instead.
+            return true;
         }
         self.keeping_use(problem, loan, target_event).is_some()
     }

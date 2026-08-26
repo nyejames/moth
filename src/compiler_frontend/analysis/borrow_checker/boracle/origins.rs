@@ -72,6 +72,7 @@ pub(crate) struct OriginSolution {
     traces: Box<[OriginTrace]>,
     state_after_event: BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
     write_through_uses: Box<[UseId]>,
+    related_origins: BTreeSet<(ValueOriginId, ValueOriginId)>,
 }
 
 impl OriginSolution {
@@ -93,6 +94,61 @@ impl OriginSolution {
 
     pub(crate) fn is_write_through_use(&self, use_id: UseId) -> bool {
         self.write_through_uses.contains(&use_id)
+    }
+
+    pub(crate) fn is_initial_alias_event(&self, event: EventId) -> bool {
+        let event_traces = self.traces.iter().filter(|trace| trace.event == event);
+        let mut saw_alias = false;
+        for trace in event_traces {
+            match trace.rule {
+                OriginTraceRule::Alias => saw_alias = true,
+                OriginTraceRule::Rebind | OriginTraceRule::WriteThrough => return false,
+                _ => {}
+            }
+        }
+        saw_alias
+    }
+
+    pub(crate) fn is_write_through_event(&self, event: EventId) -> bool {
+        self.traces
+            .iter()
+            .any(|trace| trace.event == event && trace.rule == OriginTraceRule::WriteThrough)
+    }
+
+    pub(crate) fn is_slot_rebind_event(&self, event: EventId) -> bool {
+        let mut saw_rebind = false;
+        for trace in self.traces.iter().filter(|trace| trace.event == event) {
+            match trace.rule {
+                OriginTraceRule::Rebind => saw_rebind = true,
+                OriginTraceRule::WriteThrough => return false,
+                _ => {}
+            }
+        }
+        saw_rebind
+    }
+
+    pub(crate) fn origins_overlap(
+        &self,
+        problem: &BorrowProblem,
+        left: &[ValueOriginId],
+        right: &[ValueOriginId],
+    ) -> bool {
+        if left.is_empty() || right.is_empty() {
+            return true;
+        }
+        if left.iter().any(|origin| is_top_origin(problem, *origin))
+            || right.iter().any(|origin| is_top_origin(problem, *origin))
+        {
+            return true;
+        }
+        left.iter().any(|left_origin| {
+            right.iter().any(|right_origin| {
+                left_origin == right_origin
+                    || self
+                        .related_origins
+                        .contains(&(*left_origin, *right_origin))
+            })
+        })
     }
 
     pub(crate) fn origins_for_place_after_event(
@@ -220,12 +276,121 @@ impl OriginSolver {
         facts.sort_by_key(|fact| (fact.event.raw(), fact.place.raw()));
         traces.sort_by_key(|trace| trace.event.raw());
 
+        let related_origins = related_origins(problem, &traces, &state_after_event);
+
         Ok(OriginSolution {
             facts: facts.into_boxed_slice(),
             traces: traces.into_boxed_slice(),
             state_after_event,
             write_through_uses: write_through_uses.into_iter().collect(),
+            related_origins,
         })
+    }
+}
+
+fn related_origins(
+    problem: &BorrowProblem,
+    traces: &[OriginTrace],
+    state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+) -> BTreeSet<(ValueOriginId, ValueOriginId)> {
+    let mut neighbours: BTreeMap<ValueOriginId, BTreeSet<ValueOriginId>> = BTreeMap::new();
+
+    for origin in problem.origins() {
+        let related = match &origin.kind {
+            OriginKind::Alias(origins)
+            | OriginKind::ExclusiveAlias(origins)
+            | OriginKind::Join(origins) => origins.to_vec(),
+            OriginKind::Projection { source, .. } => vec![*source],
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Alias(origins),
+                ..
+            } => origins.to_vec(),
+            OriginKind::Unknown
+            | OriginKind::Parameter { .. }
+            | OriginKind::Fresh
+            | OriginKind::Copy(_)
+            | OriginKind::CallResult { .. } => Vec::new(),
+        };
+        for related_origin in related {
+            add_related_edge(&mut neighbours, origin.id, related_origin);
+        }
+    }
+
+    for trace in traces {
+        for output in &trace.output_origins {
+            for input in &trace.input_origins {
+                add_related_edge(&mut neighbours, *output, *input);
+            }
+        }
+    }
+
+    // A projected write can introduce a fresh child origin while the containing binding keeps
+    // its current generation. Preserve that direct base/child relationship without taking a
+    // transitive closure: sibling fields must remain disjoint when their origins differ.
+    for ((event, left_place), left_origins) in state_after_event {
+        for ((candidate_event, right_place), right_origins) in state_after_event {
+            if event != candidate_event
+                || !is_strict_place_ancestor(problem, *left_place, *right_place)
+            {
+                continue;
+            }
+            for left_origin in left_origins {
+                for right_origin in right_origins {
+                    add_related_edge(&mut neighbours, *left_origin, *right_origin);
+                }
+            }
+        }
+    }
+
+    neighbours
+        .into_iter()
+        .flat_map(|(left, rights)| rights.into_iter().map(move |right| (left, right)))
+        .collect()
+}
+
+fn add_related_edge(
+    neighbours: &mut BTreeMap<ValueOriginId, BTreeSet<ValueOriginId>>,
+    left: ValueOriginId,
+    right: ValueOriginId,
+) {
+    neighbours.entry(left).or_default().insert(right);
+    neighbours.entry(right).or_default().insert(left);
+}
+
+fn is_strict_place_ancestor(
+    problem: &BorrowProblem,
+    ancestor: PlaceId,
+    descendant: PlaceId,
+) -> bool {
+    let Some(ancestor) = problem.places().get(ancestor.index()) else {
+        return false;
+    };
+    let Some(descendant) = problem.places().get(descendant.index()) else {
+        return false;
+    };
+    ancestor.root == descendant.root
+        && ancestor.projections.len() < descendant.projections.len()
+        && descendant.projections.starts_with(&ancestor.projections)
+}
+
+fn is_top_origin(problem: &BorrowProblem, origin_id: ValueOriginId) -> bool {
+    let Some(origin) = problem.origins().get(origin_id.index()) else {
+        return true;
+    };
+    match &origin.kind {
+        OriginKind::Unknown
+        | OriginKind::CallResult {
+            provenance: CallResultProvenance::Unknown,
+            ..
+        } => true,
+        OriginKind::Alias(origins)
+        | OriginKind::ExclusiveAlias(origins)
+        | OriginKind::Join(origins) => origins.iter().any(|origin| is_top_origin(problem, *origin)),
+        OriginKind::Projection { source, .. } => is_top_origin(problem, *source),
+        OriginKind::Copy(_)
+        | OriginKind::Parameter { .. }
+        | OriginKind::Fresh
+        | OriginKind::CallResult { .. } => false,
     }
 }
 
@@ -292,7 +457,7 @@ fn apply_block(
     let mut local_states = BTreeMap::new();
     let mut local_write_through_uses = BTreeSet::new();
     let mut pending_write = None;
-    for event_id in &block.events {
+    for (event_index, event_id) in block.events.iter().enumerate() {
         let event = problem.events().get(event_id.index()).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Boracle origin solver cannot locate event {:?}",
@@ -306,6 +471,22 @@ fn apply_block(
             && place == destination
         {
             local_write_through_uses.insert(use_id);
+        }
+        if rule == OriginTraceRule::WriteThrough
+            && let Some(destination) = destination
+            && matches!(&event.kind, EventKind::CallEffect(_))
+            && let Some(next_event_id) = block.events.get(event_index + 1)
+            && let Some(Event {
+                kind: EventKind::Access { use_id },
+                ..
+            }) = problem.events().get(next_event_id.index())
+            && problem.uses().get(use_id.index()).is_some_and(|use_row| {
+                use_row.kind == UseKind::Write && use_row.place == destination
+            })
+        {
+            // Call results publish their write-through origin at the CallEffect event, while
+            // the normalized destination write is the immediately following Access event.
+            local_write_through_uses.insert(*use_id);
         }
         pending_write = match &event.kind {
             EventKind::Access { use_id } => problem

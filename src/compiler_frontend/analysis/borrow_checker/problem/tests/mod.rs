@@ -32,7 +32,7 @@ use crate::compiler_frontend::public_call_summary::{
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
-    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -115,6 +115,16 @@ fn borrow_problem_field_fixture_keeps_disjoint_fields_and_base_overlap_explicit(
         problem.places()[1].projections.as_ref(),
         [ProjectionElem::Field(0)]
     );
+}
+
+#[test]
+fn borrow_problem_rejects_projected_binding_definitions() {
+    let mut parts = field_accesses();
+    parts.uses[0].kind = UseKind::Write;
+    parts.uses[0].definition = true;
+
+    let error = BorrowProblem::new(parts).expect_err("projected definitions must be rejected");
+    assert!(format!("{error:?}").contains("projected place"));
 }
 
 #[test]
@@ -913,7 +923,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
     );
     assert!(matches!(
         effect.arguments.as_ref(),
-        [argument] if argument.access == AccessKind::Shared
+        [argument] if argument.access == AccessKind::Exclusive
     ));
     let result = effect
         .result
@@ -926,6 +936,54 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
             ..
         }
     ));
+}
+
+#[test]
+fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
+    let region = RegionId(0);
+    let source_local = LocalId(0);
+    let result_local = LocalId(1);
+    let imported_identity = OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("boracle-imported-summary"),
+            "provider".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "missing".to_owned(),
+    );
+    let module = module_with_block(HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![
+            hir_local(source_local, region),
+            hir_local(result_local, region),
+        ],
+        statements: vec![
+            HirStatement {
+                id: HirNodeId(0),
+                kind: HirStatementKind::Assign {
+                    target: HirPlace::Local(source_local),
+                    value: int_expression(0, 1, region),
+                },
+                location: SourceLocation::default(),
+            },
+            HirStatement {
+                id: HirNodeId(1),
+                kind: HirStatementKind::Call {
+                    target: CallTarget::CrossModule(imported_identity),
+                    args: vec![load_expression(2, source_local, region)],
+                    result: Some(result_local),
+                },
+                location: SourceLocation::default(),
+            },
+        ],
+        terminator: HirTerminator::Return(load_expression(3, result_local, region)),
+    });
+    let function = function_for(HirBlockId(0));
+    let error = from_hir(&module, &function, None, None)
+        .expect_err("missing imported call summaries must fail extraction");
+
+    assert!(format!("{error:?}").contains("provider call summary"));
 }
 
 #[test]

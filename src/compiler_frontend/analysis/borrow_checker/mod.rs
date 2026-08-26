@@ -35,11 +35,13 @@ pub(crate) use types::{
 };
 pub(crate) type BorrowFacts = BorrowAnalysis;
 
+#[cfg(all(feature = "boracle", test))]
+#[allow(unused_imports)]
+pub(crate) use boracle::solve_hir_module;
 #[cfg(feature = "boracle")]
 #[allow(unused_imports)]
 pub(crate) use boracle::{
     BoracleDump, BoracleExperiment, BoracleModuleReport, BoracleServiceOptions, run_hir_module,
-    solve_hir_module,
 };
 #[cfg(feature = "boracle")]
 #[allow(unused_imports)]

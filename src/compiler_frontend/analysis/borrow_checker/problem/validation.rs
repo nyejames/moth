@@ -4,7 +4,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use super::{
     BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, EventId, EventKind,
-    OriginKind, RebindValue, TerminatorEventKind,
+    OriginKind, RebindValue, TerminatorEventKind, UseKind,
 };
 use super::{LoanId, PointId, ValueOriginId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -343,12 +343,24 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
 
     for use_row in uses {
         validate_point(use_row.point, points.len(), "use")?;
-        require_index(
+        let place_index = require_index(
             || use_row.place.index(),
             places.len(),
             "use place",
             use_row.place.raw(),
         )?;
+        if use_row.definition && use_row.kind != UseKind::Write {
+            return Err(compiler_error(format!(
+                "use {:?} is marked as a definition but is not a write",
+                use_row.id
+            )));
+        }
+        if use_row.definition && !places[place_index].projections.is_empty() {
+            return Err(compiler_error(format!(
+                "use {:?} marks projected place {:?} as a binding definition",
+                use_row.id, use_row.place
+            )));
+        }
     }
 
     for place in places {
