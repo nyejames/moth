@@ -392,8 +392,11 @@ fn derive_provenance_loans(
                 // A mutable destination can remain slot-backed after an alias-valued rebind.
                 // Preserve the represented value relationship without turning the raw HIR
                 // event into a new write-through exclusive capability.
-                let destination_origins =
-                    origins_for_access(problem, origins, event.id, *destination);
+                // A slot-backed alias-valued rebind creates its new provenance relationship
+                // from the value being assigned. The destination may also retain an
+                // alias-backed alternative after a CFG join, so using its union here would
+                // incorrectly attach stale origins to the new loan.
+                let source_origins = provenance_source_origins(problem, origins, event, *source);
                 push_provenance_loan(
                     problem,
                     origins,
@@ -405,7 +408,7 @@ fn derive_provenance_loans(
                         kind: AccessKind::Shared,
                         source: *source,
                         holder: *destination,
-                        loan_origins: destination_origins,
+                        loan_origins: source_origins,
                         fallback_origin: None,
                     },
                 )?;
@@ -565,6 +568,26 @@ fn derive_provenance_loans(
         loan.live_points = graph.live_points(problem, loan).into_boxed_slice();
     }
     Ok(result)
+}
+
+fn provenance_source_origins(
+    problem: &BorrowProblem,
+    origins: &OriginSolution,
+    event: &Event,
+    source: PlaceId,
+) -> Box<[ValueOriginId]> {
+    let explicit_origins = match &event.kind {
+        EventKind::Alias { origins, .. } | EventKind::ExclusiveAlias { origins, .. } => {
+            Some(origins.as_ref())
+        }
+        _ => None,
+    };
+    if let Some(explicit_origins) = explicit_origins
+        && !explicit_origins.is_empty()
+    {
+        return explicit_origins.to_vec().into_boxed_slice();
+    }
+    origins_for_access(problem, origins, event.id, source)
 }
 
 struct ProvenanceLoanSpec<'a> {

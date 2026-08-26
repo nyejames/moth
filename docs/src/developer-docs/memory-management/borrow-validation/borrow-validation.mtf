@@ -52,7 +52,10 @@ Root tracking is analysis metadata, not source-visible reference identity.
 
 ## Alias activity
 
-Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
+Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
+that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
+exclusive capability may be elided remains an explicit experimental question; the reference
+baseline keeps that capability conservative until canonical semantics adopt the stronger rule.
 
 - A shared alias blocks overlapping mutation only until its last potential use on the relevant path.
 - An unused shared alias does not block later mutation.
@@ -75,7 +78,7 @@ Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
 These points are locked accepted design.
 
 1. Last-use analysis is central to memory precision.
-2. Alias activity is path-sensitive and non-lexical.
+2. Alias activity is path-sensitive and non-lexical for shared aliases and exclusive aliases with reachable holder uses; the reference baseline remains conservative for an issued but never-used exclusive capability while elision is experimental.
 3. Branches are analysed independently.
 4. Loops use fixed-point future-use reasoning.
 5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.

@@ -18,17 +18,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 type OriginSet = BTreeSet<ValueOriginId>;
 type OriginState = BTreeMap<PlaceId, OriginSet>;
+type OriginAlternatives = BTreeMap<(PlaceId, BindingMode), OriginSet>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum BindingMode {
     Alias,
     Slot,
+    /// Both alias write-through and slot replacement remain possible after a CFG join.
     Mixed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FlowState {
     origins: OriginState,
+    alternatives: OriginAlternatives,
     modes: BTreeMap<BindingId, BindingMode>,
 }
 
@@ -38,6 +41,8 @@ pub(crate) enum OriginTraceRule {
     Noop,
     Fresh,
     Alias,
+    /// A CFG join leaves both alias-write-through and slot-replacement paths possible.
+    Mixed,
     WriteThrough,
     Copy,
     Projection,
@@ -102,7 +107,9 @@ impl OriginSolution {
         for trace in event_traces {
             match trace.rule {
                 OriginTraceRule::Alias => saw_alias = true,
-                OriginTraceRule::Rebind | OriginTraceRule::WriteThrough => return false,
+                OriginTraceRule::Mixed
+                | OriginTraceRule::Rebind
+                | OriginTraceRule::WriteThrough => return false,
                 _ => {}
             }
         }
@@ -110,16 +117,20 @@ impl OriginSolution {
     }
 
     pub(crate) fn is_write_through_event(&self, event: EventId) -> bool {
-        self.traces
-            .iter()
-            .any(|trace| trace.event == event && trace.rule == OriginTraceRule::WriteThrough)
+        self.traces.iter().any(|trace| {
+            trace.event == event
+                && matches!(
+                    trace.rule,
+                    OriginTraceRule::Mixed | OriginTraceRule::WriteThrough
+                )
+        })
     }
 
     pub(crate) fn is_slot_rebind_event(&self, event: EventId) -> bool {
         let mut saw_rebind = false;
         for trace in self.traces.iter().filter(|trace| trace.event == event) {
             match trace.rule {
-                OriginTraceRule::Rebind => saw_rebind = true,
+                OriginTraceRule::Mixed | OriginTraceRule::Rebind => saw_rebind = true,
                 OriginTraceRule::WriteThrough => return false,
                 _ => {}
             }
@@ -209,11 +220,13 @@ impl OriginSolver {
         let mut entry_states = vec![None::<FlowState>; block_count];
         entry_states[problem.control_flow().entry.index()] = Some(FlowState {
             origins: BTreeMap::new(),
+            alternatives: BTreeMap::new(),
             modes: BTreeMap::new(),
         });
         let mut output_states = vec![
             FlowState {
                 origins: BTreeMap::new(),
+                alternatives: BTreeMap::new(),
                 modes: BTreeMap::new(),
             };
             block_count
@@ -231,6 +244,7 @@ impl OriginSolver {
                         &predecessors[block_index],
                         Some(FlowState {
                             origins: BTreeMap::new(),
+                            alternatives: BTreeMap::new(),
                             modes: BTreeMap::new(),
                         }),
                     )
@@ -317,6 +331,13 @@ fn related_origins(
     }
 
     for trace in traces {
+        if trace.rule == OriginTraceRule::Mixed {
+            // A mixed trace publishes the union of two correlated execution possibilities.
+            // Its output set therefore contains preserved alias origins as well as the new
+            // slot-path origins; treating every output/input pair as related would fabricate
+            // overlap between those independent generations.
+            continue;
+        }
         for output in &trace.output_origins {
             for input in &trace.input_origins {
                 add_related_edge(&mut neighbours, *output, *input);
@@ -411,6 +432,7 @@ fn join_predecessors(
         merge_state(
             joined.get_or_insert_with(|| FlowState {
                 origins: BTreeMap::new(),
+                alternatives: BTreeMap::new(),
                 modes: BTreeMap::new(),
             }),
             state,
@@ -420,10 +442,10 @@ fn join_predecessors(
 }
 
 fn merge_state(destination: &mut FlowState, source: &FlowState) {
-    for (place, origins) in &source.origins {
+    for ((place, mode), origins) in &source.alternatives {
         destination
-            .origins
-            .entry(*place)
+            .alternatives
+            .entry((*place, *mode))
             .or_default()
             .extend(origins.iter().copied());
     }
@@ -434,6 +456,7 @@ fn merge_state(destination: &mut FlowState, source: &FlowState) {
             .and_modify(|existing| *existing = join_mode(*existing, *mode))
             .or_insert(*mode);
     }
+    rebuild_origins(destination);
 }
 
 type ApplyCapture<'a> = Option<(&'a mut Vec<OriginFact>, &'a mut Vec<OriginTrace>)>;
@@ -465,14 +488,14 @@ fn apply_block(
             ))
         })?;
         let (rule, destination, inputs) = apply_event(problem, event, &mut state)?;
-        if rule == OriginTraceRule::WriteThrough
+        if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
             && let Some(destination) = destination
             && let Some((place, use_id)) = pending_write
             && place == destination
         {
             local_write_through_uses.insert(use_id);
         }
-        if rule == OriginTraceRule::WriteThrough
+        if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
             && let Some(destination) = destination
             && matches!(&event.kind, EventKind::CallEffect(_))
             && let Some(next_event_id) = block.events.get(event_index + 1)
@@ -556,18 +579,26 @@ fn apply_event(
             origin,
         } => {
             if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
+                return Ok(write_through_result(*destination, Vec::new()));
+            }
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
                     problem,
                     state,
                     *destination,
+                    one_origin(*origin),
                     Vec::new(),
                 ));
             }
             let was_initialized = state.origins.contains_key(destination);
             let output = one_origin(*origin);
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, output);
-            set_binding_mode(problem, state, *destination, BindingMode::Slot);
+            let mode = if is_mutable_parameter(problem, *destination, *origin) {
+                BindingMode::Alias
+            } else {
+                BindingMode::Slot
+            };
+            replace_generation(problem, state, *destination, mode, output);
+            set_binding_mode(problem, state, *destination, mode);
             let rule = if was_initialized {
                 OriginTraceRule::Rebind
             } else {
@@ -592,10 +623,17 @@ fn apply_event(
             };
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(
+                    *destination,
+                    input.into_iter().collect(),
+                ));
+            }
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
                     problem,
                     state,
                     *destination,
-                    input.into_iter().collect(),
+                    input.clone(),
+                    input.iter().copied().collect(),
                 ));
             }
             let rule = if state.origins.contains_key(destination) {
@@ -603,9 +641,17 @@ fn apply_event(
             } else {
                 OriginTraceRule::Alias
             };
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, input.clone());
-            set_alias_mode_if_unclassified(problem, state, *destination);
+            let mode = if binding_mode(problem, state, *destination) == Some(BindingMode::Slot) {
+                BindingMode::Slot
+            } else {
+                BindingMode::Alias
+            };
+            replace_generation(problem, state, *destination, mode, input.clone());
+            if mode == BindingMode::Alias {
+                set_alias_mode_if_unclassified(problem, state, *destination);
+            } else {
+                set_binding_mode(problem, state, *destination, mode);
+            }
             Ok((rule, Some(*destination), input.into_iter().collect()))
         }
         EventKind::AliasFromPlace {
@@ -619,9 +665,16 @@ fn apply_event(
             let input = origins_for_place(problem, &state.origins, *source);
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(
+                    *destination,
+                    input.iter().copied().collect(),
+                ));
+            }
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
                     problem,
                     state,
                     *destination,
+                    input.clone(),
                     input.iter().copied().collect(),
                 ));
             }
@@ -630,9 +683,17 @@ fn apply_event(
             } else {
                 OriginTraceRule::Alias
             };
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, input.clone());
-            set_alias_mode_if_unclassified(problem, state, *destination);
+            let mode = if binding_mode(problem, state, *destination) == Some(BindingMode::Slot) {
+                BindingMode::Slot
+            } else {
+                BindingMode::Alias
+            };
+            replace_generation(problem, state, *destination, mode, input.clone());
+            if mode == BindingMode::Alias {
+                set_alias_mode_if_unclassified(problem, state, *destination);
+            } else {
+                set_binding_mode(problem, state, *destination, mode);
+            }
             Ok((rule, Some(*destination), input.into_iter().collect()))
         }
         EventKind::Copy {
@@ -641,15 +702,24 @@ fn apply_event(
             ..
         } => {
             if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
+                return Ok(write_through_result(*destination, Vec::new()));
+            }
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
                     problem,
                     state,
                     *destination,
+                    one_origin(*origin),
                     Vec::new(),
                 ));
             }
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, one_origin(*origin));
+            replace_generation(
+                problem,
+                state,
+                *destination,
+                BindingMode::Slot,
+                one_origin(*origin),
+            );
             set_binding_mode(problem, state, *destination, BindingMode::Slot);
             Ok((OriginTraceRule::Copy, Some(*destination), Vec::new()))
         }
@@ -667,14 +737,26 @@ fn apply_event(
             };
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(
-                    problem,
-                    state,
                     *destination,
                     input.into_iter().collect(),
                 ));
             }
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, output);
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
+                    problem,
+                    state,
+                    *destination,
+                    output,
+                    input.into_iter().collect(),
+                ));
+            }
+            replace_generation(
+                problem,
+                state,
+                *destination,
+                BindingMode::Slot,
+                output.clone(),
+            );
             set_binding_mode(problem, state, *destination, BindingMode::Slot);
             Ok((
                 OriginTraceRule::Projection,
@@ -694,15 +776,24 @@ fn apply_event(
             };
             let input_origins = input.iter().copied().collect();
             if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
+                return Ok(write_through_result(*destination, input_origins));
+            }
+            if is_mixed(problem, state, *destination) {
+                return Ok(mixed_write_result(
                     problem,
                     state,
                     *destination,
+                    input.clone(),
                     input_origins,
                 ));
             }
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, input);
+            replace_generation(
+                problem,
+                state,
+                *destination,
+                BindingMode::Slot,
+                input.clone(),
+            );
             set_binding_mode(problem, state, *destination, BindingMode::Slot);
             Ok((OriginTraceRule::Rebind, Some(*destination), input_origins))
         }
@@ -720,24 +811,50 @@ fn apply_event(
             }
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(
-                    problem,
-                    state,
                     *destination,
                     input.iter().copied().collect(),
                 ));
             }
-            replace_generation(problem, &mut state.origins, *destination);
-            state.origins.insert(*destination, one_origin(*origin));
+            if is_mixed(problem, state, *destination) {
+                let result = mixed_write_result(
+                    problem,
+                    state,
+                    *destination,
+                    one_origin(*origin),
+                    input.iter().copied().collect(),
+                );
+                for (projection, field_origins) in &field_states {
+                    if let Some(projected_place) =
+                        projected_place(problem, *destination, *projection)
+                    {
+                        state
+                            .alternatives
+                            .entry((projected_place, BindingMode::Slot))
+                            .or_default()
+                            .extend(field_origins.iter().copied());
+                    }
+                }
+                rebuild_origins(state);
+                return Ok(result);
+            }
+            replace_generation(
+                problem,
+                state,
+                *destination,
+                BindingMode::Slot,
+                one_origin(*origin),
+            );
             set_binding_mode(problem, state, *destination, BindingMode::Slot);
             for (projection, field_origins) in field_states {
                 if let Some(projected_place) = projected_place(problem, *destination, projection) {
                     state
-                        .origins
-                        .entry(projected_place)
+                        .alternatives
+                        .entry((projected_place, BindingMode::Slot))
                         .or_default()
                         .extend(field_origins);
                 }
             }
+            rebuild_origins(state);
             Ok((
                 OriginTraceRule::Aggregate,
                 Some(*destination),
@@ -772,14 +889,20 @@ fn apply_event(
             };
             if is_alias_only(problem, state, result.place) {
                 return Ok(write_through_result(
-                    problem,
-                    state,
                     result.place,
                     input.iter().copied().collect(),
                 ));
             }
-            replace_generation(problem, &mut state.origins, result.place);
-            state.origins.insert(result.place, output);
+            if is_mixed(problem, state, result.place) {
+                return Ok(mixed_write_result(
+                    problem,
+                    state,
+                    result.place,
+                    output,
+                    input.iter().copied().collect(),
+                ));
+            }
+            replace_generation(problem, state, result.place, BindingMode::Slot, output);
             set_binding_mode(problem, state, result.place, BindingMode::Slot);
             Ok((
                 OriginTraceRule::CallResult,
@@ -789,23 +912,16 @@ fn apply_event(
         }
         EventKind::ScopeExit { bindings } => {
             let roots = bindings.iter().copied().collect::<BTreeSet<_>>();
-            let removed = state
-                .origins
-                .keys()
-                .copied()
-                .filter(|place| {
-                    problem
-                        .places()
-                        .get(place.index())
-                        .is_some_and(|row| roots.contains(&row.root))
-                })
-                .collect::<Vec<_>>();
-            for place in removed {
-                state.origins.remove(&place);
-            }
+            state.alternatives.retain(|(place, _), _| {
+                problem
+                    .places()
+                    .get(place.index())
+                    .is_none_or(|row| !roots.contains(&row.root))
+            });
             for binding in bindings {
                 state.modes.remove(binding);
             }
+            rebuild_origins(state);
             Ok((OriginTraceRule::ScopeExit, None, Vec::new()))
         }
         EventKind::CallArgument { .. }
@@ -816,7 +932,6 @@ fn apply_event(
         | EventKind::LoanKill { .. } => Ok((OriginTraceRule::Noop, None, Vec::new())),
     }
 }
-
 fn join_mode(left: BindingMode, right: BindingMode) -> BindingMode {
     if left == right {
         left
@@ -833,8 +948,33 @@ fn destination_binding(problem: &BorrowProblem, destination: PlaceId) -> Option<
 }
 
 fn is_alias_only(problem: &BorrowProblem, state: &FlowState, destination: PlaceId) -> bool {
+    binding_mode(problem, state, destination) == Some(BindingMode::Alias)
+}
+
+fn is_mixed(problem: &BorrowProblem, state: &FlowState, destination: PlaceId) -> bool {
+    binding_mode(problem, state, destination) == Some(BindingMode::Mixed)
+}
+
+fn binding_mode(
+    problem: &BorrowProblem,
+    state: &FlowState,
+    destination: PlaceId,
+) -> Option<BindingMode> {
     destination_binding(problem, destination).and_then(|binding| state.modes.get(&binding).copied())
-        == Some(BindingMode::Alias)
+}
+
+fn is_mutable_parameter(
+    problem: &BorrowProblem,
+    destination: PlaceId,
+    origin: ValueOriginId,
+) -> bool {
+    problem
+        .origins()
+        .get(origin.index())
+        .is_some_and(|origin| matches!(origin.kind, OriginKind::Parameter { .. }))
+        && destination_binding(problem, destination)
+            .and_then(|binding| problem.bindings().get(binding.index()))
+            .is_some_and(|binding| binding.mutable)
 }
 
 fn set_binding_mode(
@@ -863,37 +1003,83 @@ fn set_alias_mode_if_unclassified(
 }
 
 fn write_through_result(
-    problem: &BorrowProblem,
-    state: &FlowState,
     destination: PlaceId,
     inputs: Vec<ValueOriginId>,
 ) -> (OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>) {
-    let _ = problem;
-    let _ = state;
     (OriginTraceRule::WriteThrough, Some(destination), inputs)
 }
 
-fn replace_generation(problem: &BorrowProblem, state: &mut OriginState, destination: PlaceId) {
-    let Some(destination_row) = problem.places().get(destination.index()) else {
-        return;
-    };
-    let stale_places = state
-        .keys()
-        .copied()
-        .filter(|place| {
-            let Some(place_row) = problem.places().get(place.index()) else {
-                return false;
-            };
-            place_row.root == destination_row.root
-                && place_row.projections.len() >= destination_row.projections.len()
-                && place_row
-                    .projections
-                    .starts_with(&destination_row.projections)
-        })
-        .collect::<Vec<_>>();
-    for place in stale_places {
-        state.remove(&place);
+fn mixed_write_result(
+    problem: &BorrowProblem,
+    state: &mut FlowState,
+    destination: PlaceId,
+    output: OriginSet,
+    inputs: Vec<ValueOriginId>,
+) -> (OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>) {
+    // A mixed binding represents two correlated possibilities. A write can replace the
+    // slot-backed possibility while the alias-backed possibility writes through to its
+    // referent. Keep the alternatives separate so the replaced slot generation does not
+    // retain stale origins from the other possibility.
+    replace_mode_generation(problem, state, destination, BindingMode::Slot, output);
+    set_binding_mode(problem, state, destination, BindingMode::Mixed);
+    (OriginTraceRule::Mixed, Some(destination), inputs)
+}
+
+fn rebuild_origins(state: &mut FlowState) {
+    let mut origins = BTreeMap::new();
+    for ((place, _mode), origin_set) in &state.alternatives {
+        origins
+            .entry(*place)
+            .or_insert_with(BTreeSet::new)
+            .extend(origin_set.iter().copied());
     }
+    state.origins = origins;
+}
+
+fn place_is_in_generation(
+    problem: &BorrowProblem,
+    generation: PlaceId,
+    candidate: PlaceId,
+) -> bool {
+    let Some(generation_row) = problem.places().get(generation.index()) else {
+        return false;
+    };
+    let Some(candidate_row) = problem.places().get(candidate.index()) else {
+        return false;
+    };
+    candidate_row.root == generation_row.root
+        && candidate_row.projections.len() >= generation_row.projections.len()
+        && candidate_row
+            .projections
+            .starts_with(&generation_row.projections)
+}
+
+fn replace_generation(
+    problem: &BorrowProblem,
+    state: &mut FlowState,
+    destination: PlaceId,
+    mode: BindingMode,
+    output: OriginSet,
+) {
+    state
+        .alternatives
+        .retain(|(place, _), _| !place_is_in_generation(problem, destination, *place));
+    state.alternatives.insert((destination, mode), output);
+    rebuild_origins(state);
+}
+
+fn replace_mode_generation(
+    problem: &BorrowProblem,
+    state: &mut FlowState,
+    destination: PlaceId,
+    mode: BindingMode,
+    output: OriginSet,
+) {
+    state.alternatives.retain(|(place, existing_mode), _| {
+        *existing_mode != mode || !place_is_in_generation(problem, destination, *place)
+    });
+    state.alternatives.insert((destination, mode), output);
+    rebuild_origins(state);
 }
 
 fn call_result_origins(

@@ -582,6 +582,39 @@ result = increment(value = ~x)
 }
 
 #[test]
+fn boracle_source_mutable_parameter_existing_place_is_write_through_in_callee() {
+    assert_mutable_parameter_is_write_through(
+        r#"
+mutate |value ~{Int}| -> {Int}:
+    shared = value
+    value = {2}
+    result = shared
+    return result
+;
+
+items ~= {1}
+result = mutate(value = ~items)
+"#,
+    );
+}
+
+#[test]
+fn boracle_source_mutable_parameter_fresh_rvalue_is_write_through_in_callee() {
+    assert_mutable_parameter_is_write_through(
+        r#"
+mutate |value ~{Int}| -> {Int}:
+    shared = value
+    value = {2}
+    result = shared
+    return result
+;
+
+result = mutate(value = {1})
+"#,
+    );
+}
+
+#[test]
 fn boracle_source_unknown_result_does_not_prove_independence() {
     let output = run_source_dump(
         r#"
@@ -1143,6 +1176,43 @@ result = shared
 }
 
 #[test]
+fn boracle_source_write_through_remains_live_after_an_earlier_write() {
+    let report = solve_source(
+        r#"
+items ~= {1}
+writer ~= items
+writer = {2}
+shared = items
+writer = {3}
+result = shared
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| function.report.has_conflicts())
+        .expect("a later holder use should keep the mutable alias live");
+    let write_through_uses = function
+        .problem
+        .uses()
+        .iter()
+        .filter(|use_row| {
+            use_row.definition && function.report.origin.is_write_through_use(use_row.id)
+        })
+        .map(|use_row| use_row.id)
+        .collect::<Vec<_>>();
+    assert!(
+        write_through_uses.len() >= 2,
+        "expected both writes through writer to remain holder uses, got {write_through_uses:?}"
+    );
+    assert!(function.report.loans.conflicts().iter().any(|witness| {
+        witness
+            .keeping_use
+            .is_some_and(|use_id| write_through_uses[1..].contains(&use_id))
+    }));
+}
+
+#[test]
 fn boracle_source_branch_separates_typed_use_and_mutation() {
     let report = solve_source(
         r#"
@@ -1503,6 +1573,56 @@ fn solve_source(source: &str) -> BoracleModuleReport {
     fs::write(&entry, source).expect("source should be writable");
     solve_boracle(entry.to_str().expect("temporary path should be UTF-8"))
         .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
+}
+
+fn assert_mutable_parameter_is_write_through(source: &str) {
+    let report = solve_source(source);
+    let callee = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function
+                .problem
+                .origins()
+                .iter()
+                .any(|origin| matches!(origin.kind, OriginKind::Parameter { .. }))
+        })
+        .expect("source should retain a callee parameter origin");
+    assert!(
+        callee.report.has_conflicts(),
+        "a shared callee alias must conflict with a later mutable-parameter write"
+    );
+    assert!(
+        callee.problem.uses().iter().any(|use_row| {
+            use_row.definition && callee.report.origin.is_write_through_use(use_row.id)
+        }),
+        "mutable parameter assignment should be a write-through holder use"
+    );
+    let parameter_origin = callee
+        .problem
+        .origins()
+        .iter()
+        .find_map(|origin| matches!(origin.kind, OriginKind::Parameter { .. }).then_some(origin.id))
+        .expect("callee should retain the parameter origin identity");
+    let write_through = callee
+        .report
+        .origin
+        .traces()
+        .iter()
+        .find(|trace| callee.report.origin.is_write_through_event(trace.event))
+        .expect("callee should retain the write-through origin trace");
+    let destination = write_through
+        .destination
+        .expect("write-through trace should identify its destination");
+    let post_write_origins = callee
+        .report
+        .origin
+        .origins_after_event(write_through.event, destination)
+        .expect("write-through should publish the post-event origin state");
+    assert!(
+        post_write_origins.contains(&parameter_origin),
+        "mutable parameter write should preserve the Parameter origin, got {post_write_origins:?}"
+    );
 }
 
 fn run_source_dump(source: &str, dump: BoracleDump) -> String {

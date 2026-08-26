@@ -190,6 +190,59 @@ fn boracle_aggregate_rebinding_replaces_stored_child_generation() {
 }
 
 #[test]
+fn boracle_mixed_binding_preserves_alias_and_slot_write_possibilities() {
+    let problem = mixed_binding_problem();
+    let solution = super::OriginSolver::solve(&problem).expect("mixed binding should solve");
+
+    assert_eq!(
+        solution
+            .origins_after_event(EventId::new(7), PlaceId::new(1))
+            .expect("mixed write should publish every possible origin"),
+        [ValueOriginId::new(0), ValueOriginId::new(2)]
+    );
+    assert_eq!(
+        solution
+            .origins_after_event(EventId::new(14), PlaceId::new(1))
+            .expect("later mixed replacement should remove the old slot generation"),
+        [ValueOriginId::new(0), ValueOriginId::new(3)]
+    );
+    assert!(solution.traces().iter().any(|trace| {
+        trace.event == EventId::new(7) && trace.rule == super::OriginTraceRule::Mixed
+    }));
+    assert!(solution.is_write_through_event(EventId::new(7)));
+    assert!(!solution.origins_overlap(
+        &problem,
+        &[ValueOriginId::new(0)],
+        &[ValueOriginId::new(2)]
+    ));
+    assert!(!solution.origins_overlap(
+        &problem,
+        &[ValueOriginId::new(0)],
+        &[ValueOriginId::new(3)]
+    ));
+
+    let report = super::BoracleSolver::solve(&problem).expect("mixed binding report should solve");
+    let mixed_event_loans = report
+        .loans
+        .loans()
+        .iter()
+        .filter(|loan| loan.issue_event == Some(EventId::new(7)))
+        .collect::<Vec<_>>();
+    assert_eq!(mixed_event_loans.len(), 1);
+    assert_eq!(
+        mixed_event_loans[0].origins,
+        vec![ValueOriginId::new(2)].into_boxed_slice()
+    );
+    assert!(
+        report
+            .loans
+            .conflicts()
+            .iter()
+            .any(|witness| { witness.access_use == Some(UseId::new(1)) })
+    );
+}
+
+#[test]
 fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin() {
     let problem = hir_distinct_projection_problem();
     let aggregate = problem
@@ -1519,6 +1572,249 @@ fn branch_separation_property_problem(split: bool) -> BorrowProblem {
         ..BorrowProblemParts::default()
     })
     .expect("generated branch property problem should validate")
+}
+
+fn mixed_binding_problem() -> BorrowProblem {
+    let points = vec![
+        ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
+        ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
+        ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
+        ProgramPoint::new(PointId::new(3), BlockId::new(1), 0),
+        ProgramPoint::new(PointId::new(4), BlockId::new(1), 1),
+        ProgramPoint::new(PointId::new(5), BlockId::new(1), 2),
+        ProgramPoint::new(PointId::new(6), BlockId::new(2), 0),
+        ProgramPoint::new(PointId::new(7), BlockId::new(2), 1),
+        ProgramPoint::new(PointId::new(8), BlockId::new(2), 2),
+        ProgramPoint::new(PointId::new(9), BlockId::new(3), 0),
+        ProgramPoint::new(PointId::new(10), BlockId::new(3), 1),
+        ProgramPoint::new(PointId::new(11), BlockId::new(3), 2),
+        ProgramPoint::new(PointId::new(12), BlockId::new(3), 3),
+        ProgramPoint::new(PointId::new(13), BlockId::new(3), 4),
+        ProgramPoint::new(PointId::new(14), BlockId::new(3), 5),
+    ];
+    let events = vec![
+        Event::new(
+            EventId::new(0),
+            PointId::new(1),
+            EventKind::Fresh {
+                destination: PlaceId::new(0),
+                origin: ValueOriginId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(1),
+            PointId::new(2),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Branch {
+                    targets: vec![BlockId::new(1), BlockId::new(2)].into_boxed_slice(),
+                },
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(2),
+            PointId::new(4),
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(0),
+                destination: PlaceId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(3),
+            PointId::new(5),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump {
+                    target: BlockId::new(3),
+                },
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(4),
+            PointId::new(7),
+            EventKind::Fresh {
+                destination: PlaceId::new(1),
+                origin: ValueOriginId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(5),
+            PointId::new(8),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump {
+                    target: BlockId::new(3),
+                },
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(6),
+            PointId::new(9),
+            EventKind::Fresh {
+                destination: PlaceId::new(2),
+                origin: ValueOriginId::new(2),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(7),
+            PointId::new(11),
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(2),
+                destination: PlaceId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(8),
+            PointId::new(12),
+            EventKind::Access {
+                use_id: UseId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(9),
+            PointId::new(13),
+            EventKind::Access {
+                use_id: UseId::new(2),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(10),
+            PointId::new(14),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Return,
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(11),
+            PointId::new(10),
+            EventKind::Access {
+                use_id: UseId::new(0),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(12),
+            PointId::new(1),
+            EventKind::Fresh {
+                destination: PlaceId::new(2),
+                origin: ValueOriginId::new(2),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(13),
+            PointId::new(7),
+            EventKind::AliasFromPlace {
+                source: PlaceId::new(2),
+                destination: PlaceId::new(1),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(14),
+            PointId::new(12),
+            EventKind::Fresh {
+                destination: PlaceId::new(1),
+                origin: ValueOriginId::new(3),
+            },
+            EventSource::none(),
+        ),
+    ];
+    BorrowProblem::new(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+            Binding::synthetic(BindingId::new(2)),
+        ],
+        points,
+        blocks: vec![
+            CfgBlock::new(
+                BlockId::new(0),
+                PointId::new(0),
+                PointId::new(2),
+                vec![EventId::new(0), EventId::new(12), EventId::new(1)],
+            ),
+            CfgBlock::new(
+                BlockId::new(1),
+                PointId::new(3),
+                PointId::new(5),
+                vec![EventId::new(2), EventId::new(3)],
+            ),
+            CfgBlock::new(
+                BlockId::new(2),
+                PointId::new(6),
+                PointId::new(8),
+                vec![EventId::new(4), EventId::new(13), EventId::new(5)],
+            ),
+            CfgBlock::new(
+                BlockId::new(3),
+                PointId::new(9),
+                PointId::new(14),
+                vec![
+                    EventId::new(6),
+                    EventId::new(11),
+                    EventId::new(7),
+                    EventId::new(14),
+                    EventId::new(8),
+                    EventId::new(9),
+                    EventId::new(10),
+                ],
+            ),
+        ],
+        edges: vec![
+            CfgEdge::new(BlockId::new(0), BlockId::new(1)),
+            CfgEdge::new(BlockId::new(0), BlockId::new(2)),
+            CfgEdge::new(BlockId::new(1), BlockId::new(3)),
+            CfgEdge::new(BlockId::new(2), BlockId::new(3)),
+        ],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(3)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+            Place::new(PlaceId::new(2), BindingId::new(2), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::fresh(ValueOriginId::new(1)),
+            ValueOrigin::fresh(ValueOriginId::new(2)),
+            ValueOrigin::fresh(ValueOriginId::new(3)),
+        ],
+        uses: vec![
+            Use {
+                id: UseId::new(0),
+                point: PointId::new(10),
+                place: PlaceId::new(1),
+                kind: UseKind::Write,
+                definition: true,
+            },
+            Use {
+                id: UseId::new(1),
+                point: PointId::new(12),
+                place: PlaceId::new(2),
+                kind: UseKind::Write,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(2),
+                point: PointId::new(13),
+                place: PlaceId::new(1),
+                kind: UseKind::Read,
+                definition: false,
+            },
+        ],
+        events,
+        ..BorrowProblemParts::default()
+    })
+    .expect("mixed binding problem should validate")
 }
 
 fn generated_problem(seed: u32, cyclic: bool) -> BorrowProblem {

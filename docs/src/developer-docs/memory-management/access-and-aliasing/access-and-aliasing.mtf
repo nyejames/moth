@@ -121,7 +121,10 @@ For `x = y`:
 
 ## Alias activity and last potential use
 
-Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
+Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
+that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
+exclusive capability may be elided remains an explicit experimental question; the reference
+baseline keeps that capability conservative until canonical semantics adopt the stronger rule.
 
 - A shared alias blocks overlapping mutation only until its last potential use on the relevant control-flow path.
 - An unused shared alias does not block later mutation.

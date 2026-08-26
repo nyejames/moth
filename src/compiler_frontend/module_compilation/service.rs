@@ -601,7 +601,6 @@ fn run_semantic_stages(
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
     #[cfg(feature = "boracle")]
-    #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,

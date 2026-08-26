@@ -146,7 +146,7 @@ The compiler-owned Boracle source service follows one explicit analysis relation
         -> structural-place and origin-aware overlap
         -> use-driven loan liveness and conflict witnesses
         -> origin and loan last-use observations
-        -> exact after-event optional-transfer advice
+        -> exact after-event final-use candidates
 ]
 
 The origin solution is an input to loan derivation and conflict checking, not a report collected
@@ -402,7 +402,7 @@ A mutable declaration from an existing place carries mutation-capable access to 
     writer ~= source
 ]
 
-Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias.
+Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias. A mutable function parameter retains its parameter origin but is alias-mode inside the callee, so writes through it mutate caller-provided storage.
 
 The reference extractor also distinguishes an alias-only binding from a slot-backed binding. A
 write through an alias preserves the referent generation and is checked against other holders; a
@@ -556,9 +556,9 @@ A use occurs when a later source-semantic operation observes through the loan or
 
 Merely keeping a binding visible is not a use.
 
-A direct write through a mutable alias is both a holder use and a kill boundary. It keeps the loan
-live for earlier overlapping accesses, then ends the capability immediately after that write
-event.
+A direct write through a mutable alias is a holder use and referent mutation, not a holder kill.
+The capability remains relevant when another holder use is reachable after that write; use-driven
+liveness naturally ends it after the final holder use.
 
 ### Loan kills
 
@@ -723,7 +723,10 @@ At a join, Boracle retains a loan only when at least one incoming path can still
 
 ## Dead exclusive loans
 
-Moth's accepted general model says alias activity is non-lexical and control-flow-sensitive. The current alpha implementation may conservatively keep some unused mutable aliases active to scope exit.
+Moth's accepted general model gives shared aliases, and exclusive aliases with reachable holder
+uses, path-sensitive non-lexical activity. Whether an issued but never-used exclusive capability
+may be elided remains unsettled; the current alpha implementation and Boracle reference mode may
+conservatively keep such aliases active to scope exit.
 
 Boracle should investigate the stronger rule:
 
@@ -1303,8 +1306,8 @@ A build with `boracle` exposes the initial internal command:
 
 The initial implementation accepts `problem`, `origins`, `loans`, `last-use`, `conflicts` and
 `witnesses` dumps, plus the named `reference` and `dead-exclusive-loan` experiment labels. The
-second label is deliberately reference-equivalent until its stronger rule is accepted; reports
-always include the active rule-set and experiment name.
+second label deliberately selects the stronger dead-exclusive liveness rule while it remains an
+experiment; reports always include the active rule-set and experiment name.
 
 Useful dump categories:
 
@@ -1348,7 +1351,7 @@ The command currently covers:
 - bounded generated problems
 - deterministic bounded generated problems
 - typed source-mode semantic corpus through the compiler-owned HIR service
-- exact after-event optional-transfer queries
+- exact after-event final-use candidate queries
 - generated copy/rebind provenance properties and loop/branch determinism
 - an internal source-mode smoke
 
