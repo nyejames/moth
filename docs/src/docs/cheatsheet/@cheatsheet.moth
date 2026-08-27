@@ -14,12 +14,7 @@ page_head #= language_theme_head
     # Moth language cheatsheet
 
     Moth is a small, statically typed language with first-class string templates,
-    explicit mutable access and mandatory borrow and lifetime validation. This
-    page is a compact reference for humans and coding models writing Moth source.
-
-    It describes the accepted language surface. The @../progress (progress matrix)
-    is the authority on what the current Alpha compiler implements and which
-    targets support it.
+    explicit mutable access and mandatory borrow and lifetime validation.
 ]
 
 #[section, cheatsheet_content]
