@@ -1,4 +1,9 @@
 //! Focused tests for the feature-gated Boracle reference solver.
+//!
+//! `relations` owns the typed provenance-relation vocabulary. This file owns solver,
+//! loan, report and source-service behaviour.
+
+mod relations;
 
 use super::super::last_use::{FutureUseStatus, LastUseLocation, LastUseSubject};
 use super::super::problem::{

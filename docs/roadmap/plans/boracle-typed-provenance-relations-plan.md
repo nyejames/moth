@@ -2,11 +2,11 @@
 
 Status: active
 
-Current slice: Phase 0 inventory and empty-AliasParams fallback regressions
+Current slice: Phase 1 typed relation vocabulary
 
 Blockers: none
 
-Next action: add the typed relation vocabulary in `relations.rs` without migrating the solver
+Next action: migrate origin overlap and delete `related_origins`
 
 Repository path:
 
@@ -217,44 +217,44 @@ Create one narrow owner for provenance relationships before migrating conflict l
 
 ### Work
 
-- [ ] Add `src/compiler_frontend/analysis/borrow_checker/boracle/relations.rs`.
-- [ ] Give the file a WHAT/WHY owner comment and explicit exclusions.
-- [ ] Define typed directional and symmetric relationship rows.
-- [ ] Define overlap, disjoint and unknown decisions with typed evidence.
-- [ ] Define `PrecisionLossReason` and `DisjointReason`.
-- [ ] Keep relation construction deterministic.
-- [ ] Add validation for:
-  - [ ] unknown origin IDs
-  - [ ] invalid self-relations where the kind forbids them
-  - [ ] invalid projection evidence
-  - [ ] copy correspondence that aliases source and result
-  - [ ] contradictory proven-disjoint and forced-overlap facts
-- [ ] Add a stable debug dump.
-- [ ] Re-export only the stage-local surface needed by reports and later experiments.
-- [ ] Do not migrate the solver yet. Build focused hand-authored relation tests first.
-- [ ] Move Boracle unit tests into `boracle/tests/` if the new cases would make the existing test file harder to navigate.
-- [ ] Split tests by semantic family rather than by bug report.
+- [x] Add `src/compiler_frontend/analysis/borrow_checker/boracle/relations.rs`.
+- [x] Give the file a WHAT/WHY owner comment and explicit exclusions.
+- [x] Define typed directional and symmetric relationship rows.
+- [x] Define overlap, disjoint and unknown decisions with typed evidence.
+- [x] Define `PrecisionLossReason` and `DisjointReason`.
+- [x] Keep relation construction deterministic.
+- [x] Add validation for:
+  - [x] unknown origin IDs
+  - [x] invalid self-relations where the kind forbids them
+  - [x] invalid projection evidence
+  - [x] copy correspondence that aliases source and result
+  - [x] contradictory proven-disjoint and forced-overlap facts
+- [x] Add a stable debug dump.
+- [x] Re-export only the stage-local surface needed by reports and later experiments.
+- [x] Do not migrate the solver yet. Build focused hand-authored relation tests first.
+- [x] Move Boracle unit tests into `boracle/tests/` if the new cases would make the existing test file harder to navigate.
+- [x] Split tests by semantic family rather than by bug report.
 
 ### Required tests
 
-- [ ] same origin is overlapping by identity
-- [ ] fresh origins are disjoint
-- [ ] copy source and result are disjoint
-- [ ] projection relationship is directional
-- [ ] siblings do not become related through their parent
-- [ ] aggregate containment does not imply sibling overlap
-- [ ] unknown call result returns unknown overlap evidence
-- [ ] deterministic relation ordering and dumps
-- [ ] malformed relation rows fail as `CompilerError`
+- [x] same origin is overlapping by identity
+- [x] fresh origins are disjoint
+- [x] copy source and result are disjoint
+- [x] projection relationship is directional
+- [x] siblings do not become related through their parent
+- [x] aggregate containment does not imply sibling overlap
+- [x] unknown call result returns unknown overlap evidence
+- [x] deterministic relation ordering and dumps
+- [x] malformed relation rows fail as `CompilerError`
 
 ### Phase gate
 
-- [ ] Audit the new vocabulary for overlap with `OriginKind`, `PlaceOverlap` and lifetime-topology concepts.
-- [ ] Review the new file and test split against the style guide.
-- [ ] Run focused relation tests.
-- [ ] Run `just boracle`.
-- [ ] Run `git diff --check`.
-- [ ] Commit the typed vocabulary without changing reference results.
+- [x] Audit the new vocabulary for overlap with `OriginKind`, `PlaceOverlap` and lifetime-topology concepts.
+- [x] Review the new file and test split against the style guide.
+- [x] Run focused relation tests.
+- [x] Run `just boracle`.
+- [x] Run `git diff --check`.
+- [x] Commit the typed vocabulary without changing reference results.
 
 ## Phase 2: migrate origin overlap and delete `related_origins`
 

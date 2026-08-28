@@ -1,10 +1,25 @@
 //! Boracle feature lane entry for the internal reference solver.
 //!
-//! This module is intentionally isolated behind the `boracle` cargo feature and does
-//! not participate in the shipped alpha checker path.
+//! WHAT: feature-gated origin flow, typed provenance relations, loan liveness, last-use
+//!       queries and deterministic reports over a validated `BorrowProblem`.
+//! WHY:  the reference lane must stay inspectable and isolated from the shipped alpha checker.
+//!
+//! Flow:
+//! `problem` builder -> `origins` -> `relations` (vocabulary; solver migration is later) ->
+//! `loans` -> `report` / `service`.
+//!
+//! This module does not run during normal compilation, does not rewrite HIR, and does not
+//! decide lifetime topology, retained edges or physical memory strategy.
+//!
+//! Files:
+//! - `origins.rs`: origin flow and the current untyped `related_origins` overlap query
+//! - `relations.rs`: typed relation rows, overlap/disjoint/unknown evidence and validation
+//! - `loans.rs`: loan derivation and origin-aware conflicts
+//! - `report.rs` / `service.rs`: solver reports, dumps and the source-service boundary
 
 mod loans;
 mod origins;
+mod relations;
 mod report;
 mod service;
 
@@ -14,6 +29,12 @@ pub(crate) use loans::{
 };
 #[allow(unused_imports)]
 pub(crate) use origins::{OriginFact, OriginSolution, OriginSolver, OriginTrace, OriginTraceRule};
+#[allow(unused_imports)]
+pub(crate) use relations::{
+    CopyGraphId, DisjointReason, OriginDisjointEvidence, OriginOverlapDecision,
+    OriginOverlapEvidence, OriginRegistration, OriginRelation, OriginRelationEvidence,
+    OriginRelationKind, OriginRelations, OriginUnknownEvidence, PrecisionLossReason,
+};
 #[allow(unused_imports)]
 pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
 #[cfg(test)]
