@@ -1,12 +1,15 @@
-Everything below is accepted language surface. Where a design question is still open, this page says
-so and gives no speculative syntax: **design pending** means no final contract exists yet, so do not
-invent one. Detailed explanations live throughout the @../ (Moth documentation).
+    This cheatsheet describes the final design for the language. The @../progress (progress matrix)
+    is the authority on what the current Alpha compiler implements and which
+    targets support it.
+
+    This may change or contain semantics that are not yet implemented. 
+    For more detailed breakdowns, see the @../ (Moth documentation).
 
 ## Rules to internalise first
 
 - `:` opens a block. `;` closes it. Semicolons do not end statements.
 - Bindings are immutable unless declared with `~`.
-- Existing values use shared read-only access. Rebinding does not copy.
+- Existing values use shared read-only access. Rebinding doesn't copy.
 - `~place` requests exclusive access for one operation. It is not a type, reference or move.
 - `copy place` creates independent storage. Moth has no explicit move or lifetime syntax.
 - Square brackets create strings and templates. Curly braces create collections and maps.
@@ -49,7 +52,7 @@ invent one. Detailed explanations live throughout the @../ (Moth documentation).
 
     [td:
         [: `pub name`]
-        [: put the declaration inside the module root's `export:` block]
+        [: Top level constants / functions are module public, put the declaration inside the module root's `export:` block for visibility beyond that]
     ]
 
     [td:
@@ -187,8 +190,7 @@ Naming conventions:
 - Traits use `ALL_CAPS`.
 - A visible name cannot be redeclared while it remains in scope.
 
-`Config` and its case-insensitive, leading-underscore keyword-shadow variants are reserved. `Import`
-is an ordinary valid user identifier; there is no `import` keyword.
+`Config` and its case-insensitive, leading-underscore keyword-shadow variants are reserved. There is no `import` keyword.
 
 Symbolic binary operators and assignment require spaces on both sides:
 
@@ -212,9 +214,11 @@ Symbolic binary operators and assignment require spaces on both sides:
     message = [: Hello, [text].]
 ]
 
-Quoted text creates a read-only string slice. A template creates an owned string. Both use the semantic `String` type at typed boundaries. `Char` stores one Unicode scalar value.
+Quoted text creates a read-only string slice. A template creates an owned string.
+Both use the semantic `String` type at typed boundaries. `Char` stores one Unicode scalar value.
 
-Quoted strings cannot continue across a physical newline. They support only `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings. In `$md` content, paired single backticks delimit inline code.
+Quoted strings support only `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings.
+In `$md` content, backticks are for inline code snippets.
 
 `String + String` is invalid. Concatenate and interpolate through templates:
 
@@ -239,7 +243,8 @@ String equality compares content with `is` and `is not`. Strings do not support 
     version #Int = 1           -- typed compile-time constant
 ]
 
-Mutability belongs to a binding or access operation, not to type identity. `names ~{String}` declares a mutable binding whose semantic type is `{String}`.
+Mutability belongs to a binding or access operation, not to type identity.
+`names ~{String}` declares a mutable binding whose semantic type is `{String}`.
 
 A constant:
 
@@ -249,7 +254,9 @@ A constant:
 - must fully fold
 - cannot use a same-file forward reference
 
-Visible dependency-bound constants are already folded and may be used. Cross-file constants in the same module follow the module's declaration dependency ordering. `#` controls compile-time evaluation, not visibility.
+Visible dependency-bound constants are already folded and may be used.
+Cross-file constants in the same module follow the module's declaration dependency ordering.
+`#` controls compile-time evaluation.
 
 ## Reference semantics, copying and ownership
 
@@ -263,9 +270,11 @@ Existing values use shared read-only access:
     ~items.push("Emmy") -- valid: shared_items has no later use
 ]
 
-A later use of `shared_items` would keep the alias live and make the mutation invalid. Borrow lifetimes follow control flow.
+A later use of `shared_items` would keep the alias live and make the mutation invalid.
+Borrow lifetimes follow control flow.
 
-A mutable declaration from an existing place creates a write-through alias. One from a fresh expression creates an independent slot:
+A mutable declaration from an existing place creates a write-through alias.
+One from a fresh expression creates an independent slot:
 
 [codeblock, $code("moth"):
     writer ~= items
@@ -280,15 +289,27 @@ Only `copy` creates independent storage from an existing place:
     independent ~= copy items
 ]
 
-`copy` accepts a binding, field projection or parenthesised place. It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source. Fresh literals, templates, calls and computations are invalid `copy` operands.
+`copy` accepts a binding, field projection or parenthesised place.
+It deep-copies the copyable graph, preserves internal alias topology and shares no mutable allocation with the source.
+`copy` can't be used with fresh literals, templates, calls and computations.
 
-Moth has no move operator. The compiler may transfer cleanup responsibility at proven final use without changing aliasing or source meaning. Each allocation still has one semantic lifetime owner, and retained references must point to the same or a longer-lived region.
+Moth has no move operator.
+The compiler may transfer cleanup responsibility at proven final use without changing aliasing or source meaning.
+Each allocation still has one lifetime owner and retained references must belong to a region that lives as long or longer.
 
-Memory safety comes from static proof, not from a collector. Borrow validation and lifetime-topology validation are mandatory on every backend and every build profile, so every target accepts and rejects exactly the same programs. Garbage collection is one permitted way to represent a topology the compiler has already proven legal; it can never make an illegal program legal.
+Memory safety comes from static proof, not from a collector.
+Borrow validation and lifetime-topology validation are mandatory ALWAYS. 
+Every backend accepts and rejects the same programs.
+Garbage collection is one permitted way to represent a topology the compiler has already proven legal,
+but every build, debug or release, must follow the same rules.
 
-Backends that advertise full memory control lower release builds without a tracing collector. That is a property of the backend and the emitted artefact, not a language mode: there is no source or project setting that turns GC on or off, and nothing about it appears in your code.
+Backends advertising full memory control can lower release builds without a tracing collector.
+That is a property of the backend and it's artefacts, not a language mode. 
 
-The compiler may use internal Retained Edge Counting when a runtime-dependent number of persistent stored aliases disappear independently. Ordinary local aliases and `get()` borrows are never counted, and no REC mechanism appears in source.
+There is no source or project setting that turns GC on or off, and nothing about it appears in your code.
+
+The compiler may use internal Retained Edge Counting in certain cases.
+Ordinary local aliases and `get()` borrows are never counted, and no REC mechanism appears in source.
 
 ### Declared memory groups
 
@@ -340,7 +361,8 @@ Arithmetic rules:
 - positive-scale multiply, divide and exponentiation round half to even per operation
 - `^` is right-associative
 
-Numeric operations are checked. Statically known failure is a diagnostic. Supported runtime failure enters builtin `Error!` only when that is the function's final error slot. Otherwise it traps.
+Numeric operations are checked. Statically known failure is a diagnostic.
+Supported runtime failure enters builtin `Error!` only when that is the function's final error slot. Otherwise it traps.
 
 Precedence: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`.
 
@@ -405,7 +427,9 @@ Rules:
     custom = greet(name = "Rob", punctuation = "?")
 ]
 
-Parameters use `|...|`. No parameters use `||`. Omit `->` when there are no success values. Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults. Host functions and compiler-owned builtin members are positional-only.
+Parameters use `|...|`. No parameters use `||`. Omit `->` when there are no success values.
+Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults.
+Host functions and compiler-owned builtin members are positional-only.
 
 Mutable parameters require `~place` for existing storage, but accept fresh rvalues plainly:
 
@@ -431,7 +455,8 @@ Multiple returns are not tuples:
     name, count = pair()
 ]
 
-Receive them through matching multi-bind, return or value-producing syntax. General closure/function-value systems are outside scope. Narrow named function references remain design pending.
+Receive them through matching multi-bind, return or value-producing syntax.
+General closure/function-value systems are outside scope. Narrow named function references remain design pending.
 
 ## Options: `T?`, `none` and postfix `?`
 
