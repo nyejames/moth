@@ -5,14 +5,14 @@
 //! WHY:  the reference lane must stay inspectable and isolated from the shipped alpha checker.
 //!
 //! Flow:
-//! `problem` builder -> `origins` -> `relations` (vocabulary; solver migration is later) ->
-//! `loans` -> `report` / `service`.
+//! `problem` builder -> `origins` (flow + typed relation construction) -> `relations`
+//! (typed vocabulary and the origin-overlap owner) -> `loans` -> `report` / `service`.
 //!
 //! This module does not run during normal compilation, does not rewrite HIR, and does not
 //! decide lifetime topology, retained edges or physical memory strategy.
 //!
 //! Files:
-//! - `origins.rs`: origin flow and the current untyped `related_origins` overlap query
+//! - `origins.rs`: origin flow and typed `OriginRelations` construction
 //! - `relations.rs`: typed relation rows, overlap/disjoint/unknown evidence and validation
 //! - `loans.rs`: loan derivation and origin-aware conflicts
 //! - `report.rs` / `service.rs`: solver reports, dumps and the source-service boundary

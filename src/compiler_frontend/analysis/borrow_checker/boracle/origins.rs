@@ -11,7 +11,10 @@
 
 use super::super::problem::{
     BindingId, BorrowProblem, CallResultProvenance, Event, EventId, EventKind, OriginKind, PlaceId,
-    UseId, UseKind, ValueOriginId,
+    ProjectionElem, UseId, UseKind, ValueOrigin, ValueOriginId,
+};
+use super::relations::{
+    CopyGraphId, OriginRegistration, OriginRelation, OriginRelations, PrecisionLossReason,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet};
@@ -77,7 +80,7 @@ pub(crate) struct OriginSolution {
     traces: Box<[OriginTrace]>,
     state_after_event: BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
     write_through_uses: Box<[UseId]>,
-    related_origins: BTreeSet<(ValueOriginId, ValueOriginId)>,
+    relations: OriginRelations,
 }
 
 impl OriginSolution {
@@ -138,28 +141,8 @@ impl OriginSolution {
         saw_rebind
     }
 
-    pub(crate) fn origins_overlap(
-        &self,
-        problem: &BorrowProblem,
-        left: &[ValueOriginId],
-        right: &[ValueOriginId],
-    ) -> bool {
-        if left.is_empty() || right.is_empty() {
-            return true;
-        }
-        if left.iter().any(|origin| is_top_origin(problem, *origin))
-            || right.iter().any(|origin| is_top_origin(problem, *origin))
-        {
-            return true;
-        }
-        left.iter().any(|left_origin| {
-            right.iter().any(|right_origin| {
-                left_origin == right_origin
-                    || self
-                        .related_origins
-                        .contains(&(*left_origin, *right_origin))
-            })
-        })
+    pub(crate) fn relations(&self) -> &OriginRelations {
+        &self.relations
     }
 
     pub(crate) fn origins_for_place_after_event(
@@ -168,31 +151,7 @@ impl OriginSolution {
         event: EventId,
         place: PlaceId,
     ) -> Box<[ValueOriginId]> {
-        if let Some(origins) = self.origins_after_event(event, place) {
-            return origins.to_vec().into_boxed_slice();
-        }
-
-        let Some(place_row) = problem.places().get(place.index()) else {
-            return Box::new([]);
-        };
-        let mut origins = BTreeSet::new();
-        for ((candidate_event, candidate_place), candidate_origins) in &self.state_after_event {
-            if *candidate_event != event {
-                continue;
-            }
-            let Some(candidate_row) = problem.places().get(candidate_place.index()) else {
-                continue;
-            };
-            if candidate_row.root == place_row.root
-                && candidate_row.projections.len() <= place_row.projections.len()
-                && place_row
-                    .projections
-                    .starts_with(&candidate_row.projections)
-            {
-                origins.extend(candidate_origins.iter().copied());
-            }
-        }
-        origins.into_iter().collect()
+        origins_recovered_after_event(problem, &self.state_after_event, event, place)
     }
 
     pub(crate) fn debug_dump(&self) -> String {
@@ -290,94 +249,412 @@ impl OriginSolver {
         facts.sort_by_key(|fact| (fact.event.raw(), fact.place.raw()));
         traces.sort_by_key(|trace| trace.event.raw());
 
-        let related_origins = related_origins(problem, &traces, &state_after_event);
+        let relations = origin_relations(problem, &traces, &state_after_event)?;
 
         Ok(OriginSolution {
             facts: facts.into_boxed_slice(),
             traces: traces.into_boxed_slice(),
             state_after_event,
             write_through_uses: write_through_uses.into_iter().collect(),
-            related_origins,
+            relations,
         })
     }
 }
 
-fn related_origins(
+// ------------------------
+//  Origin relation construction
+// ------------------------
+
+/// Build the typed relation table for one solved origin problem.
+///
+/// Rows are extracted from the normalized origin rows, the solved traces and the per-event
+/// state: identity stays `ValueOriginId` equality, projection rows keep their actual
+/// source-to-derived direction, same-event place ancestry owns base/child containment, and
+/// explicit copies publish positive disjointness. Every other coexistence between two solved
+/// generations becomes a may-alias precision loss. Mixed traces contribute no rows at all
+/// because their output sets union independent generations that only identity may relate.
+fn origin_relations(
     problem: &BorrowProblem,
     traces: &[OriginTrace],
     state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
-) -> BTreeSet<(ValueOriginId, ValueOriginId)> {
-    let mut neighbours: BTreeMap<ValueOriginId, BTreeSet<ValueOriginId>> = BTreeMap::new();
+) -> Result<OriginRelations, CompilerError> {
+    let top_reasons = top_like_reasons(problem);
+    let mut registrations = Vec::new();
+    let mut rows = Vec::new();
+    let mut mixed_generation_sets = Vec::new();
 
     for origin in problem.origins() {
-        let related = match &origin.kind {
-            OriginKind::Alias(origins)
-            | OriginKind::ExclusiveAlias(origins)
-            | OriginKind::Join(origins) => origins.to_vec(),
-            OriginKind::Projection { source, .. } => vec![*source],
-            OriginKind::CallResult {
-                provenance: CallResultProvenance::Alias(origins),
-                ..
-            } => origins.to_vec(),
-            OriginKind::Unknown
-            | OriginKind::Parameter { .. }
-            | OriginKind::Fresh
-            | OriginKind::Copy(_)
-            | OriginKind::CallResult { .. } => Vec::new(),
-        };
-        for related_origin in related {
-            add_related_edge(&mut neighbours, origin.id, related_origin);
-        }
-    }
+        registrations.push(match top_reasons.get(&origin.id).copied().flatten() {
+            Some(reason) => OriginRegistration::unknown(origin.id, reason),
+            None => independent_registration(origin),
+        });
 
-    for trace in traces {
-        if trace.rule == OriginTraceRule::Mixed {
-            // A mixed trace publishes the union of two correlated execution possibilities.
-            // Its output set therefore contains preserved alias origins as well as the new
-            // slot-path origins; treating every output/input pair as related would fabricate
-            // overlap between those independent generations.
-            continue;
+        // A projection row is only honest when its source is a real generation. Builder rows
+        // share one Unknown placeholder as their source and stay conservative through their
+        // unknown registration instead of inventing a row from it.
+        if let OriginKind::Projection { source, projection } = &origin.kind
+            && source != &origin.id
+            && top_reasons.get(source).copied().flatten().is_none()
+        {
+            rows.push(OriginRelation::projection(*source, origin.id, *projection));
         }
-        for output in &trace.output_origins {
-            for input in &trace.input_origins {
-                add_related_edge(&mut neighbours, *output, *input);
-            }
-        }
-    }
 
-    // A projected write can introduce a fresh child origin while the containing binding keeps
-    // its current generation. Preserve that direct base/child relationship without taking a
-    // transitive closure: sibling fields must remain disjoint when their origins differ.
-    for ((event, left_place), left_origins) in state_after_event {
-        for ((candidate_event, right_place), right_origins) in state_after_event {
-            if event != candidate_event
-                || !is_strict_place_ancestor(problem, *left_place, *right_place)
-            {
-                continue;
-            }
-            for left_origin in left_origins {
-                for right_origin in right_origins {
-                    add_related_edge(&mut neighbours, *left_origin, *right_origin);
+        // A joined origin represents one of the joined path generations. Fixture rows are the
+        // only producer, so the possible-overlap fact keeps its explicit path reason.
+        if let OriginKind::Join(members) = &origin.kind {
+            for member in members.iter().copied() {
+                if member != origin.id {
+                    rows.push(OriginRelation::may_alias(
+                        origin.id,
+                        member,
+                        PrecisionLossReason::PathJoin,
+                    ));
                 }
             }
         }
     }
 
-    neighbours
-        .into_iter()
-        .flat_map(|(left, rights)| rights.into_iter().map(move |right| (left, right)))
+    for trace in traces {
+        if trace.rule == OriginTraceRule::Mixed {
+            mixed_generation_sets.push(trace.output_origins.clone());
+            continue;
+        }
+
+        let Some(event) = problem.events().get(trace.event.index()) else {
+            continue;
+        };
+        match trace.rule {
+            OriginTraceRule::Aggregate => {
+                emit_aggregate_child_rows(problem, state_after_event, trace, event, &mut rows);
+            }
+            OriginTraceRule::Copy | OriginTraceRule::Noop | OriginTraceRule::ScopeExit => {}
+            OriginTraceRule::Projection => {
+                emit_projection_trace_rows(problem, event, state_after_event, &mut rows);
+            }
+            OriginTraceRule::Mixed => {}
+            OriginTraceRule::Alias
+            | OriginTraceRule::Rebind
+            | OriginTraceRule::WriteThrough
+            | OriginTraceRule::Fresh
+            | OriginTraceRule::CallResult => {
+                // A write through an alias-only binding preserves the referent generation while
+                // the written generation flows through the same access path, so such a pair stays
+                // a may-alias precision loss. Flow-preserving rules only restate identity pairs.
+                for output in &trace.output_origins {
+                    for input in &trace.input_origins {
+                        if output != input {
+                            rows.push(OriginRelation::may_alias(
+                                *output,
+                                *input,
+                                PrecisionLossReason::PathJoin,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Base/child containment at one event. The directional rows keep sibling fields
+    // unrelated: a transitive closure would reconnect generations the solver keeps apart.
+    for ((event, ancestor_place), ancestor_origins) in state_after_event {
+        for ((candidate_event, descendant_place), descendant_origins) in state_after_event {
+            if event != candidate_event
+                || !is_strict_place_ancestor(problem, *ancestor_place, *descendant_place)
+            {
+                continue;
+            }
+            let Some(step) = ancestry_step(problem, *ancestor_place, *descendant_place) else {
+                continue;
+            };
+            for ancestor_origin in ancestor_origins {
+                for descendant_origin in descendant_origins {
+                    if ancestor_origin != descendant_origin {
+                        rows.push(OriginRelation::aggregate_child(
+                            *ancestor_origin,
+                            *descendant_origin,
+                            step,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    emit_copy_correspondence_rows(problem, traces, state_after_event, &top_reasons, &mut rows);
+
+    Ok(
+        OriginRelations::new(registrations, rows)?
+            .with_mixed_generation_sets(mixed_generation_sets),
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TopLikeWalk {
+    InProgress,
+    Done(Option<PrecisionLossReason>),
+}
+
+/// Classify every origin's top-like uncertainty together with the reason that caused it.
+///
+/// This keeps the previous overlap helper's walk as registration evidence: Unknown rows,
+/// unknown call results and every alias, join, projection or alias-provenance derivation that
+/// reaches one are conservative. Memoized walking replaces the previous unguarded recursion.
+fn top_like_reasons(
+    problem: &BorrowProblem,
+) -> BTreeMap<ValueOriginId, Option<PrecisionLossReason>> {
+    let mut memo: BTreeMap<ValueOriginId, TopLikeWalk> = BTreeMap::new();
+    for origin in problem.origins() {
+        top_like_reason(problem, origin.id, &mut memo);
+    }
+
+    memo.into_iter()
+        .map(|(origin, walk)| (origin, finished_walk(walk)))
         .collect()
 }
 
-fn add_related_edge(
-    neighbours: &mut BTreeMap<ValueOriginId, BTreeSet<ValueOriginId>>,
-    left: ValueOriginId,
-    right: ValueOriginId,
-) {
-    neighbours.entry(left).or_default().insert(right);
-    neighbours.entry(right).or_default().insert(left);
+fn finished_walk(walk: TopLikeWalk) -> Option<PrecisionLossReason> {
+    match walk {
+        TopLikeWalk::Done(reason) => reason,
+        TopLikeWalk::InProgress => Some(PrecisionLossReason::MissingLocalSummary),
+    }
 }
 
+fn top_like_reason(
+    problem: &BorrowProblem,
+    origin_id: ValueOriginId,
+    memo: &mut BTreeMap<ValueOriginId, TopLikeWalk>,
+) -> Option<PrecisionLossReason> {
+    match memo.get(&origin_id) {
+        Some(TopLikeWalk::Done(reason)) => return *reason,
+
+        // A derivation cycle cannot be proven independent. Conservatively treat the back edge
+        // as unknown so an unknown member cannot be forgotten because of visit order.
+        Some(TopLikeWalk::InProgress) => {
+            return Some(PrecisionLossReason::MissingLocalSummary);
+        }
+        None => {}
+    }
+
+    memo.insert(origin_id, TopLikeWalk::InProgress);
+    let reason = match problem.origins().get(origin_id.index()) {
+        None => Some(PrecisionLossReason::MissingLocalSummary),
+
+        Some(origin) => match &origin.kind {
+            OriginKind::Unknown => Some(PrecisionLossReason::MissingLocalSummary),
+
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Unknown,
+                ..
+            } => Some(PrecisionLossReason::UnknownCallResult),
+
+            OriginKind::Projection { source, .. } => top_like_reason(problem, *source, memo),
+
+            OriginKind::Alias(members)
+            | OriginKind::ExclusiveAlias(members)
+            | OriginKind::Join(members) => derivation_member_reason(problem, members, memo),
+
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::Alias(members),
+                ..
+            } => derivation_member_reason(problem, members, memo),
+
+            OriginKind::Copy(_)
+            | OriginKind::Parameter { .. }
+            | OriginKind::Fresh
+            | OriginKind::CallResult { .. } => None,
+        },
+    };
+
+    memo.insert(origin_id, TopLikeWalk::Done(reason));
+    reason
+}
+
+fn derivation_member_reason(
+    problem: &BorrowProblem,
+    members: &[ValueOriginId],
+    memo: &mut BTreeMap<ValueOriginId, TopLikeWalk>,
+) -> Option<PrecisionLossReason> {
+    members
+        .iter()
+        .filter_map(|member| top_like_reason(problem, *member, memo))
+        .min()
+}
+
+/// Registration for one origin that is not top-like.
+///
+/// Alias, exclusive-alias and alias-provenance call-result rows have no current producer.
+/// They stay derived rather than claiming a fresh independent generation their member list
+/// cannot prove, so any pair without an explicit row remains conservatively unknown.
+fn independent_registration(origin: &ValueOrigin) -> OriginRegistration {
+    match &origin.kind {
+        OriginKind::Alias(_)
+        | OriginKind::ExclusiveAlias(_)
+        | OriginKind::CallResult {
+            provenance: CallResultProvenance::Alias(_),
+            ..
+        } => OriginRegistration::derived(origin.id),
+
+        _ => OriginRegistration::fresh(origin.id),
+    }
+}
+
+/// Emit typed containment rows for one aggregate event.
+///
+/// The event's fields carry the actual per-child projection path, so each stored child
+/// generation gets one directional row. Input generations the field rows cannot explain are
+/// still related as a may-alias precision loss so trace flow never silently disappears.
+fn emit_aggregate_child_rows(
+    problem: &BorrowProblem,
+    state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+    trace: &OriginTrace,
+    event: &Event,
+    rows: &mut Vec<OriginRelation>,
+) {
+    let EventKind::Aggregate {
+        destination,
+        fields,
+        ..
+    } = &event.kind
+    else {
+        return;
+    };
+
+    let mut explained_pairs = BTreeSet::new();
+    for field in fields.iter() {
+        let Some(child_place) = projected_place(problem, *destination, field.projection) else {
+            continue;
+        };
+        let field_origins =
+            origins_recovered_after_event(problem, state_after_event, trace.event, child_place);
+        for field_origin in field_origins {
+            for output in &trace.output_origins {
+                if field_origin != *output {
+                    rows.push(OriginRelation::aggregate_child(
+                        *output,
+                        field_origin,
+                        field.projection,
+                    ));
+                    explained_pairs.insert(normalized_origin_pair(*output, field_origin));
+                }
+            }
+        }
+    }
+
+    for output in &trace.output_origins {
+        for input in &trace.input_origins {
+            if output != input
+                && !explained_pairs.contains(&normalized_origin_pair(*output, *input))
+            {
+                rows.push(OriginRelation::may_alias(
+                    *output,
+                    *input,
+                    PrecisionLossReason::PathJoin,
+                ));
+            }
+        }
+    }
+}
+
+/// Emit positive copy-disjointness rows.
+///
+/// Each copy event owns one correspondence graph between the read source generation and the
+/// independent result generation. The row is only published when the copy actually replaced
+/// the destination generation: a write-through copy keeps the old referent generation, so the
+/// copied result never became observable. Pairs that another rule already forces to overlap
+/// keep that stronger fact, and unknown-provenance origins never receive a disjointness row
+/// because top-like uncertainty must stay conservative.
+fn emit_copy_correspondence_rows(
+    problem: &BorrowProblem,
+    traces: &[OriginTrace],
+    state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+    top_reasons: &BTreeMap<ValueOriginId, Option<PrecisionLossReason>>,
+    rows: &mut Vec<OriginRelation>,
+) {
+    let forced_pairs: BTreeSet<(ValueOriginId, ValueOriginId)> = rows
+        .iter()
+        .map(|row| normalized_origin_pair(row.left, row.right))
+        .collect();
+
+    let mut copy_graphs = 0u32;
+    for trace in traces {
+        if trace.rule != OriginTraceRule::Copy {
+            continue;
+        }
+        let Some(event) = problem.events().get(trace.event.index()) else {
+            continue;
+        };
+        let EventKind::Copy {
+            destination,
+            origin,
+            ..
+        } = &event.kind
+        else {
+            continue;
+        };
+        let copy_graph = CopyGraphId::new(copy_graphs);
+        copy_graphs += 1;
+
+        let Some(destination_origins) = state_after_event.get(&(event.id, *destination)) else {
+            continue;
+        };
+        if !destination_origins.contains(origin) {
+            continue;
+        }
+
+        for source_origin in &trace.input_origins {
+            if source_origin == origin
+                || top_reasons.get(source_origin).copied().flatten().is_some()
+                || top_reasons.get(origin).copied().flatten().is_some()
+                || forced_pairs.contains(&normalized_origin_pair(*source_origin, *origin))
+            {
+                continue;
+            }
+            rows.push(OriginRelation::copy_correspondence(
+                *source_origin,
+                *origin,
+                copy_graph,
+            ));
+        }
+    }
+}
+
+fn emit_projection_trace_rows(
+    problem: &BorrowProblem,
+    event: &Event,
+    state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+    rows: &mut Vec<OriginRelation>,
+) {
+    let EventKind::Projection { source, origin, .. } = &event.kind else {
+        return;
+    };
+    let Some(projection) = problem
+        .origins()
+        .get(origin.index())
+        .and_then(|row| match &row.kind {
+            OriginKind::Projection { projection, .. } => Some(*projection),
+            _ => None,
+        })
+    else {
+        return;
+    };
+
+    // Use the source place's own generation, not identity-preserving child recovery.
+    // Projecting an aggregate must not claim the stored field generation as the derived
+    // origin's source.
+    let Some(source_origins) = state_after_event.get(&(event.id, *source)) else {
+        return;
+    };
+    for source_origin in source_origins {
+        if source_origin != origin {
+            rows.push(OriginRelation::projection(
+                *source_origin,
+                *origin,
+                projection,
+            ));
+        }
+    }
+}
 fn is_strict_place_ancestor(
     problem: &BorrowProblem,
     ancestor: PlaceId,
@@ -394,24 +671,64 @@ fn is_strict_place_ancestor(
         && descendant.projections.starts_with(&ancestor.projections)
 }
 
-fn is_top_origin(problem: &BorrowProblem, origin_id: ValueOriginId) -> bool {
-    let Some(origin) = problem.origins().get(origin_id.index()) else {
-        return true;
+/// The single projection step that leads from one place to its strict descendant.
+fn ancestry_step(
+    problem: &BorrowProblem,
+    ancestor: PlaceId,
+    descendant: PlaceId,
+) -> Option<ProjectionElem> {
+    let ancestor_row = problem.places().get(ancestor.index())?;
+    let descendant_row = problem.places().get(descendant.index())?;
+
+    descendant_row
+        .projections
+        .get(ancestor_row.projections.len())
+        .copied()
+}
+
+/// Recover one place's origin state after an event, unioning same-root ancestor states when
+/// the exact place has no recorded state.
+fn origins_recovered_after_event(
+    problem: &BorrowProblem,
+    state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+    event: EventId,
+    place: PlaceId,
+) -> Box<[ValueOriginId]> {
+    if let Some(origins) = state_after_event.get(&(event, place)) {
+        return origins.clone();
+    }
+
+    let Some(place_row) = problem.places().get(place.index()) else {
+        return Box::new([]);
     };
-    match &origin.kind {
-        OriginKind::Unknown
-        | OriginKind::CallResult {
-            provenance: CallResultProvenance::Unknown,
-            ..
-        } => true,
-        OriginKind::Alias(origins)
-        | OriginKind::ExclusiveAlias(origins)
-        | OriginKind::Join(origins) => origins.iter().any(|origin| is_top_origin(problem, *origin)),
-        OriginKind::Projection { source, .. } => is_top_origin(problem, *source),
-        OriginKind::Copy(_)
-        | OriginKind::Parameter { .. }
-        | OriginKind::Fresh
-        | OriginKind::CallResult { .. } => false,
+    let mut origins = BTreeSet::new();
+    for ((candidate_event, candidate_place), candidate_origins) in state_after_event {
+        if *candidate_event != event {
+            continue;
+        }
+        let Some(candidate_row) = problem.places().get(candidate_place.index()) else {
+            continue;
+        };
+        if candidate_row.root == place_row.root
+            && candidate_row.projections.len() <= place_row.projections.len()
+            && place_row
+                .projections
+                .starts_with(&candidate_row.projections)
+        {
+            origins.extend(candidate_origins.iter().copied());
+        }
+    }
+    origins.into_iter().collect()
+}
+
+fn normalized_origin_pair(
+    left: ValueOriginId,
+    right: ValueOriginId,
+) -> (ValueOriginId, ValueOriginId) {
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
     }
 }
 
@@ -697,12 +1014,15 @@ fn apply_event(
             Ok((rule, Some(*destination), input.into_iter().collect()))
         }
         EventKind::Copy {
+            source,
             destination,
             origin,
-            ..
         } => {
+            let source_origins = origins_for_place(problem, &state.origins, *source)
+                .into_iter()
+                .collect::<Vec<_>>();
             if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(*destination, Vec::new()));
+                return Ok(write_through_result(*destination, source_origins));
             }
             if is_mixed(problem, state, *destination) {
                 return Ok(mixed_write_result(
@@ -710,7 +1030,7 @@ fn apply_event(
                     state,
                     *destination,
                     one_origin(*origin),
-                    Vec::new(),
+                    source_origins,
                 ));
             }
             replace_generation(
@@ -721,7 +1041,7 @@ fn apply_event(
                 one_origin(*origin),
             );
             set_binding_mode(problem, state, *destination, BindingMode::Slot);
-            Ok((OriginTraceRule::Copy, Some(*destination), Vec::new()))
+            Ok((OriginTraceRule::Copy, Some(*destination), source_origins))
         }
         EventKind::Projection {
             source,

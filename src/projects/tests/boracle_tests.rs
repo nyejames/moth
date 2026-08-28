@@ -1,7 +1,7 @@
 use super::{run_boracle, solve_boracle};
 use crate::compiler_frontend::analysis::borrow_checker::{
     AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, CallResultProvenance,
-    EventKind, OriginKind,
+    EventKind, OriginKind, OriginOverlapDecision,
 };
 use std::fs;
 
@@ -681,7 +681,7 @@ result = shared
             .loans
             .conflicts()
             .iter()
-            .any(|witness| witness.origin_overlap)
+            .any(|witness| { matches!(witness.origin_overlap, OriginOverlapDecision::Unknown(_)) })
     );
 }
 
@@ -967,7 +967,8 @@ result = alias
 
     assert_eq!(projected_origins, [source_origin]);
     assert!(function.report.loans.conflicts().iter().any(|witness| {
-        witness.origin_overlap && witness.loan_origins.contains(&source_origin)
+        matches!(witness.origin_overlap, OriginOverlapDecision::Overlap(_))
+            && witness.loan_origins.contains(&source_origin)
     }));
 }
 
@@ -1165,14 +1166,10 @@ result = shared
         .iter()
         .find(|function| !function.report.loans.conflicts().is_empty())
         .expect("mutable alias write-through should conflict with the shared alias");
-    assert!(
-        function
-            .report
-            .loans
-            .conflicts()
-            .iter()
-            .any(|witness| { witness.origin_overlap && witness.keeping_use.is_some() })
-    );
+    assert!(function.report.loans.conflicts().iter().any(|witness| {
+        matches!(witness.origin_overlap, OriginOverlapDecision::Overlap(_))
+            && witness.keeping_use.is_some()
+    }));
 }
 
 #[test]
@@ -1421,7 +1418,7 @@ result = shared
             .loans
             .conflicts()
             .iter()
-            .any(|witness| witness.origin_overlap)
+            .any(|witness| { matches!(witness.origin_overlap, OriginOverlapDecision::Overlap(_)) })
     );
 }
 
@@ -1472,14 +1469,10 @@ result = score
             .iter()
             .any(|loan| { !loan.origins.is_empty() && !loan.uses.is_empty() })
     );
-    assert!(
-        function
-            .report
-            .loans
-            .conflicts()
-            .iter()
-            .any(|witness| witness.origin_overlap && witness.keeping_use.is_some())
-    );
+    assert!(function.report.loans.conflicts().iter().any(|witness| {
+        matches!(witness.origin_overlap, OriginOverlapDecision::Overlap(_))
+            && witness.keeping_use.is_some()
+    }));
 }
 
 #[test]

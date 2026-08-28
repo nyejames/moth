@@ -305,6 +305,7 @@ pub(crate) struct OriginRelations {
     registrations: BTreeMap<ValueOriginId, OriginRegistration>,
     rows: Box<[OriginRelation]>,
     rows_by_pair: BTreeMap<(ValueOriginId, ValueOriginId), Box<[OriginRelation]>>,
+    mixed_generation_sets: Box<[Box<[ValueOriginId]>]>,
 }
 
 impl OriginRelations {
@@ -350,6 +351,7 @@ impl OriginRelations {
             registrations: registration_map,
             rows,
             rows_by_pair,
+            mixed_generation_sets: Box::new([]),
         })
     }
 
@@ -366,6 +368,28 @@ impl OriginRelations {
 
     pub(crate) fn rows(&self) -> &[OriginRelation] {
         &self.rows
+    }
+
+    /// Record mixed alias/slot unions without relating their independent members.
+    pub(crate) fn with_mixed_generation_sets(
+        mut self,
+        sets: impl IntoIterator<Item = Box<[ValueOriginId]>>,
+    ) -> Self {
+        let mut unique = BTreeSet::new();
+        for set in sets {
+            let mut origins = set.into_vec();
+            origins.sort_by_key(|origin| origin.raw());
+            origins.dedup();
+            if origins.len() >= 2 {
+                unique.insert(origins.into_boxed_slice());
+            }
+        }
+        self.mixed_generation_sets = unique.into_iter().collect();
+        self
+    }
+
+    pub(crate) fn mixed_generation_sets(&self) -> &[Box<[ValueOriginId]>] {
+        &self.mixed_generation_sets
     }
 
     /// Ask the one relation-owned origin-set overlap question.
@@ -429,6 +453,10 @@ impl OriginRelations {
         dump.push_str("origin-registrations:\n");
         for registration in self.registrations.values() {
             writeln!(&mut dump, "  {registration:?}").expect("writing to String cannot fail");
+        }
+        dump.push_str("mixed-generation-sets:\n");
+        for set in self.mixed_generation_sets.iter() {
+            writeln!(&mut dump, "  {set:?}").expect("writing to String cannot fail");
         }
         dump.push_str("relations:\n");
         for relation in self.rows.iter() {

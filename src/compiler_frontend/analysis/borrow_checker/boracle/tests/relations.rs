@@ -278,6 +278,7 @@ fn relation_rows_and_debug_dumps_are_deterministic() {
             "  Fresh(ValueOriginId(0))\n",
             "  Fresh(ValueOriginId(1))\n",
             "  Fresh(ValueOriginId(2))\n",
+            "mixed-generation-sets:\n",
             "relations:\n",
             "  OriginRelation { left: ValueOriginId(0), right: ValueOriginId(1), kind: Projection { projection: Field(0) }, evidence: Projection { source: ValueOriginId(0), derived: ValueOriginId(1), projection: Field(0) } }\n",
             "  OriginRelation { left: ValueOriginId(0), right: ValueOriginId(2), kind: CopyCorrespondence { copy_graph: CopyGraphId(3) }, evidence: CopyCorrespondence { source: ValueOriginId(0), result: ValueOriginId(2), copy_graph: CopyGraphId(3) } }\n",

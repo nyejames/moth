@@ -2,11 +2,11 @@
 
 Status: active
 
-Current slice: Phase 1 typed relation vocabulary
+Current slice: Phase 3 unknown-provenance hardening
 
 Blockers: none
 
-Next action: migrate origin overlap and delete `related_origins`
+Next action: audit empty-origin fallbacks and typed unknown reasons
 
 Repository path:
 
@@ -264,46 +264,46 @@ Make the relation layer the only owner of origin overlap. This removes the curre
 
 ### Work
 
-- [ ] Build relation rows from normalized origins and solved event state.
-- [ ] Preserve exact identity by reusing `ValueOriginId`.
-- [ ] Emit projection relationships from the actual projection source and path.
-- [ ] Emit aggregate child relationships without creating sibling edges.
-- [ ] Emit explicit copy disjointness.
-- [ ] Emit top-like uncertainty for unknown call results and opaque external values.
-- [ ] Represent mixed-state precision loss without relating every union member.
-- [ ] Replace `OriginSolution::origins_overlap` with one relation-owned overlap query.
-- [ ] Update loan conflict checking to consume `OriginOverlapDecision`.
-- [ ] Extend `ConflictWitness` with typed overlap evidence rather than a bare boolean.
-- [ ] Update reports and dumps.
-- [ ] Delete:
-  - [ ] `related_origins`
-  - [ ] `add_related_edge`
-  - [ ] mixed-trace skip logic that existed only to protect the untyped relation
-  - [ ] any duplicate overlap helper left in `loans.rs`
-- [ ] Keep structural `PlaceOverlap` separate. A conflict should retain both structural-place and origin evidence.
-- [ ] Snapshot reference accept/reject results before and after migration.
-- [ ] Any changed result must be classified before the phase closes.
+- [x] Build relation rows from normalized origins and solved event state.
+- [x] Preserve exact identity by reusing `ValueOriginId`.
+- [x] Emit projection relationships from the actual projection source and path.
+- [x] Emit aggregate child relationships without creating sibling edges.
+- [x] Emit explicit copy disjointness.
+- [x] Emit top-like uncertainty for unknown call results and opaque external values.
+- [x] Represent mixed-state precision loss without relating every union member.
+- [x] Replace `OriginSolution::origins_overlap` with one relation-owned overlap query.
+- [x] Update loan conflict checking to consume `OriginOverlapDecision`.
+- [x] Extend `ConflictWitness` with typed overlap evidence rather than a bare boolean.
+- [x] Update reports and dumps.
+- [x] Delete:
+  - [x] `related_origins`
+  - [x] `add_related_edge`
+  - [x] mixed-trace skip logic that existed only to protect the untyped relation
+  - [x] any duplicate overlap helper left in `loans.rs`
+- [x] Keep structural `PlaceOverlap` separate. A conflict should retain both structural-place and origin evidence.
+- [x] Snapshot reference accept/reject results before and after migration.
+- [x] Any changed result must be classified before the phase closes.
 
 ### Required tests
 
-- [ ] all existing Boracle semantic tests retain their expected result
-- [ ] mixed alias/slot writes do not relate preserved alias and new slot generations
-- [ ] old aliases remain disjoint from fresh rebindings
-- [ ] copy independence survives branch joins
-- [ ] field siblings remain disjoint
-- [ ] base and child still overlap where required
-- [ ] unknown provenance stays conservative
-- [ ] witnesses state the exact relation reason
+- [x] all existing Boracle semantic tests retain their expected result
+- [x] mixed alias/slot writes do not relate preserved alias and new slot generations
+- [x] old aliases remain disjoint from fresh rebindings
+- [x] copy independence survives branch joins
+- [x] field siblings remain disjoint
+- [x] base and child still overlap where required
+- [x] unknown provenance stays conservative
+- [x] witnesses state the exact relation reason
 
 ### Phase gate
 
-- [ ] Run a semantic-delta audit between the pre-migration and post-migration corpus.
-- [ ] Audit every deleted helper and update stale comments or names.
-- [ ] Review the complete origin-to-loan handoff against the compiler and memory authorities.
-- [ ] Run `cargo fmt --all`.
-- [ ] Run `just boracle`.
-- [ ] Run `git diff --check`.
-- [ ] Commit the migration and deletion as one coherent phase.
+- [x] Run a semantic-delta audit between the pre-migration and post-migration corpus.
+- [x] Audit every deleted helper and update stale comments or names.
+- [x] Review the complete origin-to-loan handoff against the compiler and memory authorities.
+- [x] Run `cargo fmt --all`.
+- [x] Run `just boracle`.
+- [x] Run `git diff --check`.
+- [x] Commit the migration and deletion as one coherent phase.
 
 ## Phase 3: harden unknown provenance and invariant failures
 

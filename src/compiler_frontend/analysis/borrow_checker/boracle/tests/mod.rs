@@ -1,10 +1,13 @@
 //! Focused tests for the feature-gated Boracle reference solver.
 //!
-//! `relations` owns the typed provenance-relation vocabulary. This file owns solver,
-//! loan, report and source-service behaviour.
+//! `relations` owns the typed provenance-relation vocabulary and `origin_relations` owns the
+//! relation rows built from solved problems. This file owns solver, loan, report and
+//! source-service behaviour.
 
+mod origin_relations;
 mod relations;
 
+use super::super::OriginOverlapDecision;
 use super::super::last_use::{FutureUseStatus, LastUseLocation, LastUseSubject};
 use super::super::problem::{
     AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
@@ -133,7 +136,12 @@ fn boracle_empty_alias_params_result_is_treated_as_an_independent_generation() {
         [ValueOriginId::new(1)]
     );
     assert!(
-        !solution.origins_overlap(&problem, &[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+        matches!(
+            solution
+                .relations()
+                .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+            Ok(OriginOverlapDecision::Disjoint(_))
+        ),
         "empty AliasParams currently looks disjoint from the initialized argument rather than unknown"
     );
 }
@@ -158,7 +166,12 @@ fn boracle_alias_params_with_empty_argument_state_uses_the_call_result_origin() 
         "the referenced argument must still have no origin state at the call"
     );
     assert!(
-        !solution.origins_overlap(&problem, &[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+        matches!(
+            solution
+                .relations()
+                .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+            Ok(OriginOverlapDecision::Disjoint(_))
+        ),
         "empty argument origin state currently looks independent rather than unknown"
     );
 }
@@ -258,15 +271,17 @@ fn boracle_mixed_binding_preserves_alias_and_slot_write_possibilities() {
         trace.event == EventId::new(7) && trace.rule == super::OriginTraceRule::Mixed
     }));
     assert!(solution.is_write_through_event(EventId::new(7)));
-    assert!(!solution.origins_overlap(
-        &problem,
-        &[ValueOriginId::new(0)],
-        &[ValueOriginId::new(2)]
+    assert!(matches!(
+        solution
+            .relations()
+            .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(2)]),
+        Ok(OriginOverlapDecision::Disjoint(_))
     ));
-    assert!(!solution.origins_overlap(
-        &problem,
-        &[ValueOriginId::new(0)],
-        &[ValueOriginId::new(3)]
+    assert!(matches!(
+        solution
+            .relations()
+            .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(3)]),
+        Ok(OriginOverlapDecision::Disjoint(_))
     ));
 
     let report = super::BoracleSolver::solve(&problem).expect("mixed binding report should solve");
@@ -900,7 +915,7 @@ struct DecisionSignature {
 struct ConflictSignature {
     access_event: u32,
     conflicting_loan: u32,
-    origin_overlap: bool,
+    origin_overlap: OriginOverlapDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -927,7 +942,7 @@ fn report_semantic_signature(report: &super::BoracleReport) -> SemanticSignature
         .map(|conflict| ConflictSignature {
             access_event: conflict.access_event.raw(),
             conflicting_loan: conflict.conflicting_loan.raw(),
-            origin_overlap: conflict.origin_overlap,
+            origin_overlap: conflict.origin_overlap.clone(),
         })
         .collect();
     SemanticSignature {

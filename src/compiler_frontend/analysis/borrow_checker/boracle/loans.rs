@@ -13,7 +13,7 @@ use super::super::problem::{
     AccessKind, BlockId, BorrowProblem, Event, EventId, EventKind, Loan, LoanId, PlaceId,
     PlaceOverlap, PointId, UseId, UseKind, ValueOriginId,
 };
-use super::OriginSolution;
+use super::{OriginOverlapDecision, OriginSolution};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -46,7 +46,7 @@ pub(crate) struct ConflictWitness {
     pub(crate) loan_origins: Box<[ValueOriginId]>,
     pub(crate) keeping_use: Option<UseId>,
     pub(crate) overlap: PlaceOverlap,
-    pub(crate) origin_overlap: bool,
+    pub(crate) origin_overlap: OriginOverlapDecision,
 }
 
 /// One access decision retained even when it is legal.
@@ -149,7 +149,7 @@ impl LoanSolver {
                         continue;
                     }
                     let Some((overlap, origin_overlap)) =
-                        access_conflict_overlap(problem, origins, &access, &access_origins, loan)
+                        access_conflict_overlap(problem, origins, &access, &access_origins, loan)?
                     else {
                         continue;
                     };
@@ -270,29 +270,33 @@ fn access_conflict_overlap(
     access: &AccessFact,
     access_origins: &[ValueOriginId],
     loan: &LoanFact,
-) -> Option<(PlaceOverlap, bool)> {
+) -> Result<Option<(PlaceOverlap, OriginOverlapDecision)>, CompilerError> {
     if access.definition {
-        return None;
+        return Ok(None);
     }
     if !access_kinds_conflict(access.kind, loan.kind) {
-        return None;
+        return Ok(None);
     }
 
-    let access_place = problem.places().get(access.place.index())?;
-    let loan_place = problem.places().get(loan.place.index())?;
+    let Some(access_place) = problem.places().get(access.place.index()) else {
+        return Ok(None);
+    };
+    let Some(loan_place) = problem.places().get(loan.place.index()) else {
+        return Ok(None);
+    };
     let structural_overlap = access_place.overlap(loan_place);
-    let origin_overlap = origins.origins_overlap(problem, access_origins, &loan.origins);
-    if !origin_overlap && !access_origins.is_empty() && !loan.origins.is_empty() {
-        // A known unrelated origin is a different value generation. This exclusion applies to
+    let origin_overlap = origins
+        .relations()
+        .query_overlap(access_origins, &loan.origins)?;
+
+    if matches!(origin_overlap, OriginOverlapDecision::Disjoint(_)) {
+        // A proven-disjoint origin is a different value generation. This exclusion applies to
         // projected places as well: structural place overlap alone cannot reconnect an old
         // projected value after its binding has been replaced.
-        return None;
-    }
-    if !origin_overlap && structural_overlap == PlaceOverlap::Disjoint {
-        return None;
+        return Ok(None);
     }
 
-    Some((structural_overlap, origin_overlap))
+    Ok(Some((structural_overlap, origin_overlap)))
 }
 
 fn access_kinds_conflict(left: AccessKind, right: AccessKind) -> bool {
