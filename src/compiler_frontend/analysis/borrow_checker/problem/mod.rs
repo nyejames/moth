@@ -40,7 +40,7 @@ pub(crate) use ids::{
     BindingId, BlockId, CallId, EventId, LoanId, PlaceId, PointId, UseId, ValueOriginId,
 };
 #[allow(unused_imports)]
-pub(crate) use origins::{CallResultProvenance, OriginKind, ValueOrigin};
+pub(crate) use origins::{CallResultProvenance, CallResultUnknownReason, OriginKind, ValueOrigin};
 #[allow(unused_imports)]
 pub(crate) use places::{Place, PlaceOverlap, ProjectionElem};
 

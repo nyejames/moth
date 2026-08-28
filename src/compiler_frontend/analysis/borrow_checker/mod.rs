@@ -46,7 +46,9 @@ pub(crate) use boracle::{
 };
 #[cfg(feature = "boracle")]
 #[allow(unused_imports)]
-pub(crate) use problem::{AccessKind, CallResultProvenance, EventKind, OriginKind};
+pub(crate) use problem::{
+    AccessKind, CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind,
+};
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;

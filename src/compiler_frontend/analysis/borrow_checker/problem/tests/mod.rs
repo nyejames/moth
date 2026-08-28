@@ -4,9 +4,9 @@ mod fixtures;
 
 use super::{
     AccessKind, BindingId, BlockId, BorrowProblem, Call, CallArgument, CallEffect, CallId,
-    CallResult, CallResultProvenance, Event, EventId, EventKind, EventSource, OriginKind, PlaceId,
-    PlaceOverlap, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use,
-    UseId, UseKind, ValueOrigin, ValueOriginId, from_hir,
+    CallResult, CallResultProvenance, CallResultUnknownReason, Event, EventId, EventKind,
+    EventSource, OriginKind, PlaceId, PlaceOverlap, PointId, ProgramPoint, ProjectionElem,
+    RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId, from_hir,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -335,7 +335,7 @@ fn borrow_problem_rejects_call_result_alias_parameter_out_of_range() {
 }
 
 #[test]
-fn borrow_problem_currently_accepts_empty_alias_params() {
+fn borrow_problem_rejects_empty_alias_params() {
     let mut parts = granular_call_parts();
     parts.origins.push(ValueOrigin::new(
         ValueOriginId::new(1),
@@ -351,8 +351,21 @@ fn borrow_problem_currently_accepts_empty_alias_params() {
         });
     }
 
-    BorrowProblem::new(parts)
-        .expect("empty AliasParams currently publishes; Phase 3 must not let this look fresh");
+    // WHAT: an empty AliasParams index list claims an argument derivation without naming
+    // any argument.
+    // WHY: Phase 3 treats that as malformed normalized input. Accepting it let the solver
+    // publish the call-result origin as a fresh independent generation; the invariant must
+    // fail at validation with a CompilerError naming the origin, call, event and result place.
+    let error = BorrowProblem::new(parts).expect_err("empty AliasParams is malformed input");
+
+    assert!(
+        error.msg.contains("empty AliasParams")
+            && error.msg.contains("CallEffect event")
+            && error.msg.contains("result place")
+            && error.msg.contains("EventId(1)")
+            && error.msg.contains("PlaceId(0)"),
+        "expected the rejection to name origin, call, event and result place, got: {error:?}"
+    );
 }
 
 #[test]
@@ -953,7 +966,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
     assert!(matches!(
         &problem.origins()[result.origin.index()].kind,
         OriginKind::CallResult {
-            provenance: CallResultProvenance::Unknown,
+            provenance: CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
             ..
         }
     ));

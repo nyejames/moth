@@ -38,7 +38,7 @@ use super::events::{
     EventSource, TerminatorEventKind, Use, UseKind,
 };
 use super::ids::{BindingId, BlockId, CallId, EventId, PlaceId, PointId, ValueOriginId};
-use super::origins::{CallResultProvenance, OriginKind, ValueOrigin};
+use super::origins::{CallResultProvenance, CallResultUnknownReason, OriginKind, ValueOrigin};
 use super::places::{Place, ProjectionElem};
 use super::{BorrowProblem, BorrowProblemParts};
 
@@ -962,7 +962,9 @@ impl<'a> FunctionProblemBuilder<'a> {
         accesses.extend(std::iter::repeat_n(AccessKind::Shared, args.len()));
         let provenance = match op {
             HirMapOp::Get => CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
-            HirMapOp::Remove => CallResultProvenance::Unknown,
+            HirMapOp::Remove => {
+                CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal)
+            }
             HirMapOp::Contains | HirMapOp::Set | HirMapOp::Clear | HirMapOp::Length => {
                 CallResultProvenance::Fresh
             }
@@ -1591,7 +1593,6 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids.push(event_id);
         event_id
     }
-
     fn call_effect(
         &self,
         target: &CallTarget,
@@ -1601,7 +1602,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let Some(registry) = self.external_registry else {
                 return Ok((
                     vec![AccessKind::Exclusive; argument_count],
-                    CallResultProvenance::Unknown,
+                    CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal),
                 ));
             };
             let Some(definition) = registry.get_function_by_id(*id) else {
@@ -1652,14 +1653,17 @@ impl<'a> FunctionProblemBuilder<'a> {
                 && let Some(accesses) =
                     self.local_parameter_accesses(*function_id, argument_count)?
             {
-                return Ok((accesses, CallResultProvenance::Unknown));
+                return Ok((
+                    accesses,
+                    CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
+                ));
             }
             return Ok((
                 // Missing call metadata must not under-approximate a mutable callee. The
                 // reference path prefers conservative false positives over proving that an
                 // unresolved boundary is shared.
                 vec![AccessKind::Exclusive; argument_count],
-                CallResultProvenance::Unknown,
+                CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
             ));
         };
         if summary.parameters.len() != argument_count {
@@ -1683,7 +1687,9 @@ impl<'a> FunctionProblemBuilder<'a> {
             FunctionReturnAliasSummary::AliasParams(indices) => {
                 CallResultProvenance::AliasParams(indices.iter().copied().collect())
             }
-            FunctionReturnAliasSummary::Unknown => CallResultProvenance::Unknown,
+            FunctionReturnAliasSummary::Unknown => {
+                CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
+            }
         };
         Ok((accesses, provenance))
     }

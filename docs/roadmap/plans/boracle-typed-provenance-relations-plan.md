@@ -2,11 +2,11 @@
 
 Status: active
 
-Current slice: Phase 3 unknown-provenance hardening
+Current slice: Phase 4 experiment selection
 
 Blockers: none
 
-Next action: audit empty-origin fallbacks and typed unknown reasons
+Next action: replace the single experiment selector with a typed rule selection
 
 Repository path:
 
@@ -313,32 +313,32 @@ Unknown semantic data must be conservative. Missing internal data must be an int
 
 ### Work
 
-- [ ] Audit every `OriginSet::is_empty()` branch that changes provenance meaning.
-- [ ] Replace the empty `AliasParams` result fallback with:
-  - [ ] `CompilerError` when normalized input promised a present argument origin
-  - [ ] explicit unknown/top provenance when the boundary is intentionally opaque
-- [ ] Add a typed reason to every unknown call result.
-- [ ] Distinguish:
-  - [ ] summary says unknown
-  - [ ] summary is unavailable
-  - [ ] external boundary is opaque
-  - [ ] normalized input is malformed
-  - [ ] loop or join widening lost precision
-- [ ] Strengthen `BorrowProblem::validate` where the invariant belongs at publication.
-- [ ] Keep solver checks for impossible states that can only be known after origin flow.
-- [ ] Ensure `CompilerError` messages identify the event, call, place and missing fact.
-- [ ] Do not add user-facing borrow diagnostics for internal invariant failure.
-- [ ] Add adversarial fixtures that deliberately construct malformed normalized problems.
-- [ ] Add real-source cases for conservative unknown local, generated, cross-module and external call summaries where supported by the source service.
+- [x] Audit every `OriginSet::is_empty()` branch that changes provenance meaning.
+- [x] Replace the empty `AliasParams` result fallback with:
+  - [x] `CompilerError` when normalized input promised a present argument origin
+  - [x] explicit unknown/top provenance when the boundary is intentionally opaque
+- [x] Add a typed reason to every unknown call result.
+- [x] Distinguish:
+  - [x] summary says unknown
+  - [x] summary is unavailable
+  - [x] external boundary is opaque
+  - [x] normalized input is malformed
+  - [x] loop or join widening lost precision
+- [x] Strengthen `BorrowProblem::validate` where the invariant belongs at publication.
+- [x] Keep solver checks for impossible states that can only be known after origin flow.
+- [x] Ensure `CompilerError` messages identify the event, call, place and missing fact.
+- [x] Do not add user-facing borrow diagnostics for internal invariant failure.
+- [x] Add adversarial fixtures that deliberately construct malformed normalized problems.
+- [x] Add real-source cases for conservative unknown local, generated, cross-module and external call summaries where supported by the source service.
 
 ### Phase gate
 
-- [ ] Audit every unknown and empty-origin branch in `problem/`, `origins.rs`, `loans.rs` and reports.
-- [ ] Review error lane ownership against the style guide.
-- [ ] Run focused malformed-problem tests.
-- [ ] Run `just boracle`.
-- [ ] Run `just validate`.
-- [ ] Commit the hardening slice.
+- [x] Audit every unknown and empty-origin branch in `problem/`, `origins.rs`, `loans.rs` and reports.
+- [x] Review error lane ownership against the style guide.
+- [x] Run focused malformed-problem tests.
+- [x] Run `just boracle`.
+- [x] Run `just validate`.
+- [x] Commit the hardening slice.
 
 ## Phase 4: make experiment selection composable
 

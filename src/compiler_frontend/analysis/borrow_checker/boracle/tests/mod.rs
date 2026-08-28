@@ -15,6 +15,7 @@ use super::super::problem::{
     EventSource, KillReason, Loan, LoanId, Place, PlaceId, PointId, ProgramPoint,
     TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
 };
+use super::PrecisionLossReason;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
@@ -124,40 +125,40 @@ fn boracle_calls_project_alias_result_provenance_through_arguments() {
 }
 
 #[test]
-fn boracle_empty_alias_params_result_is_treated_as_an_independent_generation() {
-    let problem = alias_params_call_problem(Vec::new());
-    let solution = super::OriginSolver::solve(&problem)
-        .expect("empty AliasParams currently publishes and solves");
+fn boracle_empty_alias_params_problem_is_rejected_as_malformed_input() {
+    // WHAT: an empty AliasParams index list claims the result derives from call arguments
+    // while naming none of them.
+    // WHY: Phase 0 showed such a problem publishing the call-result origin as a fresh
+    // independent generation that looked Disjoint from the initialized argument. Phase 3
+    // treats the empty index slice as malformed normalized input, so `BorrowProblem::new`
+    // must reject it with a CompilerError naming the origin, call, event and result place;
+    // the solver never sees the problem at all, and no flow can make the result look fresh.
+    let error = BorrowProblem::new(alias_params_call_parts(Vec::new()))
+        .expect_err("empty AliasParams must be rejected before the origin solver runs");
 
-    assert_eq!(
-        solution
-            .origins_after_event(EventId::new(2), PlaceId::new(1))
-            .expect("empty AliasParams currently falls back to the call-result origin"),
-        [ValueOriginId::new(1)]
-    );
     assert!(
-        matches!(
-            solution
-                .relations()
-                .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
-            Ok(OriginOverlapDecision::Disjoint(_))
-        ),
-        "empty AliasParams currently looks disjoint from the initialized argument rather than unknown"
+        error.msg.contains("empty AliasParams")
+            && error.msg.contains("CallEffect event")
+            && error.msg.contains("result place")
+            && error.msg.contains("EventId(2)")
+            && error.msg.contains("PlaceId(1)"),
+        "expected the rejection to name origin, call, event and result place, got: {error:?}"
     );
 }
 
 #[test]
-fn boracle_alias_params_with_empty_argument_state_uses_the_call_result_origin() {
+fn boracle_alias_params_with_empty_argument_state_stays_conservatively_unknown() {
     let problem = uninitialized_argument_alias_params_problem();
-    let solution = super::OriginSolver::solve(&problem)
-        .expect("AliasParams with empty argument state currently solves");
-
-    assert_eq!(
-        solution
-            .origins_after_event(EventId::new(1), PlaceId::new(1))
-            .expect("missing argument origins currently fall back to the call-result origin"),
-        [ValueOriginId::new(1)]
+    let solution = super::OriginSolver::solve(&problem).expect(
+        "AliasParams with valid indices whose argument has no origin state must still solve",
     );
+
+    // WHAT: the summary names argument 0, but that place has no origin state at the call.
+    // WHY: the collected argument state is empty, so the result publishes no origin at all
+    // instead of fabricating the call-result origin as an independent generation. The
+    // result origin row itself is registered Unknown(MissingLocalSummary), so a direct
+    // overlap query against the argument's real generation must stay unknown, never
+    // Disjoint(DifferentFreshGenerations).
     assert!(
         solution
             .origins_after_event(EventId::new(1), PlaceId::new(0))
@@ -166,13 +167,56 @@ fn boracle_alias_params_with_empty_argument_state_uses_the_call_result_origin() 
         "the referenced argument must still have no origin state at the call"
     );
     assert!(
-        matches!(
-            solution
-                .relations()
-                .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
-            Ok(OriginOverlapDecision::Disjoint(_))
+        solution
+            .origins_after_event(EventId::new(1), PlaceId::new(1))
+            .unwrap_or(&[])
+            .is_empty(),
+        "missing argument state must not fall back to a fabricated call-result origin"
+    );
+    match solution
+        .relations()
+        .query_overlap(&[ValueOriginId::new(0)], &[ValueOriginId::new(1)])
+        .expect("overlap query should validate")
+    {
+        OriginOverlapDecision::Unknown(evidence) => {
+            assert_eq!(
+                evidence.reason,
+                PrecisionLossReason::MissingLocalSummary,
+                "empty argument state must name the missing summary, got {:?}",
+                evidence.reason
+            );
+        }
+
+        decision => panic!(
+            "empty AliasParams argument state must stay unknown, not look independent: {decision:?}"
         ),
-        "empty argument origin state currently looks independent rather than unknown"
+    }
+}
+
+#[test]
+fn boracle_alias_params_with_partial_argument_state_stays_conservatively_unknown() {
+    let problem = partial_argument_alias_params_problem();
+    let solution = super::OriginSolver::solve(&problem)
+        .expect("AliasParams with one missing argument state must still solve");
+
+    assert!(
+        solution
+            .origins_after_event(EventId::new(3), PlaceId::new(2))
+            .unwrap_or(&[])
+            .is_empty(),
+        "a missing referenced argument must not publish the known subset as a precise result"
+    );
+    assert_eq!(
+        solution
+            .relations()
+            .query_overlap(&[ValueOriginId::new(1)], &[ValueOriginId::new(2)])
+            .expect("partial AliasParams overlap query should validate"),
+        OriginOverlapDecision::Unknown(super::OriginUnknownEvidence {
+            left: vec![ValueOriginId::new(1)].into_boxed_slice(),
+            right: vec![ValueOriginId::new(2)].into_boxed_slice(),
+            reason: PrecisionLossReason::MissingLocalSummary,
+            relation: None,
+        })
     );
 }
 
@@ -2207,7 +2251,14 @@ fn call_alias_problem() -> BorrowProblem {
 }
 
 fn alias_params_call_problem(parameter_indices: Vec<usize>) -> BorrowProblem {
-    BorrowProblem::new(with_return_terminator(BorrowProblemParts {
+    BorrowProblem::new(alias_params_call_parts(parameter_indices))
+        .expect("call alias problem should validate")
+}
+
+/// Builds the AliasParams call fixture parts without validating them, so malformed-input
+/// tests can assert the exact `BorrowProblem::new` rejection.
+fn alias_params_call_parts(parameter_indices: Vec<usize>) -> BorrowProblemParts {
+    with_return_terminator(BorrowProblemParts {
         bindings: vec![
             Binding::synthetic(BindingId::new(0)),
             Binding::synthetic(BindingId::new(1)),
@@ -2316,8 +2367,7 @@ fn alias_params_call_problem(parameter_indices: Vec<usize>) -> BorrowProblem {
             ),
         ],
         ..BorrowProblemParts::default()
-    }))
-    .expect("call alias problem should validate")
+    })
 }
 
 fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
@@ -2418,6 +2468,146 @@ fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
         ..BorrowProblemParts::default()
     }))
     .expect("uninitialized argument AliasParams problem should validate")
+}
+
+fn partial_argument_alias_params_problem() -> BorrowProblem {
+    BorrowProblem::new(with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+            Binding::synthetic(BindingId::new(2)),
+        ],
+        points: (0..=6)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(6),
+            (0..5).map(EventId::new).collect(),
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+            Place::new(PlaceId::new(2), BindingId::new(2), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                super::super::problem::OriginKind::CallResult {
+                    call: super::super::problem::CallId::new(0),
+                    provenance: super::super::problem::CallResultProvenance::AliasParams(
+                        vec![0, 1].into_boxed_slice(),
+                    ),
+                },
+            ),
+            ValueOrigin::fresh(ValueOriginId::new(2)),
+        ],
+        calls: vec![Call {
+            id: super::super::problem::CallId::new(0),
+            label: "partial-alias-call".to_owned(),
+        }],
+        uses: vec![
+            Use {
+                id: UseId::new(0),
+                point: PointId::new(2),
+                place: PlaceId::new(0),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(1),
+                point: PointId::new(3),
+                place: PlaceId::new(1),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(2),
+                point: PointId::new(5),
+                place: PlaceId::new(2),
+                kind: UseKind::Write,
+                definition: false,
+            },
+        ],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Fresh {
+                    destination: PlaceId::new(0),
+                    origin: ValueOriginId::new(0),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::CallArgument {
+                    call: super::super::problem::CallId::new(0),
+                    index: 0,
+                    argument: CallArgument {
+                        place: PlaceId::new(0),
+                        access: AccessKind::Shared,
+                        use_id: UseId::new(0),
+                    },
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::CallArgument {
+                    call: super::super::problem::CallId::new(0),
+                    index: 1,
+                    argument: CallArgument {
+                        place: PlaceId::new(1),
+                        access: AccessKind::Shared,
+                        use_id: UseId::new(1),
+                    },
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(3),
+                PointId::new(4),
+                EventKind::CallEffect(CallEffect {
+                    call: super::super::problem::CallId::new(0),
+                    arguments: vec![
+                        CallArgument {
+                            place: PlaceId::new(0),
+                            access: AccessKind::Shared,
+                            use_id: UseId::new(0),
+                        },
+                        CallArgument {
+                            place: PlaceId::new(1),
+                            access: AccessKind::Shared,
+                            use_id: UseId::new(1),
+                        },
+                    ]
+                    .into_boxed_slice(),
+                    result: Some(CallResult {
+                        place: PlaceId::new(2),
+                        origin: ValueOriginId::new(1),
+                    }),
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(4),
+                PointId::new(5),
+                EventKind::Access {
+                    use_id: UseId::new(2),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("partial argument AliasParams problem should validate")
 }
 
 fn aggregate_problem() -> BorrowProblem {

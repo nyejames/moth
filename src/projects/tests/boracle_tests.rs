@@ -1,7 +1,7 @@
 use super::{run_boracle, solve_boracle};
 use crate::compiler_frontend::analysis::borrow_checker::{
     AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, CallResultProvenance,
-    EventKind, OriginKind, OriginOverlapDecision,
+    CallResultUnknownReason, EventKind, OriginKind, OriginOverlapDecision,
 };
 use std::fs;
 
@@ -671,7 +671,7 @@ result = shared
     assert!(matches!(
         &function.problem.origins()[result.origin.index()].kind,
         OriginKind::CallResult {
-            provenance: CallResultProvenance::Unknown,
+            provenance: CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
             ..
         }
     ));
@@ -807,7 +807,7 @@ observed = loaded
     assert!(matches!(
         &function.problem.origins()[result_origin.index()].kind,
         OriginKind::CallResult {
-            provenance: CallResultProvenance::Unknown,
+            provenance: CallResultProvenance::Unknown(CallResultUnknownReason::MissingSummary),
             ..
         }
     ));
@@ -1489,8 +1489,8 @@ result = removed
     );
 
     assert!(
-        output.contains("provenance: Unknown"),
-        "expected conservative map-remove provenance, got:\n{output}"
+        output.contains("provenance: Unknown") && output.contains("OpaqueExternal"),
+        "expected opaque map-remove provenance, got:\n{output}"
     );
 }
 
@@ -1528,7 +1528,7 @@ result = removed
     assert!(matches!(
         &function.problem.origins()[result.origin.index()].kind,
         OriginKind::CallResult {
-            provenance: CallResultProvenance::Unknown,
+            provenance: CallResultProvenance::Unknown(_),
             ..
         }
     ));

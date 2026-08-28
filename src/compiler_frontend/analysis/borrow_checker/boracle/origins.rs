@@ -10,8 +10,8 @@
 #![allow(dead_code)]
 
 use super::super::problem::{
-    BindingId, BorrowProblem, CallResultProvenance, Event, EventId, EventKind, OriginKind, PlaceId,
-    ProjectionElem, UseId, UseKind, ValueOrigin, ValueOriginId,
+    BindingId, BorrowProblem, CallResultProvenance, CallResultUnknownReason, Event, EventId,
+    EventKind, OriginKind, PlaceId, ProjectionElem, UseId, UseKind, ValueOrigin, ValueOriginId,
 };
 use super::relations::{
     CopyGraphId, OriginRegistration, OriginRelation, OriginRelations, PrecisionLossReason,
@@ -191,6 +191,7 @@ impl OriginSolver {
             block_count
         ];
 
+        let mut missing_call_result_origins = BTreeSet::new();
         let mut changed = true;
         while changed {
             changed = false;
@@ -222,7 +223,14 @@ impl OriginSolver {
                     entry_states[block_index] = Some(entry.clone());
                     changed = true;
                 }
-                let output = apply_block(problem, block_index, entry, None)?.0;
+                let output = apply_block(
+                    problem,
+                    block_index,
+                    entry,
+                    None,
+                    &mut missing_call_result_origins,
+                )?
+                .0;
                 if output_states[block_index] != output {
                     output_states[block_index] = output;
                     changed = true;
@@ -238,8 +246,13 @@ impl OriginSolver {
             let Some(entry) = entry_states[block_index].clone() else {
                 continue;
             };
-            let (_, _, _, block_states, block_write_through_uses) =
-                apply_block(problem, block_index, entry, Some((&mut facts, &mut traces)))?;
+            let (_, _, _, block_states, block_write_through_uses) = apply_block(
+                problem,
+                block_index,
+                entry,
+                Some((&mut facts, &mut traces)),
+                &mut missing_call_result_origins,
+            )?;
             for ((event, place), origins) in block_states {
                 state_after_event.insert((event, place), origins);
             }
@@ -249,7 +262,12 @@ impl OriginSolver {
         facts.sort_by_key(|fact| (fact.event.raw(), fact.place.raw()));
         traces.sort_by_key(|trace| trace.event.raw());
 
-        let relations = origin_relations(problem, &traces, &state_after_event)?;
+        let relations = origin_relations(
+            problem,
+            &traces,
+            &state_after_event,
+            &missing_call_result_origins,
+        )?;
 
         Ok(OriginSolution {
             facts: facts.into_boxed_slice(),
@@ -260,11 +278,6 @@ impl OriginSolver {
         })
     }
 }
-
-// ------------------------
-//  Origin relation construction
-// ------------------------
-
 /// Build the typed relation table for one solved origin problem.
 ///
 /// Rows are extracted from the normalized origin rows, the solved traces and the per-event
@@ -277,8 +290,9 @@ fn origin_relations(
     problem: &BorrowProblem,
     traces: &[OriginTrace],
     state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
+    missing_call_result_origins: &BTreeSet<ValueOriginId>,
 ) -> Result<OriginRelations, CompilerError> {
-    let top_reasons = top_like_reasons(problem);
+    let top_reasons = top_like_reasons(problem, traces, missing_call_result_origins);
     let mut registrations = Vec::new();
     let mut rows = Vec::new();
     let mut mixed_generation_sets = Vec::new();
@@ -399,18 +413,63 @@ enum TopLikeWalk {
 ///
 /// This keeps the previous overlap helper's walk as registration evidence: Unknown rows,
 /// unknown call results and every alias, join, projection or alias-provenance derivation that
-/// reaches one are conservative. Memoized walking replaces the previous unguarded recursion.
+/// reaches one are conservative. Alias-parameters call results are classified against the
+/// argument state their owning call actually collected, so a missing local argument state is
+/// unknown evidence instead of a fresh independent generation. Memoized walking replaces the
+/// previous unguarded recursion.
 fn top_like_reasons(
     problem: &BorrowProblem,
+    traces: &[OriginTrace],
+    missing_call_result_origins: &BTreeSet<ValueOriginId>,
 ) -> BTreeMap<ValueOriginId, Option<PrecisionLossReason>> {
+    let call_result_inputs =
+        call_result_input_origins(problem, traces, missing_call_result_origins);
     let mut memo: BTreeMap<ValueOriginId, TopLikeWalk> = BTreeMap::new();
     for origin in problem.origins() {
-        top_like_reason(problem, origin.id, &mut memo);
+        top_like_reason(problem, origin.id, &call_result_inputs, &mut memo);
     }
 
     memo.into_iter()
         .map(|(origin, walk)| (origin, finished_walk(walk)))
         .collect()
+}
+/// Collect the argument origins each call actually observed for its result provenance.
+///
+/// WHAT: maps a call-result origin to the `input_origins` its owning CallEffect collected
+/// from the pre-call state, exactly what `call_result_origins` accepted for each referenced
+/// index.
+/// WHY: AliasParams provenance is only as known as the argument state at the call. A persistent
+/// per-origin missing set records an empty referenced argument even when a later application
+/// observes non-empty origins; CFG joins remain owned by `merge_state`.
+fn call_result_input_origins(
+    problem: &BorrowProblem,
+    traces: &[OriginTrace],
+    missing_call_result_origins: &BTreeSet<ValueOriginId>,
+) -> BTreeMap<ValueOriginId, Box<[ValueOriginId]>> {
+    let mut inputs = BTreeMap::new();
+    for trace in traces {
+        let Some(event) = problem.events().get(trace.event.index()) else {
+            continue;
+        };
+        let EventKind::CallEffect(effect) = &event.kind else {
+            continue;
+        };
+        let Some(result) = effect.result else {
+            continue;
+        };
+        inputs
+            .entry(result.origin)
+            .and_modify(|existing: &mut Box<[ValueOriginId]>| {
+                if trace.input_origins.is_empty() {
+                    *existing = Box::new([]);
+                }
+            })
+            .or_insert_with(|| trace.input_origins.clone());
+    }
+    for origin in missing_call_result_origins {
+        inputs.insert(*origin, Box::new([]));
+    }
+    inputs
 }
 
 fn finished_walk(walk: TopLikeWalk) -> Option<PrecisionLossReason> {
@@ -423,6 +482,7 @@ fn finished_walk(walk: TopLikeWalk) -> Option<PrecisionLossReason> {
 fn top_like_reason(
     problem: &BorrowProblem,
     origin_id: ValueOriginId,
+    call_result_inputs: &BTreeMap<ValueOriginId, Box<[ValueOriginId]>>,
     memo: &mut BTreeMap<ValueOriginId, TopLikeWalk>,
 ) -> Option<PrecisionLossReason> {
     match memo.get(&origin_id) {
@@ -444,25 +504,63 @@ fn top_like_reason(
             OriginKind::Unknown => Some(PrecisionLossReason::MissingLocalSummary),
 
             OriginKind::CallResult {
-                provenance: CallResultProvenance::Unknown,
+                provenance: CallResultProvenance::Unknown(reason),
                 ..
-            } => Some(PrecisionLossReason::UnknownCallResult),
+            } => Some(match reason {
+                CallResultUnknownReason::SummaryUnknown => PrecisionLossReason::UnknownCallResult,
+                CallResultUnknownReason::MissingSummary => PrecisionLossReason::MissingLocalSummary,
+                CallResultUnknownReason::OpaqueExternal => PrecisionLossReason::ExternalOpaqueValue,
+            }),
 
-            OriginKind::Projection { source, .. } => top_like_reason(problem, *source, memo),
+            OriginKind::Projection { source, .. } => {
+                top_like_reason(problem, *source, call_result_inputs, memo)
+            }
 
             OriginKind::Alias(members)
             | OriginKind::ExclusiveAlias(members)
-            | OriginKind::Join(members) => derivation_member_reason(problem, members, memo),
+            | OriginKind::Join(members) => {
+                derivation_member_reason(problem, members, call_result_inputs, memo)
+            }
 
             OriginKind::CallResult {
                 provenance: CallResultProvenance::Alias(members),
                 ..
-            } => derivation_member_reason(problem, members, memo),
+            } => derivation_member_reason(problem, members, call_result_inputs, memo),
+
+            OriginKind::CallResult {
+                provenance: CallResultProvenance::AliasParams(indices),
+                ..
+            } => {
+                // WHAT: AliasParams derives the result from referenced argument places, so
+                // the derivation is only as known as the argument state collected at the
+                // owning call.
+                // WHY: an empty index slice (malformed input that somehow bypassed
+                // validation), an owning call the solver never applied, or an empty
+                // collected argument state all prove nothing about what the result may
+                // alias. Registering such an origin as a fresh independent generation would
+                // report Disjoint overlap against real data, so it stays top-like
+                // MissingLocalSummary. A non-empty collection stays precise unless one of
+                // the collected generations is itself top-like.
+                if indices.is_empty() {
+                    Some(PrecisionLossReason::MissingLocalSummary)
+                } else {
+                    match call_result_inputs.get(&origin_id).map(Box::as_ref) {
+                        None => Some(PrecisionLossReason::MissingLocalSummary),
+                        Some([]) => Some(PrecisionLossReason::MissingLocalSummary),
+                        Some(members) => {
+                            derivation_member_reason(problem, members, call_result_inputs, memo)
+                        }
+                    }
+                }
+            }
 
             OriginKind::Copy(_)
             | OriginKind::Parameter { .. }
             | OriginKind::Fresh
-            | OriginKind::CallResult { .. } => None,
+            | OriginKind::CallResult {
+                provenance: CallResultProvenance::Fresh,
+                ..
+            } => None,
         },
     };
 
@@ -473,11 +571,12 @@ fn top_like_reason(
 fn derivation_member_reason(
     problem: &BorrowProblem,
     members: &[ValueOriginId],
+    call_result_inputs: &BTreeMap<ValueOriginId, Box<[ValueOriginId]>>,
     memo: &mut BTreeMap<ValueOriginId, TopLikeWalk>,
 ) -> Option<PrecisionLossReason> {
     members
         .iter()
-        .filter_map(|member| top_like_reason(problem, *member, memo))
+        .filter_map(|member| top_like_reason(problem, *member, call_result_inputs, memo))
         .min()
 }
 
@@ -485,7 +584,10 @@ fn derivation_member_reason(
 ///
 /// Alias, exclusive-alias and alias-provenance call-result rows have no current producer.
 /// They stay derived rather than claiming a fresh independent generation their member list
-/// cannot prove, so any pair without an explicit row remains conservatively unknown.
+/// cannot prove, so any pair without an explicit row remains conservatively unknown. An
+/// alias-parameters call result only reaches this function once its owning call collected a
+/// non-empty, fully precise argument state, so its fresh registration is proven rather than
+/// assumed; the empty or unapplied cases are classified unknown in `top_like_reason`.
 fn independent_registration(origin: &ValueOrigin) -> OriginRegistration {
     match &origin.kind {
         OriginKind::Alias(_)
@@ -790,6 +892,7 @@ fn apply_block(
     block_index: usize,
     mut state: FlowState,
     mut capture: ApplyCapture<'_>,
+    missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
 ) -> Result<AppliedBlock, CompilerError> {
     let block = &problem.control_flow().blocks[block_index];
     let mut local_facts = Vec::new();
@@ -804,7 +907,8 @@ fn apply_block(
                 event_id
             ))
         })?;
-        let (rule, destination, inputs) = apply_event(problem, event, &mut state)?;
+        let (rule, destination, inputs) =
+            apply_event(problem, event, &mut state, missing_call_result_origins)?;
         if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
             && let Some(destination) = destination
             && let Some((place, use_id)) = pending_write
@@ -889,6 +993,7 @@ fn apply_event(
     problem: &BorrowProblem,
     event: &Event,
     state: &mut FlowState,
+    missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
 ) -> Result<(OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>), CompilerError> {
     match &event.kind {
         EventKind::Fresh {
@@ -1050,11 +1155,14 @@ fn apply_event(
         } => {
             let input = projection_child_origins(problem, &state.origins, *source, *origin)
                 .unwrap_or_else(|| origins_for_place(problem, &state.origins, *source));
-            let output = if input.is_empty() {
-                one_origin(*origin)
-            } else {
-                input.clone()
-            };
+            if input.is_empty() {
+                return Err(CompilerError::compiler_error(format!(
+                    "Boracle origin solver cannot apply projection event {:?}: origin state is \
+                     missing for source place {:?} and destination place {:?}",
+                    event.id, source, destination
+                )));
+            }
+            let output = input.clone();
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(
                     *destination,
@@ -1202,9 +1310,13 @@ fn apply_event(
                     ))
                 })?;
             let (input, output) = match &origin.kind {
-                OriginKind::CallResult { provenance, .. } => {
-                    call_result_origins(problem, provenance, effect, &state.origins)
-                }
+                OriginKind::CallResult { provenance, .. } => call_result_origins(
+                    problem,
+                    provenance,
+                    effect,
+                    &state.origins,
+                    missing_call_result_origins,
+                ),
                 _ => (BTreeSet::new(), one_origin(result.origin)),
             };
             if is_alias_only(problem, state, result.place) {
@@ -1407,10 +1519,11 @@ fn call_result_origins(
     provenance: &CallResultProvenance,
     effect: &super::super::problem::CallEffect,
     state: &OriginState,
+    missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
 ) -> (OriginSet, OriginSet) {
     match provenance {
         CallResultProvenance::Fresh => (BTreeSet::new(), one_origin_from_result(effect)),
-        CallResultProvenance::Unknown => {
+        CallResultProvenance::Unknown(_) => {
             let output = one_origin_from_result(effect);
             (output.clone(), output)
         }
@@ -1419,17 +1532,32 @@ fn call_result_origins(
             (origins.clone(), origins)
         }
         CallResultProvenance::AliasParams(indices) => {
+            let result_origin = effect.result.map(|result| result.origin);
+            if result_origin.is_some_and(|origin| missing_call_result_origins.contains(&origin)) {
+                return (BTreeSet::new(), BTreeSet::new());
+            }
+
             let mut origins = BTreeSet::new();
+            let mut missing_argument_state = indices.is_empty();
             for index in indices {
-                if let Some(argument) = effect.arguments.get(*index) {
-                    origins.extend(origins_for_place(problem, state, argument.place));
+                let Some(argument) = effect.arguments.get(*index) else {
+                    missing_argument_state = true;
+                    continue;
+                };
+                let argument_origins = origins_for_place(problem, state, argument.place);
+                if argument_origins.is_empty() {
+                    missing_argument_state = true;
+                } else {
+                    origins.extend(argument_origins);
                 }
             }
-            if origins.is_empty() {
-                (origins, one_origin_from_result(effect))
-            } else {
-                (origins.clone(), origins)
+            if missing_argument_state {
+                if let Some(origin) = result_origin {
+                    missing_call_result_origins.insert(origin);
+                }
+                return (BTreeSet::new(), BTreeSet::new());
             }
+            (origins.clone(), origins)
         }
     }
 }

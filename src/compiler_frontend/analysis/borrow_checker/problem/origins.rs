@@ -27,13 +27,27 @@ pub(crate) enum OriginKind {
     },
 }
 
+/// Why a call result's provenance is unresolved at the problem boundary.
+///
+/// This deliberately lives in the normalized-problem layer rather than importing Boracle's
+/// relation vocabulary. The solver maps each boundary fact to its own precision-loss reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallResultUnknownReason {
+    /// The callee summary explicitly says that the returned value may alias an unknown source.
+    SummaryUnknown,
+    /// No local, generated or module-private summary was available.
+    MissingSummary,
+    /// The call crossed an opaque external boundary, including an opaque builtin operation.
+    OpaqueExternal,
+}
+
 /// Preliminary provenance supplied for a call result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CallResultProvenance {
     Fresh,
     Alias(Box<[ValueOriginId]>),
     AliasParams(Box<[usize]>),
-    Unknown,
+    Unknown(CallResultUnknownReason),
 }
 
 /// One explicit source-semantic origin lineage.

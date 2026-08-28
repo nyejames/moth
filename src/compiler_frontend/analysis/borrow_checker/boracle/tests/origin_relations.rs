@@ -14,9 +14,10 @@ use super::super::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance, CfgBlock, Event,
-    EventId, EventKind, EventSource, Loan, LoanId, OriginKind, Place, PlaceId, PlaceOverlap,
-    PointId, ProgramPoint, ProjectionElem, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
+    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
+    CallResultUnknownReason, CfgBlock, Event, EventId, EventKind, EventSource, Loan, LoanId,
+    OriginKind, Place, PlaceId, PlaceOverlap, PointId, ProgramPoint, ProjectionElem, Use, UseId,
+    UseKind, ValueOrigin, ValueOriginId,
 };
 
 #[test]
@@ -234,6 +235,57 @@ fn unknown_provenance_stays_conservatively_overlapping() {
             decision => panic!("origin {origin:?} must stay unknown, got {decision:?}"),
         }
     }
+}
+
+#[test]
+fn unknown_call_results_retain_boundary_specific_precision_reasons() {
+    let problem = boundary_reason_problem();
+    let solution =
+        super::super::OriginSolver::solve(&problem).expect("boundary reasons should solve");
+    let relations = solution.relations();
+
+    for (origin, reason) in [
+        (
+            ValueOriginId::new(1),
+            PrecisionLossReason::UnknownCallResult,
+        ),
+        (
+            ValueOriginId::new(2),
+            PrecisionLossReason::MissingLocalSummary,
+        ),
+        (
+            ValueOriginId::new(3),
+            PrecisionLossReason::ExternalOpaqueValue,
+        ),
+    ] {
+        assert_eq!(
+            relations
+                .query_overlap(&[origin], &[ValueOriginId::new(0)])
+                .expect("boundary reason query should validate"),
+            OriginOverlapDecision::Unknown(OriginUnknownEvidence {
+                left: vec![ValueOriginId::new(0)].into_boxed_slice(),
+                right: vec![origin].into_boxed_slice(),
+                reason,
+                relation: None,
+            })
+        );
+    }
+}
+
+#[test]
+fn projection_with_missing_source_state_is_rejected() {
+    let problem = projection_missing_source_state_problem();
+    let error = super::super::OriginSolver::solve(&problem)
+        .expect_err("projection with missing source state must fail");
+
+    assert!(
+        error.msg.contains("projection event")
+            && error.msg.contains("EventId(0)")
+            && error.msg.contains("source place PlaceId(0)")
+            && error.msg.contains("destination place PlaceId(1)")
+            && error.msg.contains("origin state is missing"),
+        "expected the projection error to name event, places and missing origin state, got: {error:?}"
+    );
 }
 
 #[test]
@@ -512,6 +564,121 @@ fn sibling_fields_problem() -> BorrowProblem {
     .expect("sibling fields problem should validate")
 }
 
+fn boundary_reason_problem() -> BorrowProblem {
+    BorrowProblem::new(super::with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+            Binding::synthetic(BindingId::new(2)),
+            Binding::synthetic(BindingId::new(3)),
+        ],
+        points: (0..=3)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(3),
+            (0..3).map(EventId::new).collect(),
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+            Place::new(PlaceId::new(2), BindingId::new(2), Vec::new()),
+            Place::new(PlaceId::new(3), BindingId::new(3), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                OriginKind::CallResult {
+                    call: CallId::new(0),
+                    provenance: CallResultProvenance::Unknown(
+                        CallResultUnknownReason::SummaryUnknown,
+                    ),
+                },
+            ),
+            ValueOrigin::new(
+                ValueOriginId::new(2),
+                OriginKind::CallResult {
+                    call: CallId::new(1),
+                    provenance: CallResultProvenance::Unknown(
+                        CallResultUnknownReason::MissingSummary,
+                    ),
+                },
+            ),
+            ValueOrigin::new(
+                ValueOriginId::new(3),
+                OriginKind::CallResult {
+                    call: CallId::new(2),
+                    provenance: CallResultProvenance::Unknown(
+                        CallResultUnknownReason::OpaqueExternal,
+                    ),
+                },
+            ),
+        ],
+        calls: vec![
+            Call {
+                id: CallId::new(0),
+                label: "summary-unknown".to_owned(),
+            },
+            Call {
+                id: CallId::new(1),
+                label: "missing-summary".to_owned(),
+            },
+            Call {
+                id: CallId::new(2),
+                label: "opaque-external".to_owned(),
+            },
+        ],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::CallEffect(CallEffect {
+                    call: CallId::new(0),
+                    arguments: Vec::new().into_boxed_slice(),
+                    result: Some(CallResult {
+                        place: PlaceId::new(1),
+                        origin: ValueOriginId::new(1),
+                    }),
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::CallEffect(CallEffect {
+                    call: CallId::new(1),
+                    arguments: Vec::new().into_boxed_slice(),
+                    result: Some(CallResult {
+                        place: PlaceId::new(2),
+                        origin: ValueOriginId::new(2),
+                    }),
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::CallEffect(CallEffect {
+                    call: CallId::new(2),
+                    arguments: Vec::new().into_boxed_slice(),
+                    result: Some(CallResult {
+                        place: PlaceId::new(3),
+                        origin: ValueOriginId::new(3),
+                    }),
+                }),
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("boundary reason problem should validate")
+}
+
 fn unknown_provenance_problem() -> BorrowProblem {
     BorrowProblem::new(super::with_return_terminator(BorrowProblemParts {
         bindings: vec![Binding::synthetic(BindingId::new(0))],
@@ -534,7 +701,9 @@ fn unknown_provenance_problem() -> BorrowProblem {
                 ValueOriginId::new(2),
                 OriginKind::CallResult {
                     call: CallId::new(0),
-                    provenance: CallResultProvenance::Unknown,
+                    provenance: CallResultProvenance::Unknown(
+                        CallResultUnknownReason::SummaryUnknown,
+                    ),
                 },
             ),
         ],
@@ -910,4 +1079,69 @@ fn join_origin_problem() -> BorrowProblem {
         ..BorrowProblemParts::default()
     }))
     .expect("join origin problem should validate")
+}
+
+fn projection_missing_source_state_problem() -> BorrowProblem {
+    BorrowProblem::new(super::with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points: (0..=3)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(3),
+            vec![EventId::new(0), EventId::new(1)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                OriginKind::Projection {
+                    source: ValueOriginId::new(0),
+                    projection: ProjectionElem::FixedIndex(0),
+                },
+            ),
+        ],
+        uses: vec![Use {
+            id: UseId::new(0),
+            point: PointId::new(2),
+            place: PlaceId::new(1),
+            kind: UseKind::Read,
+            definition: false,
+        }],
+        events: vec![
+            // No Fresh event records the source place, so the projection collects an empty
+            // child generation set from missing local state.
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Projection {
+                    source: PlaceId::new(0),
+                    destination: PlaceId::new(1),
+                    origin: ValueOriginId::new(1),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::Access {
+                    use_id: UseId::new(0),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("projection missing source state problem should validate")
 }

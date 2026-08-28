@@ -6,7 +6,7 @@ use super::{
     BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, EventId, EventKind,
     OriginKind, RebindValue, TerminatorEventKind, UseKind,
 };
-use super::{LoanId, PointId, ValueOriginId};
+use super::{LoanId, PlaceId, PointId, ValueOriginId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
@@ -372,15 +372,16 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         )?;
     }
 
-    let mut call_result_owners = BTreeMap::<ValueOriginId, Vec<CallId>>::new();
+    let mut call_result_owners = BTreeMap::<ValueOriginId, Vec<(EventId, CallId, PlaceId)>>::new();
     for event in events {
         if let EventKind::CallEffect(effect) = &event.kind
             && let Some(result) = effect.result
         {
-            call_result_owners
-                .entry(result.origin)
-                .or_default()
-                .push(effect.call);
+            call_result_owners.entry(result.origin).or_default().push((
+                event.id,
+                effect.call,
+                result.place,
+            ));
         }
     }
 
@@ -406,7 +407,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         origin.id
                     ))
                 })?;
-                if owners.len() != 1 || owners[0] != *call {
+                if owners.len() != 1 || owners[0].1 != *call {
                     return Err(compiler_error(format!(
                         "call-result origin {:?} has inconsistent call ownership",
                         origin.id
@@ -421,6 +422,21 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         )?;
                     }
                     CallResultProvenance::AliasParams(parameter_indices) => {
+                        // WHAT: an AliasParams summary with an empty index list claims the
+                        // result derives from call arguments while naming none of them.
+                        // WHY: that is malformed normalized input, not data a solver may
+                        // interpret: no producer emits it, and accepting it would let the
+                        // call result pose as an independent fresh generation downstream.
+                        if parameter_indices.is_empty() {
+                            let (event_id, _, result_place) = owners[0];
+                            return Err(compiler_error(format!(
+                                "call-result origin {:?} for call {:?} at CallEffect event {:?} \
+                                 with result place {:?} has an empty AliasParams index list; \
+                                 an alias-parameters summary must reference at least one call \
+                                 argument",
+                                origin.id, call, event_id, result_place
+                            )));
+                        }
                         validate_sorted_unique(parameter_indices, "call-result parameter")?;
                         let argument_count = events.iter().find_map(|event| match &event.kind {
                             EventKind::CallEffect(effect) if effect.call == *call => {
@@ -444,7 +460,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                             )));
                         }
                     }
-                    CallResultProvenance::Fresh | CallResultProvenance::Unknown => {}
+                    CallResultProvenance::Fresh | CallResultProvenance::Unknown(_) => {}
                 }
             }
         }

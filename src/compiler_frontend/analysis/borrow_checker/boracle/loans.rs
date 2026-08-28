@@ -521,7 +521,7 @@ fn derive_provenance_loans(
                         }
                     }
                     super::super::problem::CallResultProvenance::Alias(_)
-                    | super::super::problem::CallResultProvenance::Unknown => {
+                    | super::super::problem::CallResultProvenance::Unknown(_) => {
                         let result_origins =
                             origins_for_access(problem, origins, event.id, result_row.place);
                         let arguments = if effect.arguments.is_empty() {
@@ -539,7 +539,7 @@ fn derive_provenance_loans(
                                 .unwrap_or_else(|| result_origins.clone());
                             let loan_origins = if matches!(
                                 provenance,
-                                super::super::problem::CallResultProvenance::Unknown
+                                super::super::problem::CallResultProvenance::Unknown(_)
                             ) || source_origins.is_empty()
                             {
                                 result_origins.clone()
