@@ -335,6 +335,27 @@ fn borrow_problem_rejects_call_result_alias_parameter_out_of_range() {
 }
 
 #[test]
+fn borrow_problem_currently_accepts_empty_alias_params() {
+    let mut parts = granular_call_parts();
+    parts.origins.push(ValueOrigin::new(
+        ValueOriginId::new(1),
+        OriginKind::CallResult {
+            call: CallId::new(0),
+            provenance: CallResultProvenance::AliasParams(Vec::new().into_boxed_slice()),
+        },
+    ));
+    if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
+        effect.result = Some(CallResult {
+            place: PlaceId::new(0),
+            origin: ValueOriginId::new(1),
+        });
+    }
+
+    BorrowProblem::new(parts)
+        .expect("empty AliasParams currently publishes; Phase 3 must not let this look fresh");
+}
+
+#[test]
 fn borrow_problem_rejects_detached_call_result_origin() {
     let mut parts = granular_call_parts();
     parts.origins.push(ValueOrigin::new(

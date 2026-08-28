@@ -116,6 +116,49 @@ fn boracle_calls_project_alias_result_provenance_through_arguments() {
 }
 
 #[test]
+fn boracle_empty_alias_params_result_is_treated_as_an_independent_generation() {
+    let problem = alias_params_call_problem(Vec::new());
+    let solution = super::OriginSolver::solve(&problem)
+        .expect("empty AliasParams currently publishes and solves");
+
+    assert_eq!(
+        solution
+            .origins_after_event(EventId::new(2), PlaceId::new(1))
+            .expect("empty AliasParams currently falls back to the call-result origin"),
+        [ValueOriginId::new(1)]
+    );
+    assert!(
+        !solution.origins_overlap(&problem, &[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+        "empty AliasParams currently looks disjoint from the initialized argument rather than unknown"
+    );
+}
+
+#[test]
+fn boracle_alias_params_with_empty_argument_state_uses_the_call_result_origin() {
+    let problem = uninitialized_argument_alias_params_problem();
+    let solution = super::OriginSolver::solve(&problem)
+        .expect("AliasParams with empty argument state currently solves");
+
+    assert_eq!(
+        solution
+            .origins_after_event(EventId::new(1), PlaceId::new(1))
+            .expect("missing argument origins currently fall back to the call-result origin"),
+        [ValueOriginId::new(1)]
+    );
+    assert!(
+        solution
+            .origins_after_event(EventId::new(1), PlaceId::new(0))
+            .unwrap_or(&[])
+            .is_empty(),
+        "the referenced argument must still have no origin state at the call"
+    );
+    assert!(
+        !solution.origins_overlap(&problem, &[ValueOriginId::new(0)], &[ValueOriginId::new(1)]),
+        "empty argument origin state currently looks independent rather than unknown"
+    );
+}
+
+#[test]
 fn boracle_aggregates_retain_stored_child_trace() {
     let problem = aggregate_problem();
     let solution = super::OriginSolver::solve(&problem).expect("aggregate problem should solve");
@@ -2140,6 +2183,10 @@ fn generated_cyclic_problem(
 }
 
 fn call_alias_problem() -> BorrowProblem {
+    alias_params_call_problem(vec![0])
+}
+
+fn alias_params_call_problem(parameter_indices: Vec<usize>) -> BorrowProblem {
     BorrowProblem::new(with_return_terminator(BorrowProblemParts {
         bindings: vec![
             Binding::synthetic(BindingId::new(0)),
@@ -2172,7 +2219,7 @@ fn call_alias_problem() -> BorrowProblem {
                 super::super::problem::OriginKind::CallResult {
                     call: super::super::problem::CallId::new(0),
                     provenance: super::super::problem::CallResultProvenance::AliasParams(
-                        vec![0].into_boxed_slice(),
+                        parameter_indices.into_boxed_slice(),
                     ),
                 },
             ),
@@ -2251,6 +2298,106 @@ fn call_alias_problem() -> BorrowProblem {
         ..BorrowProblemParts::default()
     }))
     .expect("call alias problem should validate")
+}
+
+fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
+    BorrowProblem::new(with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points: (0..=4)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(4),
+            vec![EventId::new(0), EventId::new(1), EventId::new(2)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                super::super::problem::OriginKind::CallResult {
+                    call: super::super::problem::CallId::new(0),
+                    provenance: super::super::problem::CallResultProvenance::AliasParams(
+                        vec![0].into_boxed_slice(),
+                    ),
+                },
+            ),
+        ],
+        calls: vec![Call {
+            id: super::super::problem::CallId::new(0),
+            label: "alias-call".to_owned(),
+        }],
+        uses: vec![
+            Use {
+                id: UseId::new(0),
+                point: PointId::new(1),
+                place: PlaceId::new(0),
+                kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(1),
+                point: PointId::new(3),
+                place: PlaceId::new(1),
+                kind: UseKind::Write,
+                definition: false,
+            },
+        ],
+        events: vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::CallArgument {
+                    call: super::super::problem::CallId::new(0),
+                    index: 0,
+                    argument: CallArgument {
+                        place: PlaceId::new(0),
+                        access: super::super::problem::AccessKind::Shared,
+                        use_id: UseId::new(0),
+                    },
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::CallEffect(CallEffect {
+                    call: super::super::problem::CallId::new(0),
+                    arguments: vec![CallArgument {
+                        place: PlaceId::new(0),
+                        access: super::super::problem::AccessKind::Shared,
+                        use_id: UseId::new(0),
+                    }]
+                    .into_boxed_slice(),
+                    result: Some(CallResult {
+                        place: PlaceId::new(1),
+                        origin: ValueOriginId::new(1),
+                    }),
+                }),
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(2),
+                PointId::new(3),
+                EventKind::Access {
+                    use_id: UseId::new(1),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("uninitialized argument AliasParams problem should validate")
 }
 
 fn aggregate_problem() -> BorrowProblem {
