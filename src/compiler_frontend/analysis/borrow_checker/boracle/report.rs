@@ -13,7 +13,7 @@ use super::super::last_use::{
     LastUseSubject, event_for_use,
 };
 use super::super::problem::{BorrowProblem, EventId, EventKind, PlaceId, PointId, ValueOriginId};
-use super::service::BoracleExperiment;
+use super::service::BoracleRuleSelection;
 use super::{LoanSolution, OriginSolution};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
@@ -24,11 +24,10 @@ pub(crate) struct ReactiveObservation {
     pub(crate) place: PlaceId,
 }
 
-/// One complete Boracle solver report, including the selected experiment.
+/// One complete Boracle solver report, including the typed rule selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoracleReport {
-    pub(crate) experiment: BoracleExperiment,
-    pub(crate) rule_set: &'static str,
+    pub(crate) rule_selection: BoracleRuleSelection,
     pub(crate) origin: OriginSolution,
     pub(crate) last_use: Box<[LastUseResult]>,
     pub(crate) origin_last_use: Box<[LastUseResult]>,
@@ -120,17 +119,25 @@ pub(crate) struct BoracleSolver;
 
 impl BoracleSolver {
     pub(crate) fn solve(problem: &BorrowProblem) -> Result<BoracleReport, CompilerError> {
-        Self::solve_with_experiment(problem, BoracleExperiment::Reference)
+        Self::solve_with_rule_selection(problem, BoracleRuleSelection::default())
     }
 
-    pub(crate) fn solve_with_experiment(
+    pub(crate) fn solve_with_rule_selection(
         problem: &BorrowProblem,
-        experiment: BoracleExperiment,
+        rule_selection: BoracleRuleSelection,
     ) -> Result<BoracleReport, CompilerError> {
+        rule_selection
+            .validate()
+            .map_err(CompilerError::compiler_error)?;
+
         let origin = super::OriginSolver::solve(problem)?;
-        let exclusive_liveness = match experiment {
-            BoracleExperiment::Reference => super::ExclusiveLoanLiveness::Conservative,
-            BoracleExperiment::DeadExclusiveLoan => super::ExclusiveLoanLiveness::UseDriven,
+        let exclusive_liveness = if rule_selection
+            .experiments
+            .contains(&super::BoracleExperiment::DeadExclusiveLoan)
+        {
+            super::ExclusiveLoanLiveness::UseDriven
+        } else {
+            super::ExclusiveLoanLiveness::Conservative
         };
         let loans = super::LoanSolver::solve_with_liveness(problem, &origin, exclusive_liveness)?;
 
@@ -290,8 +297,7 @@ impl BoracleSolver {
         reactive_transfer_blocked_places.dedup();
 
         Ok(BoracleReport {
-            experiment,
-            rule_set: experiment.rule_set(),
+            rule_selection,
             origin,
             last_use: last_use.into_boxed_slice(),
             origin_last_use: origin_last_use.into_boxed_slice(),

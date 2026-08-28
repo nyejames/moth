@@ -1,8 +1,9 @@
 use super::{run_boracle, solve_boracle};
 use crate::compiler_frontend::analysis::borrow_checker::{
-    AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, CallResultProvenance,
-    CallResultUnknownReason, EventKind, OriginKind, OriginOverlapDecision,
+    AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, BoracleRuleSelection,
+    CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind, OriginOverlapDecision,
 };
+use std::collections::BTreeSet;
 use std::fs;
 
 #[test]
@@ -14,20 +15,53 @@ fn boracle_service_source_smoke_uses_real_moth_input() {
     let first = run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         BoracleDump::Origins,
-        BoracleExperiment::DeadExclusiveLoan,
+        dead_exclusive_selection(),
     )
     .expect("real source should reach Boracle");
     let second = run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         BoracleDump::Origins,
-        BoracleExperiment::DeadExclusiveLoan,
+        dead_exclusive_selection(),
     )
     .expect("real source should reach Boracle");
 
     assert_eq!(first, second);
-    assert!(first.contains("rule-set = boracle-dead-exclusive-loan-v1"));
-    assert!(first.contains("experiment = dead-exclusive-loan"));
+    assert!(first.contains("rule-set = boracle-reference-v1"));
+    assert!(first.contains("experiments = dead-exclusive-loan"));
+    assert!(!first.contains("experiment = "));
     assert!(first.contains("OriginSolution"));
+}
+
+#[test]
+fn boracle_default_report_uses_reference_rule_set_without_experiments() {
+    let report = solve_source("value = 1\n");
+    assert_eq!(
+        report.rule_selection.reference_rule_set,
+        crate::compiler_frontend::analysis::borrow_checker::BoracleReferenceRuleSet::V1
+    );
+    let output = run_source_dump("value = 1\n", BoracleDump::Problem);
+    assert!(output.contains("rule-set = boracle-reference-v1"));
+    assert!(output.contains("experiments = none"));
+    assert!(!output.contains("experiment = "));
+    assert!(report.rule_selection.experiments.is_empty());
+}
+
+#[test]
+fn boracle_source_relations_and_precision_dumps_are_focused() {
+    let source = r#"
+items ~= {"a"}
+shared = items
+result = shared
+"#;
+    let relations = run_source_dump(source, BoracleDump::Relations);
+    assert!(relations.contains("origin-registrations:"));
+    assert!(relations.contains("relations:"));
+
+    let precision = run_source_dump(source, BoracleDump::Precision);
+    assert!(precision.contains("unknown-origins:"));
+    assert!(precision.contains("may-alias-relations:"));
+    assert!(precision.contains("mixed-generation-sets:"));
+    assert!(!precision.contains("OriginSolution"));
 }
 
 #[test]
@@ -1625,7 +1659,15 @@ fn run_source_dump(source: &str, dump: BoracleDump) -> String {
     run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         dump,
-        BoracleExperiment::Reference,
+        BoracleRuleSelection::default(),
     )
     .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
+}
+
+fn dead_exclusive_selection() -> BoracleRuleSelection {
+    BoracleRuleSelection {
+        reference_rule_set:
+            crate::compiler_frontend::analysis::borrow_checker::BoracleReferenceRuleSet::V1,
+        experiments: BTreeSet::from([BoracleExperiment::DeadExclusiveLoan]),
+    }
 }

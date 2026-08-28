@@ -41,8 +41,9 @@ pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
 pub(crate) use service::solve_hir_module;
 #[allow(unused_imports)]
 pub(crate) use service::{
-    BoracleDump, BoracleExperiment, BoracleFunctionReport, BoracleModuleReport,
-    BoracleServiceOptions, run_hir_module,
+    BoracleDump, BoracleExperiment, BoracleExperimentMetadata, BoracleFunctionReport,
+    BoracleModuleReport, BoracleReferencePromotionStatus, BoracleReferenceRuleSet,
+    BoracleRuleSelection, BoracleServiceOptions, run_hir_module,
 };
 
 #[cfg(test)]

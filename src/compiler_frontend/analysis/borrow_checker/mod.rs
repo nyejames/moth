@@ -41,8 +41,9 @@ pub(crate) use boracle::solve_hir_module;
 #[cfg(feature = "boracle")]
 #[allow(unused_imports)]
 pub(crate) use boracle::{
-    BoracleDump, BoracleExperiment, BoracleModuleReport, BoracleServiceOptions,
-    OriginOverlapDecision, run_hir_module,
+    BoracleDump, BoracleExperiment, BoracleExperimentMetadata, BoracleModuleReport,
+    BoracleReferencePromotionStatus, BoracleReferenceRuleSet, BoracleRuleSelection,
+    BoracleServiceOptions, OriginOverlapDecision, run_hir_module,
 };
 #[cfg(feature = "boracle")]
 #[allow(unused_imports)]

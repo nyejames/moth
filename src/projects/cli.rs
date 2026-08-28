@@ -12,7 +12,9 @@ use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::analysis::borrow_checker::{BoracleDump, BoracleExperiment};
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BoracleDump, BoracleExperiment, BoracleRuleSelection,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
 use crate::compiler_tests::integration_test_runner::{
@@ -30,6 +32,7 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use saying::say;
 use std::path::{Path, PathBuf};
+
 use std::time::{Duration, Instant};
 use std::{env, process};
 
@@ -59,7 +62,7 @@ enum Command {
     Boracle {
         path: String,
         dump: BoracleDump,
-        experiment: BoracleExperiment,
+        rule_selection: BoracleRuleSelection,
     }, // Runs the internal, unstable reference-solver source service
 
     // Runs a hot reloading dev server that can be accessed in the browser
@@ -129,8 +132,8 @@ pub fn start_cli() -> process::ExitCode {
                 Command::Boracle {
                     path,
                     dump,
-                    experiment,
-                } => match run_boracle(&path, dump, experiment) {
+                    rule_selection,
+                } => match run_boracle(&path, dump, rule_selection) {
                     Ok(report) => {
                         print!("{report}");
                         CommandStatus::Success
@@ -699,9 +702,8 @@ fn parse_check_command(args: &[String]) -> Result<Command, String> {
 fn parse_boracle_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut dump = BoracleDump::Problem;
-    let mut experiment = BoracleExperiment::Reference;
+    let mut rule_selection = BoracleRuleSelection::default();
     let mut dump_seen = false;
-    let mut experiment_seen = false;
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -729,20 +731,15 @@ fn parse_boracle_command(args: &[String]) -> Result<Command, String> {
                 if value.starts_with("--") || value.trim().is_empty() {
                     return Err(String::from("Missing value for --experiment."));
                 }
-                if experiment_seen {
-                    return Err(String::from(
-                        "Boracle command accepts --experiment at most once.",
-                    ));
-                }
-                experiment = value
-                    .parse()
+                let experiment = value
+                    .parse::<BoracleExperiment>()
                     .map_err(|error: String| format!("Invalid value for --experiment: {error}"))?;
-                experiment_seen = true;
+                rule_selection.experiments.insert(experiment);
                 index += 2;
             }
             _ if arg.starts_with("--") => {
                 return Err(format!(
-                    "Unknown boracle flag: '{arg}'. Supported flags are --dump <problem|origins|loans|last-use|conflicts|witnesses> and --experiment <reference|dead-exclusive-loan>."
+                    "Unknown boracle flag: '{arg}'. Supported flags are --dump <problem|origins|relations|precision|loans|last-use|conflicts|witnesses> and --experiment <dead-exclusive-loan>."
                 ));
             }
             _ => {
@@ -758,10 +755,14 @@ fn parse_boracle_command(args: &[String]) -> Result<Command, String> {
         }
     }
 
+    rule_selection
+        .validate()
+        .map_err(|error| format!("Invalid Boracle rule selection: {error}"))?;
+
     Ok(Command::Boracle {
         path,
         dump,
-        experiment,
+        rule_selection,
     })
 }
 
@@ -892,8 +893,10 @@ fn print_help() {
     #[cfg(feature = "boracle")]
     {
         say!("\nBoracle command options (internal and unstable):");
-        say!("  --dump <section>       (problem, origins, loans, last-use, conflicts, witnesses)");
-        say!("  --experiment <name>    (reference or dead-exclusive-loan)");
+        say!(
+            "  --dump <section>       (problem, origins, relations, precision, loans, last-use, conflicts, witnesses)"
+        );
+        say!("  --experiment <name>    (repeatable; dead-exclusive-loan)");
     }
     say!("\nNew command options:");
     say!("  --force                (allows replacing existing scaffold files)");

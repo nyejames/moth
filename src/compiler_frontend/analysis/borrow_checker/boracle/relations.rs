@@ -465,6 +465,28 @@ impl OriginRelations {
         dump
     }
 
+    /// Render only the precision-loss views owned by the relation table.
+    pub(crate) fn precision_debug_dump(&self) -> String {
+        let mut dump = String::new();
+        dump.push_str("unknown-origins:\n");
+        for registration in self.registrations.values() {
+            if matches!(registration, OriginRegistration::Unknown { .. }) {
+                writeln!(&mut dump, "  {registration:?}").expect("writing to String cannot fail");
+            }
+        }
+        dump.push_str("may-alias-relations:\n");
+        for relation in self.rows.iter() {
+            if matches!(relation.kind, OriginRelationKind::MayAlias { .. }) {
+                writeln!(&mut dump, "  {relation:?}").expect("writing to String cannot fail");
+            }
+        }
+        dump.push_str("mixed-generation-sets:\n");
+        for set in self.mixed_generation_sets.iter() {
+            writeln!(&mut dump, "  {set:?}").expect("writing to String cannot fail");
+        }
+        dump
+    }
+
     fn query_pair(&self, left: ValueOriginId, right: ValueOriginId) -> OriginOverlapDecision {
         if left == right {
             return OriginOverlapDecision::Overlap(OriginOverlapEvidence::Identity {

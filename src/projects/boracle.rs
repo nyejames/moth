@@ -9,7 +9,7 @@ use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_proje
 use crate::build_system::create_project_modules::compile_single_file_boracle;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BoracleDump, BoracleExperiment, BoracleServiceOptions, run_hir_module,
+    BoracleDump, BoracleRuleSelection, BoracleServiceOptions, run_hir_module,
 };
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
@@ -22,11 +22,17 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 pub(crate) fn run_boracle(
     path: &str,
     dump: BoracleDump,
-    experiment: BoracleExperiment,
+    rule_selection: BoracleRuleSelection,
 ) -> Result<String, CompilerMessages> {
     let (input, string_table) = compile_boracle_input(path)?;
-    run_hir_module(&input, BoracleServiceOptions { dump, experiment })
-        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+    run_hir_module(
+        &input,
+        BoracleServiceOptions {
+            dump,
+            rule_selection,
+        },
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
 }
 
 /// Solve the same compiler-owned source payload as [`run_boracle`] without flattening the typed

@@ -2,11 +2,11 @@
 
 Status: active
 
-Current slice: Phase 4 experiment selection
+Current slice: Phase 5 documentation and closeout
 
 Blockers: none
 
-Next action: replace the single experiment selector with a typed rule selection
+Next action: update canonical Boracle docs and run final audits
 
 Repository path:
 
@@ -348,33 +348,33 @@ Later research packages need named experiments that can run alone and in reviewe
 
 ### Work
 
-- [ ] Replace the single experiment selector with a typed rule selection:
-  - [ ] one explicit reference rule-set version
-  - [ ] a sorted set of named experiments
-- [ ] Preserve `reference` as the default with an empty experiment set.
-- [ ] Preserve `dead-exclusive-loan` as an explicit experiment.
-- [ ] Reject incompatible experiment combinations.
-- [ ] Record the full rule selection in every report and dump.
-- [ ] Make CLI parsing repeatable or accept one deterministic comma-free repeated option shape.
-- [ ] Keep the command internal and unstable.
-- [ ] Add experiment metadata:
-  - [ ] stable name
-  - [ ] whether it may change legality
-  - [ ] prerequisite experiment capabilities
-  - [ ] reference promotion status
-- [ ] Add `--dump relations` and `--dump precision` only if the report data justifies both.
-- [ ] Do not expose experiments through normal `check`, build, config or source syntax.
-- [ ] Update source-service and CLI tests.
-- [ ] Delete the old single-enum path rather than retaining adapters.
+- [x] Replace the single experiment selector with a typed rule selection:
+  - [x] one explicit reference rule-set version
+  - [x] a sorted set of named experiments
+- [x] Preserve `reference` as the default with an empty experiment set.
+- [x] Preserve `dead-exclusive-loan` as an explicit experiment.
+- [x] Reject incompatible experiment combinations.
+- [x] Record the full rule selection in every report and dump.
+- [x] Make CLI parsing repeatable or accept one deterministic comma-free repeated option shape.
+- [x] Keep the command internal and unstable.
+- [x] Add experiment metadata:
+  - [x] stable name
+  - [x] whether it may change legality
+  - [x] prerequisite experiment capabilities
+  - [x] reference promotion status
+- [x] Add `--dump relations` and `--dump precision` only if the report data justifies both.
+- [x] Do not expose experiments through normal `check`, build, config or source syntax.
+- [x] Update source-service and CLI tests.
+- [x] Delete the old single-enum path rather than retaining adapters.
 
 ### Phase gate
 
-- [ ] Audit normal compilation and CLI help to prove Boracle remains feature-gated and internal.
-- [ ] Review experiment naming and report determinism.
-- [ ] Run `just feature-lane-check`.
-- [ ] Run `just boracle`.
-- [ ] Run `git diff --check`.
-- [ ] Commit the experiment foundation.
+- [x] Audit normal compilation and CLI help to prove Boracle remains feature-gated and internal.
+- [x] Review experiment naming and report determinism.
+- [x] Run `just feature-lane-check`.
+- [x] Run `just boracle`.
+- [x] Run `git diff --check`.
+- [x] Commit the experiment foundation.
 
 ## Phase 5: canonical documentation, final audits and closeout
 

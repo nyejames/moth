@@ -435,20 +435,29 @@ fn boracle_same_call_conflict_has_one_truthful_witness() {
 fn boracle_dead_exclusive_loan_is_only_enabled_by_its_experiment() {
     let problem = dead_exclusive_alias_problem();
     let reference = super::BoracleSolver::solve(&problem).expect("reference should solve");
-    let experiment = super::BoracleSolver::solve_with_experiment(
+    let experiment = super::BoracleSolver::solve_with_rule_selection(
         &problem,
-        super::BoracleExperiment::DeadExclusiveLoan,
+        super::BoracleRuleSelection {
+            reference_rule_set: super::BoracleReferenceRuleSet::V1,
+            experiments: std::collections::BTreeSet::from([
+                super::BoracleExperiment::DeadExclusiveLoan,
+            ]),
+        },
     )
     .expect("dead-exclusive experiment should solve");
 
     assert_eq!(
-        reference.experiment,
-        super::BoracleExperiment::Reference,
-        "the default solver must remain in reference mode"
+        reference.rule_selection,
+        super::BoracleRuleSelection::default(),
+        "the default solver must remain in the reference rule-set with no experiments"
     );
     assert_eq!(
-        experiment.experiment,
-        super::BoracleExperiment::DeadExclusiveLoan
+        experiment.rule_selection.experiments,
+        std::collections::BTreeSet::from([super::BoracleExperiment::DeadExclusiveLoan])
+    );
+    assert_eq!(
+        experiment.rule_selection.reference_rule_set,
+        super::BoracleReferenceRuleSet::V1
     );
     assert!(reference.has_conflicts());
     assert!(!experiment.has_conflicts());
