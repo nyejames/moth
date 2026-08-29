@@ -346,9 +346,27 @@ fn origin_relations(
                 emit_projection_trace_rows(problem, event, state_after_event, &mut rows);
             }
             OriginTraceRule::Mixed => {}
+            OriginTraceRule::WriteThrough => {
+                if matches!(event.kind, EventKind::Copy { .. }) {
+                    // Copy independence: writing a copy through an alias preserves the
+                    // referent for loans, but must not PathJoin the source generation
+                    // with that referent.
+                } else {
+                    for output in &trace.output_origins {
+                        for input in &trace.input_origins {
+                            if output != input {
+                                rows.push(OriginRelation::may_alias(
+                                    *output,
+                                    *input,
+                                    PrecisionLossReason::PathJoin,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             OriginTraceRule::Alias
             | OriginTraceRule::Rebind
-            | OriginTraceRule::WriteThrough
             | OriginTraceRule::Fresh
             | OriginTraceRule::CallResult => {
                 // A write through an alias-only binding preserves the referent generation while
@@ -1126,6 +1144,13 @@ fn apply_event(
             let source_origins = origins_for_place(problem, &state.origins, *source)
                 .into_iter()
                 .collect::<Vec<_>>();
+            if source_origins.is_empty() {
+                return Err(CompilerError::compiler_error(format!(
+                    "Boracle origin solver cannot apply copy event {:?}: origin state is \
+                     missing for source place {:?} and destination place {:?}",
+                    event.id, source, destination
+                )));
+            }
             if is_alias_only(problem, state, *destination) {
                 return Ok(write_through_result(*destination, source_origins));
             }
@@ -1234,6 +1259,13 @@ fn apply_event(
             let mut field_states = Vec::new();
             for field in fields {
                 let field_origins = origins_for_place(problem, &state.origins, field.source);
+                if field_origins.is_empty() {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Boracle origin solver cannot apply aggregate event {:?}: origin state \
+                         is missing for field source place {:?} and destination place {:?}",
+                        event.id, field.source, destination
+                    )));
+                }
                 input.extend(field_origins.iter().copied());
                 field_states.push((field.projection, field_origins));
             }

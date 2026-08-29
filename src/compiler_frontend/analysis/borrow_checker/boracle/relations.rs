@@ -1,15 +1,14 @@
 //! Typed provenance relationships for the Boracle reference lane.
 //!
-//! WHAT: owns hand-authored origin relation rows, typed overlap/disjoint/unknown evidence,
-//!       deterministic construction and validation for one Boracle relation table.
-//! WHY:  origin overlap needs an explicit semantic owner before conflict logic can migrate away
-//!       from the current untyped related-origin set.
+//! WHAT: owns origin relation rows, typed overlap/disjoint/unknown evidence, mixed-generation
+//!       sets, deterministic construction, validation and the origin-overlap query.
+//! WHY:  loan conflict checking and reports consume one explicit overlap owner rather than
+//!       reconstructing relatedness from traces or binding names.
 //!
 //! This module intentionally stops at source-semantic provenance. It does not own lifetime
-//! topology, `PlaceOverlap`, retained-edge counting (REC), or solver migration.
+//! topology, `PlaceOverlap`, retained-edge counting (REC), or experiment selection.
 
-// The relation surface is introduced before its production consumers and is therefore expected to
-// contain items used only by focused tests and later report/experiment phases.
+// Some constructors exist for focused tests and dumps that the solver does not yet emit.
 #![allow(dead_code)]
 
 use super::super::problem::{ProjectionElem, ValueOriginId};

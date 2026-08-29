@@ -23,9 +23,12 @@ The current alpha borrow checker remains the normal compiler authority until a l
 
 The semantic integration and adversarial-hardening baseline is now complete for the reference
 borrow-analysis boundary. The source service feeds one normalized problem into parameter-aware
-origin flow, alias-derived loans, origin-aware overlap, use-driven liveness and origin/event-aware
-last-use queries. This makes Boracle suitable for reference investigations and differential tests;
-it does not make it the production checker or a lifetime-topology authority.
+origin flow, typed `OriginRelations` overlap queries, alias-derived loans, use-driven liveness and
+origin/event-aware last-use queries. This makes Boracle suitable for reference investigations and
+differential tests; it does not make it the production checker or a lifetime-topology authority.
+
+The relation owner is now explicit: solved origin flow constructs `OriginRelations`, and loan
+conflict checking consumes its `query_overlap` result.
 
 Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and
 analysis queries throughout the compiler's life.
@@ -91,7 +94,7 @@ Boracle takes the opposite tradeoff.
 - It uses explicit data structures.
 - It favours readable fixed-point loops over compact algorithms.
 - It retains derivation and witness information that production checking should reconstruct only on failure.
-- It can run alternative named rule sets.
+- It can run the reference rule-set with named experiments.
 - It provides a solver implementation independent from the production algorithm.
 - It can explain discrepancies using stable normalized facts.
 - It remains useful for future borrow-checker features, diagnostics, optimisation proofs and downstream memory investigations.
@@ -142,23 +145,24 @@ The compiler-owned Boracle source service follows one explicit analysis relation
     validated HIR
         -> normalized semantic events and CFG facts
         -> parameter and definition-aware origin propagation
+        -> solved origin flow and OriginRelations
         -> alias/provenance-derived loan rows
-        -> structural-place and origin-aware overlap
+        -> structural-place overlap and OriginRelations::query_overlap
         -> use-driven loan liveness and conflict witnesses
         -> origin and loan last-use observations
         -> exact after-event final-use candidates
 ]
 
-The origin solution is an input to loan derivation and conflict checking, not a report collected
-beside an independent loan solve. Structural place overlap handles bases and projections within a
-binding; origin overlap handles aliases across binding roots. Explicit copies and fresh
-rebindings remain disjoint from the source generation they replace or copy.
+The origin stage constructs `OriginRelations` from solved flow before loan derivation. Loan
+conflict checking consumes `OriginRelations::query_overlap`; it does not rebuild origin overlap
+from traces or binding names. Structural place overlap remains a separate fact. Explicit copies
+and fresh rebindings remain disjoint from the source generation they replace or copy.
 
 Source extraction preserves exact call-argument and result-write boundaries, edge-specific scope
 visibility and deterministic CFG ordering. Local and generated call summaries that are unavailable
 at this boundary remain conservative rather than being invented from source text.
 
-### Planned main paths
+### Main paths
 
 [codeblock, $code("text"):
     src/compiler_frontend/analysis/borrow_checker/problem/
@@ -280,12 +284,13 @@ Additional IDs such as `UseId`, `AccessEventId` or `OriginEventId` are justified
 
 Borrow legality checks overlapping places, not only equal local names.
 
-The initial reference overlap relation should be explicit and conservative where required.
+Structural place overlap remains explicit and conservative where required. `OriginRelations` owns
+origin overlap separately.
 
 [table:
     [th:
         [: **Pair**]
-        [: **Initial overlap rule**]
+        [: **Structural place overlap rule**]
     ]
 
     [td:
@@ -316,11 +321,6 @@ The initial reference overlap relation should be explicit and conservative where
     [td:
         [: growable collection element and structural mutation]
         [: overlap at the collection receiver base]
-    ]
-
-    [td:
-        [: separate fresh or copied origins]
-        [: disjoint even when bindings share a historical source name]
     ]
 ]
 
@@ -361,9 +361,10 @@ This distinction is one of Boracle's central reasons to exist. The current alpha
 
 ## Origins and provenance
 
-Origin analysis records where a value's observable storage relationship came from.
+Origin analysis records where a value's observable storage relationship came from. Solved origin
+flow publishes the relation rows and precision evidence needed by borrow conflict queries.
 
-The initial reference vocabulary needs at least:
+The reference vocabulary includes:
 
 - fresh origin
 - alias of one or more existing origins
@@ -372,7 +373,10 @@ The initial reference vocabulary needs at least:
 - joined possible origins
 - call result supplied as fresh, aliasing or conservatively unknown preliminary provenance
 
-This is Stage 6 provenance, not final lifetime result provenance. Detached stored results, result-to-result aliases, retained parameters, outlives relationships and retention cardinality belong to later lifetime analysis unless Boracle is explicitly running a non-reference experiment.
+`OriginRelations` owns overlap between origin sets. This is provenance for borrow analysis, not
+final lifetime result provenance. Detached stored results, result-to-result aliases, retained
+parameters, outlives relationships and retention cardinality belong to later lifetime analysis
+unless Boracle is explicitly running a non-reference experiment.
 
 ### Fresh values
 
@@ -421,6 +425,83 @@ Boracle should retain the explicit set and the path reason for each origin. It m
 Unknown call-result provenance is an explicit top-like relation. It may overlap an argument origin
 and cannot establish an independence proof. It is never treated as a fresh origin merely because a
 local summary is unavailable.
+
+### Typed origin relations
+
+`OriginRelations` is the only origin-overlap owner. Identity means equality of `ValueOriginId`.
+Aliases that preserve one exact value generation therefore keep the same ID and need no
+alias-equivalence row.
+
+The relation kinds preserve why two origins can or cannot observe one source-semantic generation:
+
+[table:
+    [th:
+        [: **Relation kind**]
+        [: **Meaning**]
+    ]
+
+    [td:
+        [: `Projection`]
+        [: directional source -> derived provenance; the row records the projection path]
+    ]
+
+    [td:
+        [: `AggregateChild`]
+        [: directional parent -> child containment; sibling children stay disjoint]
+    ]
+
+    [td:
+        [: `CopyCorrespondence`]
+        [: source/result correspondence with positive disjointness; the query reports `ExplicitCopy`]
+    ]
+
+    [td:
+        [: `MayAlias`]
+        [: possible overlap retained because precision was lost]
+    ]
+
+    [td:
+        [: `ProvenDisjoint`]
+        [: positive disjointness evidence with an explicit reason]
+    ]
+]
+
+`Projection` and `AggregateChild` preserve source-to-derived direction in each row. Origin-set
+queries are symmetric, but they are pair-local, not transitive: a query examines the requested
+origin pairs and never walks a relation graph to manufacture a new overlap. A parent-child row
+does not relate two child siblings.
+
+`CopyCorrespondence` and `ProvenDisjoint` are positive disjointness facts. The absence of an
+overlap row alone is not a disjointness proof. A copied result therefore returns disjoint
+evidence with reason `ExplicitCopy`, while distinct registered fresh generations return
+`DifferentFreshGenerations`.
+
+Mixed alias/slot unions record their independent members in mixed-generation sets without
+relating the members to one another. Mixed traces do not emit a relation row that could reconnect
+independent generations through a binding join.
+
+Separate fresh or copied origins therefore stay provably disjoint through `OriginRelations`
+even when the bindings involved share a historical source name; the decision consults
+generation identity and copy correspondence, never a binding name.
+
+`OriginRelations::query_overlap` canonicalizes both origin sets and asks each pair directly. It
+returns typed evidence for identity overlap, a directional or `MayAlias` overlap, positive
+disjointness or unknown precision. An unknown pair does not become fresh merely because a local
+summary or trace is missing.
+
+The precision-loss vocabulary is explicit:
+
+- `UnknownCallResult`
+- `MissingLocalSummary`
+- `DynamicIndex`
+- `ConservativeStorageDomain`
+- `PathJoin`
+- `MixedBindingMode`
+- `LoopGenerationWidening`
+- `ExternalOpaqueValue`
+
+These reasons explain an `Unknown` decision or a `MayAlias` relation. They do not turn an
+uncertain origin into an independent generation.
 
 ## Explicit copy
 
@@ -829,6 +910,23 @@ has already happened.
 
 Boracle may investigate a richer future summary vocabulary without publishing it as current interface contract.
 
+### Unknown call-result boundaries
+
+The normalized problem records `CallResultUnknownReason` at the call boundary:
+
+- `SummaryUnknown`: the resolved summary says that the result may alias an unknown source
+- `MissingSummary`: no local or generated summary was available
+- `OpaqueExternal`: the call crossed an opaque external or builtin boundary
+
+The origin relation layer maps these to `UnknownCallResult`, `MissingLocalSummary` and
+`ExternalOpaqueValue` respectively. A valid `AliasParams` result is only as precise as the
+argument origins collected at its owning call. An empty argument state remains unknown with
+`MissingLocalSummary`.
+
+An empty `AliasParams` list is malformed normalized input and raises `CompilerError`. It must not
+be published as a fresh independent result. The solver also keeps impossible post-flow states on
+the `CompilerError` lane rather than changing their meaning into a user-facing borrow diagnostic.
+
 ### Multiple returns
 
 One function-wide union can over-approximate relationships between separate return slots.
@@ -911,6 +1009,17 @@ Conceptual example:
 ]
 
 The production checker should eventually reconstruct equivalent useful evidence only when a diagnostic needs it. Boracle can retain it all the time.
+
+### Conflict evidence
+
+Each rejected access retains both structural and provenance evidence. `ConflictWitness` carries
+the requested and conflicting places, their origin sets, the keeping-alive use and an
+`OriginOverlapDecision` alongside `PlaceOverlap`.
+
+A witness's origin decision is `Overlap` or `Unknown`: a proven-disjoint query excludes the
+pairing before a witness can exist. Equal `ValueOriginId`s report `Identity` overlap evidence.
+Thus a witness preserves the typed identity, relation or precision reason instead of reducing
+the origin result to a boolean.
 
 ## Diagnostic boundary
 
@@ -1068,32 +1177,29 @@ A future named experiment may ask whether a set of borrow/last-use facts would b
 
 ## Reference and experiment result separation
 
-Every report records its rule set.
-
-Conceptual shape:
-
-[codeblock, $code("text"):
-    rule_set
-        reference
-
-    experiments
-        none
-]
-
-or:
+Every report and dump records one versioned reference rule-set plus a sorted experiment set. The
+default selection is `boracle-reference-v1` with no experiments.
 
 [codeblock, $code("text"):
-    rule_set
-        reference plus experiments
-
-    experiments
-        dead_exclusive_loan
-        loop_generation_epoch
+    rule-set = boracle-reference-v1
+    experiments = none
 ]
 
-A snapshot without rule-set identity is invalid.
+When experiments are selected, the header keeps the same reference rule-set and prints names in
+sorted order:
 
-Reference and experimental results should live in separate fields or report sections so a caller cannot accidentally treat an experiment as the canonical answer.
+[codeblock, $code("text"):
+    rule-set = boracle-reference-v1
+    experiments = dead-exclusive-loan
+]
+
+The only named experiment is `dead-exclusive-loan`. It may change legality and remains
+unpromoted research. Reference mode comes from the rule-set with an empty experiment set, not from
+an experiment value. Reports have no separate experiment field and experiments do not create
+alternate rule-set names.
+
+Reference and experimental results remain distinguishable in the typed rule selection and report
+header so a caller cannot accidentally treat an experimental result as the canonical answer.
 
 ## Initial investigation programme
 
@@ -1296,34 +1402,27 @@ normalized problem and complete report, with a smaller property-specific normali
 reproduction. Differential agreement is evidence for investigation, not proof that either solver
 is correct.
 
-## Developer command and dumps
-
-A build with `boracle` exposes the initial internal command:
+A build with `boracle` exposes the internal command:
 
 [codeblock, $code("bash"):
-    cargo run --features boracle -- boracle ./tmp/example.moth --dump loans
+    cargo run --features boracle -- boracle ./tmp/example.moth --dump relations
 ]
 
-The initial implementation accepts `problem`, `origins`, `loans`, `last-use`, `conflicts` and
-`witnesses` dumps, plus the named `reference` and `dead-exclusive-loan` experiment labels. The
-second label deliberately selects the stronger dead-exclusive liveness rule while it remains an
-experiment; reports always include the active rule-set and experiment name.
+`--dump` accepts `problem`, `origins`, `relations`, `precision`, `loans`, `last-use`, `conflicts`
+and `witnesses`. The `relations` dump renders registrations, mixed-generation sets and typed
+relation rows. The `precision` dump renders unknown origins, `MayAlias` rows and
+mixed-generation sets.
 
-Useful dump categories:
+`--experiment` is repeatable. The only accepted experiment name is `dead-exclusive-loan`. The
+default command selects `boracle-reference-v1` with an empty experiment set. The experiment
+selects use-driven liveness for an otherwise-unused exclusive capability while it remains
+research-only and not promoted into the reference rule-set.
 
-- normalized problem
-- CFG points and edges
-- places and overlap classes
-- origins and provenance derivations
-- loans and liveness
-- future-use and last-use facts
-- conflicts
-- witnesses
-- experiment deltas
+The command is feature-gated, internal and unstable. It must be absent without the feature and
+must not appear as normal user documentation.
 
-The command is internal and unstable. It must be absent without the feature and must not appear as normal user documentation.
-
-The CLI calls one compiler-owned Boracle analysis service. It does not assemble tokenization, AST, HIR or analysis stages itself.
+The CLI calls one compiler-owned Boracle analysis service. It does not assemble tokenization, AST,
+HIR or analysis stages itself.
 
 ## Validation
 

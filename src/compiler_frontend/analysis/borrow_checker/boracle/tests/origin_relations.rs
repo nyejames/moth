@@ -9,8 +9,8 @@
 
 use super::super::{
     DisjointReason, OriginDisjointEvidence, OriginOverlapDecision, OriginOverlapEvidence,
-    OriginRelation, OriginRelationEvidence, OriginRelationKind, OriginUnknownEvidence,
-    PrecisionLossReason,
+    OriginRegistration, OriginRelation, OriginRelationEvidence, OriginRelationKind,
+    OriginUnknownEvidence, PrecisionLossReason,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
@@ -51,15 +51,15 @@ fn mixed_alias_and_slot_generations_stay_unrelated_in_relations() {
             }),
             "preserved alias and slot generations must stay provably disjoint"
         );
+        assert!(
+            relations
+                .mixed_generation_sets()
+                .iter()
+                .any(|set| set.as_ref() == [preserved, slot]),
+            "mixed write publishing {preserved:?} alongside {slot:?} must record its union as \
+             MixedBindingMode precision loss"
+        );
     }
-
-    assert!(
-        relations.mixed_generation_sets().iter().any(|set| {
-            set.as_ref() == [ValueOriginId::new(0), ValueOriginId::new(2)]
-                || set.as_ref() == [ValueOriginId::new(0), ValueOriginId::new(3)]
-        }),
-        "mixed writes must record their union as MixedBindingMode precision loss"
-    );
 }
 
 #[test]
@@ -273,6 +273,67 @@ fn unknown_call_results_retain_boundary_specific_precision_reasons() {
 }
 
 #[test]
+fn precision_dump_reports_populated_precision_loss_content() {
+    // Unknown provenance registers real unknown origins with their boundary reasons, the
+    // join fixture keeps its may-alias rows, and the mixed fixture publishes both mixed
+    // generation unions: the dump must render that content, not only the headings.
+    let unknown = super::super::OriginSolver::solve(&unknown_provenance_problem())
+        .expect("unknown provenance should solve")
+        .relations()
+        .precision_debug_dump();
+    let unknown_origins =
+        precision_dump_section(&unknown, "unknown-origins:", Some("may-alias-relations:"));
+    for (id, reason) in [
+        (
+            ValueOriginId::new(1),
+            PrecisionLossReason::MissingLocalSummary,
+        ),
+        (
+            ValueOriginId::new(2),
+            PrecisionLossReason::UnknownCallResult,
+        ),
+    ] {
+        let registration = format!("{:?}", OriginRegistration::unknown(id, reason));
+        assert!(
+            unknown_origins.contains(&registration),
+            "precision dump must register origin {id:?} as {registration:?}, got:\n\
+             {unknown_origins}"
+        );
+    }
+
+    let join = super::super::OriginSolver::solve(&join_origin_problem())
+        .expect("join origin should solve")
+        .relations()
+        .precision_debug_dump();
+    let may_alias = precision_dump_section(
+        &join,
+        "may-alias-relations:",
+        Some("mixed-generation-sets:"),
+    );
+    for member in [ValueOriginId::new(1), ValueOriginId::new(2)] {
+        let row =
+            OriginRelation::may_alias(ValueOriginId::new(3), member, PrecisionLossReason::PathJoin);
+        assert!(
+            may_alias.contains(&format!("{row:?}")),
+            "precision dump must carry the join may-alias row {row:?}, got:\n{may_alias}"
+        );
+    }
+
+    let mixed = super::super::OriginSolver::solve(&super::mixed_binding_problem())
+        .expect("mixed binding should solve")
+        .relations()
+        .precision_debug_dump();
+    let mixed_sets = precision_dump_section(&mixed, "mixed-generation-sets:", None);
+    for slot in [ValueOriginId::new(2), ValueOriginId::new(3)] {
+        let expected = format!("{:?}", [ValueOriginId::new(0), slot]);
+        assert!(
+            mixed_sets.contains(&expected),
+            "precision dump must record the mixed union {expected}, got:\n{mixed_sets}"
+        );
+    }
+}
+
+#[test]
 fn projection_with_missing_source_state_is_rejected() {
     let problem = projection_missing_source_state_problem();
     let error = super::super::OriginSolver::solve(&problem)
@@ -285,6 +346,39 @@ fn projection_with_missing_source_state_is_rejected() {
             && error.msg.contains("destination place PlaceId(1)")
             && error.msg.contains("origin state is missing"),
         "expected the projection error to name event, places and missing origin state, got: {error:?}"
+    );
+}
+
+#[test]
+fn copy_with_missing_source_state_is_rejected() {
+    let problem = copy_missing_source_state_problem();
+    let error = super::super::OriginSolver::solve(&problem)
+        .expect_err("copy with missing source state must fail");
+
+    assert!(
+        error.msg.contains("copy event")
+            && error.msg.contains("EventId(0)")
+            && error.msg.contains("source place PlaceId(0)")
+            && error.msg.contains("destination place PlaceId(1)")
+            && error.msg.contains("origin state is missing"),
+        "expected the copy error to name event, places and missing origin state, got: {error:?}"
+    );
+}
+
+#[test]
+fn aggregate_with_missing_field_source_state_is_rejected() {
+    let problem = aggregate_missing_field_source_state_problem();
+    let error = super::super::OriginSolver::solve(&problem)
+        .expect_err("aggregate with a missing field state must fail");
+
+    assert!(
+        error.msg.contains("aggregate event")
+            && error.msg.contains("EventId(1)")
+            && error.msg.contains("field source place PlaceId(2)")
+            && error.msg.contains("destination place PlaceId(1)")
+            && error.msg.contains("origin state is missing"),
+        "expected the aggregate error to name the event, the failing field place and the \
+         destination place, got: {error:?}"
     );
 }
 
@@ -464,6 +558,19 @@ fn normalized(left: ValueOriginId, right: ValueOriginId) -> (ValueOriginId, Valu
     } else {
         (right, left)
     }
+}
+
+/// Slice one heading-delimited section out of a precision dump so assertions check the
+/// rendered rows between headings rather than only the headings themselves.
+fn precision_dump_section<'a>(dump: &'a str, heading: &str, next_heading: Option<&str>) -> &'a str {
+    let start = dump
+        .find(heading)
+        .unwrap_or_else(|| panic!("precision dump must contain the {heading} heading"));
+    let rest = &dump[start + heading.len()..];
+    let end = next_heading
+        .and_then(|next| rest.find(next))
+        .unwrap_or(rest.len());
+    &rest[..end]
 }
 
 fn sibling_fields_problem() -> BorrowProblem {
@@ -1144,4 +1251,132 @@ fn projection_missing_source_state_problem() -> BorrowProblem {
         ..BorrowProblemParts::default()
     }))
     .expect("projection missing source state problem should validate")
+}
+
+fn copy_missing_source_state_problem() -> BorrowProblem {
+    BorrowProblem::new(super::with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+        ],
+        points: (0..=3)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(3),
+            vec![EventId::new(0), EventId::new(1)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::new(
+                ValueOriginId::new(1),
+                OriginKind::Copy(vec![ValueOriginId::new(0)].into_boxed_slice()),
+            ),
+        ],
+        uses: vec![Use {
+            id: UseId::new(0),
+            point: PointId::new(2),
+            place: PlaceId::new(1),
+            kind: UseKind::Read,
+            definition: false,
+        }],
+        events: vec![
+            // No Fresh event records the source place, so the copy collects an empty source
+            // generation set from missing local state instead of a copied-from generation.
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Copy {
+                    source: PlaceId::new(0),
+                    destination: PlaceId::new(1),
+                    origin: ValueOriginId::new(1),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::Access {
+                    use_id: UseId::new(0),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("copy missing source state problem should validate")
+}
+
+fn aggregate_missing_field_source_state_problem() -> BorrowProblem {
+    BorrowProblem::new(super::with_return_terminator(BorrowProblemParts {
+        bindings: vec![
+            Binding::synthetic(BindingId::new(0)),
+            Binding::synthetic(BindingId::new(1)),
+            Binding::synthetic(BindingId::new(2)),
+        ],
+        points: (0..=3)
+            .map(|ordinal| ProgramPoint::new(PointId::new(ordinal), BlockId::new(0), ordinal))
+            .collect(),
+        blocks: vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(3),
+            vec![EventId::new(0), EventId::new(1)],
+        )],
+        entry: BlockId::new(0),
+        exits: vec![BlockId::new(0)],
+        places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
+            Place::new(PlaceId::new(2), BindingId::new(2), Vec::new()),
+        ],
+        origins: vec![
+            ValueOrigin::fresh(ValueOriginId::new(0)),
+            ValueOrigin::fresh(ValueOriginId::new(1)),
+        ],
+        events: vec![
+            // The first field observes its stored generation, but the second field's source
+            // place carries no recorded origin state: the aggregate must not invent a fresh
+            // parent generation for a field whose provenance is missing.
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Fresh {
+                    destination: PlaceId::new(0),
+                    origin: ValueOriginId::new(0),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::Aggregate {
+                    destination: PlaceId::new(1),
+                    origin: ValueOriginId::new(1),
+                    fields: vec![
+                        AggregateField {
+                            projection: ProjectionElem::Field(0),
+                            source: PlaceId::new(0),
+                        },
+                        AggregateField {
+                            projection: ProjectionElem::Field(1),
+                            source: PlaceId::new(2),
+                        },
+                    ]
+                    .into_boxed_slice(),
+                },
+                EventSource::none(),
+            ),
+        ],
+        ..BorrowProblemParts::default()
+    }))
+    .expect("aggregate missing field source state problem should validate")
 }

@@ -48,6 +48,9 @@ These are analysis lattice states. They are not Moth source types and do not dir
 
 Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.
 
+Production Stage 6 still checks conflicts against overlapping storage roots; the feature-gated
+Boracle reference solver instead evaluates typed `OriginRelations` provenance.
+
 Root tracking is analysis metadata, not source-visible reference identity.
 
 ## Alias activity

@@ -128,11 +128,10 @@ fn boracle_calls_project_alias_result_provenance_through_arguments() {
 fn boracle_empty_alias_params_problem_is_rejected_as_malformed_input() {
     // WHAT: an empty AliasParams index list claims the result derives from call arguments
     // while naming none of them.
-    // WHY: Phase 0 showed such a problem publishing the call-result origin as a fresh
-    // independent generation that looked Disjoint from the initialized argument. Phase 3
-    // treats the empty index slice as malformed normalized input, so `BorrowProblem::new`
-    // must reject it with a CompilerError naming the origin, call, event and result place;
-    // the solver never sees the problem at all, and no flow can make the result look fresh.
+    // WHY: that is malformed normalized input. Accepting it used to publish the call-result
+    // origin as a fresh independent generation. `BorrowProblem::new` must reject it with a
+    // CompilerError naming the origin, call, event and result place; the solver never sees
+    // the problem, and no flow can make the result look fresh.
     let error = BorrowProblem::new(alias_params_call_parts(Vec::new()))
         .expect_err("empty AliasParams must be rejected before the origin solver runs");
 

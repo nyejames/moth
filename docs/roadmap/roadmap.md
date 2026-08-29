@@ -12,7 +12,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 ## Active implementation work
 
 - [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
-- [Boracle typed provenance relations](./plans/boracle-typed-provenance-relations-plan.md)
 
 ## Queued documentation work
 

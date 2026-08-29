@@ -353,9 +353,9 @@ fn borrow_problem_rejects_empty_alias_params() {
 
     // WHAT: an empty AliasParams index list claims an argument derivation without naming
     // any argument.
-    // WHY: Phase 3 treats that as malformed normalized input. Accepting it let the solver
-    // publish the call-result origin as a fresh independent generation; the invariant must
-    // fail at validation with a CompilerError naming the origin, call, event and result place.
+    // WHY: that is malformed normalized input. Accepting it let the solver publish the
+    // call-result origin as a fresh independent generation; the invariant must fail at
+    // validation with a CompilerError naming the origin, call, event and result place.
     let error = BorrowProblem::new(parts).expect_err("empty AliasParams is malformed input");
 
     assert!(

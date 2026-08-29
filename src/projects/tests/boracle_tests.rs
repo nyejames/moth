@@ -197,6 +197,79 @@ result = shared
 }
 
 #[test]
+fn boracle_source_copy_through_alias_stays_write_through_without_path_join() {
+    let report = solve_source(
+        r#"
+items ~= {1}
+writer ~= items
+~items.push(2) catch:
+;
+payload ~= {3}
+writer = copy payload
+"#,
+    );
+    let function = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function
+                .problem
+                .events()
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::Copy { .. }))
+        })
+        .expect("copy through a live alias should produce a typed copy event");
+    let write_through_use = function
+        .problem
+        .uses()
+        .iter()
+        .find(|use_row| {
+            use_row.definition && function.report.origin.is_write_through_use(use_row.id)
+        })
+        .expect("copy into an alias-only destination must stay write-through");
+    assert!(
+        write_through_use.definition && function.report.has_conflicts(),
+        "a live shared holder must still conflict with the write-through copy"
+    );
+
+    let (copy_event, source, destination) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Copy {
+                source,
+                destination,
+                ..
+            } => Some((event.id, *source, *destination)),
+            _ => None,
+        })
+        .expect("copy event should be present");
+    let source_origins =
+        function
+            .report
+            .origin
+            .origins_for_place_after_event(&function.problem, copy_event, source);
+    let destination_origins = function.report.origin.origins_for_place_after_event(
+        &function.problem,
+        copy_event,
+        destination,
+    );
+    assert!(
+        matches!(
+            function
+                .report
+                .origin
+                .relations()
+                .query_overlap(&source_origins, &destination_origins)
+                .expect("copy write-through overlap should validate"),
+            OriginOverlapDecision::Disjoint(_)
+        ),
+        "copying through an alias must not PathJoin the payload with the preserved referent"
+    );
+}
+
+#[test]
 fn boracle_source_rebind_separates_old_alias_origin() {
     let output = run_source_dump(
         r#"
