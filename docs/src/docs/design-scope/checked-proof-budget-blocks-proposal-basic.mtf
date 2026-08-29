@@ -1,0 +1,49 @@
+This is an open proposal. The name and syntax are not accepted yet.
+
+### What it would do
+
+A checked proof-budget block would let the compiler spend much more time trying
+to prove difficult code safe:
+
+[codeblock, $code("moth"):
+    checked:
+        -- code that needs unusually deep analysis
+    ;
+]
+
+The compiler would still run its normal fast analysis first. It would only use
+the expensive tier when the normal checker found a possible conflict it could
+not settle.
+
+### What it would not do
+
+Code outside the block would still receive every mandatory safety check. A
+checked block would not:
+
+- change runtime behaviour
+- weaken borrow or lifetime rules
+- make garbage collection a safety fallback
+- accept code because testing found no failure
+- let source choose a solver or time limit
+
+It would trade compile time for proof precision, not safety for convenience.
+
+### Predictable limits
+
+The deeper checker would use deterministic limits such as a maximum number of
+states or refinement rounds. It would not try for a machine-dependent number of
+seconds.
+
+If the compiler reached its limit, the code would remain unproven. The compiler
+would never treat "no counterexample found yet" as proof.
+
+### Why it may help
+
+The deeper tier could keep more branch relationships separate, reason more
+carefully about loop generations, specialise call summaries or prove that two
+indexes cannot refer to the same element.
+
+Boracle will research these proof techniques before Moth decides whether a
+source feature is worthwhile. The proposal should become accepted design only
+if the deeper tier proves a useful class of safe programs that the normal
+checker deliberately rejects for compile-time cost reasons.

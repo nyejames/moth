@@ -40,6 +40,13 @@ Current open questions include:
 
 - distinct primitive-backed nominal wrapper or newtype syntax
 - narrow references to named, monomorphic, non-capturing functions
+- @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), an opt-in
+  lexical scope that may permit much deeper static analysis in exchange for
+  substantially slower compilation
+
+The checked-block name and example spelling are only working proposal language.
+The safety rules, source meaning and runtime behaviour would remain the same
+inside and outside the scope.
 
 Transparent aliases remain transparent regardless of whether a distinct
 primitive-backed nominal wrapper enters the language.
@@ -89,4 +96,5 @@ belongs in the language at all.
 ### Read next
 
 - @#design-principles (Design principles)
+- @#checked-proof-budget-blocks-proposal (Future proposal: checked proof-budget blocks)
 - @#excluded-language-families (Excluded language families)

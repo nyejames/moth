@@ -104,6 +104,7 @@ page_head #= theme_head
     - @./access-and-aliasing (Access and aliasing): shared reads, explicit copies and `~` access
     - @./borrow-validation (Borrow validation): roots, joins, last-use facts and affine transfer safety
     - @./boracle (Boracle reference solver): the developer-facing reference borrow model and borrow-analysis laboratory
+    - @./checked-proof-budget-research (Checked proof-budget research): future opt-in deep analysis that trades compile time for proof precision without changing safety rules
     - @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation): one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes
     - @./declared-memory-groups (Declared memory groups): accepted deferred `group` / `into` semantics and hard bulk lifetimes
     - @./retained-edge-counting (Retained Edge Counting): the narrow counted strategy for runtime-many persistent retained edges
@@ -114,5 +115,5 @@ page_head #= theme_head
 #[section, $md:
     ## Current support
 
-    See @../../docs/progress (Progress matrix) for what is implemented today. Most of this model is accepted design with implementation deferred.
+    See @../../docs/progress (Progress matrix) for what is implemented today. Most of this model is accepted design with implementation deferred. Checked proof-budget scopes remain an open proposal and are intentionally absent from the progress matrix.
 ]

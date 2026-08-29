@@ -1,0 +1,16 @@
+@checked-proof-budget-research content as reference_content
+@styles navbar, section, theme_head
+
+page_title #= "Checked proof-budget research"
+page_description #= "Future research into opt-in deep static analysis for difficult borrow proofs."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Memory management) / Checked proof-budget research
+
+    This page records a future design proposal and the compiler constraints current Boracle work should preserve. It is not accepted source syntax or current compiler behaviour.
+]
+
+#[section, reference_content]

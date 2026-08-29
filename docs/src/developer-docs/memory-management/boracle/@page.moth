@@ -11,6 +11,8 @@ page_head #= theme_head
     @../ (Memory management) / Boracle reference solver
 
     Boracle is a developer-facing reference model of borrow legality, not a language feature and not a production fallback. It exists so borrow reasoning can be inspected, compared and extended outside the production checker.
+
+    @../checked-proof-budget-research (Checked proof-budget research) records how current experiments should preserve room for a future opt-in deep analysis tier without turning Boracle into a public fallback checker.
 ]
 
 #[section, reference_content]

@@ -1,0 +1,251 @@
+This is an open design proposal. It is not accepted syntax, a progress-matrix
+feature or an implementation promise.
+
+### Core idea
+
+Moth's normal compiler should use a predictable, efficient borrow analysis that
+proves common programs without turning every build into symbolic execution.
+Some safe programs still need substantially more path, value or loop reasoning
+than the normal checker should spend by default.
+
+The proposal introduces a lexical **proof-budget scope**. The working name is a
+checked block:
+
+[codeblock, $code("moth"):
+    checked:
+        -- difficult but safe alias relationships
+    ;
+]
+
+The example spelling is illustrative only. The final keyword, placement rules
+and exact scope shape remain open.
+
+A checked scope would let the compiler spend much more compile time proving the
+same static safety rules. It would not make code outside the scope less checked.
+
+### Same rules, different analysis effort
+
+The proposed meaning is:
+
+[codeblock, $code("text"):
+    ordinary source
+        -> normal proof budget
+
+    checked scope
+        -> normal proof budget first
+        -> deeper proof only when the normal analysis cannot decide
+]
+
+The safety contract would remain identical:
+
+- shared and exclusive accesses still cannot conflict
+- copies still create independent values only through `copy`
+- optional ownership transfer still requires a complete final-use proof
+- lifetime topology still needs one legal owner and valid retained edges
+- garbage collection still cannot make invalid source legal
+- backend choice still cannot change accepted source
+
+A checked block would affect compiler effort, not runtime meaning.
+
+### Candidate analysis ladder
+
+The future production checker is expected to start with cheap analysis and only
+refine a candidate conflict when needed. Checked scopes fit that structure:
+
+[codeblock, $code("text"):
+    cheap borrow solve
+        |
+        +-- proven safe -> accept
+        |
+        v
+    candidate conflict
+        |
+        v
+    normal conflict-directed refinement
+        |
+        +-- conflict disproved -> accept
+        |
+        v
+    checked proof scope?
+        |
+        +-- no -> report the remaining conflict
+        |
+        v
+    deep refinement
+        |
+        +-- conflict impossible -> accept
+        +-- conflict possible -> report one compatible witness
+        +-- proof limit reached -> report that proof remained inconclusive
+]
+
+The normal path should still handle most code. The checked tier exists for
+analyses whose cost would be unreasonable as the default.
+
+Possible deep analyses include:
+
+- retaining many more branch-correlated state alternatives
+- delaying conservative widening at control-flow joins
+- stronger loop-generation and induction reasoning
+- richer outcome-sensitive call-summary instantiation
+- value-sensitive fixed-index or inequality proofs
+- larger conflict slices and more complete witness reconstruction
+- later investigation of narrow solver-backed path-feasibility queries
+
+None of these techniques is accepted merely because this proposal names them.
+Each still needs an independent soundness review.
+
+### Analysis enclave
+
+A checked scope should not become an isolated mini-function. Values, aliases and
+capabilities may enter the scope and later uses may occur after it.
+
+A likely architecture is:
+
+[codeblock, $code("text"):
+    normal entry facts
+        -> checked deep refinement
+        -> compact proven exit facts
+        -> normal analysis continues
+]
+
+The compiler may inspect predecessor provenance and later uses outside the
+lexical block when the proof requires them. The scope authorises expensive state
+splitting and refinement around obligations caused by the scope. It should not
+silently turn the whole module into deep symbolic execution.
+
+Useful exit facts may include:
+
+- two origins must be disjoint
+- two places must observe the same generation
+- a loan cannot reach one exit
+- a result has one of several path-correlated provenance shapes
+- a value has no future use on a specific continuation
+
+The ordinary checker can consume those compact facts without retaining the full
+deep state outside the scope.
+
+### Deterministic compile-time budgets
+
+The compiler must not decide legality by trying for a wall-clock duration such
+as five seconds. Machine speed, system load and cache state must not change
+whether a program compiles.
+
+A checked analysis needs deterministic semantic limits, such as:
+
+- maximum refined states
+- maximum path alternatives
+- maximum loop-refinement rounds
+- maximum tracked predicates
+- maximum specialised summary obligations
+- maximum solver obligations if a solver is ever introduced
+
+The exact limits are compiler implementation policy. Source should not select a
+numeric budget or a solver algorithm.
+
+Reaching the hard limit means the compiler could not prove the program within
+the supported checked tier. It never means "probably safe".
+
+### Monotonicity
+
+A useful final design should preserve these properties:
+
+[codeblock, $code("text"):
+    normal analysis accepts P
+        -> checked analysis also accepts P
+
+    checked analysis accepts P
+        -> the same ordinary Moth safety rules are proven
+
+    removing checked
+        -> may lose a difficult proof
+        -> never changes runtime meaning
+]
+
+Adding checked must not activate a stricter source law or produce a different
+runtime operation. It only permits more analysis.
+
+### Relationship to Boracle
+
+Boracle is the right place to research the proof techniques before source syntax
+is accepted.
+
+The research sequence should distinguish:
+
+[codeblock, $code("text"):
+    coarse result
+    normal refinement result
+    deep refinement result
+    proof effort required
+]
+
+A case is useful evidence for this proposal when:
+
+- normal analysis reaches a deliberate precision or cost boundary
+- a deeper deterministic analysis proves the case safe
+- the proof has a path-compatible explanation
+- independent operational testing finds no bounded counterexample
+- the deeper rule has a written static soundness argument
+
+Boracle's bounded operational oracle remains a counterexample finder and test
+oracle. A finite set of successful executions can never replace the static proof
+required for checked acceptance.
+
+### Possible future use beyond borrow conflicts
+
+Borrow precision is the primary motivation. The same proof-budget marker could
+later inform other static analyses when their own contracts support a deeper
+tier:
+
+- last-use and optional-transfer precision
+- lifetime-region and escape proofs
+- cleanup-frontier and retained-edge reasoning
+- proving that REC is unnecessary in a difficult case
+- bounds-check or checked-arithmetic elimination
+
+These consumers must remain separate analyses. A checked block must not merge
+borrow legality, lifetime topology and physical memory planning into one solver.
+
+### Hard constraints for any accepted design
+
+- Normal Moth remains fully statically checked.
+- Checked code uses the same safety and runtime semantics as ordinary code.
+- Cheap analysis runs before deep analysis.
+- Deep analysis is conflict-directed rather than unconditional whole-module work.
+- Compile-time limits are deterministic and semantic, not wall-clock timeouts.
+- Exhausting the proof budget cannot accept code.
+- The backend sees no runtime checked-block operation.
+- Source cannot choose a solver implementation or numeric budget.
+- Cross-module calls continue to use stable semantic summaries.
+- A checked caller does not open arbitrary dependency HIR as local control flow.
+- Bounded operational execution is evidence, not acceptance proof.
+- The proposal does not make Boracle a user-selectable compiler fallback.
+
+### Open questions
+
+The design remains open on:
+
+- whether `checked` is the right name
+- whether the feature should be block-only or also allow a whole function
+- how nested checked scopes compose
+- which deep proof families are worth supporting first
+- how the compiler reports a true conflict versus exhausted proof effort
+- which compact exit facts may escape the scope
+- whether lifetime analysis should reuse the same marker later
+- whether narrow path-feasibility solving is worthwhile after custom Moth-specific domains
+- what deterministic hard limits provide useful power without pathological builds
+
+The syntax should remain unaccepted until Boracle demonstrates a meaningful set
+of safe programs that need the deeper tier and the compiler can explain those
+proofs clearly.
+
+### Why the proposal may fit Moth
+
+Moth deliberately removes many features that make general borrow checking hard:
+there are no source-visible lifetime parameters, general closures, function
+values, trait objects, raw pointers or unsafe escape hatches. Calls are static,
+generics are concrete before borrow validation and builtin storage effects are
+compiler-known.
+
+Those restrictions make an unusually strong deep static tier plausible. The
+proposal uses that advantage without forcing every ordinary build to pay its
+worst-case cost.

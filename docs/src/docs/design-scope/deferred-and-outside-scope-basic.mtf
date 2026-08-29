@@ -9,7 +9,12 @@ appear in the progress matrix as implementation work.
 ### Still being considered
 
 Some ideas have no final contract. Moth may consider distinct primitive-backed
-nominal wrappers, but transparent aliases remain transparent either way.
+nominal wrappers, narrow named function references and checked proof-budget
+blocks.
+
+A checked proof-budget block would let the compiler spend much more time trying
+to prove difficult code safe. Code outside the block would still receive the
+same mandatory safety checks. The working name and syntax are not accepted yet.
 
 ### Not part of Moth's design
 

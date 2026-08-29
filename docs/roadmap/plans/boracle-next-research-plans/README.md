@@ -8,6 +8,8 @@ That plan is still `proposed`. Activate it before editing: copy it to `docs/road
 
 The package 1 blocker on that plan is cleared: typed provenance overlap evidence, explicit unknown reasons, deterministic reports, and composable experiment selection are in the `boracle` branch. The remaining first action in the oracle plan is to establish the current semantic corpus baseline and specify the smallest executable normalized semantics.
 
+Before activating any remaining package, also read `checked-proof-budget-integration.md` in this directory. It records a future open proposal for opt-in deeper analysis and the architecture each package should preserve. It is design awareness only, not an implementation requirement for checked source syntax.
+
 The completed package 1 plan was deleted from `docs/roadmap/plans/` with its roadmap entry. The copy in this directory is historical only.
 
 | Order | Package | Status | Main result |
@@ -38,14 +40,37 @@ Checkpoints on `boracle`:
 
 These are explicit non-goals of the completed package. Do not reopen them while implementing the oracle unless a new required finding depends on them.
 
-* CFG join of empty ∪ nonempty argument origin state still unions to the nonempty set. `merge_state` widening belongs to package 4, loop generation epochs.
+* CFG join of empty union nonempty argument origin state still unions to the nonempty set. `merge_state` widening belongs to package 4, loop generation epochs.
 * Dynamic-index sibling overlap is unused in current producers. `PrecisionLossReason::DynamicIndex` exists but is not emitted. That belongs to package 6, or to refinement if a producer starts emitting precise dynamic-index origins.
 * `ProvenDisjoint` rows against unknown registrations are not rejected at construction. No current emitter produces that shape.
 * Production Stage 6 remaining on storage-root overlap is intentional, not unfinished Boracle work.
 
-The plans preserve the accepted compiler boundary: borrow validation consumes validated HIR, writes facts without rewriting HIR and does not decide lifetime topology, retained edges or physical memory strategy. 
+### Future checked proof-budget proposal
 
-They also preserve the build-system boundary. Module scheduling and publication remain build-owned while normalized problem construction, reference solving, summary convergence and generated semantic work remain compiler-owned. 
+The open proposal is a lexical proof-budget scope, currently called a checked block, that may let the compiler spend substantially more deterministic analysis effort on difficult borrow proofs.
+
+The proposal is not accepted syntax and does not belong in the progress matrix. It must preserve:
+
+```text
+same safety rules
+same runtime meaning
+ordinary fast analysis first
+deeper conflict-directed proof only when needed
+```
+
+The remaining packages should record whether a capability is suitable for:
+
+```text
+coarse analysis
+normal conflict refinement
+potential future deep refinement
+```
+
+They must not add checked syntax, wall-clock timeouts or a public solver switch. The shared integration requirements live in `checked-proof-budget-integration.md`.
+
+The plans preserve the accepted compiler boundary: borrow validation consumes validated HIR, writes facts without rewriting HIR and does not decide lifetime topology, retained edges or physical memory strategy.
+
+They also preserve the build-system boundary. Module scheduling and publication remain build-owned while normalized problem construction, reference solving, summary convergence and generated semantic work remain compiler-owned.
 
 ## Why this order
 
@@ -80,6 +105,8 @@ all bounded executions safe + static rejected
 
 Bounded execution is not a proof for unbounded loops. The plan treats truncated exploration as inconclusive and uses the oracle for counterexamples, regression evidence and reduction.
 
+The oracle may validate future deep-refinement acceptance deltas. It can never become the acceptance proof for a checked scope.
+
 ### 3. Conflict-directed refinement as the central production direction
 
 This is the most important ambitious package.
@@ -108,6 +135,8 @@ confirmed conflict with one path-compatible witness
 
 This can retain a fast common path in the future production checker while using stronger proof only where conservative merging creates a candidate error.
 
+It is also the main foundation for a possible checked tier. Refinement should record the effort needed to discharge a conflict and keep room for separate normal and deep deterministic state limits.
+
 ### 4. Loops after acyclic path refinement
 
 Loop epochs add another correlation dimension. Starting them before the acyclic relation and refinement machinery is stable would mix two hard problems.
@@ -121,6 +150,8 @@ UnknownMany
 ```
 
 It also adds edge-specific last-use queries and honest witnesses for infinite no-use continuations.
+
+A future checked tier may permit delayed widening or richer loop invariants, but bounded unrolling alone never proves unbounded safety.
 
 ### 5. Interprocedural work after local proof machinery
 
@@ -138,6 +169,8 @@ call effect starts
 
 It does not inspect callee internals or change ordinary mutable alias rules.
 
+A future checked caller may authorise more context-sensitive summary specialisation. Separate compilation and stable semantic summaries remain mandatory.
+
 ### 6. Aggregate and builtin storage semantics last
 
 This package then uses the established relation, oracle, refinement and call-result vocabulary to model:
@@ -149,3 +182,5 @@ This package then uses the established relation, oracle, refinement and call-res
 * Preliminary detached-result provenance
 
 It explicitly stops before allocation families, retained-edge cardinality, cleanup frontiers and REC selection.
+
+Dynamic indexes remain conservative in the first package. A later deep-analysis experiment may investigate narrow index inequality facts without making general index solving part of ordinary borrow validation.

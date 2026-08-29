@@ -11,6 +11,8 @@ page_head #= theme_head
     @../ (Memory management) / Borrow validation
 
     Borrow validation runs after HIR generation. It writes analysis facts beside HIR without changing it. Lifetime topology is a separate later analysis.
+
+    @../checked-proof-budget-research (Checked proof-budget research) records an open proposal for opt-in deeper analysis. It does not change the current safety contract or make ordinary code less checked.
 ]
 
 #[section, reference_content]
