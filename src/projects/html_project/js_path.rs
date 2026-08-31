@@ -25,10 +25,13 @@ use crate::compiler_frontend::module_compilation::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
-use crate::projects::html_project::document_shell::render_html_document_shell;
+use crate::projects::html_project::document_shell::{
+    HtmlDocumentShellInput, render_html_document_shell,
+};
 use crate::projects::html_project::external_js::runtime_glue::generate_module_glue;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
-use crate::projects::html_project::page_metadata::extract_html_page_metadata;
+use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::timing_scope;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,8 +44,10 @@ use std::sync::Arc;
 ///      call sites readable and the parameter list stable as fields are added or renamed.
 pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub hir_module: &'a HirModule,
+    pub page_metadata_plan: &'a HtmlPageMetadataPlan,
     pub const_fragments: &'a [ResolvedConstFragment],
     pub string_table: &'a mut StringTable,
+    pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub document_config: &'a HtmlDocumentConfig,
     pub logical_html_path: &'a Path,
     pub project_name: &'a str,
@@ -90,6 +95,7 @@ pub(crate) struct HtmlJsCompileInput<'a> {
     >,
     /// Every generated symbol name assigned to this compilation, in deterministic order.
     pub(crate) all_generated_function_names: Arc<Vec<String>>,
+    pub(crate) structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub(crate) compile_input: &'a HtmlModuleCompileInput<'a>,
     pub(crate) output_path: PathBuf,
 }
@@ -110,9 +116,13 @@ pub(crate) fn compile_html_module_js(
         module_private_function_names,
         generated_function_names,
         all_generated_function_names,
+        structural_url_renderer,
         compile_input: input,
         output_path,
     } = input;
+    let structural_string_urls = structural_url_renderer
+        .lowering_map(&module.executable.resource_table, input.reachability)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
         input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
@@ -120,7 +130,8 @@ pub(crate) fn compile_html_module_js(
         Arc::clone(&source_function_names),
         Arc::clone(&module_private_function_names),
         Arc::clone(&generated_function_names),
-    );
+    )
+    .with_structural_string_urls(Arc::clone(&structural_string_urls));
 
     let mut js_module = {
         timing_scope!(
@@ -140,6 +151,12 @@ pub(crate) fn compile_html_module_js(
     if !linked_modules.is_empty() {
         let mut isolated_modules = Vec::with_capacity(linked_modules.len() + 1);
         for linked in linked_modules {
+            let linked_structural_string_urls = structural_url_renderer
+                .lowering_map(
+                    &linked.module.executable.resource_table,
+                    linked.reachability,
+                )
+                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
             let linked_config = JsLoweringConfig::html_page_bundle(
                 input.build_profile.is_release(),
                 Arc::clone(&linked.module.link_facts.external_package_registry),
@@ -147,7 +164,8 @@ pub(crate) fn compile_html_module_js(
                 Arc::clone(&source_function_names),
                 Arc::clone(&module_private_function_names),
                 Arc::clone(&linked.generated_function_names),
-            );
+            )
+            .with_structural_string_urls(linked_structural_string_urls);
             let linked_js = {
                 timing_scope!(
                     timing_guard_backend_js_lower_linked,
@@ -241,8 +259,10 @@ pub(crate) fn compile_html_module_js(
 
     let html = render_html_document(&mut HtmlDocumentRenderInput {
         hir_module: input.hir_module,
+        page_metadata_plan: input.page_metadata_plan,
         const_fragments: input.const_fragments,
         string_table,
+        structural_url_renderer,
         document_config: input.document_config,
         logical_html_path: &output_path,
         project_name: input.project_name,
@@ -359,31 +379,24 @@ fn html_module_uses_reactive_runtime_fragments(
 /// WHAT: merges const fragments (with runtime insertion indices) and runtime slot placeholders
 /// into source-order HTML. Returns slot IDs so the bootstrap script can hydrate them in order.
 /// WHY: source order requires interleaving const strings at their indexed positions
-///      relative to runtime slots. Structural const values remain unresolved until URL assignment,
-///      so this builder boundary reports an internal error when final text is unavailable.
+///      relative to runtime slots, resolving structural pieces against the consuming page
+///      document's output context.
 pub(crate) fn render_entry_fragments(
     const_fragments: &[ResolvedConstFragment],
     slot_count: usize,
+    structural_url_renderer: &StructuralUrlRenderer<'_>,
 ) -> Result<(String, Vec<String>), CompilerError> {
     let mut html = String::new();
     let mut slot_ids: Vec<String> = Vec::new();
     let mut runtime_index = 0usize;
 
-    // Sort const fragments by runtime_insertion_index to handle them in order. A builder needs
-    // final text here; URL assignment will replace this internal wall in the next phase.
+    // Sort const fragments by runtime_insertion_index to handle them in order.
     let mut sorted_const: Vec<(usize, String)> = const_fragments
         .iter()
         .map(|fragment| {
-            fragment
-                .value
-                .clone()
-                .into_text()
+            structural_url_renderer
+                .render_owned(&fragment.value)
                 .map(|text| (fragment.runtime_insertion_index, text))
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "HTML builder boundary cannot render a structural const fragment until URL assignment lands.",
-                    )
-                })
         })
         .collect::<Result<_, _>>()?;
     sorted_const.sort_by_key(|(idx, _)| *idx);
@@ -422,17 +435,16 @@ pub(crate) fn render_entry_fragments(
 pub(crate) fn render_html_document(
     input: &mut HtmlDocumentRenderInput<'_>,
 ) -> Result<String, CompilerMessages> {
-    let (body_html, slot_ids) =
-        render_entry_fragments(input.const_fragments, input.entry_runtime_fragment_count)
-            .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
+    let (body_html, slot_ids) = render_entry_fragments(
+        input.const_fragments,
+        input.entry_runtime_fragment_count,
+        input.structural_url_renderer,
+    )
+    .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
     let start_function = input
         .hir_module
         .require_start_function("HTML document rendering")
         .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
-    let page_metadata =
-        extract_html_page_metadata(input.hir_module, start_function, input.string_table).map_err(
-            |diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, input.string_table),
-        )?;
     let Some(start_function_name) = input.function_names.get(&start_function) else {
         return Err(CompilerMessages::from_error(
             CompilerError::compiler_error(format!(
@@ -451,18 +463,18 @@ pub(crate) fn render_html_document(
         input.uses_reactive_runtime_fragments,
     );
 
-    render_html_document_shell(
-        input.document_config,
-        &page_metadata,
-        input.logical_html_path,
-        input.project_name,
+    render_html_document_shell(HtmlDocumentShellInput {
+        config: input.document_config,
+        page_metadata: &input.page_metadata_plan.metadata,
+        structural_url_renderer: input.structural_url_renderer,
+        logical_html_path: input.logical_html_path,
+        project_name: input.project_name,
         body_html,
         script_html,
-        input.import_map_html.clone(),
-    )
+        import_map_html: input.import_map_html.clone(),
+    })
     .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))
 }
-
 fn render_runtime_bootstrap_script_html(
     start_function_name: &str,
     js_bundle: &str,

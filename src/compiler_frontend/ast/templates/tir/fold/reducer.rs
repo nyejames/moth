@@ -362,12 +362,16 @@ impl FoldOutputState {
         mut self,
         string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
     ) -> ConstStringValue {
-        let Some(mut structural_pieces) = self.structural_pieces.take() else {
+        if self.structural_pieces.is_none() {
             return ConstStringValue::Text(string_table.intern(&self.output_buffer));
-        };
+        }
 
         self.flush_structural_text(string_table);
-        ConstStringValue::Pieces(std::mem::take(&mut structural_pieces))
+        let structural_pieces = self
+            .structural_pieces
+            .take()
+            .expect("structural pieces initialized before flushing");
+        ConstStringValue::Pieces(structural_pieces)
     }
 }
 

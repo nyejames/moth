@@ -6,14 +6,14 @@
 //! Rendered HTML fragments remain opaque during assembly so the shell never rewrites
 //! whitespace-sensitive content such as code blocks, scripts, import maps, or head markup.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::timed_stage;
 use std::fmt::Write as _;
 use std::path::Path;
-
-use crate::compiler_frontend::compiler_errors::CompilerError;
-
 const CORE_CSS: &str = include_str!("moth-css-core.css");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,40 +33,44 @@ pub(crate) struct ResolvedHtmlDocument {
     pub import_map_html: Option<String>,
 }
 
+/// Inputs for one HTML document-shell render.
+pub(crate) struct HtmlDocumentShellInput<'a> {
+    pub config: &'a HtmlDocumentConfig,
+    pub page_metadata: &'a HtmlPageMetadata,
+    pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
+    pub logical_html_path: &'a Path,
+    pub project_name: &'a str,
+    pub body_html: String,
+    pub script_html: String,
+    pub import_map_html: Option<String>,
+}
+
 pub(crate) fn render_html_document_shell(
-    config: &HtmlDocumentConfig,
-    page_metadata: &HtmlPageMetadata,
-    logical_html_path: &Path,
-    project_name: &str,
-    body_html: String,
-    script_html: String,
-    import_map_html: Option<String>,
+    input: HtmlDocumentShellInput<'_>,
 ) -> Result<String, CompilerError> {
     timed_stage!(crate::timing::TimingMetric::BackendHtmlRender, {
-        let resolved = resolve_html_document(
-            config,
-            page_metadata,
-            logical_html_path,
-            project_name,
-            body_html,
-            script_html,
-            import_map_html,
-        )?;
+        let resolved = resolve_html_document(input)?;
 
         Ok(render_resolved_document(&resolved))
     })
 }
 
 fn resolve_html_document(
-    config: &HtmlDocumentConfig,
-    page_metadata: &HtmlPageMetadata,
-    logical_html_path: &Path,
-    project_name: &str,
-    body_html: String,
-    script_html: String,
-    import_map_html: Option<String>,
+    input: HtmlDocumentShellInput<'_>,
 ) -> Result<ResolvedHtmlDocument, CompilerError> {
-    let mut base_title = page_metadata.title.clone();
+    let HtmlDocumentShellInput {
+        config,
+        page_metadata,
+        structural_url_renderer,
+        logical_html_path,
+        project_name,
+        body_html,
+        script_html,
+        import_map_html,
+    } = input;
+
+    let mut base_title =
+        render_metadata_value(page_metadata.title.as_ref(), structural_url_renderer)?;
     if base_title.is_none() {
         base_title = route_title_fallback(logical_html_path)?;
     }
@@ -75,33 +79,48 @@ fn resolve_html_document(
     }
     let base_title = base_title.unwrap_or_default();
 
+    let lang = render_metadata_value(page_metadata.lang.as_ref(), structural_url_renderer)?
+        .unwrap_or_else(|| config.lang.clone());
+    let description =
+        render_metadata_value(page_metadata.description.as_ref(), structural_url_renderer)?;
+    let favicon = render_metadata_value(page_metadata.favicon.as_ref(), structural_url_renderer)?
+        .or_else(|| config.favicon.clone());
+    let head_html = render_metadata_value(
+        page_metadata.extra_head_html.as_ref(),
+        structural_url_renderer,
+    )?
+    .unwrap_or_default();
+    let body_style =
+        render_metadata_value(page_metadata.body_style.as_ref(), structural_url_renderer)?
+            .unwrap_or_else(|| config.body_style.clone());
+
     Ok(ResolvedHtmlDocument {
-        lang: page_metadata
-            .lang
-            .clone()
-            .unwrap_or_else(|| config.lang.clone()),
+        lang,
         title: format!(
             "{}{}{}",
             config.title_prefix, base_title, config.title_postfix
         ),
-        description: page_metadata.description.clone(),
-        favicon: page_metadata
-            .favicon
-            .clone()
-            .or_else(|| config.favicon.clone()),
+        description,
+        favicon,
         inject_charset: config.inject_charset,
         inject_viewport: config.inject_viewport,
         inject_color_scheme: config.inject_color_scheme,
-        head_html: page_metadata.extra_head_html.clone().unwrap_or_default(),
-        body_style: page_metadata
-            .body_style
-            .clone()
-            .unwrap_or_else(|| config.body_style.clone()),
+        head_html,
+        body_style,
         body_html,
         script_html,
         core_css: config.inject_core_css.then(|| CORE_CSS.to_string()),
         import_map_html,
     })
+}
+
+fn render_metadata_value(
+    value: Option<&OwnedFoldedString>,
+    structural_url_renderer: &StructuralUrlRenderer<'_>,
+) -> Result<Option<String>, CompilerError> {
+    value
+        .map(|value| structural_url_renderer.render_owned(value))
+        .transpose()
 }
 
 fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {

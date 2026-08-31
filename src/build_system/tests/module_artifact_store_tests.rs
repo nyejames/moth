@@ -68,7 +68,6 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
                 const_top_level_fragments: Vec::new(),
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
-                rendered_path_usages: Vec::new(),
                 materialisation_context: Some(Arc::new(context)),
             },
         },

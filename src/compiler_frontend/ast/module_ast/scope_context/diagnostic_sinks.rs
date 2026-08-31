@@ -1,4 +1,4 @@
-//! Local mutation plus warning and rendered-path sinks for AST scope contexts.
+//! Local mutation plus warning sinks for AST scope contexts.
 
 use super::*;
 
@@ -54,14 +54,5 @@ impl ScopeContext {
 
     pub fn take_emitted_warnings(&self) -> Vec<CompilerDiagnostic> {
         std::mem::take(&mut *self.shared.emitted_warnings.borrow_mut())
-    }
-
-    pub fn record_rendered_path_usages(&self, usages: Vec<RenderedPathUsage>) {
-        self.rendered_path_usages.borrow_mut().extend(usages);
-    }
-
-    #[cfg(test)]
-    pub fn take_rendered_path_usages(&self) -> Vec<RenderedPathUsage> {
-        std::mem::take(&mut *self.rendered_path_usages.borrow_mut())
     }
 }

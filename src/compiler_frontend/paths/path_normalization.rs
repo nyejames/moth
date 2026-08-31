@@ -5,10 +5,8 @@
 //! diagnostic construction.
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// A source-file dependency candidate derived from one extensionless dependency path.
@@ -133,69 +131,4 @@ fn with_extension(path: PathBuf, extension: &str) -> PathBuf {
     } else {
         path.with_extension(extension)
     }
-}
-
-/// WHAT: builds the project-visible public path from a resolved path literal.
-/// WHY: the public path is what string coercion renders; it differs from the filesystem path by
-/// stripping the base and keeping the user-visible segments.
-pub(crate) fn build_public_path(
-    source_path: &InternedPath,
-    base_kind: &CompileTimePathBase,
-    string_table: &StringTable,
-) -> InternedPath {
-    match base_kind {
-        // Relative paths keep their original form as the public path.
-        CompileTimePathBase::RelativeToFile => source_path.clone(),
-
-        // Source-backed package and entry-root paths keep the visible segments. For source-backed package paths
-        // the first segment is the package prefix, which must be preserved. For entry-root paths,
-        // all segments are visible. In both cases the source path already contains the correct
-        // visible segments, so we can reuse it directly.
-        CompileTimePathBase::SourcePackageRoot | CompileTimePathBase::EntryRoot => {
-            // Strip leading `.` or `..` defensively; these should not be present for non-relative
-            // paths.
-            let components = source_path.as_components();
-            let skip = components
-                .iter()
-                .take_while(|component| {
-                    let segment = string_table.resolve(**component);
-                    segment == "." || segment == ".."
-                })
-                .count();
-
-            if skip == 0 {
-                source_path.clone()
-            } else {
-                InternedPath::from_components(components[skip..].to_vec())
-            }
-        }
-    }
-}
-
-/// WHAT: best-effort canonicalization that works even when the leaf doesn't exist yet.
-/// WHY: project-root validation needs a canonical path for prefix comparison, but the target file
-/// may not exist. Missing target diagnostics are reported separately.
-pub(crate) fn canonicalize_best_effort(path: &Path) -> PathBuf {
-    if let Ok(canonical) = fs::canonicalize(path) {
-        return canonical;
-    }
-
-    let mut existing = path.to_path_buf();
-    let mut tail_components: Vec<String> = Vec::new();
-
-    while !existing.exists() {
-        if let Some(name) = existing.file_name().and_then(|name| name.to_str()) {
-            tail_components.push(name.to_owned());
-        }
-        if !existing.pop() {
-            return path.to_path_buf();
-        }
-    }
-
-    let mut result = fs::canonicalize(&existing).unwrap_or(existing);
-    for component in tail_components.iter().rev() {
-        result.push(component);
-    }
-
-    result
 }

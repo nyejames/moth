@@ -19,7 +19,7 @@ pub(crate) use writer::{OutputDestinationOutcome, OutputWriteOutcome, OutputWrit
 #[cfg(test)]
 mod tests;
 
-pub(crate) use output_path::output_path_identity;
+pub(crate) use output_path::{OutputPathIdentity, output_path_identity};
 pub(crate) use policy::ValidatedOutputFolder;
 pub(crate) use policy::canonical_output_root_for_identity;
 pub(crate) use policy::classify_output_folder;

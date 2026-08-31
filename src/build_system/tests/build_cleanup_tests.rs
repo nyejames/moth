@@ -1495,6 +1495,8 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: CleanupPolicy::html(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
     let result = write_project_outputs(
         &release_project,
@@ -1541,7 +1543,7 @@ fn builder_owner_conflict_fails_without_mutation() {
     fs::create_dir_all(&project_dir).expect("should create project dir");
     let output_root = project_dir.join("dev");
 
-    let project = html_project(
+    let mut project = html_project(
         vec![OutputFile::new(
             PathBuf::from("index.html"),
             FileKind::Html(String::from("<html>HTML</html>")),
@@ -1572,9 +1574,9 @@ fn builder_owner_conflict_fails_without_mutation() {
         write_mode: WriteMode::AlwaysWrite,
     };
     let messages = crate::build_system::output::write_project_outputs(
-        &project,
+        &mut project,
         &conflicting_options,
-        &string_table,
+        &mut string_table,
     )
     .expect_err("a foreign builder must not claim the output root");
     let diagnostic = messages

@@ -13,6 +13,7 @@ pub(crate) mod create_project_modules;
 pub(crate) mod output;
 pub(crate) mod path_validation;
 pub(crate) mod project_config;
+pub(crate) mod resource_unions;
 pub(crate) mod utils;
 
 #[cfg(test)]

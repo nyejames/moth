@@ -1,20 +1,23 @@
-//! Tests for atomic publication of a module artefact and its generated delta.
+//! Tests for atomic publication of a module artefact, generated delta and resource associations.
 //!
-//! WHAT: protects the combined build-boundary transaction that commits both retained lanes.
-//! WHY: a valid module or generated delta must not become visible when its companion lane fails
-//!       preflight. Single-store publication invariants belong to `module_artifact_store_tests`.
+//! WHAT: protects the combined build-boundary transaction that commits all three retained lanes.
+//! WHY: a valid module, generated delta or resource association must not become visible when
+//!       another lane fails preflight. Single-store publication invariants belong to
+//!       `module_artifact_store_tests` and `resource_inputs_tests`.
 
-use super::publish_module_and_generated;
+use super::ModuleBoundaryPublication;
 use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::{
     ModuleArtifactStore, ProviderSlot,
 };
 use crate::build_system::create_project_modules::module_identity::ModuleId;
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -28,7 +31,13 @@ use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionDelta,
     GeneratedFunctionSidecar, Module, ModuleRootActivity, ProviderMaterialisationRegistry,
 };
-use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::file_references::ResourceSourceId;
+use crate::compiler_frontend::paths::module_resources::{
+    ModuleResourceTable, ResourceSourceAssociation,
+};
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -53,6 +62,45 @@ fn duplicate_materialisation_identity() -> GeneratedDeclarationIdentity {
         "duplicate".to_owned(),
         None,
     ))
+}
+
+fn resource_association(
+    module_origin: &StableModuleOriginIdentity,
+    source: ResourceSourceId,
+) -> ResourceSourceAssociation {
+    ResourceSourceAssociation {
+        origin: StableResourceOriginId::module_owned(
+            module_origin.clone(),
+            PortableResourcePath::from_portable_spelling("assets/compiler-owned.svg".to_owned())
+                .expect("test resource path should be valid"),
+        ),
+        source,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_module_and_generated(
+    modules: &mut ModuleArtifactStore,
+    generated: &mut BoundaryGeneratedFunctionStore,
+    materialisations: &mut ProviderMaterialisationRegistry,
+    resource_inputs: &mut ResourceInputRegistry,
+    module_id: ModuleId,
+    expected_origin: &StableModuleOriginIdentity,
+    artifact: CompiledModuleArtifact,
+    generated_delta: GeneratedFunctionDelta,
+    resource_source_associations: Vec<ResourceSourceAssociation>,
+) -> Result<(), CompilerError> {
+    super::publish_module_and_generated(ModuleBoundaryPublication {
+        modules,
+        generated,
+        materialisations,
+        resource_inputs,
+        module_id,
+        expected_origin,
+        artifact,
+        generated_delta,
+        resource_source_associations,
+    })
 }
 
 fn invalid_artifact() -> CompiledModuleArtifact {
@@ -81,7 +129,6 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 const_top_level_fragments: Vec::new(),
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
-                rendered_path_usages: Vec::new(),
                 materialisation_context: Some(Arc::new(
                     ModuleMaterialisationContext::from_identities_for_test(vec![
                         identity.clone(),
@@ -155,7 +202,6 @@ fn generated_sidecar(
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
-            rendered_path_usages: Vec::new(),
             materialisation_context: None,
         },
     };
@@ -199,6 +245,70 @@ fn generated_delta_with_identity_mismatch() -> GeneratedFunctionDelta {
 }
 
 #[test]
+fn combined_publication_commits_compiler_resource_association_delta() {
+    let mut modules = ModuleArtifactStore::new(1);
+    let mut generated = BoundaryGeneratedFunctionStore::default();
+    let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let artifact = artifact_without_context();
+    let expected_origin = artifact.interface.module_origin.clone();
+    let source = resource_inputs.register_source(PathBuf::from("/project/assets/logo.svg"));
+    let association = resource_association(&expected_origin, source);
+    let resource_origin = association.origin.clone();
+
+    publish_module_and_generated(
+        &mut modules,
+        &mut generated,
+        &mut materialisations,
+        &mut resource_inputs,
+        ModuleId::from_index(0),
+        &expected_origin,
+        artifact,
+        GeneratedFunctionDelta::from_records(Vec::new()),
+        vec![association],
+    )
+    .expect("a valid compiler association delta should publish with its module");
+
+    assert_eq!(
+        resource_inputs.source_for_origin(&resource_origin),
+        Some(source),
+        "publication must attach the compiler-produced origin/source pair"
+    );
+    assert_eq!(modules.artifact_count(), 1);
+    assert_eq!(generated.sidecars().count(), 0);
+}
+
+#[test]
+fn combined_publication_rejects_unknown_resource_source_without_mutation() {
+    let mut modules = ModuleArtifactStore::new(1);
+    let mut generated = BoundaryGeneratedFunctionStore::default();
+    let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let artifact = artifact_without_context();
+    let expected_origin = artifact.interface.module_origin.clone();
+    let association = resource_association(&expected_origin, ResourceSourceId::from_index(99));
+    let resource_origin = association.origin.clone();
+
+    let error = publish_module_and_generated(
+        &mut modules,
+        &mut generated,
+        &mut materialisations,
+        &mut resource_inputs,
+        ModuleId::from_index(0),
+        &expected_origin,
+        artifact,
+        GeneratedFunctionDelta::from_records(Vec::new()),
+        vec![association],
+    )
+    .expect_err("an unknown source ID must fail resource preflight");
+
+    assert!(error.msg.contains("unknown source ID"));
+    assert_eq!(modules.artifact_count(), 0);
+    assert_eq!(generated.sidecars().count(), 0);
+    assert_eq!(resource_inputs.source_for_origin(&resource_origin), None);
+}
+
+#[test]
 fn combined_publication_preflights_both_fallible_lanes_before_mutation() {
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
@@ -207,14 +317,20 @@ fn combined_publication_preflights_both_fallible_lanes_before_mutation() {
     let expected_origin = artifact.interface.module_origin.clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source = resource_inputs.register_source(PathBuf::from("/project/assets/logo.svg"));
+    let association = resource_association(&expected_origin, source);
+    let resource_origin = association.origin.clone();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
         &mut materialisations,
+        &mut resource_inputs,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,
         generated_delta,
+        vec![association],
     )
     .expect_err("an invalid module publication should fail before either lane commits");
 
@@ -230,6 +346,7 @@ fn combined_publication_preflights_both_fallible_lanes_before_mutation() {
     );
     assert_eq!(modules.materialisation_locations().count(), 0);
     assert_eq!(generated.sidecars().count(), 0);
+    assert_eq!(resource_inputs.source_for_origin(&resource_origin), None);
 }
 
 #[test]
@@ -245,14 +362,17 @@ fn combined_publication_rejects_expected_origin_mismatch_without_mutation() {
     );
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
         &mut materialisations,
+        &mut resource_inputs,
         ModuleId::from_index(0),
         &wrong_origin,
         artifact,
         generated_delta,
+        Vec::new(),
     )
     .expect_err("an expected-origin mismatch must fail before publication");
 
@@ -273,14 +393,20 @@ fn combined_publication_rejects_generated_delta_without_committing_valid_module(
     let expected_origin = artifact.interface.module_origin.clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source = resource_inputs.register_source(PathBuf::from("/project/assets/logo.svg"));
+    let association = resource_association(&expected_origin, source);
+    let before = resource_inputs.clone();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
         &mut materialisations,
+        &mut resource_inputs,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,
         generated_delta_with_identity_mismatch(),
+        vec![association],
     )
     .expect_err("a generated preflight failure must reject the combined publication");
 
@@ -291,6 +417,10 @@ fn combined_publication_rejects_generated_delta_without_committing_valid_module(
         ProviderSlot::Unavailable
     );
     assert_eq!(generated.sidecars().count(), 0);
+    assert_eq!(
+        resource_inputs, before,
+        "generated preflight failure must not attach a pending resource association"
+    );
 }
 
 #[test]
@@ -302,14 +432,20 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
     let expected_origin = artifact.interface.module_origin.clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source = resource_inputs.register_source(PathBuf::from("/project/assets/logo.svg"));
+    let association = resource_association(&expected_origin, source);
+    let before = resource_inputs.clone();
     let error = publish_module_and_generated(
         &mut modules,
         &mut generated,
         &mut materialisations,
+        &mut resource_inputs,
         ModuleId::from_index(0),
         &expected_origin,
         artifact,
         generated_delta_with_valid_record(),
+        vec![association],
     )
     .expect_err("a module preflight failure must reject the combined publication");
 
@@ -324,4 +460,8 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
         ProviderSlot::Unavailable
     );
     assert_eq!(generated.sidecars().count(), 0);
+    assert_eq!(
+        resource_inputs, before,
+        "module preflight failure must not attach a pending resource association"
+    );
 }

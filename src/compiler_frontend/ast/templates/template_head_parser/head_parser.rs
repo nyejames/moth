@@ -502,15 +502,8 @@ pub fn parse_template_head(
                     &meaningful_item_compatibility,
                     token_stream,
                 )?;
-                let path_root = token_stream
-                    .path_syntax
-                    .try_path_for_token(path_id, &token_stream.current_location())
-                    .map_err(TemplateError::from)?
-                    .root
-                    .clone();
                 push_template_head_path_expression(
                     path_id,
-                    &path_root,
                     token_stream,
                     context,
                     type_interner,

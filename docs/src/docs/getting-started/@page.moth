@@ -387,7 +387,7 @@ page_head #= language_theme_head
     ## Warnings and future suggestions
 
     Warnings are for code that can still compile but deserves attention.
-    Current warnings include things like malformed CSS/HTML template content, large tracked assets, naming convention issues and dependency alias case mismatches.
+    Current warnings include things like malformed CSS/HTML template content, naming convention issues and dependency alias case mismatches.
 
     Moth separates correctness from style pressure.
     The future `suggest` command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code.

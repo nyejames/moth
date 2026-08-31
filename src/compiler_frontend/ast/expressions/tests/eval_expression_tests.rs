@@ -20,7 +20,6 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
@@ -78,11 +77,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         vec![],
         0,
     )
-    .with_source_file_scope(source_scope.clone())
-    .with_path_format_config(PathStringFormatConfig {
-        origin: String::from("/moth"),
-        ..PathStringFormatConfig::default()
-    });
+    .with_source_file_scope(source_scope.clone());
 
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::structural_string(
@@ -129,11 +124,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
             ..
         }
     ));
-
-    let recorded = context.take_rendered_path_usages();
-    assert!(recorded.is_empty());
 }
-
 #[test]
 fn structural_string_equality_is_refused_only_in_a_constant_context() {
     // WHY: the refusal belongs only to const-required positions; rejecting runtime

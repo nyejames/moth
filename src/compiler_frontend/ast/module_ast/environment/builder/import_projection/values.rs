@@ -1,6 +1,8 @@
 //! Imported aliases, constants, defaults, and folded values.
 
 use super::*;
+use std::cell::RefCell;
+
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};

@@ -96,7 +96,6 @@ pub(crate) fn compile_project_config_file(
             source_code: &source_code,
             style_directives: services.style_directives,
             binding_packages: &services.frontend_surface.binding_packages,
-            source_file_kinds: &services.frontend_surface.source_file_kinds,
         },
         string_table,
     )?;

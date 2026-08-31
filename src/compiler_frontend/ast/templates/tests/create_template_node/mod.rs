@@ -18,8 +18,6 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -117,28 +115,6 @@ fn template_tokens_from_source_with_directives(
     tokens
 }
 
-fn test_project_path_resolver() -> ProjectPathResolver {
-    let cwd = std::env::temp_dir();
-    ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid")
-}
-
-/// Creates a real file inside the test resolver's entry root and returns its resource path.
-///
-/// A path head names one existing regular file, so a template test that needs a rendered path head
-/// has to give the resolver something to find.
-fn test_resource_file(file_name: &str) -> String {
-    let file_path = std::env::temp_dir().join(file_name);
-    std::fs::write(&file_path, b"test resource").expect("test resource file should be writable");
-
-    file_name.to_owned()
-}
-
 fn with_test_path_context(
     context: ScopeContext,
     source_scope: &InternedPath,
@@ -146,9 +122,7 @@ fn with_test_path_context(
 ) -> ScopeContext {
     context
         .with_style_directives(style_directives)
-        .with_project_path_resolver(Some(test_project_path_resolver()))
         .with_source_file_scope(source_scope.to_owned())
-        .with_path_format_config(PathStringFormatConfig::default())
 }
 
 fn new_constant_context(scope: InternedPath) -> ScopeContext {

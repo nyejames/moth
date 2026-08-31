@@ -11,7 +11,9 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, source_location::SourceLocation,
+};
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -22,7 +24,6 @@ use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
@@ -33,8 +34,7 @@ use std::sync::Arc;
 ///
 /// WHAT: a lane container with exactly an executable lane (typed HIR, its paired resource table,
 ///       type environment and borrow facts), a link-facts lane (per-function runtime facts,
-///       external imports and the effective registry), and a compiler-metadata lane (entry path,
-///       warnings, fragments, root activity, docs and rendered paths).
+///       warnings, fragments, root activity and docs).
 /// WHY: backends consume one stable module payload shape regardless of project type, with explicit
 ///      ownership keeping HIR/type/borrow/resource pairing obvious at call sites.
 pub(crate) struct Module {
@@ -87,9 +87,6 @@ pub(crate) struct CompiledModuleArtifact {
 ///      while keeping HIR/type/borrow/resource state together for backend lowering.
 pub(crate) struct ModuleExecutable {
     pub(crate) hir: HirModule,
-    /// The Phase 4 union planner and output integration consume this table when they resolve
-    /// executable resource uses into manifest records.
-    #[allow(dead_code)]
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
@@ -139,12 +136,10 @@ pub(crate) struct ModuleLinkFacts {
 /// Non-HIR compiler and builder-facing metadata for one compiled module.
 ///
 /// WHAT: owns the resolved root-local entry path, module warnings, resolved const top-level
-///       fragments, header-derived root activity, resolved documentation fragments, and
-///       rendered-path usages.
+///       fragments, header-derived root activity, and resolved documentation fragments.
 /// WHY: these are compiler-metadata lanes, not executable HIR state or link facts. Consolidating
 ///      them into one owned lane on the `Module` payload keeps HIR limited to executable/semantic
-///      IR and gives string-ID remapping, warning collection, and tracked-asset planning a single
-///      owner. The architecture assigns resolved root-local entry metadata to this lane.
+///      IR and gives backend assembly a single metadata owner.
 pub(crate) struct ModuleCompilerMetadata {
     /// Canonical entry file for the compiled module.
     pub(crate) entry_point: PathBuf,
@@ -152,7 +147,6 @@ pub(crate) struct ModuleCompilerMetadata {
     pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
     pub(crate) root_activity: ModuleRootActivity,
     pub(crate) doc_fragments: Vec<ModuleDocFragment>,
-    pub(crate) rendered_path_usages: Vec<RenderedPathUsage>,
     /// Self-contained declaring-module semantics used by generated-function materialisation.
     ///
     /// Shared by `Arc` so the boundary materialisation registry can keep resolving templates while
@@ -173,16 +167,15 @@ impl ModuleCompilerMetadata {
             entry_point,
             warnings,
             doc_fragments: lowering_metadata.doc_fragments,
-            rendered_path_usages: lowering_metadata.rendered_path_usages,
             const_top_level_fragments,
             root_activity,
             materialisation_context,
         }
     }
 
-    /// WHY: warnings, documentation locations, and rendered-path interned fields must all remap
-    ///      exactly once. Const fragment values are already owned folded strings with no interned
-    ///      IDs, root activity carries no interned fields, and the entry path is a `PathBuf`.
+    /// WHY: warnings, documentation and const-fragment locations must remap exactly once. Const
+    ///      fragment values are already owned folded strings with no interned IDs, root activity
+    ///      carries no interned fields, and the entry path is a `PathBuf`.
     ///
     /// Materialisation metadata owns self-contained strings and stable semantic identities, so
     /// this remap covers only executable presentation fields that retain local `StringId` values.
@@ -191,15 +184,12 @@ impl ModuleCompilerMetadata {
             warning.remap_string_ids(remap);
         }
 
-        for fragment in &mut self.doc_fragments {
+        for fragment in &mut self.const_top_level_fragments {
             fragment.location.remap_string_ids(remap);
         }
 
-        for usage in &mut self.rendered_path_usages {
-            usage.source_path.remap_string_ids(remap);
-            usage.public_path.remap_string_ids(remap);
-            usage.source_file_scope.remap_string_ids(remap);
-            usage.render_location.remap_string_ids(remap);
+        for fragment in &mut self.doc_fragments {
+            fragment.location.remap_string_ids(remap);
         }
     }
 }
@@ -225,16 +215,17 @@ impl ModuleRootActivity {
     }
 }
 
-/// A resolved const top-level fragment: an owned folded string and its runtime insertion index.
+/// A resolved const top-level fragment: an owned folded string, its source location and runtime insertion index.
 ///
-/// WHAT: carries the fully resolved module-local structural string value plus the count of runtime
-/// fragments that precede it in source order.
-/// WHY: builders merge const strings with the runtime fragment list returned by entry start()
-/// using the insertion index to reconstruct source-order interleaving, resolving any structural
-/// pieces at their final output boundary.
+/// WHAT: carries the fully resolved module-local structural string value plus the source location
+///       and count of runtime fragments that precede it in source order.
+/// WHY: builders merge const strings with the runtime fragment list using the insertion index to
+///      reconstruct source-order interleaving, while resolving structural pieces at their boundary.
 pub(crate) struct ResolvedConstFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
+    /// The authored source location of this const fragment.
+    pub location: SourceLocation,
     /// The owned structural string value of this const fragment.
     pub value: OwnedFoldedString,
 }

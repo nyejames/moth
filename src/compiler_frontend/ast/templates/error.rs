@@ -8,7 +8,6 @@
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathResolutionError;
 
 #[derive(Debug)]
 pub(crate) enum TemplateError {
@@ -45,19 +44,6 @@ impl From<Box<CompilerDiagnostic>> for TemplateError {
 impl From<CompilerError> for TemplateError {
     fn from(error: CompilerError) -> Self {
         TemplateError::Infrastructure(Box::new(error))
-    }
-}
-
-impl From<CompileTimePathResolutionError> for TemplateError {
-    fn from(error: CompileTimePathResolutionError) -> Self {
-        match error {
-            CompileTimePathResolutionError::Diagnostic(diagnostic) => {
-                TemplateError::Diagnostic(diagnostic)
-            }
-            CompileTimePathResolutionError::Infrastructure(error) => {
-                TemplateError::Infrastructure(Box::new(error))
-            }
-        }
     }
 }
 

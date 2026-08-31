@@ -421,6 +421,10 @@ impl PackageBoundaryId {
     pub(crate) fn index(self) -> usize {
         self.0
     }
+
+    pub(crate) fn from_index(index: usize) -> Self {
+        Self(index)
+    }
 }
 
 /// Exact cross-package location of one published materialisation template.

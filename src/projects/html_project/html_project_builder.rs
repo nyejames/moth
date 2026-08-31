@@ -11,40 +11,49 @@ use crate::backends::external_package_validation::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, OutputFile, Project, ProjectCompilation, ProjectLinkedModule,
+    BackendBuilder, DeferredResourceOutput, FileKind, OutputFile, Project, ProjectCompilation,
+    ProjectEntry,
 };
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;
-use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
+use crate::projects::html_project::compile_input::{
+    HtmlModuleCompileContext, HtmlModuleCompileInput,
+};
 use crate::projects::html_project::diagnostics::{
-    duplicate_html_output_path_messages, tracked_asset_builder_output_conflict_messages,
-    tracked_asset_output_conflict_messages,
+    duplicate_html_output_path_messages, resource_output_path_reserved_messages,
 };
 use crate::projects::html_project::document_config::parse_html_document_config;
 use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
-use crate::projects::html_project::external_js::runtime_assets::emit_external_js_runtime_assets;
+use crate::projects::html_project::external_js::runtime_assets::{
+    emit_external_js_runtime_assets, js_runtime_asset_output_path,
+};
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
-use crate::projects::html_project::external_js::runtime_glue::emit_build_runtime_modules;
+use crate::projects::html_project::external_js::runtime_glue::{
+    emit_build_runtime_modules, planned_runtime_module_output_paths,
+};
 use crate::projects::html_project::js_path::{
     HtmlJsCompileInput, compile_html_module_js, html_output_path,
 };
+use crate::projects::html_project::output_plan::plan_wasm_output_from_logical_html_path;
+use crate::projects::html_project::page_metadata::extract_html_page_metadata;
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
-use crate::projects::html_project::style_directives::html_project_style_directives;
-use crate::projects::html_project::tracked_assets::{
-    emit_tracked_assets, plan_module_tracked_assets,
+use crate::projects::html_project::resource_output_plan::{
+    HtmlResourceOutputPlan, ResourceUrlContext, display_origin,
 };
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
+use crate::projects::html_project::style_directives::html_project_style_directives;
 use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, ProjectConfigError};
-use crate::timing_scope;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -85,13 +94,13 @@ impl BackendBuilder for HtmlProjectBuilder {
 
     fn build_backend(
         &self,
-        project_compilation: ProjectCompilation,
+        mut project_compilation: ProjectCompilation,
         config: &Config,
         build_profile: BuildProfile,
         flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
-        parse_html_site_config(config, string_table)
+        let site_config = parse_html_site_config(config, string_table)
             .map_err(|error| error.into_messages(string_table.clone()))?;
 
         let document_config = parse_html_document_config(config, string_table)
@@ -108,16 +117,15 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = HtmlEntryPathPlan::from_config(config, string_table)?;
+        let resource_inputs = project_compilation.take_resource_inputs();
 
         let mut output_files = Vec::new();
         let mut output_paths = HashSet::new();
         let mut output_path_owners: HashMap<PathBuf, PathBuf> = HashMap::new();
+        let mut resource_output_plan = HtmlResourceOutputPlan::new(config.project_name.as_str());
         let mut entry_page_rel = None;
         let mut has_directory_homepage = false;
         let artifact_entries = project_compilation.entries();
-        let mut compiled_html_output_paths = Vec::with_capacity(artifact_entries.len());
-        let mut warnings = Vec::new();
-
         for entry in artifact_entries.iter().cloned() {
             let module = entry.module;
             // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
@@ -128,23 +136,89 @@ impl BackendBuilder for HtmlProjectBuilder {
                 string_table,
             )
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-
-            let compiled_artifacts = self.compile_one_module(
-                module,
-                entry.reachability,
-                entry.external_imports,
-                &entry.linked_modules,
-                Arc::clone(&entry.source_function_names),
-                Arc::clone(&entry.module_private_function_names),
-                Arc::clone(&entry.generated_function_names),
-                Arc::clone(&entry.all_generated_function_names),
-                &logical_html_output_path,
-                config.project_name.as_str(),
-                &document_config,
-                build_profile,
-                wasm_enabled,
+            let wasm_route_plan = if wasm_enabled {
+                Some(
+                    plan_wasm_output_from_logical_html_path(&logical_html_output_path)
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                )
+            } else {
+                None
+            };
+            let planned_html_output_path = wasm_route_plan
+                .as_ref()
+                .map_or(logical_html_output_path.as_path(), |plan| {
+                    plan.html_path.as_path()
+                });
+            let start_function = module
+                .executable
+                .hir
+                .require_start_function("HTML page metadata extraction")
+                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+            let page_metadata_plan = extract_html_page_metadata(
+                &module.executable.hir,
+                start_function,
+                &module.executable.resource_table,
+                string_table,
+            )
+            .map_err(|diagnostic| {
+                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+            })?;
+            resource_output_plan.plan_entry(
+                &entry,
+                planned_html_output_path,
+                &page_metadata_plan,
                 string_table,
             )?;
+            if let Some(route_plan) = &wasm_route_plan {
+                if let Some(js_path) = &route_plan.js_path {
+                    resource_output_plan.reserve_builder_output_path(
+                        js_path,
+                        "JavaScript",
+                        string_table,
+                    )?;
+                }
+                if let Some(wasm_path) = &route_plan.wasm_path {
+                    resource_output_plan.reserve_builder_output_path(
+                        wasm_path,
+                        "Wasm",
+                        string_table,
+                    )?;
+                }
+            }
+            let resource_url_context =
+                ResourceUrlContext::PageDocument(planned_html_output_path.to_path_buf());
+            let structural_url_renderer = StructuralUrlRenderer::new(
+                &resource_output_plan,
+                &resource_url_context,
+                Some(site_config.origin.as_str()),
+            );
+
+            let compiled_artifacts = self.compile_one_module(
+                HtmlModuleCompileContext {
+                    entry,
+                    page_metadata_plan: &page_metadata_plan,
+                    logical_html_output_path: &logical_html_output_path,
+                    structural_url_renderer: &structural_url_renderer,
+                    project_name: config.project_name.as_str(),
+                    document_config: &document_config,
+                    build_profile,
+                    wasm_enabled,
+                },
+                string_table,
+            )?;
+            for output_file in &compiled_artifacts.output_files {
+                let artefact_kind = match output_file.file_kind() {
+                    FileKind::Html(_) => "HTML page",
+                    FileKind::Js(_) => "JavaScript",
+                    FileKind::Wasm(_) => "Wasm",
+                    FileKind::Bytes(_) | FileKind::NotBuilt | FileKind::Directory => "builder",
+                };
+                resource_output_plan.reserve_builder_output_path(
+                    output_file.relative_output_path(),
+                    artefact_kind,
+                    string_table,
+                )?;
+            }
 
             let html_output_path = compiled_artifacts.html_output_path.clone();
             for output_file in compiled_artifacts.output_files {
@@ -161,7 +235,6 @@ impl BackendBuilder for HtmlProjectBuilder {
                 output_path_owners.insert(output_path.clone(), module.metadata.entry_point.clone());
                 output_files.push(output_file);
             }
-            compiled_html_output_paths.push((module, html_output_path.clone()));
 
             if entry_paths.is_homepage_entry(&module.metadata.entry_point) {
                 has_directory_homepage = true;
@@ -180,6 +253,23 @@ impl BackendBuilder for HtmlProjectBuilder {
         let runtime_emission_plan = HtmlExternalRuntimeEmissionPlan::from_import_sets(
             artifact_entries.iter().map(|entry| entry.external_imports),
         );
+        for asset in runtime_emission_plan.js_assets().values() {
+            let output_path = js_runtime_asset_output_path(&asset.canonical_source_path);
+            resource_output_plan.reserve_builder_output_path(
+                &output_path,
+                "JavaScript",
+                string_table,
+            )?;
+        }
+        let runtime_module_output_paths =
+            planned_runtime_module_output_paths(runtime_emission_plan.runtime_module_specifiers());
+        for output_path in runtime_module_output_paths {
+            resource_output_plan.reserve_builder_output_path(
+                &output_path,
+                "JavaScript",
+                string_table,
+            )?;
+        }
 
         output_files.extend(emit_external_js_runtime_assets(
             &runtime_emission_plan,
@@ -192,63 +282,21 @@ impl BackendBuilder for HtmlProjectBuilder {
             &mut output_paths,
             string_table,
         )?);
-
-        let mut tracked_assets = Vec::new();
-        let mut tracked_asset_sources_by_output: HashMap<PathBuf, PathBuf> = HashMap::new();
-        {
-            timing_scope!(
-                timing_guard_backend_html_tracked_assets_plan,
-                crate::timing::TimingMetric::BackendAssetsPlan
-            );
-            for (module, html_output_path) in &compiled_html_output_paths {
-                let planned_assets =
-                    plan_module_tracked_assets(module, html_output_path, string_table)?;
-                warnings.extend(planned_assets.warnings);
-
-                for asset in planned_assets.assets {
-                    let output_path = asset.emitted_output_path.clone();
-
-                    if let Some(existing_source) = tracked_asset_sources_by_output.get(&output_path)
-                    {
-                        if *existing_source == asset.source_filesystem_path {
-                            continue;
-                        }
-
-                        return Err(conflicting_tracked_asset_output_error(
-                            &asset.source_filesystem_path,
-                            existing_source,
-                            &output_path,
-                            string_table,
-                        ));
-                    }
-
-                    if !output_paths.insert(output_path.clone()) {
-                        return Err(tracked_asset_conflicts_with_existing_output_error(
-                            &asset.source_filesystem_path,
-                            &output_path,
-                            string_table,
-                        ));
-                    }
-
-                    tracked_asset_sources_by_output
-                        .insert(output_path.clone(), asset.source_filesystem_path.clone());
-                    tracked_assets.push(asset);
-                }
-            }
-        }
-        {
-            timing_scope!(
-                timing_guard_backend_html_tracked_assets_emit,
-                crate::timing::TimingMetric::BackendAssetsEmit
-            );
-            output_files.extend(emit_tracked_assets(&tracked_assets, string_table)?);
-        }
+        let deferred_resources = emit_planned_resource_outputs(
+            resource_output_plan,
+            &resource_inputs,
+            &output_files,
+            &output_paths,
+            string_table,
+        )?;
 
         Ok(Project {
             output_files,
             entry_page_rel,
             cleanup_policy: CleanupPolicy::html(),
-            warnings,
+            warnings: Vec::new(),
+            deferred_resources,
+            resource_inputs,
         })
     }
 
@@ -336,39 +384,33 @@ impl HtmlProjectBuilder {
     }
 
     /// Compile one module through the appropriate builder path (JS-only or HTML+Wasm).
-    #[allow(clippy::too_many_arguments)]
     fn compile_one_module(
         &self,
-        module: &Module,
-        reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
-        external_imports: &[ModuleExternalImport],
-        linked_modules: &[ProjectLinkedModule<'_>],
-        source_function_names: Arc<
-            std::collections::HashMap<
-                crate::compiler_frontend::semantic_identity::OriginFunctionId,
-                String,
-            >,
-        >,
-        module_private_function_names: Arc<
-            std::collections::HashMap<
-                crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
-                String,
-            >,
-        >,
-        generated_function_names: Arc<
-            std::collections::HashMap<
-                crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
-                String,
-            >,
-        >,
-        all_generated_function_names: Arc<Vec<String>>,
-        logical_html_output_path: &Path,
-        project_name: &str,
-        document_config: &crate::projects::html_project::document_config::HtmlDocumentConfig,
-        build_profile: BuildProfile,
-        wasm_enabled: bool,
+        context: HtmlModuleCompileContext<'_>,
         string_table: &mut StringTable,
     ) -> Result<CompiledHtmlModuleArtifacts, CompilerMessages> {
+        let HtmlModuleCompileContext {
+            entry:
+                ProjectEntry {
+                    module,
+                    reachability,
+                    external_imports,
+                    linked_modules,
+                    source_function_names,
+                    module_private_function_names,
+                    generated_function_names,
+                    all_generated_function_names,
+                    ..
+                },
+            page_metadata_plan,
+            logical_html_output_path,
+            structural_url_renderer,
+            project_name,
+            document_config,
+            build_profile,
+            wasm_enabled,
+        } = context;
+
         // Validate that every selected external call has lowering metadata for the target.
         // WHY: fail early with a structured Rule error at the call site rather than a vague
         // backend-internal error during lowering.
@@ -384,6 +426,9 @@ impl HtmlProjectBuilder {
             string_table,
         )
         .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
+        structural_url_renderer
+            .validate_site_root_policy(reachability, page_metadata_plan.uses_site_root)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -406,7 +451,7 @@ impl HtmlProjectBuilder {
             }
         })?;
 
-        for linked in linked_modules {
+        for linked in &linked_modules {
             validate_hir_external_package_support(
                 linked.reachability,
                 linked.module.link_facts.external_package_registry.as_ref(),
@@ -416,6 +461,9 @@ impl HtmlProjectBuilder {
             .map_err(|diagnostic| {
                 CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
             })?;
+            structural_url_renderer
+                .validate_site_root_policy(linked.reachability, false)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             validate_hir_backend_feature_support(
                 BackendFeatureValidationInput {
                     hir: &linked.module.executable.hir,
@@ -440,9 +488,11 @@ impl HtmlProjectBuilder {
 
         let compile_input = HtmlModuleCompileInput {
             hir_module: &module.executable.hir,
+            resource_table: &module.executable.resource_table,
             reachability,
             type_environment: &module.executable.type_environment,
             const_fragments: &module.metadata.const_top_level_fragments,
+            page_metadata_plan,
             borrow_analysis: &module.executable.borrow_analysis,
             project_name,
             document_config,
@@ -451,20 +501,25 @@ impl HtmlProjectBuilder {
             external_package_registry: Arc::clone(&module.link_facts.external_package_registry),
         };
         if wasm_enabled {
-            let compiled_wasm =
-                compile_html_module_wasm(&compile_input, string_table, logical_html_output_path)?;
+            let compiled_wasm = compile_html_module_wasm(
+                &compile_input,
+                string_table,
+                logical_html_output_path,
+                structural_url_renderer,
+            )?;
             Ok(CompiledHtmlModuleArtifacts::from_wasm(compiled_wasm))
         } else {
             let compiled_js = compile_html_module_js(
                 HtmlJsCompileInput {
                     module,
                     external_imports,
-                    linked_modules,
+                    linked_modules: &linked_modules,
                     source_function_names,
                     module_private_function_names,
                     generated_function_names,
                     all_generated_function_names,
                     compile_input: &compile_input,
+                    structural_url_renderer,
                     output_path: logical_html_output_path.to_path_buf(),
                 },
                 string_table,
@@ -475,6 +530,72 @@ impl HtmlProjectBuilder {
             })
         }
     }
+}
+
+/// Resolve the byte-free resource plan into deferred destinations after all builder output paths
+/// are reserved.
+///
+/// Module-owned origins must have an explicit Stage 0 attachment. Provider-owned origins remain
+/// with their provider emitters when no file source was attached, because their logical output path
+/// is not permission to guess a filesystem source.
+fn emit_planned_resource_outputs(
+    resource_output_plan: HtmlResourceOutputPlan,
+    resource_inputs: &ResourceInputRegistry,
+    output_files: &[OutputFile],
+    output_paths: &HashSet<PathBuf>,
+    string_table: &mut StringTable,
+) -> Result<Vec<DeferredResourceOutput>, CompilerMessages> {
+    let planned_resource_outputs = resource_output_plan.into_records();
+    let mut pending_output_paths = HashSet::with_capacity(planned_resource_outputs.len());
+    let mut deferred_resources = Vec::with_capacity(planned_resource_outputs.len());
+
+    // Resolve every source attachment and reserve every destination before touching resource IO.
+    // Provider-owned records without an attachment remain with their provider emitters.
+    for record in planned_resource_outputs {
+        let Some(source_id) = resource_inputs.source_for_origin(&record.origin) else {
+            if matches!(record.origin.owner(), StableResourceOwnerId::Provider(_)) {
+                continue;
+            }
+
+            let error = CompilerError::new(
+                format!(
+                    "planned module-owned resource origin {:?} has no Stage 0 source attachment",
+                    record.origin
+                ),
+                record.first_authored_location.clone(),
+                ErrorType::Compiler,
+            );
+            return Err(CompilerMessages::from_error_ref(error, string_table));
+        };
+        if output_paths.contains(&record.output_path)
+            || !pending_output_paths.insert(record.output_path.clone())
+        {
+            let artefact_kind = output_files
+                .iter()
+                .find(|output_file| output_file.relative_output_path() == record.output_path)
+                .map(|output_file| match output_file.file_kind() {
+                    FileKind::Html(_) => "HTML page",
+                    FileKind::Js(_) => "JavaScript",
+                    FileKind::Wasm(_) => "Wasm",
+                    FileKind::Bytes(_) | FileKind::NotBuilt | FileKind::Directory => "builder",
+                })
+                .unwrap_or("builder");
+            return Err(resource_output_path_reserved_messages(
+                &record.output_path,
+                &display_origin(&record.origin),
+                artefact_kind,
+                &record.first_authored_location,
+                string_table,
+            ));
+        }
+
+        deferred_resources.push(DeferredResourceOutput {
+            relative_output_path: record.output_path,
+            source_id,
+        });
+    }
+
+    Ok(deferred_resources)
 }
 
 fn duplicate_output_path_error(
@@ -489,28 +610,6 @@ fn duplicate_output_path_error(
         output_path,
         string_table,
     )
-}
-
-fn conflicting_tracked_asset_output_error(
-    source_path: &Path,
-    existing_source_path: &Path,
-    output_path: &Path,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
-    tracked_asset_output_conflict_messages(
-        source_path,
-        existing_source_path,
-        output_path,
-        string_table,
-    )
-}
-
-fn tracked_asset_conflicts_with_existing_output_error(
-    source_path: &Path,
-    output_path: &Path,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
-    tracked_asset_builder_output_conflict_messages(source_path, output_path, string_table)
 }
 
 struct CompiledHtmlModuleArtifacts {

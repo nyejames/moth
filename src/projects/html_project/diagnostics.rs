@@ -6,7 +6,9 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::path::Path;
 
@@ -41,36 +43,52 @@ pub(crate) fn duplicate_html_output_path_messages(
     )
 }
 
-pub(crate) fn tracked_asset_output_conflict_messages(
-    asset_path: &Path,
-    existing_owner: &Path,
+/// Build a typed diagnostic for two resource origins claiming one output path.
+///
+/// The conflicting origin is primary because it is the source that made the output path
+/// ambiguous. The existing origin remains attached as a secondary previous-declaration label.
+pub(crate) fn resource_output_path_collision_messages(
     output_path: &Path,
+    existing_origin: &str,
+    existing_location: &SourceLocation,
+    conflicting_origin: &str,
+    conflicting_location: &SourceLocation,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
-    html_config_messages(
-        asset_path,
-        |string_table| InvalidConfigReason::TrackedAssetOutputConflict {
-            asset_path: path_id(asset_path, string_table),
-            output_path: path_id(output_path, string_table),
-            existing_owner: path_id(existing_owner, string_table),
-        },
-        string_table,
-    )
+    let reason = InvalidConfigReason::ResourceOutputPathCollision {
+        output_path: path_id(output_path, string_table),
+        existing_origin: string_table.intern(existing_origin),
+        conflicting_origin: string_table.intern(conflicting_origin),
+    };
+    let diagnostic =
+        CompilerDiagnostic::invalid_config_reason(None, reason, conflicting_location.clone())
+            .with_labels(vec![
+                DiagnosticLabel::primary(conflicting_location.clone()),
+                DiagnosticLabel::secondary(
+                    existing_location.clone(),
+                    Some(DiagnosticLabelMessage::PreviousDeclaration),
+                ),
+            ]);
+
+    CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }
 
-pub(crate) fn tracked_asset_builder_output_conflict_messages(
-    asset_path: &Path,
+/// Build a typed diagnostic for a resource claiming a builder-owned artefact path.
+pub(crate) fn resource_output_path_reserved_messages(
     output_path: &Path,
+    origin: &str,
+    artefact_kind: &str,
+    location: &SourceLocation,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
-    html_config_messages(
-        asset_path,
-        |string_table| InvalidConfigReason::TrackedAssetBuilderOutputConflict {
-            asset_path: path_id(asset_path, string_table),
-            output_path: path_id(output_path, string_table),
-        },
-        string_table,
-    )
+    let reason = InvalidConfigReason::ResourceOutputPathReserved {
+        output_path: path_id(output_path, string_table),
+        origin: string_table.intern(origin),
+        artefact_kind: string_table.intern(artefact_kind),
+    };
+    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, location.clone());
+
+    CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }
 
 fn html_config_messages(

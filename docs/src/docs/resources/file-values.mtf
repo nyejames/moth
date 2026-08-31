@@ -9,7 +9,7 @@ A file path written in expression position evaluates to a `String`. There is no 
 ]
 
 - a `.mtf` path evaluates to that file's compiler-owned `content` string
-- a `.md` path evaluates to that file's rendered `content` string
+- a `.md` path evaluates to that file's compiler-owned `content` string
 - any other accepted file evaluates to a resource-bearing string
 - a `.moth` path has no file value at all
 
@@ -35,7 +35,9 @@ Whichever form is used, plain Markdown links and images inside a `.md` file stay
     source = @helpers.moth
 ]
 
-That is rejected. A `.moth` file exposes declarations, and declarations are consumed through dependency clauses:
+That is rejected. Preparation records the spelling as `SourceKindNoFileValue`, a structural diagnostic fact with no physical target. Stage 0 does not resolve or validate a `.moth` target, add semantic-source membership or create a physical-source or watch record. No filesystem target resolution occurs. AST always issues `MothFileHasNoValue`, whether or not a matching `.moth` file exists.
+
+A `.moth` file exposes declarations, and declarations are consumed through dependency clauses:
 
 [codeblock, $code("moth"):
     @helpers build_value
@@ -145,7 +147,7 @@ It returns structural folded content with its resource facts. Extracting plain t
 
 ### Static branch specialisation
 
-Both branches of an ordinary `if` complete normal validation, and a path in a branch removed by known-`Bool` specialisation is still resolved and validated. That inactive branch contributes no output. A runtime branch retains ordinary reachability, so any reachable branch contributes its uses. See @#file-paths (File paths) for why being a build input is separate from reaching an output.
+Both branches of an ordinary `if` complete normal validation, and a physical-target-bearing path in a branch removed by known-`Bool` specialisation is still resolved and validated. A `SourceKindNoFileValue` occurrence still reaches AST for its unconditional diagnostic but is never resolved as a physical target. That inactive branch contributes no output. A runtime branch retains ordinary reachability, so any reachable physical-target-bearing path contributes its uses. See @#file-paths (File paths) for why being a build input is separate from reaching an output.
 
 ### Related concepts
 

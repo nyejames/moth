@@ -469,9 +469,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: File paths in value position]
             [: Partial]
-            [: Targeted Stage 0 classification, directory/source-package/synthetic resolution, fixed-point content discovery, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
+            [: Targeted prepared-reference and Stage 0 physical-input resolution, fixed-point content discovery, AST String/file-kind semantics, structural Resource/SiteRoot flow, output-link planning, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
             [: Frontend / HTML builder]
-            [: Every non-dependency path token is now classified during retained preparation and resolved once during Stage 0 across directory, source-package and synthetic single-file flows. Referenced [$html:<code>.mtf</code>] and [$html:<code>.md</code>] sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; [$html:<code>.moth</code>], extensionless and site-root rows remain explicit facts for AST; and module, support-package, strict-case and symlink boundaries are settled before semantics. Config bootstrap rejects file-value paths. The superseded source-visible [$html:<code>Path</code>] type and its compile-time-only availability rules are gone, so [$html:<code>Path</code>] is an ordinary user identifier. AST value interpretation is still incomplete: direct content-file values and structural resource/site-root strings are not wired, and the legacy eager rendered-path and HTML tracked-asset lanes remain until the resource-link cutover. Complete when structural strings flow through folded values, TIR, public values and HIR and builders own exact resource liveness, placement and URL rendering.]
+            [: Every physical-target-bearing non-dependency path token is classified during retained preparation and resolved once during Stage 0 across directory, source-package and synthetic single-file flows. Referenced [$html:<code>.mtf</code>] and [$html:<code>.md</code>] sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; [$html:<code>SourceKindNoFileValue</code>] for [$html:<code>.moth</code>] plus extensionless and site-root rows remain no-physical-target outcomes for AST. AST interprets the published outcomes as ordinary [$html:<code>String</code>] values, including structural Resource/SiteRoot pieces. Config bootstrap rejects file-value paths, and module, support-package, strict-case and symlink boundaries are settled before semantics. Phase 5 still closes exported and re-exported resource-string and package liveness, generated sidecars and public fingerprints, direct [$html:<code>.mtf</code>] service parity, provider/generated resource identity and reachability, dependency artefact compatibility, and CSS opaque-anchor validation. The superseded source-visible [$html:<code>Path</code>] type and its compile-time-only availability rules are gone, so [$html:<code>Path</code>] is an ordinary user identifier.]
         ]
 
         [data:
@@ -485,9 +485,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: HTML project builds]
             [: Supported]
-            [: Broad routing, API-only artifact filtering, document shell, metadata, tracked asset, config, output cleanup, external JS glue, and page-fragment coverage.]
+            [: Broad routing, API-only artifact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage.]
             [: HTML / JS]
-            [: This is the release-critical project backend. Only roots with HTML artifact activity participate in page, runtime asset, tracked asset, and homepage planning. HTML-Wasm behavior is tracked under experimental surfaces.]
+            [: This is the release-critical project backend. Only roots with HTML artifact activity participate in page, runtime asset, resource-output and homepage planning. HTML-Wasm behavior is tracked under experimental surfaces.]
         ]
 
         [data:

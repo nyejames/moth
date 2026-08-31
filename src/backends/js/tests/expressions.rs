@@ -1,6 +1,8 @@
 //! Expression lowering tests for JavaScript output.
 
 use super::support::*;
+use crate::backends::structural_string::StructuralStringUrlMap;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField, ValueKind,
@@ -11,6 +13,7 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use std::sync::Arc;
 
 #[test]
 fn integer_division_binop_emits_zero_checked_truncation_path() {
@@ -535,5 +538,64 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
     assert!(
         output.source.contains("__moth_map_new([])"),
         "empty map literal must lower to __moth_map_new([])"
+    );
+}
+
+/// Verifies that builder-rendered structural strings become escaped JS string literals.
+#[test]
+fn lowers_structural_string_with_url_map_as_escaped_literal() {
+    let mut string_table = StringTable::new();
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let prefix = string_table.intern("before");
+    let suffix = string_table.intern("after");
+    let structural_expression = expression(
+        1,
+        HirExpressionKind::StructuralString {
+            pieces: vec![
+                ConstStringPiece::Text(prefix),
+                ConstStringPiece::SiteRoot,
+                ConstStringPiece::Text(suffix),
+            ],
+        },
+        types.string,
+        region,
+        ValueKind::RValue,
+    );
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(structural_expression),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.string,
+    };
+    let module = build_module(&mut string_table, "main", vec![block], function, &[]);
+
+    let url_map = StructuralStringUrlMap {
+        site_root_url: Some("quote\"line\n".to_owned()),
+        ..Default::default()
+    };
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config().with_structural_string_urls(Arc::new(url_map)),
+        &type_environment,
+    )
+    .expect("JS lowering should render structural strings");
+
+    assert!(
+        output
+            .source
+            .contains("return \"beforequote\\\"line\\nafter\";"),
+        "structural string should be rendered and escaped as one JS literal:\n{}",
+        output.source
     );
 }

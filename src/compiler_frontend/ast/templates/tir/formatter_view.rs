@@ -16,6 +16,8 @@
 //! this adapter. Node-root formatting avoids scratch `TemplateIr` entries, and
 //! no intermediate content-to-TIR conversion remains in the render-unit path.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece, output_to_input,
@@ -36,8 +38,11 @@ use crate::compiler_frontend::ast::templates::tir::view::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashMap;
 
 // -------------------------
@@ -968,10 +973,12 @@ fn process_formatter_run(
 
 /// Maps formatter output pieces back to TIR node IDs.
 ///
-/// WHAT: text output becomes a new body `Text` node; opaque anchors are looked
-/// up in the local side-table and the original TIR node is reused.
-/// WHY: preserving original nodes for anchors keeps child-template opacity and
-/// dynamic-expression metadata intact.
+/// WHAT: text output becomes a new body `Text` node; ordinary opaque anchors
+///      look up the local side-table and reuse the original TIR node; a
+///      formatter-generated site-root anchor becomes a structural expression node.
+/// WHY: preserving original nodes for source anchors keeps child-template opacity
+///      and dynamic-expression metadata intact, while `$md` site-root links use
+///      the same structural string path as ordinary file values.
 fn output_to_tir_nodes(
     formatter_store: &mut FormatterStore<'_>,
     output: crate::compiler_frontend::ast::templates::formatter_contract::FormatterOutput,
@@ -1006,6 +1013,34 @@ fn output_to_tir_nodes(
             }
 
             FormatterOutputPiece::Opaque(anchor) => {
+                if anchor.kind == FormatterOpaqueKind::SiteRoot {
+                    let site_id = formatter_store.store.next_expression_site_id();
+                    let expression = Expression::new(
+                        ExpressionKind::StructuralString {
+                            pieces: vec![ConstStringPiece::SiteRoot],
+                        },
+                        representative_location.clone(),
+                        builtin_type_ids::STRING,
+                        DataType::StringSlice,
+                        ValueMode::ImmutableOwned,
+                    );
+                    nodes.push(push_formatter_node(
+                        formatter_store,
+                        TemplateIrNode::new(
+                            TemplateIrNodeKind::DynamicExpression {
+                                expression: Box::new(expression),
+                                origin: TemplateSegmentOrigin::Body,
+                                reactive_subscription: None,
+                                site_id,
+                            },
+                            representative_location.clone(),
+                        ),
+                        None,
+                    )?);
+                    content_changed = true;
+                    continue;
+                }
+
                 let Some(node_id) = anchor_side_table.get(anchor.id.0).copied() else {
                     return Err(CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(format!(

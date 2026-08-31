@@ -152,6 +152,7 @@ pub(crate) fn resolve_file_value(
                 Err(diagnostic.clone().into())
             }
             Stage0ResolvedFileReferenceOutcome::Resource {
+                source,
                 owner_relative_path,
             } => {
                 let module_origin = services.module_origin.clone().ok_or_else(|| {
@@ -163,10 +164,13 @@ pub(crate) fn resolve_file_value(
                     module_origin,
                     owner_relative_path.clone(),
                 );
-                let resource = services
-                    .module_resources
-                    .borrow_mut()
-                    .intern_origin(origin, row.location.clone());
+                let mut resources = services.module_resources.borrow_mut();
+                let resource = match source {
+                    Some(source) => {
+                        resources.intern_origin_with_source(origin, *source, row.location.clone())
+                    }
+                    None => resources.intern_origin(origin, row.location.clone()),
+                };
                 structural_string(
                     vec![ConstStringPiece::Resource(resource)],
                     row.location.clone(),

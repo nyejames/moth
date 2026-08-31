@@ -50,9 +50,14 @@ fn dependency_clause_paths_are_excluded_from_file_values() {
          unused #= @assets/logo.svg\n",
     );
     let references = output.structural_file_references.references();
-    assert_eq!(references.len(), 1);
     assert_eq!(
-        references[0].authored_path.to_portable_string(&strings),
+        output
+            .path_syntax
+            .table()
+            .try_path(references[0].path_syntax)
+            .expect("prepared reference should point into its path table")
+            .root
+            .to_portable_string(&strings),
         "assets/logo.svg"
     );
     assert_eq!(

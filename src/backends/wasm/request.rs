@@ -3,13 +3,12 @@
 //! WHAT: this is the only input seam from project-build orchestration into the Wasm backend.
 //! WHY: keeping one explicit request object preserves stage separation and makes option growth
 //! predictable as HTML/Wasm integration and richer Wasm features are added.
-
+use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct WasmBackendRequest {
     /// Builder-selected export set and stable names.
@@ -29,7 +28,8 @@ pub(crate) struct WasmBackendRequest {
     /// WHY: dynamic external package IDs are synthetic today, so diagnostics need registry
     /// metadata to avoid reporting only `<synthetic>`.
     pub external_package_registry: Arc<ExternalPackageRegistry>,
-    /// Selects which HIR functions are lowered into this Wasm module.
+    /// Builder-rendered text for structural strings in this physical output variant.
+    pub(crate) structural_string_urls: Option<Arc<StructuralStringUrlMap>>,
     pub function_emission_policy: WasmFunctionEmissionPolicy,
 }
 

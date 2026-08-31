@@ -602,13 +602,16 @@ Prepared syntax may contain:
 
 Stage 0 consumes structural provider references to finalise graphs. It does not bind source symbols itself.
 
-Stage 0 also consumes structural file references, and owns the one filesystem resolution each of them
-gets. A content-source reference brings that `.mtf` or `.md` into the appropriate semantic source set
-through its normal source-kind adapter, before the consuming module reaches AST. A resource reference
-becomes a build input and watch interest, validated against the same ownership rules the resource
-model uses. Stage 0 may register an unhashed byte source; it does not read contents, hash an unused
-file, choose an output path, render a URL or decide whether the resource reaches an output. The
-resolved target is published so AST interprets it without probing the filesystem again.
+Stage 0 also consumes structural file references. Each physical-target-bearing structural file
+reference gets one filesystem resolution. `SiteRoot`, extensionless and
+`SourceKindNoFileValue` facts carry no physical target and never enter this resolution path. A
+content-source reference brings that `.mtf` or `.md` into the appropriate semantic source set
+through its normal source-kind adapter, before the consuming module reaches AST. A resource
+reference becomes a build input and watch interest, validated against the same ownership rules
+the resource model uses. Stage 0 may register an unhashed byte source; it does not read contents,
+hash an unused file, choose an output path, render a URL or decide whether the resource reaches an
+output. The resolved outcome is published so AST interprets it without probing the filesystem
+again.
 
 What Stage 0 creates for a resource is a build input, not a semantic identity. It holds the
 canonical physical source, its owning root, the validated logical target and the watch interest. The
@@ -618,9 +621,11 @@ watch interest recorded for a missing target carries no manufactured resource id
 canonical file may back several distinct logical origins, and equal origins must agree on their
 byte-source facts.
 
-Every authored file-value path is graph-active, independently of AST reachability, constant folding
-and static branch specialisation. Graph membership is never decided by output reachability, and
-`#Config` cannot alter file dependency topology.
+Every authored physical-target-bearing file-value path is graph-active, independently of AST
+reachability, constant folding and static branch specialisation. `SourceKindNoFileValue` is
+retained only as a structural diagnostic fact with no physical target, semantic-source membership,
+physical-source or watch record. Graph membership is never decided by output reachability, and `#Config`
+cannot alter file dependency topology.
 
 Because a newly discovered content source may itself contain file references, discovery is a
 monotone worklist rather than a single pass. Stage 0 seeds the set from the module root and its
@@ -1451,9 +1456,9 @@ from them.
 
 ### Graph activity versus emission
 
-Stage 0 registers an input and watch interest for every authored file-value path, before any
-reachability question. Registration may create an unhashed byte-source record. It never forces a
-byte read.
+Stage 0 registers an input and watch interest for every physical-target-bearing authored file-value
+path, before any reachability question. Registration may create an unhashed byte-source record. It
+never forces a byte read.
 
 Emission is decided later and exactly. A resource that no reachable output uses is never read,
 hashed or emitted, even though it remains a known and watchable build input.

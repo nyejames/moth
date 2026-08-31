@@ -38,9 +38,9 @@ pub(crate) struct WriteOptions {
 /// Returns what each prepared destination did on disk, so callers report emitted artifacts
 /// instead of planned ones and never infer a skipped write from a filesystem timestamp.
 pub(crate) fn write_project_outputs(
-    project: &Project,
+    project: &mut Project,
     options: &WriteOptions,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> Result<OutputWriteSummary, CompilerMessages> {
     timing_scope!(
         timing_guard_output_write_total,
@@ -52,16 +52,15 @@ pub(crate) fn write_project_outputs(
 }
 
 fn write_project_outputs_inner(
-    project: &Project,
+    project: &mut Project,
     options: &WriteOptions,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> Result<OutputWriteSummary, CompilerMessages> {
     // ---------------------------------------
     //  Preflight the complete output batch
     // ---------------------------------------
-    // WHAT: validate every non-NotBuilt output path, reject duplicate destinations, compute the
+    // WHAT: validate every ordinary and deferred destination, reject duplicate paths, compute the
     // complete managed-path set, and prepare canonical destinations before any filesystem mutation.
-    // WHY: a late invalid or duplicate path must not leave earlier files already written.
     let prepared_write = prepare_output_write(project, &options.output_plan, string_table)?;
 
     // ---------------------------------------
@@ -98,7 +97,8 @@ fn write_project_outputs_inner(
     // ---------------------------------------
     //  Emit individual output files
     // ---------------------------------------
-
+    // Deferred resources are materialised here, after the complete batch and output root have
+    // passed central validation.
     let write_summary =
         emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table)?;
 

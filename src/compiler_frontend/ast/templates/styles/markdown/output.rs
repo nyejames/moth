@@ -38,6 +38,15 @@ impl MarkdownOutputBuilder {
         self.flush_text();
         self.pieces.push(FormatterOutputPiece::Opaque(anchor));
     }
+    /// Preserves a formatter-generated site-root anchor through whitespace and TIR adaptation.
+    pub(super) fn push_site_root(&mut self) {
+        self.flush_text();
+        self.pieces
+            .push(FormatterOutputPiece::Opaque(FormatterOpaquePiece {
+                id: FormatterAnchorId(0),
+                kind: FormatterOpaqueKind::SiteRoot,
+            }));
+    }
 
     pub(super) fn append_pieces(&mut self, pieces: Vec<FormatterOutputPiece>) {
         for piece in pieces {

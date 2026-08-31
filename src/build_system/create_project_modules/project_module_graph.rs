@@ -27,6 +27,8 @@
 //! namespace builder consumes the scoped-support-visibility surface for project and package
 //! boundaries.
 
+#[cfg(test)]
+use super::module_identity::ModuleIdentityRecord;
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::source_tree_index::SourceTreeIndex;
 
@@ -257,6 +259,51 @@ impl ProjectModuleGraph {
             dependencies: ProjectModuleDependencies::UnderConstruction {
                 dependency_providers,
                 provider_consumers,
+            },
+            edge_source_locations: BTreeMap::new(),
+        }
+    }
+
+    /// Build a graph from explicit identities for assembly tests.
+    ///
+    /// WHAT: supplies deterministic graph nodes without requiring source discovery to create a
+    /// fixture. WHY: package assembly tests need to model a facade and selected descendants while
+    /// keeping their source artefacts synthetic and focused on liveness.
+    #[cfg(test)]
+    pub(crate) fn from_test_records(records: Vec<ModuleIdentityRecord>) -> Self {
+        let identities = ModuleIdentityTable::from_records(records);
+        let module_ids: Vec<ModuleId> = identities.module_ids().collect();
+        let node_count = module_ids.len();
+        let mut nodes = Vec::with_capacity(node_count);
+        let mut entry_modules = Vec::new();
+        let mut facade = None;
+
+        for module_id in &module_ids {
+            let record = identities.record(*module_id);
+            nodes.push(ProjectModuleGraphNode {
+                module_id: *module_id,
+                stable_origin: record.stable_origin().clone(),
+                role: record.role(),
+                root_directory: record.root_directory().to_path_buf(),
+                root_file: record.root_file().to_path_buf(),
+                nearest_parent: None,
+                direct_children: Vec::new(),
+            });
+
+            match record.role() {
+                ModuleRootRole::Normal => entry_modules.push(*module_id),
+                ModuleRootRole::ProjectPackageFacade => facade = Some(*module_id),
+                ModuleRootRole::Support => {}
+            }
+        }
+
+        Self {
+            nodes,
+            entry_modules,
+            facade,
+            dependencies: ProjectModuleDependencies::Frozen {
+                dependency_providers: vec![Vec::new(); node_count],
+                provider_consumers: vec![Vec::new(); node_count],
             },
             edge_source_locations: BTreeMap::new(),
         }

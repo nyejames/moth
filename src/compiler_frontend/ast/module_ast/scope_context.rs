@@ -62,13 +62,11 @@ use crate::compiler_frontend::instrumentation::{
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
-    ResolvedFileReferenceTarget,
+    ResolvedFileReferenceTarget, ResourceSourceId,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
+
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -79,7 +77,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
-use crate::return_compiler_error;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -171,6 +168,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
         value: Option<&'a OwnedFoldedString>,
     },
     Resource {
+        source: Option<&'a ResourceSourceId>,
         owner_relative_path: &'a PortableResourcePath,
     },
     IdentifiedSourceKind,
@@ -263,9 +261,10 @@ fn ordinary_reference_view<'a>(
             }
         }
         ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+            source,
             owner_relative_path,
-            ..
         }) => Stage0ResolvedFileReferenceOutcome::Resource {
+            source: Some(source),
             owner_relative_path,
         },
         ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::IdentifiedSourceKind) => {
@@ -297,6 +296,7 @@ fn frozen_reference_view(
         FrozenResolvedFileReferenceOutcome::Resource {
             owner_relative_path,
         } => Stage0ResolvedFileReferenceOutcome::Resource {
+            source: None,
             owner_relative_path,
         },
         FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind => {
@@ -394,18 +394,14 @@ pub struct ScopeShared {
     pub(crate) choice_variant_shells_by_path:
         Option<Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>>,
     pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
-
-    // Emission side channels (diagnostics, path usages, generic instantiation requests).
     pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
-    pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
+
     pub(crate) generic_function_instantiation_requests:
         Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
     // Path resolution and source identity.
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) source_file_scope: Option<InternedPath>,
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     pub(crate) declaring_file_id: Option<FileId>,
-    pub(crate) path_format_config: PathStringFormatConfig,
     pub(crate) template_const_loop_iteration_limit: usize,
 
     // Receiver method catalog for dispatch.
@@ -703,13 +699,10 @@ impl ScopeContext {
             choice_variant_shells_by_path: None,
             resolved_module_constants_override: None,
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
-            rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
-            project_path_resolver: None,
             source_file_scope: None,
             file_value_resolution: None,
             declaring_file_id: None,
-            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),

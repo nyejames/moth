@@ -413,10 +413,16 @@ fn compile_fixture(
             let source_file = reference
                 .source_file
                 .expect("prepared rows carry a source FileId");
+            let authored_path = output
+                .path_syntax
+                .table()
+                .try_path(reference.path_syntax)
+                .expect("prepared reference should point into its path table")
+                .root
+                .to_portable_string(&string_table);
             let outcome = match reference.class {
                 PreparedFileReferenceClass::ContentSource => {
-                    let target_path =
-                        PathBuf::from(reference.authored_path.to_portable_string(&string_table));
+                    let target_path = PathBuf::from(&authored_path);
                     let target = source_files
                         .get_by_canonical_path(&target_path)
                         .map(|identity| identity.file_id)
@@ -426,7 +432,6 @@ fn compile_fixture(
                     )
                 }
                 PreparedFileReferenceClass::ResourceFile => {
-                    let authored_path = reference.authored_path.to_portable_string(&string_table);
                     let owner_relative_path = portable_resource_path(&authored_path);
                     let source = ResourceSourceId::from_index(resource_source_index);
                     resource_source_index += 1;

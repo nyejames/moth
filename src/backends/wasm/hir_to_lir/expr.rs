@@ -5,11 +5,11 @@ use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lo
 use crate::backends::wasm::hir_to_lir::static_data::intern_static_utf8;
 use crate::backends::wasm::lir::instructions::WasmLirStmt;
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId, WasmLocalRole};
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
-
 /// Result of lowering a single HIR expression into LIR statements and a destination local.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ExprLoweringOutput {
@@ -111,28 +111,24 @@ pub(crate) fn lower_expression(
             })
         }
         HirExpressionKind::StringLiteral(value) => {
-            // String literal lowering goes through runtime buffer ops so the
-            // same model can be reused for runtime template fragments.
-            let data_id = intern_static_utf8(context.module_context, value, "hir.string_literal");
-            let buffer =
-                context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::BufferHandle);
-            statements.push(WasmLirStmt::StringNewBuffer { dst: buffer });
-            statements.push(WasmLirStmt::StringPushLiteral {
-                buffer,
-                data: data_id,
-            });
-
-            let dst = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
-            statements.push(WasmLirStmt::StringFinish { dst, buffer });
-
-            Ok(ExprLoweringOutput {
-                value: dst,
-                prefer_move: false,
-            })
+            // String literal lowering goes through runtime buffer ops so the same model can be
+            // reused for runtime template fragments.
+            Ok(lower_concrete_string(
+                context,
+                statements,
+                value,
+                "hir.string_literal",
+            ))
         }
-        HirExpressionKind::StructuralString { .. } => Err(lir_transformation_error(
-            "Structural string reached Wasm lowering before output-boundary rendering",
-        )),
+        HirExpressionKind::StructuralString { pieces } => {
+            let rendered = render_structural_string(context, pieces)?;
+            Ok(lower_concrete_string(
+                context,
+                statements,
+                &rendered,
+                "hir.structural_string",
+            ))
+        }
         HirExpressionKind::Load(place) => {
             let local = lower_place_local(context, place)?;
             Ok(ExprLoweringOutput {
@@ -183,6 +179,72 @@ pub(crate) fn lower_expression(
         | HirExpressionKind::VariantPayloadGet { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support this HIR expression",
         )),
+    }
+}
+
+fn render_structural_string(
+    context: &WasmFunctionLoweringContext<'_, '_>,
+    pieces: &[ConstStringPiece],
+) -> Result<String, CompilerError> {
+    let Some(url_map) = context
+        .module_context
+        .request
+        .structural_string_urls
+        .as_ref()
+    else {
+        return Err(lir_transformation_error(
+            "Wasm lowering received a structural string without a builder URL map",
+        ));
+    };
+
+    let mut rendered = String::new();
+    for piece in pieces {
+        match piece {
+            ConstStringPiece::Text(text) => {
+                rendered.push_str(context.module_context.string_table.resolve(*text))
+            }
+            ConstStringPiece::Resource(resource_id) => {
+                let Some(url) = url_map.resource_urls.get(resource_id) else {
+                    return Err(lir_transformation_error(format!(
+                        "Wasm lowering has no rendered URL for structural resource {resource_id:?}"
+                    )));
+                };
+                rendered.push_str(url);
+            }
+            ConstStringPiece::SiteRoot => {
+                let Some(url) = url_map.site_root_url.as_deref() else {
+                    return Err(lir_transformation_error(
+                        "Wasm lowering has no rendered URL for a structural site root",
+                    ));
+                };
+                rendered.push_str(url);
+            }
+        }
+    }
+
+    Ok(rendered)
+}
+
+fn lower_concrete_string(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    statements: &mut Vec<WasmLirStmt>,
+    value: &str,
+    debug_name: &str,
+) -> ExprLoweringOutput {
+    let data_id = intern_static_utf8(context.module_context, value, debug_name);
+    let buffer = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::BufferHandle);
+    statements.push(WasmLirStmt::StringNewBuffer { dst: buffer });
+    statements.push(WasmLirStmt::StringPushLiteral {
+        buffer,
+        data: data_id,
+    });
+
+    let dst = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
+    statements.push(WasmLirStmt::StringFinish { dst, buffer });
+
+    ExprLoweringOutput {
+        value: dst,
+        prefer_move: false,
     }
 }
 

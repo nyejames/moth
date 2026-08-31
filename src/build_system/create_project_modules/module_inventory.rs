@@ -714,6 +714,7 @@ fn discover_modules_serial_provider_capable(
                     .resolve_file_reference(
                         &mut file_reference_resolver,
                         seed.module_id,
+                        prepared_output.path_syntax.table(),
                         file_reference,
                         &mut discovered_content_sources,
                     )

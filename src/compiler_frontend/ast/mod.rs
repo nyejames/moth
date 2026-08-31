@@ -173,7 +173,6 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -226,7 +225,6 @@ pub struct Ast {
     /// Const top-level fragments with their runtime insertion indices.
     /// Builders merge these with the runtime fragment list returned by entry `start()`.
     pub const_top_level_fragments: Vec<AstConstTopLevelFragment>,
-    pub rendered_path_usages: Vec<RenderedPathUsage>,
     pub warnings: Vec<CompilerDiagnostic>,
 
     /// Resolved choice definitions for HIR pre-registration.

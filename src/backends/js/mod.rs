@@ -3,7 +3,6 @@
 //! This backend lowers HIR into readable JavaScript using GC semantics.
 //! Borrowing and ownership are optimization concerns and therefore ignored here.
 
-use std::sync::Arc;
 mod emitter;
 mod identifiers;
 mod js_calls;
@@ -28,6 +27,7 @@ pub(crate) use emitter::JsEmitter;
 pub use emitter::lower_hir_to_js;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
 
+use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
@@ -35,6 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Policy controlling which HIR functions are emitted in a JS bundle.
 ///
@@ -87,7 +88,8 @@ pub struct JsLoweringConfig {
     pub source_function_names: Arc<HashMap<OriginFunctionId, String>>,
     /// Build-owned symbols for private executables linked into generated sidecars.
     pub module_private_function_names: Arc<HashMap<ModulePrivateExecutableIdentity, String>>,
-    /// Collision-free build-owned symbols for generated executables.
+    /// Builder-rendered text for structural strings in this physical output variant.
+    pub(crate) structural_string_urls: Option<Arc<StructuralStringUrlMap>>,
     pub generated_function_names: Arc<HashMap<GeneratedFunctionIdentity, String>>,
 }
 
@@ -109,6 +111,7 @@ impl JsLoweringConfig {
             source_function_names: Arc::new(HashMap::new()),
             module_private_function_names: Arc::new(HashMap::new()),
             generated_function_names: Arc::new(HashMap::new()),
+            structural_string_urls: None,
         }
     }
 
@@ -152,6 +155,14 @@ impl JsLoweringConfig {
         config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config
+    }
+    /// Attach builder-rendered structural-string URLs for this lowering run.
+    pub(crate) fn with_structural_string_urls(
+        mut self,
+        structural_string_urls: Arc<StructuralStringUrlMap>,
+    ) -> Self {
+        self.structural_string_urls = Some(structural_string_urls);
+        self
     }
 }
 

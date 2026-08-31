@@ -834,8 +834,15 @@ fn parse_module_headers_with_content_sources(
                 continue;
             }
 
-            let target_path =
-                PathBuf::from(reference.authored_path.to_portable_string(&string_table));
+            let target_path = PathBuf::from(
+                output
+                    .path_syntax
+                    .table()
+                    .try_path(reference.path_syntax)
+                    .expect("prepared reference should point into its path table")
+                    .root
+                    .to_portable_string(&string_table),
+            );
             let Some(target) = source_files
                 .get_by_canonical_path(&target_path)
                 .map(|identity| identity.file_id)

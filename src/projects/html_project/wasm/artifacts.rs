@@ -13,10 +13,13 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
-use crate::projects::html_project::document_shell::render_html_document_shell;
+use crate::projects::html_project::document_shell::{
+    HtmlDocumentShellInput, render_html_document_shell,
+};
 use crate::projects::html_project::js_path::render_entry_fragments;
 use crate::projects::html_project::output_plan::plan_wasm_output_from_logical_html_path;
-use crate::projects::html_project::page_metadata::extract_html_page_metadata;
+use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::wasm::export_plan::{
     HtmlWasmExportPlan, build_html_wasm_export_plan,
 };
@@ -60,14 +63,14 @@ pub(crate) struct HtmlWasmArtifacts {
 pub(crate) struct HtmlWasmArtifactEmitInput<'a> {
     pub entry_fragment_html: &'a str,
     pub string_table: &'a mut StringTable,
+    pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub logical_html_output_path: &'a Path,
     pub project_name: &'a str,
     pub document_config: &'a HtmlDocumentConfig,
-    pub hir_module: &'a HirModule,
+    pub page_metadata_plan: &'a HtmlPageMetadataPlan,
     pub js_bundle: &'a str,
     pub wasm_bytes: Vec<u8>,
 }
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HtmlWasmDebugOutputs {
     /// Builder-local export/runtime planning summary.
@@ -97,6 +100,7 @@ pub(crate) fn compile_html_module_wasm(
     input: &HtmlModuleCompileInput<'_>,
     string_table: &mut StringTable,
     logical_html_output_path: &Path,
+    structural_url_renderer: &StructuralUrlRenderer<'_>,
 ) -> Result<CompiledHtmlWasmModule, CompilerMessages> {
     // Record the full Wasm build duration on every exit path (success or error).
     timing_scope!(
@@ -110,12 +114,15 @@ pub(crate) fn compile_html_module_wasm(
     //      re-derives the route here.
     let output_plan = plan_wasm_output_from_logical_html_path(logical_html_output_path)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-
+    let structural_string_urls = structural_url_renderer
+        .lowering_map(input.resource_table, input.reachability)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let js_lowering_config = JsLoweringConfig::html_wasm_companion(
         input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
-    );
+    )
+    .with_structural_string_urls(Arc::clone(&structural_string_urls));
     let js_module = lower_hir_to_js(
         input.hir_module,
         input.borrow_analysis,
@@ -128,13 +135,14 @@ pub(crate) fn compile_html_module_wasm(
     let (entry_fragment_html, slot_ids) = render_entry_fragments(
         input.const_fragments,
         input.root_activity.runtime_fragment_count,
+        structural_url_renderer,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-
     let mut build_plan = build_html_wasm_plan(input.hir_module, input.reachability, slot_ids)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     build_plan.wasm_request.external_package_registry =
         Arc::clone(&input.external_package_registry);
+    build_plan.wasm_request.structural_string_urls = Some(structural_string_urls);
 
     let wasm_result = {
         timing_scope!(
@@ -168,10 +176,11 @@ pub(crate) fn compile_html_module_wasm(
             HtmlWasmArtifactEmitInput {
                 entry_fragment_html: &entry_fragment_html,
                 string_table,
+                structural_url_renderer,
                 logical_html_output_path,
                 project_name: input.project_name,
                 document_config: input.document_config,
-                hir_module: input.hir_module,
+                page_metadata_plan: input.page_metadata_plan,
                 js_bundle: &js_module.source,
                 wasm_bytes,
             },
@@ -237,10 +246,11 @@ pub(crate) fn emit_html_wasm_artifacts(
     let HtmlWasmArtifactEmitInput {
         entry_fragment_html,
         string_table,
+        structural_url_renderer,
         logical_html_output_path,
         project_name,
         document_config,
-        hir_module,
+        page_metadata_plan,
         js_bundle,
         wasm_bytes,
     } = &mut input;
@@ -251,14 +261,10 @@ pub(crate) fn emit_html_wasm_artifacts(
         &plan.js_start_invocation,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let start_function = hir_module
-        .require_start_function("HTML-Wasm document rendering")
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let page_metadata = extract_html_page_metadata(hir_module, start_function, string_table)
-        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
     let html = render_wasm_html_document(
         document_config,
-        &page_metadata,
+        page_metadata_plan,
+        structural_url_renderer,
         logical_html_output_path,
         project_name,
         entry_fragment_html,
@@ -271,23 +277,24 @@ pub(crate) fn emit_html_wasm_artifacts(
         html,
     })
 }
-
 fn render_wasm_html_document(
     document_config: &HtmlDocumentConfig,
-    page_metadata: &crate::projects::html_project::page_metadata::HtmlPageMetadata,
+    page_metadata_plan: &HtmlPageMetadataPlan,
+    structural_url_renderer: &StructuralUrlRenderer<'_>,
     logical_html_output_path: &Path,
     project_name: &str,
     entry_fragment_html: &str,
 ) -> Result<String, CompilerError> {
-    render_html_document_shell(
-        document_config,
-        page_metadata,
-        logical_html_output_path,
+    render_html_document_shell(HtmlDocumentShellInput {
+        config: document_config,
+        page_metadata: &page_metadata_plan.metadata,
+        structural_url_renderer,
+        logical_html_path: logical_html_output_path,
         project_name,
-        entry_fragment_html.to_string(),
-        String::from("<script src=\"./page.js\"></script>\n"),
-        None,
-    )
+        body_html: entry_fragment_html.to_string(),
+        script_html: String::from("<script src=\"./page.js\"></script>\n"),
+        import_map_html: None,
+    })
 }
 
 fn build_debug_outputs(

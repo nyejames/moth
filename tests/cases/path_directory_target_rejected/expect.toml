@@ -5,7 +5,7 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0063"]
 
-# MOTH-RULE-0063 covers every invalid path literal, so pin the directory reason.
+# Directory targets still use the Stage 0 physical diagnostic, so the path must have an extension.
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0063"
 reason = "invalid_compile_time_path.target_is_directory"

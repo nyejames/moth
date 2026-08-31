@@ -111,22 +111,24 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*entry_point),
             string_table.resolve(*existing_entry_point),
         ),
-        InvalidConfigReason::TrackedAssetOutputConflict {
-            asset_path,
+        InvalidConfigReason::ResourceOutputPathCollision {
             output_path,
-            existing_owner,
+            existing_origin,
+            conflicting_origin,
         } => format!(
-            "Tracked asset '{}' would emit to '{}', but that output path is already claimed by '{}'.",
-            string_table.resolve(*asset_path),
+            "HTML resource output path '{}' is claimed by distinct origins '{}' and '{}'. Ensure each resource origin maps to a unique output path.",
             string_table.resolve(*output_path),
-            string_table.resolve(*existing_owner),
+            string_table.resolve(*existing_origin),
+            string_table.resolve(*conflicting_origin),
         ),
-        InvalidConfigReason::TrackedAssetBuilderOutputConflict {
-            asset_path,
+        InvalidConfigReason::ResourceOutputPathReserved {
             output_path,
+            origin,
+            artefact_kind,
         } => format!(
-            "Tracked asset '{}' would emit to '{}', but that output path is already claimed by another emitted HTML builder artifact.",
-            string_table.resolve(*asset_path),
+            "HTML resource origin '{}' conflicts with {} output path '{}'. Choose a different resource path or builder output destination.",
+            string_table.resolve(*origin),
+            string_table.resolve(*artefact_kind),
             string_table.resolve(*output_path),
         ),
         InvalidConfigReason::ConfiguredEntryRootMissing { entry_root } => format!(

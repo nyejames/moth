@@ -30,8 +30,6 @@ impl DiagnosticPayload {
 
             DiagnosticPayload::UnknownName { name, .. }
             | DiagnosticPayload::UnusedName { name }
-            | DiagnosticPayload::MothFilePathInTemplateOutput { path: name }
-            | DiagnosticPayload::LargeTrackedAsset { path: name, .. }
             | DiagnosticPayload::IdentifierNamingConvention { name, .. }
             | DiagnosticPayload::MalformedTemplate { message: name } => {
                 *name = remap.get(*name);
@@ -783,8 +781,6 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedExternalFunction { .. }
             | DiagnosticPayload::UnusedName { .. }
             | DiagnosticPayload::UnreachableMatchArm
-            | DiagnosticPayload::MothFilePathInTemplateOutput { .. }
-            | DiagnosticPayload::LargeTrackedAsset { .. }
             | DiagnosticPayload::IdentifierNamingConvention { .. }
             | DiagnosticPayload::DependencyAliasCaseMismatch { .. }
             | DiagnosticPayload::MalformedTemplate { .. }

@@ -232,12 +232,12 @@ fn build_command_outcome(
                     let output_plan = output_plan_builder(&mut build_result)
                         .map_err(BuildOutputStageError::OutputPlan)?;
                     write_project_outputs(
-                        &build_result.project,
+                        &mut build_result.project,
                         &WriteOptions {
                             output_plan,
                             write_mode: WriteMode::AlwaysWrite,
                         },
-                        &build_result.string_table,
+                        &mut build_result.string_table,
                     )
                     .map_err(BuildOutputStageError::Write)
                 })()

@@ -10,6 +10,7 @@ use super::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::Flag;
 #[cfg(feature = "timers")]
@@ -848,6 +849,8 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings,

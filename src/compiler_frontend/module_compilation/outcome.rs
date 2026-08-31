@@ -9,9 +9,9 @@
 use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
+use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
 /// Typed result of one retained module's semantic compilation.
 ///
 /// `Success` carries the complete unmerged semantic result plus its local string-table delta.
@@ -40,6 +40,8 @@ pub(crate) struct ModuleSemanticResult {
     pub(crate) module: Module,
     /// New generated identities, summaries and sidecars completed for this module.
     pub(crate) generated_delta: GeneratedFunctionDelta,
+    /// Compiler-owned origin/source pairings emitted while AST interned resource values.
+    pub(crate) resource_source_associations: Vec<ResourceSourceAssociation>,
     /// The module-local string table carrying every diagnostic render identity produced during
     /// semantic compilation. Merged into the build table once per module so downstream consumers
     /// see a single remapped table.

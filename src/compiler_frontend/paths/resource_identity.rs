@@ -7,14 +7,9 @@
 //! every later build decision, so it carries no absolute path, output path, route, URL or
 //! content hash.
 //!
-//! This module owns identity only. Filesystem resolution belongs to path resolution, byte
-//! sources and output placement belong to the build system, and dense module-local handles
+//! This module owns identity only. Stage 0's file-reference resolver owns filesystem resolution,
+//! byte sources and output placement belong to the build system, and dense module-local handles
 //! belong to `module_resources`.
-
-// Resource identity is built before its consumers. The AST resource classifier interns these
-// origins, and the build-owned byte-source registry keys on them, so this allowance is removed by
-// the slice that wires resolution into AST expression parsing.
-#![allow(dead_code)]
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::semantic_identity::{
@@ -106,6 +101,7 @@ pub(crate) struct StableProviderResourceOwnerId {
 }
 
 impl StableProviderResourceOwnerId {
+    #[allow(dead_code)] // provider-owned resources are not interned until provider emission
     pub(crate) fn new(provider_kind: &str, package: StablePackageIdentity) -> Self {
         Self {
             provider_kind: provider_kind.to_owned(),
@@ -129,6 +125,7 @@ impl StableProviderResourceOwnerId {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum StableResourceOwnerId {
     Module(StableModuleOriginIdentity),
+    #[allow(dead_code)] // provider-owned resources are not interned until provider emission
     Provider(StableProviderResourceOwnerId),
 }
 

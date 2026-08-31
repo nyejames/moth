@@ -65,8 +65,8 @@ define_stable_reason_keys! {
         &InvalidConfigReason::InvalidProjectSettingValue { .. } => "invalid_config.invalid_project_setting_value",
         &InvalidConfigReason::MissingHtmlHomepage { .. } => "invalid_config.missing_html_homepage",
         &InvalidConfigReason::DuplicateHtmlOutputPath { .. } => "invalid_config.duplicate_html_output_path",
-        &InvalidConfigReason::TrackedAssetOutputConflict { .. } => "invalid_config.tracked_asset_output_conflict",
-        &InvalidConfigReason::TrackedAssetBuilderOutputConflict { .. } => "invalid_config.tracked_asset_builder_output_conflict",
+        &InvalidConfigReason::ResourceOutputPathCollision { .. } => "invalid_config.resource_output_path_collision",
+        &InvalidConfigReason::ResourceOutputPathReserved { .. } => "invalid_config.resource_output_path_reserved",
         &InvalidConfigReason::ConfiguredEntryRootMissing { .. } => "invalid_config.configured_entry_root_missing",
         &InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => "invalid_config.entry_root_package_prefix_collision",
         &InvalidConfigReason::SourcePackageMissingRoot { .. } => "invalid_config.source_package_missing_root",
@@ -707,7 +707,6 @@ define_stable_reason_keys! {
 
     InvalidPageMetadataReason => {
     &InvalidPageMetadataReason::NotAString => "invalid_page_metadata.not_a_string",
-    &InvalidPageMetadataReason::NotYetRenderable => "invalid_page_metadata.not_yet_renderable",
     &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
     },
 

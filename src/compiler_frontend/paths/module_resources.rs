@@ -19,16 +19,12 @@
 //! through `StableResourceOriginId` first. The table owns no `PathBuf`, output path or rendered
 //! URL.
 
-// The table is built before its readers. AST resource classification now interns origins when
-// file values resolve, and Phase 4's HIR link facts are still to read the interning order back,
-// so the read side deliberately runs ahead of its callers until that lane lands.
-#![allow(dead_code)]
-
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Dense module-local handle for one resolved resource origin.
 #[repr(transparent)]
@@ -56,6 +52,16 @@ pub(crate) struct ModuleResourceOrigin {
     pub(crate) first_authored_location: SourceLocation,
 }
 
+/// One compiler-owned semantic resource origin paired with its Stage 0 physical source.
+///
+/// The association is emitted while AST interns the origin. Build publication consumes this
+/// opaque source identity directly instead of reconstructing it from the origin's path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResourceSourceAssociation {
+    pub(crate) origin: StableResourceOriginId,
+    pub(crate) source: ResourceSourceId,
+}
+
 /// Every resource origin one module resolved.
 ///
 /// Origins are appended in resolution order. That order is deterministic for a given module, but
@@ -65,6 +71,8 @@ pub(crate) struct ModuleResourceOrigin {
 pub(crate) struct ModuleResourceTable {
     origins: Vec<ModuleResourceOrigin>,
     by_origin: FxHashMap<StableResourceOriginId, ResourceId>,
+    source_association_keys: FxHashSet<(StableResourceOriginId, ResourceSourceId)>,
+    source_associations: Vec<ResourceSourceAssociation>,
 }
 
 impl ModuleResourceTable {
@@ -97,6 +105,28 @@ impl ModuleResourceTable {
         resource
     }
 
+    /// Intern one origin and retain its explicit Stage 0 source association.
+    ///
+    /// The source ID is opaque to AST and is carried unchanged to the build publication boundary.
+    /// Distinct source IDs for one origin are retained so the boundary can diagnose that
+    /// disagreement instead of silently choosing one.
+    pub(crate) fn intern_origin_with_source(
+        &mut self,
+        origin: StableResourceOriginId,
+        source: ResourceSourceId,
+        first_authored_location: SourceLocation,
+    ) -> ResourceId {
+        let resource = self.intern_origin(origin.clone(), first_authored_location);
+        if self
+            .source_association_keys
+            .insert((origin.clone(), source))
+        {
+            self.source_associations
+                .push(ResourceSourceAssociation { origin, source });
+        }
+        resource
+    }
+
     /// Read one origin row through a fallible boundary.
     ///
     /// A handle past the end of the table means a `ResourceId` reached a table that never issued
@@ -114,11 +144,19 @@ impl ModuleResourceTable {
         })
     }
 
-    /// Every resolved origin, in interning order.
+    /// Every explicit compiler-produced origin/source association, in interning order.
+    pub(crate) fn resource_source_associations(&self) -> &[ResourceSourceAssociation] {
+        &self.source_associations
+    }
+    /// Every resolved origin currently owned by this module, in interning order.
+    ///
+    /// This is the module-owned identity view used by focused table diagnostics.
+    #[allow(dead_code)] // focused table diagnostics inspect current ownership
     pub(crate) fn origins(&self) -> &[ModuleResourceOrigin] {
         &self.origins
     }
-
+    /// Whether this module currently owns no resolved resource origins.
+    #[allow(dead_code)] // focused table diagnostics inspect current ownership
     pub(crate) fn is_empty(&self) -> bool {
         self.origins.is_empty()
     }

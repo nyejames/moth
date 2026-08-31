@@ -179,17 +179,6 @@ fn render_payload_message(
             format!("Unused name '{}'", string_table.resolve(*name))
         }
         DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
-        DiagnosticPayload::MothFilePathInTemplateOutput { path } => format!(
-            "Moth source path '{}' is being inserted into template output",
-            string_table.resolve(*path)
-        ),
-        DiagnosticPayload::LargeTrackedAsset { path, byte_size } => {
-            let mib = *byte_size as f64 / (1024.0 * 1024.0);
-            format!(
-                "Large tracked asset '{}' ({mib:.1} MiB)",
-                string_table.resolve(*path)
-            )
-        }
         DiagnosticPayload::IdentifierNamingConvention {
             name,
             expected_style,

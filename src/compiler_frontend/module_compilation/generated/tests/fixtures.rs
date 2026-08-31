@@ -133,7 +133,6 @@ pub(crate) fn test_module() -> Module {
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
-            rendered_path_usages: Vec::new(),
             materialisation_context: None,
         },
     }

@@ -22,6 +22,7 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
+use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
@@ -71,32 +72,55 @@ use super::source_tree_index::SourceTreeIndex;
 #[path = "../tests/compilation_tests.rs"]
 mod tests;
 
-/// Publish one successful module and its generated sidecars as one boundary transaction.
+/// Inputs for one atomic module, generated and resource-association publication.
+pub(super) struct ModuleBoundaryPublication<'a> {
+    pub modules: &'a mut ModuleArtifactStore,
+    pub generated: &'a mut BoundaryGeneratedFunctionStore,
+    pub materialisations: &'a mut ProviderMaterialisationRegistry,
+    pub resource_inputs: &'a mut ResourceInputRegistry,
+    pub module_id: ModuleId,
+    pub expected_origin: &'a StableModuleOriginIdentity,
+    pub artifact: CompiledModuleArtifact,
+    pub generated_delta: GeneratedFunctionDelta,
+    pub resource_source_associations: Vec<ResourceSourceAssociation>,
+}
+
+/// Publish one successful module, its generated sidecars and its resource-source associations as
+/// one boundary transaction.
 ///
-/// WHAT: validates both retained lanes before either lane is mutated, then commits the module
-///       artefact and generated delta through their infallible commit operations.
-/// WHY: a successful semantic result has one ownership boundary; publishing its lanes separately
+/// WHAT: preflights all three mutable registries before reserving or committing any of them, then
+///       executes only infallible commits.
+/// WHY: a successful semantic result has one ownership boundary; publishing any lane separately
 ///      would make atomicity depend on a later invariant remaining impossible.
 pub(super) fn publish_module_and_generated(
-    modules: &mut ModuleArtifactStore,
-    generated: &mut BoundaryGeneratedFunctionStore,
-    materialisations: &mut ProviderMaterialisationRegistry,
-    module_id: ModuleId,
-    expected_origin: &StableModuleOriginIdentity,
-    artifact: CompiledModuleArtifact,
-    generated_delta: GeneratedFunctionDelta,
+    publication: ModuleBoundaryPublication<'_>,
 ) -> Result<(), CompilerError> {
-    // Both fallible checks run before anything mutates. The reservations and the materialisation
-    // publication that follow cannot fail, so a rejected publication leaves all three lanes clean.
-    // Materialisation publication sits inside that infallible tail rather than after the commits
-    // because it borrows the artefact `commit_success` consumes.
-    let generated_publication = generated.preflight(&generated_delta)?;
+    let ModuleBoundaryPublication {
+        modules,
+        generated,
+        materialisations,
+        resource_inputs,
+        module_id,
+        expected_origin,
+        artifact,
+        generated_delta,
+        resource_source_associations,
+    } = publication;
+    // Every fallible check runs before anything mutates. The reservations and commits that follow
+    // cannot fail, so a rejected publication leaves module, generated and resource registries
+    // unchanged.
     let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
+    let generated_publication = generated.preflight(&generated_delta)?;
+    let resource_publication =
+        resource_inputs.preflight_resource_source_associations(&resource_source_associations)?;
+
     modules.reserve_success_commit(&module_publication);
     generated.reserve_commit(&generated_publication);
+    resource_inputs.reserve_resource_source_associations(&resource_publication);
     publish_materialisation_templates(materialisations, &artifact);
     modules.commit_success(module_publication, artifact);
     generated.commit(generated_publication, generated_delta);
+    resource_inputs.commit_resource_source_associations(resource_publication);
     Ok(())
 }
 
@@ -503,6 +527,7 @@ pub(crate) fn compile_single_file_frontend(
     let ModuleSemanticResult {
         mut module,
         mut generated_delta,
+        resource_source_associations,
         string_table: _,
         public_interface,
     } = result;
@@ -525,17 +550,18 @@ pub(crate) fn compile_single_file_frontend(
         module,
         interface: public_interface,
     };
-    publish_module_and_generated(
-        &mut modules,
-        &mut generated_store,
-        &mut provider_materialisations,
+    publish_module_and_generated(ModuleBoundaryPublication {
+        modules: &mut modules,
+        generated: &mut generated_store,
+        materialisations: &mut provider_materialisations,
+        resource_inputs: &mut resource_inputs,
         module_id,
-        &graph_stable_origin,
+        expected_origin: &graph_stable_origin,
         artifact,
         generated_delta,
-    )
+        resource_source_associations,
+    })
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
     let boundary = CompiledGraphBoundary {
         structure: graph,
         modules,
@@ -1012,13 +1038,13 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         }
     }
 }
-
 fn compile_module_waves(
     context: BoundaryCompilationContext<'_>,
     graph: ProjectModuleGraph,
     module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_dependencies: &[ResolvedSourcePackageDependency],
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<CompiledGraphBoundary, CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
@@ -1151,6 +1177,7 @@ fn compile_module_waves(
                     let ModuleSemanticResult {
                         mut module,
                         mut generated_delta,
+                        resource_source_associations,
                         string_table: _,
                         public_interface,
                     } = compiled;
@@ -1162,15 +1189,17 @@ fn compile_module_waves(
                         module,
                         interface: public_interface,
                     };
-                    publish_module_and_generated(
-                        &mut provider_store,
-                        &mut generated_store,
-                        &mut provider_materialisations,
-                        outcome.module_id,
-                        graph.node(outcome.module_id).stable_origin(),
+                    publish_module_and_generated(ModuleBoundaryPublication {
+                        modules: &mut provider_store,
+                        generated: &mut generated_store,
+                        materialisations: &mut provider_materialisations,
+                        resource_inputs,
+                        module_id: outcome.module_id,
+                        expected_origin: graph.node(outcome.module_id).stable_origin(),
                         artifact,
                         generated_delta,
-                    )
+                        resource_source_associations,
+                    })
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
@@ -1554,6 +1583,7 @@ pub(crate) fn compile_directory_frontend(
             module_waves,
             &provider_bindings,
             &source_package_dependencies,
+            &mut resource_inputs,
             string_table,
         );
         let boundary = compiled?;
@@ -1607,6 +1637,7 @@ pub(crate) fn compile_directory_frontend(
         project_module_waves,
         &project_provider_bindings,
         &project_source_package_dependencies,
+        &mut resource_inputs,
         string_table,
     );
     let project_boundary = compiled_project?;

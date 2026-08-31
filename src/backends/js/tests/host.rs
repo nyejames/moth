@@ -84,6 +84,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
             source_function_names: Arc::new(Default::default()),
             module_private_function_names: Arc::new(Default::default()),
             generated_function_names: Arc::new(Default::default()),
+            structural_string_urls: None,
         },
         &type_environment,
     )
@@ -142,6 +143,7 @@ fn auto_invokes_start_function_when_enabled() {
             source_function_names: Arc::new(Default::default()),
             module_private_function_names: Arc::new(Default::default()),
             generated_function_names: Arc::new(Default::default()),
+            structural_string_urls: None,
         },
         &type_environment,
     )

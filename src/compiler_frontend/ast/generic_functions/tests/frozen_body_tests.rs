@@ -631,6 +631,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
             .expect("materialised facts should retain each compact row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
             owner_relative_path,
+            ..
         } = reference.outcome
         else {
             panic!("remapping fixture should retain resource outcomes");
@@ -1112,7 +1113,6 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
-                project_path_resolver: fixture.preparation.project_path_resolver.clone(),
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
@@ -1271,6 +1271,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .expect("materialised body should retain its path row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
             owner_relative_path,
+            ..
         } = reference.outcome
         else {
             panic!("collision fixture should retain resource outcomes");
@@ -1305,7 +1306,6 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
-                project_path_resolver: fixture.preparation.project_path_resolver.clone(),
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
@@ -1398,7 +1398,6 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                         .as_ref(),
                     style_directives: &fixture.preparation.style_directives,
                     build_profile: fixture.preparation.build_profile,
-                    project_path_resolver: fixture.preparation.project_path_resolver.clone(),
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
@@ -1563,7 +1562,6 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                         .as_ref(),
                     style_directives: &fixture.preparation.style_directives,
                     build_profile: fixture.preparation.build_profile,
-                    project_path_resolver: fixture.preparation.project_path_resolver.clone(),
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,

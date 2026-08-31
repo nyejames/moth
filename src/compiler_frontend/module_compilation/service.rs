@@ -52,6 +52,7 @@ use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
     SourceProviderDependencySet, build_direct_export_seed,
@@ -155,12 +156,13 @@ pub(crate) fn compile_module(
     // (an infrastructure failure recovered losslessly from its structured payload). This is
     // the single lossless ownership transfer; graph and render consumers never re-classify.
     match compile_result {
-        Ok((module, public_interface, generated_delta)) => {
+        Ok((module, public_interface, generated_delta, resource_source_associations)) => {
             let string_table = compiler.string_table;
             Ok(ModuleCompilationOutcome::Success(Box::new(
                 ModuleSemanticResult {
                     module,
                     generated_delta,
+                    resource_source_associations,
                     string_table,
                     public_interface,
                 },
@@ -212,7 +214,15 @@ fn run_semantic_stages(
     mut warnings: Vec<CompilerDiagnostic>,
     inputs: SemanticStageInputs<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(Module, PublicSemanticInterface, GeneratedFunctionDelta), CompilerMessages> {
+) -> Result<
+    (
+        Module,
+        PublicSemanticInterface,
+        GeneratedFunctionDelta,
+        Vec<ResourceSourceAssociation>,
+    ),
+    CompilerMessages,
+> {
     let SemanticStageInputs {
         prepared_header_syntax,
         source_module_origins,
@@ -480,6 +490,7 @@ fn run_semantic_stages(
                 )
                 .map(|value| ResolvedConstFragment {
                     runtime_insertion_index: fragment.runtime_insertion_index,
+                    location: fragment._location.clone(),
                     value,
                 })
             })
@@ -607,6 +618,7 @@ fn run_semantic_stages(
                 &compiler.string_table,
             )
         })?;
+    let resource_source_associations = resource_table.resource_source_associations().to_vec();
 
     // -------------------------
     //  Finalize Module Build
@@ -665,6 +677,7 @@ fn run_semantic_stages(
         },
         public_interface,
         generated_delta,
+        resource_source_associations,
     ))
 }
 

@@ -207,6 +207,8 @@ mod built_outputs_tests {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         }
     }
 

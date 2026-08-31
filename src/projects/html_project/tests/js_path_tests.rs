@@ -1,6 +1,7 @@
 //! Tests for the JS-only HTML rendering path.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -10,12 +11,16 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
+use crate::projects::html_project::resource_output_plan::{
+    HtmlResourceOutputPlan, ResourceUrlContext,
+};
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{
     create_test_hir_module, create_test_module,
 };
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn bootstrap_script_calls_start_once_and_hydrates_slots() {
@@ -57,8 +62,11 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
 
 #[test]
 fn render_entry_fragments_preserves_runtime_slot_order() {
+    let plan = HtmlResourceOutputPlan::new("js-path-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
     let (body_html, slot_ids) =
-        render_entry_fragments(&[], 2).expect("plain runtime slots should render");
+        render_entry_fragments(&[], 2, &renderer).expect("plain runtime slots should render");
 
     let slot0_pos = body_html
         .find("moth-slot-0")
@@ -98,32 +106,38 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
     let text_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Text(String::from("<head>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Text(String::from("</html>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Text(String::from("<main>body")),
         },
     ];
     let piece_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "<head>",
             ))]),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "</html>",
             ))]),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
+            location: SourceLocation::default(),
             value: OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text(String::from("<main>")),
                 OwnedFoldedStringPiece::Text(String::from("body")),
@@ -131,10 +145,13 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
         },
     ];
 
-    let (text_html, text_slot_ids) =
-        render_entry_fragments(&text_fragments, 2).expect("text fragments should render");
-    let (piece_html, piece_slot_ids) =
-        render_entry_fragments(&piece_fragments, 2).expect("all-text fragments should render");
+    let plan = HtmlResourceOutputPlan::new("js-path-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let (text_html, text_slot_ids) = render_entry_fragments(&text_fragments, 2, &renderer)
+        .expect("text fragments should render");
+    let (piece_html, piece_slot_ids) = render_entry_fragments(&piece_fragments, 2, &renderer)
+        .expect("all-text fragments should render");
     let expected_html = "<head>\n<div id=\"moth-slot-0\"></div>\n<main>body\n<div id=\"moth-slot-1\"></div>\n</html>\n";
     let expected_slot_ids = vec![String::from("moth-slot-0"), String::from("moth-slot-1")];
 
@@ -152,39 +169,45 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
 }
 
 #[test]
-fn render_entry_fragments_rejects_resource_piece_at_builder_boundary() {
-    // WHAT: a resource-bearing const fragment remains an internal renderer error.
-    // WHY: URL assignment has not landed yet, so final HTML text cannot be produced for a
-    //      structural resource piece.
+fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
+    let origin = fixture_resource_origin();
+    let mut string_table = StringTable::new();
+    let mut plan = HtmlResourceOutputPlan::new("js-path-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    plan.plan_origin(
+        origin.clone(),
+        Default::default(),
+        context.clone(),
+        &mut string_table,
+        true,
+    )
+    .expect("resource should be planned");
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        location: SourceLocation::default(),
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
-            OwnedFoldedStringPiece::Resource(fixture_resource_origin()),
+            OwnedFoldedStringPiece::Resource(origin),
             OwnedFoldedStringPiece::Text(String::from("after")),
         ]),
     }];
 
-    let error = render_entry_fragments(&fragments, 0)
-        .expect_err("a resource piece must remain unresolved at the builder boundary");
+    let (html, slot_ids) =
+        render_entry_fragments(&fragments, 0, &renderer).expect("resource should render");
 
-    let message = format!("{error:?}");
-    assert!(
-        message.contains("HTML builder boundary"),
-        "resource rendering should report the builder-boundary wall: {message}"
-    );
-    assert!(
-        message.contains("URL assignment"),
-        "resource rendering should identify the missing URL assignment: {message}"
-    );
+    assert_eq!(html, "before../assets/logo.svgafter\n");
+    assert!(slot_ids.is_empty());
 }
 
 #[test]
-fn render_entry_fragments_rejects_site_root_piece_at_builder_boundary() {
-    // WHAT: a site-root const fragment remains an internal renderer error.
-    // WHY: site-root URL context is also assigned only after this builder boundary.
+fn render_entry_fragments_renders_site_root_piece_at_builder_boundary() {
+    let plan = HtmlResourceOutputPlan::new("js-path-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/moth"));
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        location: SourceLocation::default(),
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
             OwnedFoldedStringPiece::SiteRoot,
@@ -192,18 +215,11 @@ fn render_entry_fragments_rejects_site_root_piece_at_builder_boundary() {
         ]),
     }];
 
-    let error = render_entry_fragments(&fragments, 0)
-        .expect_err("a site-root piece must remain unresolved at the builder boundary");
+    let (html, slot_ids) =
+        render_entry_fragments(&fragments, 0, &renderer).expect("site root should render");
 
-    let message = format!("{error:?}");
-    assert!(
-        message.contains("HTML builder boundary"),
-        "site-root rendering should report the builder-boundary wall: {message}"
-    );
-    assert!(
-        message.contains("URL assignment"),
-        "site-root rendering should identify the missing URL assignment: {message}"
-    );
+    assert_eq!(html, "before/moth/after\n");
+    assert!(slot_ids.is_empty());
 }
 
 #[test]
@@ -219,11 +235,17 @@ fn no_runtime_fragments_still_emits_start_call() {
         String::from("start_entry"),
     )]);
 
+    let plan = HtmlResourceOutputPlan::new("");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
         &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &module.executable.hir,
+            page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
             string_table: &mut string_table,
+            structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             logical_html_path: Path::new("index.html"),
             project_name: "",
@@ -270,11 +292,17 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     )]);
 
     let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
+    let plan = HtmlResourceOutputPlan::new("");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
         &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
+            page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
             string_table: &mut string_table,
+            structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             logical_html_path: Path::new("index.html"),
             project_name: "",

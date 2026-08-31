@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
 };
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
@@ -151,12 +151,10 @@ pub(super) fn dependency_path_for_local_name(
 pub(super) fn collect_content_source_ordering_hints(
     headers: &mut [Header],
     file_references: &PreparedFileReferenceTable,
+    path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
-) {
-    let content_targets = content_source_targets(file_references, string_table);
-    if content_targets.is_empty() {
-        return;
-    }
+) -> Result<(), CompilerError> {
+    let content_targets = content_source_targets(file_references, path_syntax, string_table)?;
 
     for header in headers {
         let Header {
@@ -225,6 +223,7 @@ pub(super) fn collect_content_source_ordering_hints(
             _ => {}
         }
     }
+    Ok(())
 }
 
 /// Map every content-class path row to its synthetic content constant hint target.
@@ -234,25 +233,28 @@ pub(super) fn collect_content_source_ordering_hints(
 /// occurrence records no content edge.
 fn content_source_targets(
     file_references: &PreparedFileReferenceTable,
+    path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
-) -> FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint> {
+) -> Result<FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>, CompilerError> {
     let mut targets = FxHashMap::default();
-
     for reference in file_references.iter() {
         if reference.class != PreparedFileReferenceClass::ContentSource {
             continue;
         }
 
+        let authored_path = &path_syntax
+            .try_path_for_token(reference.path_syntax, &reference.location)?
+            .root;
         targets.insert(
             reference.path_syntax,
             LocalDeclarationOrderingHint::content_source(
-                content_constant_path(&reference.authored_path, string_table),
+                content_constant_path(authored_path, string_table),
                 reference.path_syntax,
             ),
         );
     }
 
-    targets
+    Ok(targets)
 }
 
 /// Insert one content hint for every path token in the slice whose row is a content source.

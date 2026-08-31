@@ -74,3 +74,40 @@ fn unknown_key_renders_authored_key() {
         "UnknownKey should render the exact authored key name"
     );
 }
+
+#[test]
+fn resource_output_conflicts_render_typed_facts() {
+    let mut string_table = StringTable::new();
+    let output_path = string_table.intern("assets/logo.svg");
+    let existing_origin = string_table.intern("module origin one/assets/logo.svg");
+    let conflicting_origin = string_table.intern("module origin two/assets/logo.svg");
+    let collision_message = invalid_config_message(
+        None,
+        &InvalidConfigReason::ResourceOutputPathCollision {
+            output_path,
+            existing_origin,
+            conflicting_origin,
+        },
+        &string_table,
+    );
+    assert_eq!(
+        collision_message,
+        "HTML resource output path 'assets/logo.svg' is claimed by distinct origins 'module origin one/assets/logo.svg' and 'module origin two/assets/logo.svg'. Ensure each resource origin maps to a unique output path.",
+    );
+
+    let origin = string_table.intern("module origin/assets/index.html");
+    let artefact_kind = string_table.intern("HTML page");
+    let reserved_message = invalid_config_message(
+        None,
+        &InvalidConfigReason::ResourceOutputPathReserved {
+            output_path,
+            origin,
+            artefact_kind,
+        },
+        &string_table,
+    );
+    assert_eq!(
+        reserved_message,
+        "HTML resource origin 'module origin/assets/index.html' conflicts with HTML page output path 'assets/logo.svg'. Choose a different resource path or builder output destination.",
+    );
+}

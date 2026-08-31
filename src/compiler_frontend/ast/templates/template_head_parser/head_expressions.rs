@@ -3,7 +3,7 @@
 //! WHAT:
 //! - Normalizes values inserted from template heads into parser TIR.
 //! - Handles template-valued expressions, non-template expressions, and compile-time
-//!   path coercion.
+//!   path resolution.
 //!
 //! WHY:
 //! - Head parsing needs one place for const-context checks so the orchestration
@@ -23,20 +23,14 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_path_for_rendered_output;
-use crate::compiler_frontend::paths::site_root::render_site_root_url;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,
@@ -283,136 +277,39 @@ pub(super) fn push_template_head_reactive_subscription(
 
     Ok(())
 }
-/// Returns the Stage 0 class for a template-head path when resolution facts are attached.
+/// Resolves a compile-time file value in template-head context and records its expression.
 ///
-/// Partial parser contexts without resolution facts retain their eager path lane. Complete module
-/// and generated contexts use the same resolved-reference view as value-position paths.
-fn resolved_template_head_path_class(
-    path_syntax: PathSyntaxId,
-    context: &ScopeContext,
-) -> HeadExpressionResult<Option<PreparedFileReferenceClass>> {
-    let Some(stage0_resolution_facts) = context
-        .shared
-        .file_value_resolution
-        .as_ref()
-        .and_then(|services| services.stage0_resolution_facts.as_ref())
-    else {
-        return Ok(None);
-    };
-    let Some(reference) = stage0_resolution_facts
-        .lookup(context.shared.declaring_file_id, path_syntax)
-        .map_err(TemplateError::from)?
-    else {
-        return Err(CompilerError::compiler_error(
-            "template-head file path had no Stage 0 resolved reference row",
-        )
-        .into());
-    };
-
-    Ok(Some(reference.class))
-}
-
-/// Coerces a compile-time path token in template head context to string output.
-/// Emits source-file warnings when `.moth` files are inserted into rendered output.
+/// Stage 0 owns physical resolution for every authored path occurrence. Reusing the ordinary
+/// file-value resolver keeps resource and site-root values structural while preserving the shared
+/// extensionless and source-kind diagnostics.
 pub(super) fn push_template_head_path_expression(
     path_syntax: PathSyntaxId,
-    path: &InternedPath,
     token_stream: &FileTokens,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
 ) -> HeadExpressionResult<()> {
-    // The bare site-root spelling `@/` interns as an empty path. It addresses the site rather than
-    // a file inside it, so it never enters resource resolution: it renders the configured project
-    // origin and carries no path value, resource origin, byte source or watch interest.
-    if path.is_empty() {
-        push_template_head_site_root(token_stream, context, construction_context, string_table);
-        return Ok(());
-    }
-
-    let path_class = resolved_template_head_path_class(path_syntax, context)?;
-    if path_class == Some(PreparedFileReferenceClass::ContentSource) {
-        let value_mode = ValueMode::ImmutableOwned;
-        let location = token_stream.current_location();
-        let expression = resolve_file_value(
-            path_syntax,
-            token_stream,
-            context,
-            type_interner,
-            &value_mode,
-            string_table,
-        )
-        .map_err(TemplateError::from)?;
-
-        return push_template_head_expression(
-            expression,
-            TemplateHeadExpressionContext {
-                context,
-                type_environment: type_interner.environment(),
-                construction_context,
-            },
-            &location,
-            string_table,
-        );
-    }
-
-    let source_scope = context
-        .required_source_file_scope("template head path coercion")
-        .map_err(TemplateError::from)?;
-    let declaring_file = source_scope.to_path_buf(string_table);
-    let (resolved, recorded) = resolve_compile_time_path_for_rendered_output(
-        path,
-        context
-            .required_project_path_resolver("template head path coercion")
-            .map_err(TemplateError::from)?,
-        &declaring_file,
-        source_scope,
-        &token_stream.current_location(),
-        &context.path_format_config,
+    let value_mode = ValueMode::ImmutableOwned;
+    let location = token_stream.current_location();
+    let expression = resolve_file_value(
+        path_syntax,
+        token_stream,
+        context,
+        type_interner,
+        &value_mode,
         string_table,
     )
     .map_err(TemplateError::from)?;
 
-    // Warn when a .moth source file path is coerced into template output.
-    if resolved
-        .filesystem_path
-        .extension()
-        .is_some_and(|extension| extension == LANGUAGE_SOURCE_EXTENSION)
-    {
-        let location = token_stream.current_location();
-        let path_str = resolved.source_path.to_portable_string(string_table);
-        context.emit_warning(CompilerDiagnostic::moth_file_path_in_template_output(
-            string_table.get_or_intern(path_str),
-            location,
-        ));
-    }
-
-    // Templates always fold to strings, so path text is eagerly formatted here.
-    context.record_rendered_path_usages(recorded.usages);
-    let interned = string_table.get_or_intern(recorded.rendered_text);
-    let location = token_stream.current_location();
-    let byte_len = string_table.resolve(interned).len();
-
-    construction_context.record_head_text(interned, byte_len, location.clone());
-
-    Ok(())
-}
-
-/// Records the site-root URL that the bare `@/` spelling renders in a template head.
-///
-/// The site root is a `String`, not a `Path`. It is not resolved, checked, copied, watched or
-/// tracked, so this boundary needs neither a source file scope nor a project path resolver.
-fn push_template_head_site_root(
-    token_stream: &FileTokens,
-    context: &ScopeContext,
-    construction_context: &mut TemplateConstructionContext,
-    string_table: &mut StringTable,
-) {
-    let location = token_stream.current_location();
-    let interned =
-        string_table.get_or_intern(render_site_root_url(&context.path_format_config.origin));
-    let byte_len = string_table.resolve(interned).len();
-
-    construction_context.record_head_text(interned, byte_len, location);
+    push_template_head_expression(
+        expression,
+        TemplateHeadExpressionContext {
+            context,
+            type_environment: type_interner.environment(),
+            construction_context,
+        },
+        &location,
+        string_table,
+    )
 }

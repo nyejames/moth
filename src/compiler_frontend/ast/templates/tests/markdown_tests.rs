@@ -57,9 +57,10 @@ fn to_markdown(content: &str, default_tag: &str) -> String {
         .into_iter()
         .map(|piece| match piece {
             FormatterOutputPiece::Text(text) => text,
-            FormatterOutputPiece::Opaque(_) => {
-                unreachable!("plain-text markdown helper should never emit opaque anchors")
-            }
+            FormatterOutputPiece::Opaque(anchor) => match anchor.kind {
+                FormatterOpaqueKind::SiteRoot => "{site-root}".to_owned(),
+                _ => unreachable!("plain-text markdown helper should only emit site-root anchors"),
+            },
         })
         .collect()
 }
@@ -95,6 +96,7 @@ fn markdown_formatter_output_from_text_and_anchors(
                 FormatterOpaqueKind::DynamicExpression => {
                     format!("{{dynamic:{}}}", anchor.id.0)
                 }
+                FormatterOpaqueKind::SiteRoot => "{site-root}".to_owned(),
             },
         })
         .collect()
@@ -117,8 +119,13 @@ fn parses_links_for_all_supported_target_prefixes() {
 
     for (input, target) in cases {
         let rendered = to_markdown(input, "p");
+        let expected_target = if target.starts_with('/') && !target.starts_with("//") {
+            format!("{{site-root}}{}", &target[1..])
+        } else {
+            target.to_owned()
+        };
         let expected = format!(
-            "<p><a href=\"{target}\">{}</a></p>",
+            "<p><a href=\"{expected_target}\">{}</a></p>",
             input
                 .split_once('(')
                 .expect("label start should exist")
@@ -127,6 +134,29 @@ fn parses_links_for_all_supported_target_prefixes() {
         );
         assert_eq!(rendered, expected);
     }
+}
+
+#[test]
+fn single_slash_link_emits_site_root_anchor_before_suffix() {
+    let lines = split_text_into_lines("@/docs (Docs)");
+    let pieces = render_markdown_stream(&lines, "p");
+
+    assert_eq!(pieces.len(), 3);
+    assert!(matches!(
+        &pieces[0],
+        FormatterOutputPiece::Text(text) if text == "<p><a href=\""
+    ));
+    assert!(matches!(
+        &pieces[1],
+        FormatterOutputPiece::Opaque(FormatterOpaquePiece {
+            kind: FormatterOpaqueKind::SiteRoot,
+            ..
+        })
+    ));
+    assert!(matches!(
+        &pieces[2],
+        FormatterOutputPiece::Text(text) if text == "docs\">Docs</a></p>"
+    ));
 }
 
 #[test]
@@ -177,10 +207,13 @@ fn malformed_candidate_keeps_literal_at_symbol() {
 #[test]
 fn link_parsing_works_inside_heading_and_emphasis() {
     let heading = to_markdown("\n# @/docs (Docs)\n", "p");
-    assert_eq!(heading, "<h1><a href=\"/docs\">Docs</a></h1>");
+    assert_eq!(heading, "<h1><a href=\"{site-root}docs\">Docs</a></h1>");
 
     let emphasis = to_markdown("\n*@/docs (Docs)*\n", "p");
-    assert_eq!(emphasis, "<p><em><a href=\"/docs\">Docs</a></em></p>");
+    assert_eq!(
+        emphasis,
+        "<p><em><a href=\"{site-root}docs\">Docs</a></em></p>"
+    );
 }
 
 #[test]
@@ -302,7 +335,7 @@ fn list_items_keep_inline_markdown_links_and_escaping() {
     let rendered = to_markdown("- item *bold* @/docs (Docs) <tag>", "p");
 
     assert!(rendered.contains("<li>item <em>bold</em>"));
-    assert!(rendered.contains("<a href=\"/docs\">Docs</a>"));
+    assert!(rendered.contains("<a href=\"{site-root}docs\">Docs</a>"));
     assert!(rendered.contains("&lt;tag&gt;"));
 }
 

@@ -11,8 +11,8 @@
 //!   paragraph and list structure across opaque anchors.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
-    FormatterInput, FormatterInputPiece, FormatterOpaquePiece, FormatterOutput,
-    FormatterOutputPiece,
+    FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
+    FormatterOpaquePiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{

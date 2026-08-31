@@ -11,8 +11,8 @@ The target is:
 - `.mtf` and `.md` file values reuse the compiler-owned synthetic `content` constant their source-kind adapter already produces
 - any other accepted file evaluates to a resource-bearing `String` that stays structural until a builder knows the output artefact
 - bare `@/` evaluates to a structural site-root `String` that names no file
-- every authored file-value path is graph-active before AST reachability, constant folding or static branch specialisation
-- filesystem resolution happens once, before AST, and AST never probes the filesystem again
+- every authored physical-target-bearing file-value path is graph-active before AST reachability, constant folding or static branch specialisation
+- filesystem resolution happens once for each physical-target-bearing structural file reference, before AST, and AST never probes the filesystem again
 - stable resource identity contains no absolute path, output path, route, URL or content hash
 - resource anchors remain structural through `ConstValueStore`, TIR, public folded values, HIR and link facts
 - only resource uses that reach a selected entry or package output are read, hashed and emitted
@@ -31,13 +31,11 @@ WORK_ID: path-values-resource-linking
 WORK_SOURCE: docs/roadmap/plans/path-values-and-resource-linking-plan.md
 BASE_REVISION: 72405be4d1a1ba2cc7fb596ed4ce953a66fbb47e
 STATUS: active
-CURRENT_SCOPE: Phase 4 resource link planning and atomic old-lane deletion - slices 4a and 4b have landed
-COMPLETED: Phases 0, 1, 2 and 3, plus Phase 4 slices 4a and 4b; Path type/availability lane deleted; graph-active prepared references and shared Stage 0 resolution; AST value-position file paths interpret the resolved-reference table with content reuse, structural resource and site-root pieces, and content-source ordering edges across every pre-body declaration shell; template folds, public projection and the direct `.mtf` service carry one owned structural string vocabulary, and one `ConstStringRequirement` owner diagnoses const-required operations that need final text; TIR folds, const-template projection, AST finalization and the runtime handoff all carry pieces, with a resource or site-root piece acting as a hard text-coalescing boundary; HIR string constants, append composition and string-id remapping carry pieces; persistent generic bodies capture their resolved file-reference subset alongside the path-syntax subset and each materialised body carries its own Stage 0 facts, so generic parameter defaults and generic bodies both resolve file values through sidecar-local resource tables and portable content values, and the interim `MOTH-DEFERRED-0001` file-value guard is deleted; both resource-table lanes survive HIR lowering paired with the HIR that indexes them, per-function link facts carry ordered resource and site-root uses, and resource origins carry authored provenance that never reaches identity; top-level const fragments carry structural pieces from fold through collection and into builder-facing `OwnedFoldedString`, and the remaining final-text wall is `render_entry_fragments`
-NEXT_ACTION: Phase 4 slice 4c - build exact entry and package resource unions, and extend the byte-source registry to the `ResourceByteSource`/`ResourceContentState` shape, registration only, no reads
-VALIDATION: full `just validate` green at the slice 4b checkpoint - clippy `--all-features -D warnings`, 8 feature lanes, source audit, 4656 + 788 + 17 unit tests, 1911/1911 integration fixtures, docs build, bench-ci, bench-scaling 3/3, timers erasure
-AUDITS: Phases 1, 2 and 3 audits accepted after corrections, as recorded in Git history. Slice 4a as previously recorded. Slice 4b ran two lanes: no production defect. Two test-strength findings were required and inverted - collection must keep all-text `Pieces` unflattened, and `render_entry_fragments` must emit byte-identical HTML for `Text` and all-text `Pieces`. Two findings were deferred until 4e replaces the wall: a real `#[...]` emitter/service pipeline fixture, and caller-level JS/Wasm `CompilerMessages` mapping tests
+CURRENT_SCOPE: Phase 5 public, generated and service boundaries
+COMPLETED: Phases 0-3 and Phase 4 slices 4a-4g, including physical-target-bearing prepared references and shared Stage 0 resolution, structural Resource/SiteRoot propagation, exact live-origin unions, planned HTML resource output and eager-lane deletion
+NEXT_ACTION: Phase 5 - complete public, generated and service boundaries
 BLOCKERS: none
-NOTES: template heads are cut over for content occurrences only - resource, bare `@/`, extensionless and `.moth` head forms deliberately remain on the eager rendered-path lane until Phase 4 deletes it; any runtime use of a resource-bearing string still reaches `MOTH-INFRA-0001` at JavaScript expression lowering, which is general to every runtime position rather than specific to one operation, and closes as items 3 and 4 land HIR and TIR carriage and Phase 4 supplies the output boundary
+NOTES: `SourceKindNoFileValue` is a structural diagnostic fact with no physical target. `CompileTimePathBase` remains for dependency-path diagnostics only. File values reject `./` and `../`. Resource URLs are artefact-relative. Origin applies only to SiteRoot
 ```
 
 Keep this block small. Record activation baselines and implementation checkpoints in working notes and Git history, not in this file.
@@ -84,15 +82,11 @@ Read the current versions of:
 
 ## Current migration surface
 
-- resource paths currently resolve through `CompileTimePath` and render eagerly through the configured origin
-- the HTML builder reconstructs tracked assets from module-wide rendered-path metadata
-- `RenderedPathUsage` and module-wide rendered-path metadata still exist
-- stable resource identity, portable resource paths, dense module-local `ResourceId` and the `ModuleResourceTable` already exist and are kept
-- file-only regular resource targets, directory-target diagnostics and module-root-relative ownership already exist and are kept
-- bare `@/` is accepted as a site-root URL `String` but is still rendered eagerly in AST instead of staying structural
-- Moth-aware `$md` single-slash link targets still render literally, so they lag the accepted site-root contract
-- a builtin `Path` type, its source spelling, its canonical identity and the recursive compile-time-only availability classifier exist on the branch and are deleted by Phase 1
-- no expression yet produces a structural value: expression-position paths still fold eagerly to text in the template head
+- the eager `CompileTimePath`, `RenderedPathUsage` and HTML tracked-asset reconstruction lanes are deleted
+- template heads and moth-aware `$md` single-slash links use structural Resource/SiteRoot pieces
+- `CompileTimePathBase` remains only for dependency-path diagnostics
+- generated getting-started HTML and a timing summary label still mention tracked assets until Phase 6 rebuilds docs
+- Phase 5 still owns public, generated and service boundary completion, including opaque-anchor preservation through remaining template-body tokenizer surfaces
 
 ## Scope boundaries
 
@@ -173,7 +167,9 @@ The value carries one structural `Resource` anchor rather than eager text, becau
 source = @helpers.moth
 ```
 
-is a diagnostic. A `.moth` file exposes declarations through dependency clauses. Source text is never exposed and no `String` representation is manufactured for it.
+is a diagnostic. Preparation records the spelling as `SourceKindNoFileValue`, a structural diagnostic fact with no physical target. Stage 0 does not resolve or validate a `.moth` target, add semantic-source membership or create a physical-source or watch record. No filesystem target resolution occurs. AST always issues `MothFileHasNoValue`, whether or not a matching `.moth` file exists.
+
+A `.moth` file exposes declarations, and declarations are consumed through dependency clauses. Source text is never exposed and no `String` representation is manufactured for it.
 
 More generally, a compiler source kind may be used as a file value only where the language defines one canonical compiler-owned content `String` for that source kind. V1 has that property for `.mtf` and `.md` only. This is not a general source-file reflection system.
 
@@ -280,11 +276,12 @@ is a diagnostic, as is a direct `.mtf` or `.md` file value in project config. So
 
 ## Graph activity and output liveness
 
-### Graph-active file paths
+### Graph-active physical file paths
 
 This is the main architectural change from the superseded plan.
 
-Every authored file-value path is graph-active before AST reachability, constant folding or static branch specialisation. Graph activity follows the authored path occurrence, not later expression liveness.
+Every authored physical-target-bearing file-value path is graph-active before AST reachability, constant folding or static branch specialisation. Graph activity follows the authored path occurrence, not later expression liveness.
+`SourceKindNoFileValue` remains a structural diagnostic fact with no physical target. It contributes no semantic-source membership, build input, watch interest or filesystem resolution, and AST still issues `MothFileHasNoValue`.
 
 ```moth
 unused #= @docs/old.mtf
@@ -302,8 +299,11 @@ All three still contribute structural input dependencies.
 ### The required invariant
 
 ```text
-authored file path
+physical-target-bearing authored file path
     -> graph/input dependency always
+
+SourceKindNoFileValue
+    -> structural diagnostic fact only
 
 semantic resource use
     -> retained only through normal semantic liveness
@@ -324,11 +324,11 @@ Consequences:
 - an unmaterialised generic body contributes no output resource use
 - none of those cases removes the earlier graph or input edge
 
-Do not tree-shake paths before graph construction. Do not make graph structure depend on `#Config`, constant folding or reachability.
+Do not tree-shake physical-target-bearing paths before graph construction. Do not make graph structure depend on `#Config`, constant folding or reachability.
 
 ### Static control-flow specialisation
 
-Graph and input validity is separate from executable and output liveness. Both branches of an ordinary `if` remain frontend-valid, and graph-active paths in both branches have already contributed input edges. After known-Bool specialisation an inactive branch publishes no HIR resource use and causes no emission. Do not add general CFG tree shaking.
+Graph and input validity is separate from executable and output liveness. Both branches of an ordinary `if` remain frontend-valid, and graph-active physical-target-bearing paths in both branches have already contributed input edges. After known-Bool specialisation an inactive branch publishes no HIR resource use and causes no emission. Do not add general CFG tree shaking.
 
 ## Discovery, resolution and publication
 
@@ -349,10 +349,10 @@ AST                        -> value semantics
 The handoff is explicit at every join, so two implementers cannot build incompatible halves of it:
 
 1. preparation publishes file-reference syntax facts beside the prepared syntax
-2. Stage 0 consumes those facts and resolves their physical targets
+2. Stage 0 consumes those facts and resolves physical targets only for physical-target-bearing references
 3. the resolved table is paired with the prepared syntax and supplied to module compilation
 4. interface binding passes it through without interpreting it
-5. AST resolves a path token through its file-owned identity and that token's resolved entry
+5. AST interprets a path token through its file-owned identity and the published outcome
 6. the AST file-value owner is given no filesystem resolver
 
 Conceptually:
@@ -391,18 +391,18 @@ Rules:
 
 - no second tokenization, no second expression parser and no arbitrary source-text scan
 - preparation knows which path rows a dependency clause consumed and excludes them from the value-reference family, so one authored path occurrence keeps one semantic role
-- classification is shallow: bare `@/` is a site root and creates no file edge, explicit `.mtf` or `.md` is a content-source reference, explicit `.moth` is retained as a source-kind reference so AST can issue the precise diagnostic, another explicit extension is a resource-file reference, and an extensionless non-dependency path is left for AST to diagnose
+- classification is shallow: bare `@/` is a site root and creates no file edge, explicit `.mtf` or `.md` is a content-source reference, explicit `.moth` is retained as `SourceKindNoFileValue`, a structural diagnostic fact with no physical target, another explicit extension is a resource-file reference, and an extensionless non-dependency path is left for AST to diagnose
 - no type checking, folding or surrounding-expression parsing happens during this scan
 
 Because classification never reads the surrounding expression, two edge cases need stated answers.
 
-**Malformed surrounding code.** Every retained path token outside a dependency-clause-owned token range is structurally classified. A later AST syntax failure in the containing expression does not retract that graph fact. Order diagnostics so a speculative missing-file error cannot displace the primary syntax error at the same location.
+**Malformed surrounding code.** Every retained path token outside a dependency-clause-owned token range is structurally classified. A later AST syntax failure in the containing expression does not retract that classification or any graph/input fact for a physical-target-bearing reference. Order diagnostics so a speculative missing-file error cannot displace the primary syntax error at the same location.
 
-**Explicit `.moth` value paths.** Stage 0 validates and identifies the target so AST can issue the precise diagnostic, and stops there. It does not add that file to the module's semantic source set, and its declarations never affect collisions or visibility. Invalid value syntax must not change the module before AST rejects it. The same rule applies to any future recognised source kind with no canonical file-value semantics: it is identified for its diagnostic, never silently treated as an ordinary resource.
+**Explicit `.moth` value paths.** Preparation records `SourceKindNoFileValue`, a structural diagnostic fact with no physical target. Stage 0 does not resolve or validate a `.moth` target, add semantic-source membership or create a physical-source or watch record. No filesystem target resolution occurs. AST always issues `MothFileHasNoValue`, whether or not a matching `.moth` file exists. Invalid value syntax must not change the module before AST rejects it. The same rule applies to any future recognised source kind with no canonical file-value semantics.
 
 ### Stage 0 owns physical resolution
 
-Stage 0 consumes prepared structural file references and owns physical graph and input resolution, not language value semantics.
+Stage 0 consumes prepared structural file references and owns physical graph and input resolution for physical-target-bearing references, not language value semantics.
 
 For content-source references it ensures the referenced source enters the appropriate semantic source set before the consuming module reaches AST. The content source is prepared exactly once through the normal source-kind adapter. Content files are never opened recursively from AST.
 
@@ -431,7 +431,7 @@ For resource references it resolves the file as a build input and watch interest
 
 Stage 0 may create an unhashed build-owned resource source record. It must not read file contents, hash an unused file, choose an output path, render a URL, create a public semantic resource origin or decide whether the resource reaches an output.
 
-What exists after Stage 0 and before AST is a build input, not a semantic identity. Keep the two records separate:
+For a physical-target-bearing resource, what exists after Stage 0 and before AST is a build input, not a semantic identity. A `SourceKindNoFileValue` fact has no corresponding build input or semantic identity. Keep the two records separate:
 
 ```text
 Stage 0 build input
@@ -465,7 +465,7 @@ StableResourceOriginId
 
 This is what keeps a diagnosed module from publishing semantic identity early, and what removes any reason for a second filesystem lookup.
 
-Filesystem resolution happens once. Stage 0 publishes the resolved target so AST can consume it:
+Each physical-target-bearing structural file reference gets one filesystem resolution. Stage 0 publishes its resolved target so AST can consume it. Structural `SiteRoot`, extensionless and `SourceKindNoFileValue` facts publish `NoPhysicalTarget` and never enter filesystem resolution.
 
 ```rust
 pub enum ResolvedFileReferenceTarget {
@@ -480,11 +480,11 @@ pub enum ResolvedFileReferenceTarget {
 }
 ```
 
-Exact IDs may differ. The rule does not: AST interprets an already-resolved target and never rediscovers it.
+Exact IDs may differ. The rule does not: AST interprets an already-published outcome, including `NoPhysicalTarget`, and never rediscovers the filesystem target.
 
 ### AST owns value semantics
 
-One focused file-value resolver consumes the exact `PathSyntaxId`, the prepared source identity, the Stage 0 resolved target, ordinary AST receiving context, the module resource table and the folded constant environment. It is not given a filesystem resolver, so rediscovery is unavailable rather than merely discouraged.
+One focused file-value resolver consumes the exact `PathSyntaxId`, the prepared source identity, the Stage 0 published outcome, ordinary AST receiving context, the module resource table and the folded constant environment. It is not given a filesystem resolver, so rediscovery is unavailable rather than merely discouraged.
 
 - `.mtf` and `.md` resolve to the existing folded synthetic `content` `String`; no path string is manufactured
 - an ordinary resource interns the stable semantic origin into the module resource table and produces a `String` expression carrying one `Resource` piece, typed with the ordinary builtin `String` `TypeId`
@@ -756,13 +756,13 @@ Resource-bearing and site-root-bearing strings are not compile-time-only values 
 
 ## Validation and emission liveness
 
-Semantic validation covers every graph-active file path, including one in an unused private constant, an unrendered helper template, either branch of an ordinary `if`, a branch removed by known-Bool specialisation, an unmaterialised generic template or a function unreachable from the selected entry.
+Semantic validation covers every graph-active physical-target-bearing file path, including one in an unused private constant, an unrendered helper template, either branch of an ordinary `if`, a branch removed by known-Bool specialisation, an unmaterialised generic template or a function unreachable from the selected entry. The separate `SourceKindNoFileValue` fact reaches AST for its unconditional diagnostic.
 
 Executable liveness is exact and separate. Entry planning unions resource uses from the selected `start`, reachable source and generated functions, runtime fragments, compile-time fragments, selected entry settings and reachable provider runtime requirements. Package planning unions externally selected exports, structural resource-bearing exported strings, reachable source and generated implementations and provider runtime requirements permitted by the package target.
 
 Unions come from per-function link facts and metadata owners without rescanning HIR or scanning all compiled modules. An unused private string containing a resource produces no emitted resource.
 
-A file-value path inside a generic template is graph-active when the authored source is prepared, even if no instance is materialised. Its resource and output anchor becomes durable only when the generated body is materialised and survives normal specialisation and reachability. Generated sidecars use generated-local resource IDs or an explicitly paired shared table; donor-local `ResourceId` values are never copied into generated HIR.
+A physical-target-bearing file-value path inside a generic template is graph-active when the authored source is prepared, even if no instance is materialised. Its resource and output anchor becomes durable only when the generated body is materialised and survives normal specialisation and reachability. Generated sidecars use generated-local resource IDs or an explicitly paired shared table; donor-local `ResourceId` values are never copied into generated HIR.
 
 ## Output placement and URL contexts
 
@@ -823,7 +823,7 @@ Changing the project origin behaves the same way. It invalidates the physical an
 - one file-owned path syntax table, no second tokenization and no second expression parse
 - at most one simple prepared-source walk over path tokens or dense path rows
 - dense file-reference IDs where repeated cross-stage lookup benefits
-- one filesystem resolution per authored file reference
+- one filesystem resolution per physical-target-bearing structural file reference
 - one stable origin record per unique semantic origin
 - one physical source record per canonical file
 - dense local resource and use IDs, and no `PathBuf` per resource use
@@ -933,7 +933,7 @@ Phase 0 is closed. The design review is complete and implementation is cleared t
 ### Exit gate
 
 - no canonical document describes `Path` as a source-visible type
-- graph-active file-value paths are canonical
+- physical-target-bearing graph-active file-value paths are canonical
 - the file-value result type is `String` everywhere
 - dependency clauses remain canonical
 - every cross-stage join has one named owner: preparation publishes, Stage 0 resolves, binding passes through, AST interprets
@@ -957,7 +957,7 @@ Start from a clean `just validate` baseline. The redirect landed as documentatio
 - delete the planned `PublicFoldedValue::Path`
 - add prepared structural file-reference records
 - mark dependency-clause path rows so they are not reclassified as file values
-- collect non-dependency graph-active file paths without parsing expressions
+- collect non-dependency physical-target-bearing graph-active file paths without parsing expressions
 - integrate them into Stage 0 source and resource input resolution
 - include referenced `.mtf` and `.md` files in semantic source preparation
 - create resource watch and input records without reading bytes
@@ -969,20 +969,20 @@ Start from a clean `just validate` baseline. The redirect landed as documentatio
 - graph activity for an unused private `.mtf`, `.md` and resource path
 - a syntax error inside an otherwise unused `.mtf` dependency is reported
 - a missing resource or content file in a known-Bool inactive branch is reported
-- a path inside an unmaterialised generic template is graph-active
+- a physical-target-bearing path inside an unmaterialised generic template is graph-active
 - repeated authored paths deduplicate the target without losing useful locations
-- a graph-active unused resource is neither read nor hashed
+- a graph-active unused physical resource is neither read nor hashed
 - `@/` and ordinary quoted URL strings create no graph or input record
 - a file-value path in `config.moth` is rejected
 - transitive discovery reaches a fixed point: a `.mtf` referencing a `.mtf` referencing a resource prepares each source once, whatever the insertion order
 - `Path` is usable as an ordinary user type name, for example `Path = |text String,|`
-- a path token inside a syntactically broken expression is still graph-active, and the primary syntax error is not displaced by a speculative missing-file error
-- an explicit `.moth` value path resolves for its diagnostic without entering the semantic source set or affecting collisions and visibility
+- a physical-target-bearing path token inside a syntactically broken expression is still graph-active, and the primary syntax error is not displaced by a speculative missing-file error
+- an explicit `.moth` value path retains `SourceKindNoFileValue` as a no-physical-target structural fact, never enters the semantic source set or creates a physical-source or watch record, and makes AST issue `MothFileHasNoValue` whether or not a matching target exists
 
 ### Exit gate
 
 - graph construction no longer depends solely on top-level dependency clauses
-- every authored file-value path is graph-active
+- every physical-target-bearing file-value path is graph-active; `SourceKindNoFileValue` reaches AST only as a no-physical-target diagnostic fact
 - Stage 0 parses no expressions
 - no `Path` type survives
 
@@ -1018,7 +1018,7 @@ Give value-position paths their final language-level `String` semantics.
 ### Exit gate
 
 - every accepted value path has natural type `String`
-- no eager resource URL is produced for a value-position path; template-head resource, bare `@/`, extensionless and `.moth` occurrences stay on the eager rendered-path lane that Phase 4 deletes
+- no eager resource URL is produced for a value-position path; template-head resource and bare `@/` occurrences use structural outcomes, while extensionless and `SourceKindNoFileValue` occurrences use no-target outcomes for AST diagnostics
 - direct content-file values work in ordinary code and in templates
 
 ## Phase 3 - structural String vertical propagation
@@ -1067,7 +1067,7 @@ Complete one source-to-output route and delete eager resource reconstruction.
 - give resource diagnostics real provenance before emitting any: `ModuleResourceOrigin::first_authored_location` has no production reader today, and generated generic materialisation interns origins with a defaulted location because `intern_resource_origin` takes no location. The authored location is available at the parameter and struct-field materialisation sites, so thread it when the first diagnostic needs it rather than leaving a defaulted location to point at nothing
 - validate conflicts before reads, and deduplicate sources, hashes, reads and warnings
 - delete `RenderedPathUsage`, module-wide eager rendered-path metadata and `CompileTimePath`
-- delete eager route-relative path formatting in frontend and template parsing; the residual callers left by Phase 2 are the template-head resource, bare `@/`, extensionless and `.moth` occurrence forms, which move onto the resolved table here
+- delete eager route-relative path formatting in frontend and template parsing; the residual template-head resource and bare `@/` occurrences use published structural outcomes, while extensionless and `SourceKindNoFileValue` occurrences use no-target outcomes for AST diagnostics
 - delete HTML tracked-asset reconstruction from rendered path strings
 - delete path-format configuration that exists only for eager rendering
 - delete duplicate path filesystem resolution and every fallback that scans strings or generated HTML
@@ -1122,7 +1122,7 @@ Close every non-mainline boundary.
 - scaling and counter checks, and benchmark sanity
 - remove obsolete path-format, rendered-path, tracked-asset and provider-asset tests
 - replace implementation-shaped tests with canonical behaviour and invariant owners
-- update language, template, Moth-template, package, project, HTML, compiler and build documentation; known drift carried from Phase 2 is `docs/src/docs/resources/file-values.mtf` line 12, which calls a `.md` value a "rendered content string" when it is the file's content, and line 68, whose unconditional structural claim only becomes true once Phase 4 removes the residual eager template-head forms
+- update language, template, Moth-template, package, project, HTML, compiler and build documentation where Phase 5 boundaries still leave drift
 - update scaffolds, examples and the external editor grammar
 - update the progress matrix truthfully and `index.md`
 - rebuild generated documentation
@@ -1146,9 +1146,9 @@ The work is complete when:
 
 - top-level dependency clauses remain the declaration-binding mechanism
 - value-position explicit file paths produce `String`, `.mtf` and `.md` produce their synthetic content, ordinary files produce structural resource-bearing strings, bare `@/` produces a structural site-root string, `.moth` has no file value, and no source-visible `Path` type exists
-- every authored file-value path is graph-active independently of AST reachability
-- Stage 0 parses no expressions, referenced content sources are prepared before consumers, and resource inputs are known and watchable without eager bytes
-- filesystem target resolution occurs once, the resolved table reaches AST through prepared syntax and module compilation input, and AST owns value interpretation with no filesystem resolver of its own
+- every physical-target-bearing authored file-value path is graph-active independently of AST reachability; `SourceKindNoFileValue` remains a no-physical-target diagnostic fact
+- Stage 0 parses no expressions, referenced content sources are prepared before consumers, and physical resource inputs are known and watchable without eager bytes; no-file facts create no input or watch record
+- physical filesystem target resolution occurs once for each physical-target-bearing structural file reference, the published outcome reaches AST through prepared syntax and module compilation input, and AST owns value interpretation with no filesystem resolver of its own
 - `Resource` and `SiteRoot` stay structural through `ConstValueStore`, TIR, public projection and HIR, with a compact plain-string fast path, and one policy owner decides which operations may keep structure
 - generated sidecars preserve resource identity through captured and remapped resolved references, and compile-time operations cannot observe guessed final URLs
 - `Path` is an ordinary user identifier again

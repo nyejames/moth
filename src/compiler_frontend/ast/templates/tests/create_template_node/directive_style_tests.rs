@@ -53,14 +53,6 @@ fn directive_tokens(source: &str, string_table: &mut StringTable) -> FileTokens 
 }
 
 fn test_context(scope: InternedPath) -> ScopeContext {
-    let cwd = std::env::temp_dir();
-    let resolver = ProjectPathResolver::new(
-        cwd.clone(),
-        cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-    )
-    .expect("test path resolver should be valid");
     ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope.clone(),
@@ -69,9 +61,7 @@ fn test_context(scope: InternedPath) -> ScopeContext {
         vec![],
         0,
     )
-    .with_project_path_resolver(Some(resolver))
     .with_source_file_scope(scope)
-    .with_path_format_config(PathStringFormatConfig::default())
 }
 
 fn parse_optional_parenthesized_expression_for_test(

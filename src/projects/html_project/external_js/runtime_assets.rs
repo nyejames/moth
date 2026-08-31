@@ -8,9 +8,8 @@
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::build_system::output::validate_relative_output_path;
 use crate::build_system::utils::file_error_messages;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::diagnostics::tracked_asset_builder_output_conflict_messages;
 use crate::projects::html_project::external_js::path_identity::{
     sanitized_path_stem, stable_path_hash_hex,
 };
@@ -64,9 +63,14 @@ pub(crate) fn emit_external_js_runtime_assets(
 fn external_js_asset_conflicts_with_existing_output_error(
     source_path: &Path,
     output_path: &Path,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
 ) -> CompilerMessages {
-    tracked_asset_builder_output_conflict_messages(source_path, output_path, string_table)
+    let message = format!(
+        "External JS asset '{}' would emit to '{}' which conflicts with an existing output.",
+        source_path.display(),
+        output_path.display()
+    );
+    CompilerMessages::from_error(CompilerError::compiler_error(message), string_table.clone())
 }
 
 /// Generate a deterministic, collision-resistant output path for a JS runtime asset.

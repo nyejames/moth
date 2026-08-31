@@ -59,8 +59,8 @@ or thorough reviews.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
-- Every authored file-value path is graph-active before AST reachability, folding or static specialisation. Filesystem resolution happens once, before AST, and no later stage rediscovers files by scanning strings, rendered output or body tokens.
-- Graph and input validity is separate from executable and output liveness. Graph activity is conservative and follows the authored path occurrence; emission is exact and follows entry or package reachability.
+- Every physical-target-bearing authored file-value path is graph-active before AST reachability, folding or static specialisation. Filesystem resolution happens once for each physical-target-bearing structural file reference, and no later stage rediscovers files by scanning strings, rendered output or body tokens. `SourceKindNoFileValue` remains a structural diagnostic fact with no physical target.
+- Graph and input validity is separate from executable and output liveness. Graph activity is conservative for physical-target-bearing authored path occurrences; `SourceKindNoFileValue` remains diagnostic-only. Emission is exact and follows entry or package reachability.
 - A file value has language type `String`. There is no source-visible `Path` type. Resource and site-root anchors stay structural inside the string until a builder assigns output placement and a URL context.
 - Resource origin, resource use and byte source are three separate facts. Semantic resource identity carries no absolute path, output path, route, URL or content hash.
 - AST resolves constants, generic call inference, traits, casts and template semantics, then emits concrete generic requests. Generated functions are materialised, HIR-validated, borrow-validated and lifetime-analysed before backend handoff.
@@ -1059,8 +1059,8 @@ File references are discovered before AST, not by it:
 - tokenization owns authored path syntax and dense path rows
 - compiler-owned source preparation classifies non-dependency path rows into structural file
   references, without a second tokenization, a second expression parser or a source-text scan
-- Stage 0 resolves each reference against the filesystem exactly once
-- AST interprets the already-resolved target as a value and never probes the filesystem
+- Stage 0 resolves each physical-target-bearing structural file reference against the filesystem exactly once
+- AST interprets the published outcome as a value and never probes the filesystem
 
 Preparation excludes the path rows a dependency clause consumed, so one authored path occurrence
 keeps one semantic role. Classification is shallow: bare `@/` is a site root and creates no file
@@ -1071,16 +1071,20 @@ surrounding-expression parsing happens during that scan.
 
 Because the scan never reads the surrounding expression, two consequences are stated rather than
 left to an implementation. Every retained path token outside a dependency-clause-owned range is
-classified, and a later AST syntax failure in the containing expression does not retract that graph
-fact; diagnostic ordering keeps a speculative missing-file error from displacing the primary syntax
-error. And a `.moth` value path is identified only so AST can issue its diagnostic: it never enters
-the semantic source set, and its declarations never affect collisions or visibility. The same holds
-for any future recognised source kind with no file-value semantics.
+classified, and a later AST syntax failure in the containing expression does not retract that
+structural classification or any graph/input fact for a physical-target-bearing reference.
+Diagnostic ordering keeps a speculative missing-file error from displacing the primary syntax error.
+`SourceKindNoFileValue` is retained as a structural diagnostic fact with no physical target. Stage 0
+does not resolve or validate a `.moth` target, add semantic-source membership or create a
+physical-source or watch record. No filesystem target resolution occurs. AST always issues
+`MothFileHasNoValue`, whether or not a matching `.moth` file exists. The same holds for any future
+recognised source kind with no file-value semantics.
 
-Graph membership is settled before AST runs, so AST never decides it. A path AST later finds in an
-unreachable position was already resolved and validated, and errors inside a referenced content file
-are reported whether or not the consuming code survives specialisation. The canonical list of
-positions this covers is in `docs/src/docs/resources/file-paths.mtf`.
+Graph membership for physical-target-bearing references is settled before AST runs, so AST never
+decides it. A physical-target-bearing path AST later finds in an unreachable position was already
+resolved and validated, and errors inside a referenced content file are reported whether or not the
+consuming code survives specialisation. The canonical list of positions this covers is in
+`docs/src/docs/resources/file-paths.mtf`.
 
 What Stage 0 validates, registers and deliberately does not do with a file reference is owned by
 `docs/build-system-design.md` > `Prepared-source orchestration`. AST consumes its published result.

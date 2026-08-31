@@ -286,16 +286,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Unused function parameter default value",
             DiagnosticSeverity::Warning,
         ),
-        RuleDiagnosticKind::MothFilePathInTemplateOutput => DiagnosticDescriptor::new(
-            "MOTH-RULE-0019",
-            "Moth source path in template output",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::LargeTrackedAsset => DiagnosticDescriptor::new(
-            "MOTH-RULE-0020",
-            "Large tracked asset",
-            DiagnosticSeverity::Warning,
-        ),
         RuleDiagnosticKind::IdentifierNamingConvention => DiagnosticDescriptor::new(
             "MOTH-RULE-0021",
             "Identifier naming convention",

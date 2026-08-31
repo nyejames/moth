@@ -4,26 +4,65 @@ use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{FileKind, Project, ProjectCompilation};
+use crate::build_system::create_project_modules::resource_inputs::{
+    ResourceContentState, ResourceInputRegistry,
+};
+use crate::build_system::output::{
+    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
+    WriteOptions, write_project_outputs,
+};
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
-use crate::compiler_frontend::folded_value::OwnedFoldedString;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::file_references::ResourceSourceId;
+use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::tests::test_support::{
-    RenderedPathUsageInput, add_reachable_external_import, collect_output_paths,
-    create_test_module, expect_bytes_output, expect_html_output, expect_js_output,
-    rendered_path_usage,
+    add_reachable_external_import, collect_output_paths, create_test_module, expect_html_output,
+    expect_js_output,
 };
 use crate::projects::settings::Config;
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+
+fn attach_origin(
+    registry: &mut ResourceInputRegistry,
+    origin: StableResourceOriginId,
+    source: ResourceSourceId,
+) -> Result<(), CompilerError> {
+    let publication = registry
+        .preflight_resource_source_associations(&[ResourceSourceAssociation { origin, source }])?;
+    registry.reserve_resource_source_associations(&publication);
+    registry.commit_resource_source_associations(publication);
+    Ok(())
+}
+
+fn project_resource_origin(resource_path: &str) -> StableResourceOriginId {
+    StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_portable_spelling(resource_path.to_owned())
+            .expect("test resource path should be valid"),
+    )
+}
 
 fn build_with_test_modules(
     builder: &HtmlProjectBuilder,
@@ -169,6 +208,273 @@ fn build_backend_emits_single_html_output_file() {
 }
 
 #[test]
+fn shared_resource_origin_defers_one_output_file_across_pages() {
+    let directory = tempfile::tempdir().expect("should create resource directory");
+    let source_path = directory.path().join("static/shared.bin");
+    fs::create_dir_all(source_path.parent().expect("resource should have a parent"))
+        .expect("should create resource directory");
+    fs::write(&source_path, [1_u8, 2, 3]).expect("should write shared resource");
+    let canonical_source_path =
+        fs::canonicalize(&source_path).expect("shared resource should canonicalize");
+
+    let resource_origin = StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_portable_spelling("static/shared.bin".to_owned())
+            .expect("shared resource path should be valid"),
+    );
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_id = resource_inputs.register_source(canonical_source_path);
+    attach_origin(&mut resource_inputs, resource_origin.clone(), source_id)
+        .expect("shared resource origin should attach");
+
+    let mut string_table = StringTable::new();
+    let mut first_page = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut second_page = create_test_module(PathBuf::from("docs.moth"), &mut string_table);
+    for module in [&mut first_page, &mut second_page] {
+        module
+            .executable
+            .resource_table
+            .intern_origin(resource_origin.clone(), SourceLocation::default());
+        module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+            runtime_insertion_index: 0,
+            location: SourceLocation::default(),
+            value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
+                resource_origin.clone(),
+            )]),
+        }];
+    }
+
+    let mut config = Config::new(PathBuf::from("docs.moth"));
+    config.project_name = "test".to_owned();
+    let project = HtmlProjectBuilder::new()
+        .build_backend(
+            crate::build_system::test_support::project_compilation_from_test_modules_with_resources(
+                vec![first_page, second_page],
+                resource_inputs,
+            )
+            .expect("test modules should assemble with resource inputs"),
+            &config,
+            BuildProfile::Dev,
+            &[],
+            &mut string_table,
+        )
+        .expect("shared resource build should succeed");
+
+    let shared_outputs = project
+        .deferred_resources
+        .iter()
+        .filter(|resource| resource.relative_output_path == Path::new("static/shared.bin"))
+        .count();
+    assert_eq!(
+        shared_outputs, 1,
+        "shared origin/path should produce one deferred output"
+    );
+    assert_eq!(
+        project.resource_inputs.records()[0].content(),
+        ResourceContentState::Unhashed,
+        "HTML planning must not read or hash shared resource bytes"
+    );
+}
+
+#[test]
+fn resource_destination_collision_preflights_before_read() {
+    let directory = tempfile::tempdir().expect("should create resource directory");
+    let source_path = directory.path().join("logo.svg");
+    fs::write(&source_path, [1_u8, 2, 3]).expect("should write resource");
+    let canonical_source_path =
+        fs::canonicalize(&source_path).expect("resource should canonicalize");
+
+    let origin = project_resource_origin("assets/logo.svg");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_id = resource_inputs.register_source(canonical_source_path);
+    attach_origin(&mut resource_inputs, origin.clone(), source_id)
+        .expect("resource origin should attach");
+
+    let mut string_table = StringTable::new();
+    let mut resource_output_plan = HtmlResourceOutputPlan::new("test");
+    resource_output_plan
+        .plan_origin(
+            origin,
+            SourceLocation::default(),
+            ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+            &mut string_table,
+            true,
+        )
+        .expect("resource should be planned");
+
+    let output_path = PathBuf::from("assets/logo.svg");
+    let output_paths = HashSet::from([output_path.clone()]);
+    let output_files = Vec::new();
+    let result = emit_planned_resource_outputs(
+        resource_output_plan,
+        &resource_inputs,
+        &output_files,
+        &output_paths,
+        &mut string_table,
+    );
+
+    let messages = result.expect_err("an existing destination should fail emission");
+    assert!(matches!(
+        first_invalid_config_reason(&messages),
+        InvalidConfigReason::ResourceOutputPathReserved { .. }
+    ));
+    assert!(output_files.is_empty(), "a failed preflight emits no files");
+    assert_eq!(
+        resource_inputs.records()[0].content(),
+        ResourceContentState::Unhashed,
+        "destination conflicts must not hash the source"
+    );
+}
+
+#[test]
+fn missing_module_source_preflights_before_reading_other_records() {
+    let directory = tempfile::tempdir().expect("should create resource directory");
+    let attached_path = directory.path().join("attached.bin");
+    let unattached_path = directory.path().join("unattached.bin");
+    fs::write(&attached_path, [1_u8, 2, 3]).expect("should write attached resource");
+    fs::write(&unattached_path, [4_u8, 5, 6]).expect("should write unattached resource");
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let attached_source = resource_inputs.register_source(
+        fs::canonicalize(&attached_path).expect("attached resource should canonicalize"),
+    );
+    resource_inputs.register_source(
+        fs::canonicalize(&unattached_path).expect("unattached resource should canonicalize"),
+    );
+    let attached_origin = project_resource_origin("assets/attached.bin");
+    let unattached_origin = project_resource_origin("assets/unattached.bin");
+    attach_origin(
+        &mut resource_inputs,
+        attached_origin.clone(),
+        attached_source,
+    )
+    .expect("attached resource origin should attach");
+
+    let mut string_table = StringTable::new();
+    let mut resource_output_plan = HtmlResourceOutputPlan::new("test");
+    for origin in [attached_origin, unattached_origin] {
+        resource_output_plan
+            .plan_origin(
+                origin,
+                SourceLocation::default(),
+                ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+                &mut string_table,
+                true,
+            )
+            .expect("resource should be planned");
+    }
+
+    let output_files = Vec::new();
+    let output_paths = HashSet::new();
+    let result = emit_planned_resource_outputs(
+        resource_output_plan,
+        &resource_inputs,
+        &output_files,
+        &output_paths,
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_err(),
+        "a missing module source should fail emission"
+    );
+    assert!(output_files.is_empty(), "a failed preflight emits no files");
+    assert!(
+        resource_inputs
+            .records()
+            .iter()
+            .all(|record| record.content() == ResourceContentState::Unhashed),
+        "a missing source must not allow an earlier record to be read"
+    );
+}
+
+#[test]
+fn successful_resource_emit_reads_and_writes_bytes() {
+    let directory = tempfile::tempdir().expect("should create resource directory");
+    let source_path = directory.path().join("logo.bin");
+    fs::write(&source_path, [7_u8, 8, 9]).expect("should write resource");
+
+    let origin = project_resource_origin("assets/logo.bin");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_id = resource_inputs
+        .register_source(fs::canonicalize(&source_path).expect("resource should canonicalize"));
+    attach_origin(&mut resource_inputs, origin.clone(), source_id)
+        .expect("resource origin should attach");
+
+    let mut string_table = StringTable::new();
+    let mut resource_output_plan = HtmlResourceOutputPlan::new("test");
+    resource_output_plan
+        .plan_origin(
+            origin,
+            SourceLocation::default(),
+            ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+            &mut string_table,
+            true,
+        )
+        .expect("resource should be planned");
+
+    let output_files = Vec::new();
+    let output_paths = HashSet::new();
+    let deferred_resources = emit_planned_resource_outputs(
+        resource_output_plan,
+        &resource_inputs,
+        &output_files,
+        &output_paths,
+        &mut string_table,
+    )
+    .expect("resource should remain deferred after HTML planning");
+
+    assert!(
+        output_files.is_empty(),
+        "HTML planning must not emit file bytes"
+    );
+    assert_eq!(
+        resource_inputs.records()[0].content(),
+        ResourceContentState::Unhashed,
+        "HTML planning must not read or hash resource bytes"
+    );
+    assert!(output_paths.is_empty());
+    assert_eq!(deferred_resources.len(), 1);
+
+    let output_root = directory.path().join("output");
+    let mut project = Project {
+        output_files,
+        entry_page_rel: Some(PathBuf::from("index.html")),
+        cleanup_policy: CleanupPolicy::html(),
+        warnings: Vec::new(),
+        deferred_resources,
+        resource_inputs,
+    };
+    let options = WriteOptions {
+        output_plan: OutputPlan::SingleFile(SingleFileOutputPlan {
+            output_root: output_root.clone(),
+            project_root: None,
+            owner: OutputOwner {
+                builder: BuilderKind::Html,
+                profile: BuildProfile::Dev,
+            },
+            setting_location: SourceLocation::default(),
+        }),
+        write_mode: WriteMode::AlwaysWrite,
+    };
+    write_project_outputs(&mut project, &options, &mut string_table)
+        .expect("central writer should materialise deferred resource bytes");
+
+    assert_eq!(
+        fs::read(output_root.join("assets/logo.bin")).expect("resource output should exist"),
+        [7_u8, 8, 9]
+    );
+    assert!(matches!(
+        project.resource_inputs.records()[0].content(),
+        ResourceContentState::Read { .. }
+    ));
+}
+
+#[test]
 fn at_prefixed_route_name_strips_at_from_output() {
     let builder = HtmlProjectBuilder::new();
     let entry_path = PathBuf::from("@404.moth");
@@ -237,6 +543,7 @@ fn emits_const_fragment_and_calls_start() {
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        location: SourceLocation::default(),
         value: OwnedFoldedString::Text(String::from("<meta charset=\"utf-8\">")),
     }];
 
@@ -593,20 +900,6 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
         }),
         required_runtime_imports: vec![],
     }];
-    api_only
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["missing-asset.png"],
-                public_path_components: &["assets", "missing-asset.png"],
-                filesystem_path: entry_root.join("missing-asset.png"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["api", "@api.moth"],
-                line_number: 1,
-            },
-        ));
 
     let project = builder
         .build_backend(
@@ -760,259 +1053,4 @@ fn builder_rejects_invalid_origin_config() {
             .resolve(*expected)
             .contains("starts with '/'")
     );
-}
-
-#[test]
-fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("assets")).expect("should create assets dir");
-    fs::create_dir_all(root.join("docs")).expect("should create docs dir");
-    fs::write(root.join("assets/logo.png"), [1_u8, 2, 3]).expect("should write asset");
-    let canonical_root = fs::canonicalize(&root).expect("root should resolve");
-
-    let builder = HtmlProjectBuilder::new();
-    let config = Config::new(root.clone());
-    let mut string_table = StringTable::new();
-
-    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
-    homepage
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["assets", "logo.png"],
-                public_path_components: &["assets", "logo.png"],
-                filesystem_path: canonical_root.join("assets/logo.png"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let mut docs_page =
-        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
-    docs_page
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["assets", "logo.png"],
-                public_path_components: &["assets", "logo.png"],
-                filesystem_path: canonical_root.join("assets/logo.png"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["docs", "@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let project = builder
-        .build_backend(
-            project_compilation(vec![homepage, docs_page]),
-            &config,
-            BuildProfile::Dev,
-            &[],
-            &mut string_table,
-        )
-        .expect("tracked-asset build should succeed");
-
-    let output_paths = collect_output_paths(&project.output_files);
-    assert!(output_paths.contains(&PathBuf::from("assets/logo.png")));
-    assert_eq!(
-        expect_bytes_output(&project.output_files, "assets/logo.png"),
-        [1_u8, 2, 3]
-    );
-    assert_eq!(
-        project
-            .output_files
-            .iter()
-            .filter(|file| matches!(file.file_kind(), FileKind::Bytes(_)))
-            .count(),
-        1,
-        "same source/same emitted path should dedupe"
-    );
-}
-
-#[test]
-fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("blog/post")).expect("should create blog dir");
-    fs::create_dir_all(root.join("shared")).expect("should create shared dir");
-    fs::write(root.join("shared/logo.png"), [4_u8, 5, 6]).expect("should write asset");
-    let canonical_root = fs::canonicalize(&root).expect("root should resolve");
-
-    let builder = HtmlProjectBuilder::new();
-    let config = Config::new(root.clone());
-    let mut string_table = StringTable::new();
-
-    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
-    homepage
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &[".", "logo.png"],
-                public_path_components: &[".", "logo.png"],
-                filesystem_path: canonical_root.join("shared/logo.png"),
-                base: CompileTimePathBase::RelativeToFile,
-                source_file_scope_components: &["@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let mut blog_page = create_test_module(
-        canonical_root.join("blog/post/@page.moth"),
-        &mut string_table,
-    );
-    blog_page
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["..", "shared", "logo.png"],
-                public_path_components: &["..", "shared", "logo.png"],
-                filesystem_path: canonical_root.join("shared/logo.png"),
-                base: CompileTimePathBase::RelativeToFile,
-                source_file_scope_components: &["blog", "post", "@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let project = builder
-        .build_backend(
-            project_compilation(vec![homepage, blog_page]),
-            &config,
-            BuildProfile::Dev,
-            &[],
-            &mut string_table,
-        )
-        .expect("tracked-asset build should succeed");
-
-    assert_eq!(
-        expect_bytes_output(&project.output_files, "logo.png"),
-        [4_u8, 5, 6]
-    );
-    assert_eq!(
-        expect_bytes_output(&project.output_files, "blog/shared/logo.png"),
-        [4_u8, 5, 6]
-    );
-}
-
-#[test]
-fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("assets")).expect("should create assets dir");
-    fs::create_dir_all(root.join("docs")).expect("should create docs dir");
-    fs::write(root.join("assets/logo-a.png"), [1_u8]).expect("should write first asset");
-    fs::write(root.join("assets/logo-b.png"), [2_u8]).expect("should write second asset");
-    let canonical_root = fs::canonicalize(&root).expect("root should resolve");
-
-    let builder = HtmlProjectBuilder::new();
-    let config = Config::new(root.clone());
-    let mut string_table = StringTable::new();
-
-    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
-    homepage
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["assets", "logo.png"],
-                public_path_components: &["assets", "logo.png"],
-                filesystem_path: canonical_root.join("assets/logo-a.png"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let mut docs_page =
-        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
-    docs_page
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["assets", "logo.png"],
-                public_path_components: &["assets", "logo.png"],
-                filesystem_path: canonical_root.join("assets/logo-b.png"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["docs", "@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let error = match builder.build_backend(
-        project_compilation(vec![homepage, docs_page]),
-        &config,
-        BuildProfile::Dev,
-        &[],
-        &mut string_table,
-    ) {
-        Err(messages) => messages,
-        Ok(_) => panic!("conflicting tracked assets should fail"),
-    };
-
-    let reason = first_invalid_config_reason(&error);
-    let InvalidConfigReason::TrackedAssetOutputConflict { output_path, .. } = reason else {
-        panic!("expected tracked-asset output conflict config reason");
-    };
-    assert_eq!(
-        portable_path_text(error.string_table.resolve(*output_path)),
-        "assets/logo.png"
-    );
-}
-
-#[test]
-fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("assets")).expect("should create assets dir");
-    fs::write(root.join("assets/copied.html"), b"asset").expect("should write asset");
-    let canonical_root = fs::canonicalize(&root).expect("root should resolve");
-
-    let builder = HtmlProjectBuilder::new();
-    let config = Config::new(root.clone());
-    let mut string_table = StringTable::new();
-
-    let mut homepage = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
-    homepage
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &["assets", "copied.html"],
-                public_path_components: &["index.html"],
-                filesystem_path: canonical_root.join("assets/copied.html"),
-                base: CompileTimePathBase::EntryRoot,
-                source_file_scope_components: &["@page.moth"],
-                line_number: 1,
-            },
-        ));
-
-    let error = match builder.build_backend(
-        project_compilation(vec![homepage]),
-        &config,
-        BuildProfile::Dev,
-        &[],
-        &mut string_table,
-    ) {
-        Err(messages) => messages,
-        Ok(_) => panic!("tracked asset should not overwrite generated HTML output"),
-    };
-
-    let reason = first_invalid_config_reason(&error);
-    let InvalidConfigReason::TrackedAssetBuilderOutputConflict { output_path, .. } = reason else {
-        panic!("expected tracked asset versus generated output config reason");
-    };
-    assert_eq!(error.string_table.resolve(*output_path), "index.html");
 }

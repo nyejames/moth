@@ -50,7 +50,12 @@ pub(crate) fn prepare_moth_template_file(
 
     // Content sources can reference other content sources, so the synthetic constant's template
     // body takes the same token-level content ordering facts as authored shells.
-    collect_content_source_ordering_hints(&mut headers, &structural_file_references, string_table);
+    collect_content_source_ordering_hints(
+        &mut headers,
+        &structural_file_references,
+        path_syntax.table(),
+        string_table,
+    )?;
 
     Ok(FileFrontendPrepareOutput {
         source_file: context.source_file,

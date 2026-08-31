@@ -4,6 +4,7 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BackendBuilder, FileKind, OutputFile, Project};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
     WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
@@ -155,7 +156,9 @@ fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
 ) -> Result<OutputWriteSummary, CompilerMessages> {
-    write_project_outputs_with_table(project, options, &StringTable::default())
+    let mut project = project.clone();
+    let mut string_table = StringTable::default();
+    write_project_outputs_with_table(&mut project, options, &mut string_table)
 }
 
 fn always_write_options(output_root: PathBuf, project_entry_dir: Option<PathBuf>) -> WriteOptions {
@@ -208,6 +211,8 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
         entry_page_rel,
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     }
 }
 
@@ -254,6 +259,8 @@ impl BackendBuilder for WarningBuilder {
                 string_table.get_or_intern("x".to_string()),
                 SourceLocation::default(),
             )],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         })
     }
 
@@ -307,6 +314,8 @@ impl BackendBuilder for EntryTrackingBuilder {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         })
     }
 
@@ -342,6 +351,8 @@ impl BackendBuilder for ValidationTrackingBuilder {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         })
     }
 
@@ -419,6 +430,8 @@ impl BackendBuilder for NoDirectiveBuilder {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::generic([".html"]),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         })
     }
 
@@ -492,6 +505,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
     }
 }
 
+mod build_assembly_tests;
 mod build_cleanup_tests;
 mod build_dependency_tests;
 mod build_directive_tests;

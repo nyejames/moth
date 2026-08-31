@@ -293,8 +293,10 @@ fn recollecting_content_hints_deduplicates_into_the_hint_set() {
     collect_content_source_ordering_hints(
         &mut output.headers,
         &output.structural_file_references,
+        output.path_syntax.table(),
         &mut strings,
-    );
+    )
+    .expect("re-collecting valid path rows should succeed");
     let after: Vec<usize> = output
         .headers
         .iter()

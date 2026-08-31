@@ -772,23 +772,6 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
 }
 
 #[test]
-fn parser_tir_records_rendered_path_head_as_tir_only() {
-    let mut string_table = StringTable::new();
-    let resource = test_resource_file("parser_tir_rendered_path_head.txt");
-    let (template, store) = parse_template(&format!("[@{resource}: body]"), &mut string_table);
-    let store = store.borrow();
-
-    let children = tir_root_child_ids(&template, &store);
-    assert_eq!(children.len(), 2);
-    let head_text = parser_tir_text(children[0], &store, &string_table);
-    assert!(!head_text.is_empty());
-    assert_eq!(
-        parser_tir_root_child_origins(&template, &store),
-        vec![TemplateSegmentOrigin::Head, TemplateSegmentOrigin::Body]
-    );
-}
-
-#[test]
 fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let mut string_table = StringTable::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
@@ -833,9 +816,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         vec![],
         0,
     )
-    .with_project_path_resolver(Some(test_project_path_resolver()))
-    .with_source_file_scope(token_stream.src_path.to_owned())
-    .with_path_format_config(PathStringFormatConfig::default());
+    .with_source_file_scope(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect("reactive head template should parse");

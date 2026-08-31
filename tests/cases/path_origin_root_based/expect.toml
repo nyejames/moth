@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["/mysite/assets/logo.png"]
+must_contain = ["./assets/logo.png"]

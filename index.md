@@ -170,7 +170,6 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
     - [@web/canvas binding package](src/projects/html_project/binding_packages/web/canvas/): built-in JS canvas asset (`canvas.js`) and `@web/canvas` registration. Used by the `@html` canvas helpers.
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs).
-- [tracked_assets.rs](src/projects/html_project/tracked_assets.rs): copied assets.
 - [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
 
 ## Tests/tooling

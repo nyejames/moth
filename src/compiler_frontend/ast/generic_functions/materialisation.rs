@@ -4,6 +4,8 @@
 //! generic body after a consumer emits a concrete request.
 //! WHY: generated sidecars must compile in an independent type environment without reopening
 //! source or borrowing the mutable requester or declaring-module environment.
+mod frozen_file_references;
+mod frozen_syntax;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
@@ -24,9 +26,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
-    FileValueResolutionServices, FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
-    ReceiverMethodCatalog, ReceiverMethodEntry, Stage0ResolutionFacts,
-    Stage0ResolvedFileReferenceOutcome,
+    FileValueResolutionServices, ReceiverMethodCatalog, ReceiverMethodEntry, Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
@@ -61,9 +61,8 @@ use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::folded_value::{
-    FoldedValueGenericParameterResolver, FoldedValueProjectionContext, OwnedFoldedString,
-    PublicConstTemplate, PublicFoldedValue, convert_const_value_to_folded_value,
-    convert_expression_to_folded_value,
+    FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicConstTemplate,
+    PublicFoldedValue, convert_const_value_to_folded_value, convert_expression_to_folded_value,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, ImportedFunctionContract, NamespaceRecord,
@@ -73,12 +72,9 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols,
 };
-use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+#[cfg(test)]
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
@@ -98,7 +94,8 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{
     StringId, StringIdRemap, StringTable, StringTableForkSource,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -113,6 +110,13 @@ use crate::compiler_frontend::traits::evidence::{
 };
 use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
+#[cfg(test)]
+use frozen_file_references::StableResolvedFileReferenceOutcome;
+#[cfg(test)]
+use frozen_syntax::FrozenStringPool;
+use frozen_syntax::{
+    MaterialisedBody, StableBodySyntax, StableSourceLocation, materialise_path, stable_path,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
@@ -142,381 +146,10 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
-}
-/// Every handle is issued by the compact path-syntax table in the same capture operation. Target
-/// payloads carry owned folded strings for content and owner-relative portable spelling for
-/// resources. No donor-local identity crosses publication.
-/// Owned content text needs no frozen-pool entry or remap pass.
-#[derive(Clone)]
-struct StableResolvedFileReference {
-    path_syntax: PathSyntaxId,
-    class: PreparedFileReferenceClass,
-    outcome: StableResolvedFileReferenceOutcome,
-}
-
-#[derive(Clone)]
-enum StableResolvedFileReferenceOutcome {
-    NoPhysicalTarget,
-    Content { value: OwnedFoldedString },
-    Resource { owner_relative_path: StringId },
-    IdentifiedSourceKind,
-}
-
-/// Owned frozen token buffer retained by one generic declaration artefact.
-///
-/// WHAT: preserves the already-tokenized body as canonical [`TokenKind`] values whose
-///       `StringId` payloads index one context-local immutable frozen string pool.
-/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `FileId`,
-/// filesystem paths, or a mutable string table. Freezing remaps donor IDs into the pool once;
-/// materialisation merges the pool into the fresh generated-local table once and remaps every
-/// token payload through that single pool remap, without running tokenization again and without
-/// a second exhaustive token-kind vocabulary.
-#[derive(Clone)]
-struct StableBodySyntax {
-    /// Declaration-qualified stream path, such as `file/generic_function`.
-    ///
-    /// This path names the token stream's semantic declaration context. The owning source-file
-    /// identity deliberately remains on `GenericTemplateArtefact`, because token and path-row
-    /// locations are file-scoped rather than declaration-scoped.
-    declaration_path: Box<[String]>,
-    pool: Box<[String]>,
-    tokens: Box<[Token]>,
-    /// Canonical table vocabulary retained only for the path rows referenced by this body.
-    /// Its StringIds index `pool` until materialisation remaps the whole table in place.
-    path_syntax: PathSyntaxTable,
-    resolved_file_references: Box<[StableResolvedFileReference]>,
-}
-
-fn pool_remap(id: StringId, remap: &[StringId]) -> Result<StringId, CompilerError> {
-    let index = id.index() as usize;
-    remap.get(index).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "frozen generic payload references out-of-range pool entry {index}"
-        ))
-    })
-}
-
-/// Incremental frozen string pool builder used while capturing one body syntax.
-///
-/// Repeated spellings, path components and literals share one pool entry.
-#[derive(Default)]
-struct FrozenStringPool {
-    entries: Vec<String>,
-    by_text: FxHashMap<String, u32>,
-}
-
-impl FrozenStringPool {
-    fn index(&mut self, text: &str) -> StringId {
-        if let Some(index) = self.by_text.get(text) {
-            return StringId::from_index(*index);
-        }
-
-        let index = self.entries.len() as u32;
-        let owned = text.to_owned();
-        self.entries.push(owned.clone());
-        self.by_text.insert(owned, index);
-        StringId::from_index(index)
-    }
-
-    fn finish(self) -> Box<[String]> {
-        self.entries.into_boxed_slice()
-    }
-}
-
-struct MaterialisedBody {
-    file_tokens: FileTokens,
-    resolution_facts: Arc<Stage0ResolutionFacts>,
-}
-
-impl MaterialisedBody {
-    fn into_generic_body(self) -> GenericFunctionBody {
-        GenericFunctionBody::materialised(self.file_tokens, self.resolution_facts)
-    }
-}
-
-impl std::fmt::Debug for MaterialisedBody {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("MaterialisedBody")
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct StableSourceLocation {
-    scope: Box<[String]>,
-    start: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-    end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-}
-
-fn capture_public_content_value(
-    value: PublicFoldedValue,
-) -> Result<OwnedFoldedString, CompilerError> {
-    let PublicFoldedValue::String(value) = value else {
-        return Err(CompilerError::compiler_error(
-            "synthetic content constant did not fold to a String value",
-        ));
-    };
-    Ok(value)
-}
-
-impl StableBodySyntax {
-    fn capture(
-        tokens: &FileTokens,
-        source_file: &InternedPath,
-        string_table: &StringTable,
-        stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
-        content_value_at_path: &impl Fn(&InternedPath) -> Result<PublicFoldedValue, CompilerError>,
-    ) -> Result<Self, CompilerError> {
-        if !tokens.src_path.starts_with(source_file) {
-            return Err(CompilerError::compiler_error(
-                "frozen generic body declaration path is outside its owning source file",
-            ));
-        }
-
-        let source_path_syntax = tokens.path_syntax_table()?;
-        source_path_syntax.validate_file_owned_locations(source_file)?;
-        source_path_syntax.validate_file_tokens(
-            &tokens.tokens,
-            source_file,
-            "generic body capture",
-        )?;
-
-        let mut pool = FrozenStringPool::default();
-        let mut frozen_tokens = tokens.tokens.clone();
-        let (mut path_syntax, path_syntax_map) =
-            source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
-        let mut path_syntax_map = path_syntax_map.into_iter().collect::<Vec<_>>();
-        path_syntax_map.sort_by_key(|(_, compact_id)| *compact_id);
-
-        let mut resolved_file_references = Vec::with_capacity(path_syntax_map.len());
-        for (source_path_id, compact_path_id) in path_syntax_map {
-            let facts = stage0_resolution_facts.ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "persistent generic body has path syntax but no Stage 0 resolution facts",
-                )
-            })?;
-            let resolved = facts
-                .lookup(tokens.file_id, source_path_id)?
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "persistent generic body path handle {:?} had no matching Stage 0 resolved-reference row",
-                        source_path_id
-                    ))
-                })?;
-            let outcome = match resolved.outcome {
-                Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {
-                    StableResolvedFileReferenceOutcome::NoPhysicalTarget
-                }
-                Stage0ResolvedFileReferenceOutcome::Content {
-                    logical_path,
-                    value,
-                } => {
-                    let value = match value {
-                        Some(value) => value.clone(),
-                        None => {
-                            let logical_path = logical_path.ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "ordinary content reference had no logical source path before capture",
-                                )
-                            })?;
-                            capture_public_content_value(content_value_at_path(logical_path)?)?
-                        }
-                    };
-                    StableResolvedFileReferenceOutcome::Content { value }
-                }
-                Stage0ResolvedFileReferenceOutcome::Resource {
-                    owner_relative_path,
-                } => StableResolvedFileReferenceOutcome::Resource {
-                    owner_relative_path: pool.index(owner_relative_path.as_str()),
-                },
-                Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind => {
-                    StableResolvedFileReferenceOutcome::IdentifiedSourceKind
-                }
-                Stage0ResolvedFileReferenceOutcome::Diagnostic(_) => {
-                    return Err(CompilerError::compiler_error(
-                        "persistent generic body retained a diagnosed file reference; generic body validation must report it before capture",
-                    ));
-                }
-            };
-            resolved_file_references.push(StableResolvedFileReference {
-                path_syntax: compact_path_id,
-                class: resolved.class,
-                outcome,
-            });
-        }
-
-        // The source stream owns the complete table. A persistent generic retains only the
-        // referenced canonical subset, then token and table payloads enter the same frozen pool.
-        for token in &mut frozen_tokens {
-            token.try_remap_string_ids(&mut |id| {
-                Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
-            })?;
-        }
-        path_syntax.try_remap_string_ids(&mut |id| {
-            Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
-        })?;
-
-        Ok(Self {
-            declaration_path: stable_path(&tokens.src_path, string_table),
-            pool: pool.finish(),
-            tokens: frozen_tokens.into_boxed_slice(),
-            path_syntax,
-            resolved_file_references: resolved_file_references.into_boxed_slice(),
-        })
-    }
-
-    fn materialise(
-        &self,
-        source_file: &InternedPath,
-        string_table: &mut StringTable,
-    ) -> Result<MaterialisedBody, CompilerError> {
-        let declaration_path = materialise_path(&self.declaration_path, string_table);
-        if !declaration_path.starts_with(source_file) {
-            return Err(CompilerError::compiler_error(
-                "frozen generic body declaration path is outside its materialised source file",
-            ));
-        }
-        let remap = self
-            .pool
-            .iter()
-            .map(|text| string_table.intern(text))
-            .collect::<Vec<_>>();
-        let mut tokens = Vec::with_capacity(self.tokens.len());
-        for token in self.tokens.iter() {
-            let mut materialised = token.clone();
-            materialised.try_remap_string_ids(&mut |id| {
-                let index = id.index() as usize;
-                remap.get(index).copied().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "frozen token payload references out-of-range pool entry {index}"
-                    ))
-                })
-            })?;
-            tokens.push(materialised);
-        }
-        let mut path_syntax = self.path_syntax.clone();
-        path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
-        path_syntax.validate_file_owned_locations(source_file)?;
-        path_syntax.validate_file_tokens(&tokens, source_file, "frozen generic body")?;
-
-        let resolved_file_references = self
-            .resolved_file_references
-            .iter()
-            .map(|reference| {
-                let outcome = match &reference.outcome {
-                    StableResolvedFileReferenceOutcome::NoPhysicalTarget => {
-                        FrozenResolvedFileReferenceOutcome::NoPhysicalTarget
-                    }
-                    StableResolvedFileReferenceOutcome::Content { value } => {
-                        FrozenResolvedFileReferenceOutcome::Content {
-                            value: value.clone(),
-                        }
-                    }
-                    StableResolvedFileReferenceOutcome::Resource {
-                        owner_relative_path,
-                    } => {
-                        let owner_relative_path = pool_remap(*owner_relative_path, &remap)?;
-                        FrozenResolvedFileReferenceOutcome::Resource {
-                            owner_relative_path: PortableResourcePath::from_portable_spelling(
-                                string_table.resolve(owner_relative_path).to_owned(),
-                            )?,
-                        }
-                    }
-                    StableResolvedFileReferenceOutcome::IdentifiedSourceKind => {
-                        FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind
-                    }
-                };
-                Ok::<FrozenResolvedFileReference, CompilerError>(FrozenResolvedFileReference {
-                    path_syntax: reference.path_syntax,
-                    class: reference.class,
-                    outcome,
-                })
-            })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
-        let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
-            resolved_file_references,
-        )?);
-
-        Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen_with_identity(
-                declaration_path,
-                None,
-                None,
-                tokens,
-                path_syntax,
-            ),
-            resolution_facts,
-        })
-    }
-}
-
-impl StableSourceLocation {
-    fn capture(location: &SourceLocation, string_table: &StringTable) -> Self {
-        Self {
-            scope: stable_path(&location.scope, string_table),
-            start: location.start_pos,
-            end: location.end_pos,
-        }
-    }
-
-    fn materialise(&self, string_table: &mut StringTable) -> SourceLocation {
-        SourceLocation::new(
-            materialise_path(&self.scope, string_table),
-            self.start,
-            self.end,
-        )
-    }
-
-    fn is_default(&self) -> bool {
-        self.scope.is_empty() && self.start == Default::default() && self.end == Default::default()
-    }
-
-    /// Select a stable diagnostic location while combining semantically equal blueprints.
-    ///
-    /// WHY: imported public projections have no authored range, so their default must not erase
-    /// source provenance; when both ranges exist, lexical ordering makes lane order irrelevant.
-    fn preferred_with(&self, other: &Self) -> Self {
-        match (self.is_default(), other.is_default()) {
-            (true, false) => other.clone(),
-            (false, true) => self.clone(),
-            _ => {
-                let ordering = self
-                    .scope
-                    .as_ref()
-                    .cmp(other.scope.as_ref())
-                    .then_with(|| self.start.line_number.cmp(&other.start.line_number))
-                    .then_with(|| self.start.char_column.cmp(&other.start.char_column))
-                    .then_with(|| self.end.line_number.cmp(&other.end.line_number))
-                    .then_with(|| self.end.char_column.cmp(&other.end.char_column));
-                if ordering == std::cmp::Ordering::Greater {
-                    other.clone()
-                } else {
-                    self.clone()
-                }
-            }
-        }
-    }
-}
-
-fn stable_path(path: &InternedPath, string_table: &StringTable) -> Box<[String]> {
-    path.as_components()
-        .iter()
-        .map(|component| string_table.resolve(*component).to_owned())
-        .collect()
-}
-
-fn materialise_path(path: &[String], string_table: &mut StringTable) -> InternedPath {
-    InternedPath::from_components(
-        path.iter()
-            .map(|component| string_table.intern(component))
-            .collect(),
-    )
 }
 
 /// Immutable requester-owned definition used to project one nominal into a generated-local
@@ -1292,19 +925,10 @@ impl GenericTemplateArtefact {
             external_package_registry,
             style_directives,
             build_profile,
-            project_path_resolver,
             template_const_loop_iteration_limit,
             #[cfg(feature = "timers")]
             timing_context,
         } = input;
-        let project_path_resolver = project_path_resolver.ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "Stable generated materialisation has no active project path resolver",
-                ),
-                &requester_context.string_table,
-            )
-        })?;
         let (mut string_table, requester_string_remap) =
             requester_context.fork_materialisation_string_table();
         let mut call_location = requester_call_location.clone();
@@ -1330,9 +954,7 @@ impl GenericTemplateArtefact {
             entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile,
-            project_path_resolver: Some(project_path_resolver),
             file_value_resolution: Some(file_value_resolution),
-            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]
@@ -3184,8 +2806,6 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
-    pub(crate) path_format_config: PathStringFormatConfig,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 }
@@ -5460,8 +5080,6 @@ impl ModuleMaterialisationPreparation {
             external_package_registry: Arc::clone(&lookups.external_package_registry),
             style_directives: lookups.style_directives.clone(),
             build_profile: lookups.build_profile,
-            project_path_resolver: lookups.project_path_resolver.clone(),
-            path_format_config: lookups.path_format_config.clone(),
             template_const_loop_iteration_limit,
             capacity_estimate,
         })
@@ -5526,7 +5144,6 @@ impl ModuleMaterialisationPreparation {
             imported_struct_definitions: self.imported_struct_definitions.clone(),
             imported_choice_definitions: self.imported_choice_definitions.clone(),
             resolved_module_constants: Rc::new(resolved_module_constants),
-            rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
             resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path.clone()),
             resolved_function_signatures_by_path: Rc::new(
@@ -5545,8 +5162,6 @@ impl ModuleMaterialisationPreparation {
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: self.style_directives.clone(),
             build_profile: self.build_profile,
-            project_path_resolver: self.project_path_resolver.clone(),
-            path_format_config: self.path_format_config.clone(),
         };
 
         Ok(AstModuleEnvironment {
@@ -5612,7 +5227,6 @@ impl ModuleMaterialisationPreparation {
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
-        project_path_resolver: Option<ProjectPathResolver>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let template = self
@@ -5707,9 +5321,7 @@ impl ModuleMaterialisationPreparation {
             entry_dir: self.entry_dir.clone(),
             root_role: ModuleRootRole::Support,
             build_profile: self.build_profile,
-            project_path_resolver: self.project_path_resolver.clone().or(project_path_resolver),
             file_value_resolution: Some(file_value_resolution),
-            path_format_config: self.path_format_config.clone(),
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             capacity_estimate: self.capacity_estimate,
             #[cfg(feature = "timers")]

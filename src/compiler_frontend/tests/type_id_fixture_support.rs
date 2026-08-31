@@ -686,7 +686,6 @@ pub(crate) fn build_ast_with_choices(
         doc_fragments: vec![],
         entry_path,
         const_top_level_fragments: vec![],
-        rendered_path_usages: vec![],
         warnings: vec![],
         choice_definitions: choice_definitions
             .into_iter()

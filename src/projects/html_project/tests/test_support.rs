@@ -28,9 +28,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
 use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ModuleRootActivity,
 };
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -107,7 +105,6 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
                 ..ModuleRootActivity::default()
             },
             doc_fragments: vec![],
-            rendered_path_usages: vec![],
             materialisation_context: None,
         },
     }
@@ -171,60 +168,6 @@ pub(crate) fn add_reachable_external_import(
         .expect("test HIR should refresh function link facts");
 }
 
-pub(crate) fn interned_path(string_table: &mut StringTable, components: &[&str]) -> InternedPath {
-    let mut path = InternedPath::new();
-    for component in components {
-        path.push_str(component, string_table);
-    }
-    path
-}
-
-/// Input parameters for constructing one rendered-path usage fixture.
-///
-/// WHAT: holds path semantics and source-location metadata for a single recorded usage.
-/// WHY: HTML builder tests create many usage fixtures, so one input struct keeps call sites clear.
-pub(crate) struct RenderedPathUsageInput<'a> {
-    pub source_path_components: &'a [&'a str],
-    pub public_path_components: &'a [&'a str],
-    pub filesystem_path: PathBuf,
-    pub base: CompileTimePathBase,
-    pub source_file_scope_components: &'a [&'a str],
-    pub line_number: i32,
-}
-
-pub(crate) fn rendered_path_usage(
-    string_table: &mut StringTable,
-    input: RenderedPathUsageInput<'_>,
-) -> RenderedPathUsage {
-    let RenderedPathUsageInput {
-        source_path_components,
-        public_path_components,
-        filesystem_path,
-        base,
-        source_file_scope_components,
-        line_number,
-    } = input;
-    let scope = interned_path(string_table, source_file_scope_components);
-    RenderedPathUsage {
-        source_path: interned_path(string_table, source_path_components),
-        filesystem_path,
-        public_path: interned_path(string_table, public_path_components),
-        base,
-        source_file_scope: scope.clone(),
-        render_location: SourceLocation::new(
-            scope,
-            crate::compiler_frontend::tokenizer::tokens::CharPosition {
-                line_number,
-                char_column: 1,
-            },
-            crate::compiler_frontend::tokenizer::tokens::CharPosition {
-                line_number,
-                char_column: 10,
-            },
-        ),
-    }
-}
-
 /// Collect output paths so tests can assert artifact layout without repeating iterator plumbing.
 pub(crate) fn collect_output_paths(output_files: &[OutputFile]) -> Vec<PathBuf> {
     output_files
@@ -262,23 +205,6 @@ pub(crate) fn expect_js_output<'a>(output_files: &'a [OutputFile], relative_path
             _ => None,
         })
         .expect("expected JS output artifact")
-}
-
-/// Extract an emitted binary artifact by relative path.
-pub(crate) fn expect_bytes_output<'a>(
-    output_files: &'a [OutputFile],
-    relative_path: &str,
-) -> &'a [u8] {
-    let expected_path = PathBuf::from(relative_path);
-    output_files
-        .iter()
-        .find_map(|file| match file.file_kind() {
-            FileKind::Bytes(bytes) if file.relative_output_path() == expected_path.as_path() => {
-                Some(bytes.as_slice())
-            }
-            _ => None,
-        })
-        .expect("expected binary output artifact")
 }
 
 /// Assert the full-document shell contract shared by all HTML builder outputs.

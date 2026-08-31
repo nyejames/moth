@@ -71,7 +71,6 @@ use crate::compiler_frontend::headers::module_symbols::{
     OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
     PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationSemantics,
@@ -90,7 +89,6 @@ use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -321,7 +319,6 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     /// which visible declarations are explicit compile-time constants. Sharing one set means
     /// none of those passes copies it per declaration.
     pub(crate) resolved_module_constants: Rc<ResolvedConstantSet>,
-    pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
 
     // Copy-on-write side tables shared with every environment-time `ScopeContext`.
@@ -384,7 +381,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::empty()),
             resolved_module_constants: Rc::new(ResolvedConstantSet::default()),
-            rendered_path_usages: Rc::new(RefCell::new(Vec::new())),
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: Rc::new(FxHashMap::default()),
             choice_variant_shells_by_path: Rc::new(FxHashMap::default()),
@@ -689,7 +685,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 imported_struct_definitions: self.imported_struct_definitions,
                 imported_choice_definitions: self.imported_choice_definitions,
                 resolved_module_constants: self.resolved_module_constants,
-                rendered_path_usages: self.rendered_path_usages,
                 builtin_struct_ast_nodes: self.builtin_struct_ast_nodes,
 
                 resolved_struct_fields_by_path: self.resolved_struct_fields_by_path,
@@ -711,8 +706,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 external_package_registry: Arc::clone(&self.context.external_package_registry),
                 style_directives: self.context.style_directives.clone(),
                 build_profile: self.context.build_profile,
-                project_path_resolver: self.context.project_path_resolver.clone(),
-                path_format_config: self.context.path_format_config.clone(),
             }),
             generated_evidence_pairs: Rc::new(FxHashSet::default()),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
@@ -819,10 +812,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
-        .with_project_path_resolver(self.context.project_path_resolver.clone())
-        .with_path_format_config(self.context.path_format_config.clone())
-        .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
-        .with_rendered_path_usage_sink(Rc::clone(&self.rendered_path_usages))
         .with_resolved_type_aliases(Rc::clone(&self.resolved_type_aliases_by_path))
         .with_generic_declarations(Rc::clone(&self.generic_declarations_by_path))
         .with_resolved_struct_fields_by_path(Rc::clone(&self.resolved_struct_fields_by_path))

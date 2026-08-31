@@ -155,7 +155,7 @@ pub(crate) fn compile_moth_template_source(
             })?;
 
     // 4. Fold the ordered declarations and take the synthetic `content` constant.
-    let mut ast = fold_template_ast(sorted, entry_scope, &request, &path_resolver, string_table)?;
+    let mut ast = fold_template_ast(sorted, entry_scope, &request, string_table)?;
     let warnings = std::mem::take(&mut ast.warnings);
 
     match extract_content_value(&ast, string_table) {
@@ -213,7 +213,6 @@ fn fold_template_ast(
     sorted: crate::compiler_frontend::module_dependencies::SortedHeaders,
     entry_scope: InternedPath,
     request: &MothTemplateCompilationRequest<'_>,
-    path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<Ast, CompilerMessages> {
     let options = FrontendOptions::default();
@@ -232,9 +231,7 @@ fn fold_template_ast(
             string_table,
             entry_dir: entry_scope,
             build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: Some(path_resolver.clone()),
             file_value_resolution: None,
-            path_format_config: options.path_format_config,
             template_const_loop_iteration_limit: options.template_const_loop_iteration_limit,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

@@ -7,8 +7,8 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "docs/guide/index.html"
 kind = "html"
-must_contain = ["../../shared/logo.png"]
+must_contain = ["./shared/logo.png"]
 
 [[backends.html.artifact_assertions]]
-path = "shared/logo.png"
+path = "docs/guide/shared/logo.png"
 kind = "binary"

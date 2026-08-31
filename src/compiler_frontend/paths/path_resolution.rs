@@ -1,28 +1,23 @@
-//! Project-aware compile-time path and single-file dependency resolution.
+//! Project-aware dependency resolution.
 //!
-//! `ProjectPathResolver` keeps the public resolution surface for Stage 0, headers, AST folding,
-//! and builder-facing path tracking. The data contracts, module-root scanning, and path
-//! normalization helpers live in sibling modules so this file can focus on orchestration and
-//! diagnostic boundaries.
+//! `ProjectPathResolver` owns Stage 0 source/dependency path rules and canonical source lookup.
+//! Structural file values are resolved from Stage 0 facts rather than through an eager rendered
+//! path lane.
+//!
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCompileTimePathReason, InvalidImportPathReason,
-};
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathResolutionError,
-    validate_path_literal_target,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+
 use crate::compiler_frontend::paths::dependency_resolution::{
     DependencyPathResolutionError, validate_dependency_boundary,
     validate_dependency_case_sensitivity,
 };
-use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_normalization::{
-    DependencyCandidate, DependencyCandidateSupport, build_public_path,
-    candidate_dependency_files_for_source_kinds, canonicalize_best_effort,
+    DependencyCandidate, DependencyCandidateSupport, candidate_dependency_files_for_source_kinds,
     dependency_contains_dotdot, is_relative_dependency_path, join_and_normalize_path,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -272,10 +267,9 @@ impl ProjectPathResolver {
         })
     }
 
-    /// WHAT: resolves one dependency path to both a typed compile-time path and a canonical file path.
-    /// WHY: dependencies use the same resolution model as general path literals, but additionally
-    ///      apply `.moth` extension fallback logic. Returns both representations so callers
-    ///      can choose what they need.
+    /// WHAT: resolves one dependency path to its semantic base and canonical file path.
+    /// WHY: dependency resolution applies `.moth` extension fallback and boundary validation,
+    ///      while structural file values consume the resulting Stage 0 facts separately.
     ///
     /// NOTE: `string_table` is used for diagnostic path interning and case-mismatch strings.
     pub(crate) fn resolve_dependency_as_compile_time_path(
@@ -283,7 +277,7 @@ impl ProjectPathResolver {
         dependency_path: &InternedPath,
         declaring_file: &Path,
         string_table: &mut StringTable,
-    ) -> Result<(CompileTimePath, PathBuf), DependencyPathResolutionError> {
+    ) -> Result<(CompileTimePathBase, PathBuf), DependencyPathResolutionError> {
         if let Some(extension) = explicit_source_extension(dependency_path, string_table) {
             let location = SourceLocation::from_path(declaring_file, string_table);
             let diagnostic = if extension == SourceFileKind::Moth.extension() {
@@ -396,14 +390,7 @@ impl ProjectPathResolver {
             string_table,
         )?;
 
-        let public_path = build_public_path(dependency_path, &base_kind, string_table);
-        let ct_path = CompileTimePath {
-            source_path: dependency_path.clone(),
-            filesystem_path: canonical.clone(),
-            public_path,
-            base: base_kind,
-        };
-        Ok((ct_path, canonical))
+        Ok((base_kind, canonical))
     }
 
     /// WHAT: returns whether the dependency path starts with a registered source-backed package prefix.
@@ -416,39 +403,6 @@ impl ProjectPathResolver {
         let first_component = dependency_path.as_components().first()?;
         let segment = string_table.resolve(*first_component);
         self.source_package_roots.roots().get(segment).cloned()
-    }
-
-    // -----------------------------------------------------------------------
-    // Compile-time path literal resolution (non-dependency general paths)
-    // -----------------------------------------------------------------------
-
-    /// WHAT: resolves a general path literal to a typed compile-time path value.
-    /// WHY: all Moth path literals must use the same resolution rules as
-    ///       dependencies, but additionally require an existing regular file, reject
-    ///       escapes outside the project root, and carry public-path metadata.
-    pub(crate) fn resolve_compile_time_path(
-        &self,
-        path: &InternedPath,
-        declaring_file: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<CompileTimePath, CompileTimePathResolutionError> {
-        let (base_kind, filesystem_base) =
-            self.resolve_path_base(path, declaring_file, string_table)?;
-
-        let filesystem_path = join_and_normalize_path(&filesystem_base, path, string_table);
-
-        self.validate_inside_project_root(&filesystem_path, path, declaring_file, string_table)?;
-
-        validate_path_literal_target(&filesystem_path, path, declaring_file, string_table)?;
-
-        let public_path = build_public_path(path, &base_kind, string_table);
-
-        Ok(CompileTimePath {
-            source_path: path.clone(),
-            filesystem_path,
-            public_path,
-            base: base_kind,
-        })
     }
 
     // -----------------------------------------------------------------------
@@ -484,50 +438,6 @@ impl ProjectPathResolver {
     fn source_kind_for_canonical_path(&self, path: &Path) -> Option<SourceFileKind> {
         let extension = path.extension().and_then(|extension| extension.to_str())?;
         SourceFileKind::from_extension(extension)
-    }
-
-    /// WHAT: rejects paths that would escape the project root after normalization.
-    /// WHY: paths outside the project root are a semantic error in Moth.
-    ///
-    /// NOTE: `string_table` is only used on error paths to intern diagnostic file paths.
-    fn validate_inside_project_root(
-        &self,
-        resolved: &Path,
-        source_path: &InternedPath,
-        declaring_file: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompileTimePathResolutionError> {
-        // Canonicalize the project root once (it must exist).
-        let canonical_root = fs::canonicalize(&self.project_root).map_err(|error| {
-            CompilerError::file_error(
-                &self.project_root,
-                format!(
-                    "Failed to canonicalize project root '{}': {error}",
-                    self.project_root.display()
-                ),
-                string_table,
-            )
-        })?;
-
-        // The resolved path may not exist yet (that check comes next), so we
-        // walk up to the nearest existing ancestor and canonicalize from there,
-        // then re-append the remaining tail.
-        let canonical_resolved = canonicalize_best_effort(resolved);
-
-        if !canonical_resolved.starts_with(&canonical_root) {
-            let location = SourceLocation::from_path(declaring_file, string_table);
-            let diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-                source_path.clone(),
-                InvalidCompileTimePathReason::EscapesProjectRoot,
-                location,
-            );
-
-            return Err(CompileTimePathResolutionError::Diagnostic(Box::new(
-                diagnostic,
-            )));
-        }
-
-        Ok(())
     }
 }
 

@@ -1,10 +1,16 @@
 entry = "."
 
 [backends.html]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0061"]
 
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0061"
-reason = "invalid_page_metadata.not_yet_renderable"
+# A reserved page-metadata constant may carry a resource piece. Once URL contexts
+# are assigned, that string renders instead of being refused as not-yet-renderable.
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["rel=\"icon\" href=\"./static/favicon.png\""]
+
+[[backends.html.artifact_assertions]]
+path = "static/favicon.png"
+kind = "binary"

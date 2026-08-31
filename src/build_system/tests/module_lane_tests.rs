@@ -234,7 +234,6 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity::default(),
             doc_fragments: vec![],
-            rendered_path_usages: vec![],
             materialisation_context: None,
         },
     };
@@ -341,7 +340,6 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
                 ..ModuleRootActivity::default()
             },
             doc_fragments: vec![],
-            rendered_path_usages: vec![],
             materialisation_context: None,
         },
     };
@@ -1388,7 +1386,6 @@ fn lane_module_with_generated_and_cross_module_calls(
                 ModuleRootActivity::default()
             },
             doc_fragments: vec![],
-            rendered_path_usages: vec![],
             materialisation_context: None,
         },
     }
@@ -1696,7 +1693,6 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
                 ModuleRootActivity::default()
             },
             doc_fragments: vec![],
-            rendered_path_usages: vec![],
             materialisation_context: None,
         },
     }

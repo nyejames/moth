@@ -463,9 +463,7 @@ impl CompilerFrontend {
                 entry_dir: interned_entry_file,
                 root_role,
                 build_profile,
-                project_path_resolver: self.project_path_resolver.clone(),
                 file_value_resolution,
-                path_format_config: self.options.path_format_config.clone(),
                 template_const_loop_iteration_limit: self
                     .options
                     .template_const_loop_iteration_limit,

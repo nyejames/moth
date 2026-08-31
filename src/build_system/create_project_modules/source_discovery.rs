@@ -903,6 +903,11 @@ fn traverse_reachable_source_files(
         // Structural file references are already classified by preparation. Resolve every
         // occurrence through the same physical resolver used by directory modules, then queue
         // supported content targets so discovery reaches the complete content closure.
+        let prepared_path_syntax = &local_source_cache
+            .get(&canonical_file)
+            .expect("fresh or cached Moth source must remain in the complete source cache")
+            .prepared_output
+            .path_syntax;
         let structural_file_references = local_source_cache
             .get(&canonical_file)
             .expect("fresh or cached Moth source must remain in the complete source cache")
@@ -912,7 +917,12 @@ fn traverse_reachable_source_files(
             .to_vec();
         for reference in structural_file_references {
             let resolved = file_reference_resolver
-                .resolve(&canonical_file, &reference, string_table)
+                .resolve(
+                    &canonical_file,
+                    prepared_path_syntax.table(),
+                    &reference,
+                    string_table,
+                )
                 .map_err(SourceDiscoveryError::from)?;
             if let SingleFileReferenceOutcome::Source { canonical } = &resolved.outcome
                 && resolved.class == PreparedFileReferenceClass::ContentSource

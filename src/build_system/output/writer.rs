@@ -111,14 +111,36 @@ pub(crate) struct PreparedOutputWrite {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum PreparedDestinationKind {
+    OutputFile(usize),
+    DeferredResource(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedDestination {
-    output_file_index: usize,
+    kind: PreparedDestinationKind,
     relative_path: PathBuf,
     canonical_relative_path: PathBuf,
     destination: PathBuf,
     is_directory: bool,
 }
 
+struct DestinationPreparation<'a> {
+    output_root: &'a Path,
+    canonical_output_root: &'a Path,
+    destinations: &'a mut Vec<PreparedDestination>,
+    managed_artifact_paths: &'a mut HashSet<PathBuf>,
+    explicit_directory_paths: &'a mut HashSet<PathBuf>,
+    identities: &'a mut HashMap<OutputPathIdentity, PathBuf>,
+    string_table: &'a StringTable,
+}
+
+struct DestinationRequest<'a> {
+    authored_path: &'a Path,
+    is_directory: bool,
+    is_managed: bool,
+    kind: PreparedDestinationKind,
+}
 /// Prepare all final destinations before the writer creates a root or emits one artifact.
 pub(crate) fn prepare_output_write(
     project: &Project,
@@ -138,140 +160,49 @@ pub(crate) fn prepare_output_write(
     let mut managed_artifact_paths = HashSet::new();
     let mut explicit_directory_paths = HashSet::new();
     let mut identities: HashMap<OutputPathIdentity, PathBuf> = HashMap::new();
+    let mut preparation = DestinationPreparation {
+        output_root,
+        canonical_output_root: &canonical_output_root,
+        destinations: &mut destinations,
+        managed_artifact_paths: &mut managed_artifact_paths,
+        explicit_directory_paths: &mut explicit_directory_paths,
+        identities: &mut identities,
+        string_table,
+    };
 
     for (output_file_index, output_file) in project.output_files.iter().enumerate() {
         if matches!(output_file.file_kind(), FileKind::NotBuilt) {
             continue;
         }
 
-        let relative_path =
-            validate_relative_output_path(output_file.relative_output_path(), string_table)?;
-
-        let identity = output_path_identity(&relative_path).map_err(|_| {
-            file_error_with_rejection_reason(
-                &relative_path,
-                "Output path must use normal portable path components.",
-                OutputRejectionReason::NonPortablePathComponents,
-                string_table,
-            )
-        })?;
-        if path_starts_with_component_identity(&relative_path, Path::new(BUILD_MANIFEST_FILENAME)) {
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                format!(
-                    "Output destination '{}' uses a path reserved for the internal build manifest.",
-                    relative_path.display()
-                ),
-                OutputRejectionReason::ReservedManifestDestination,
-                string_table,
-            ));
-        }
-        if let Some(existing_path) = identities.get(&identity) {
-            let message = if existing_path == &relative_path {
-                format!(
-                    "Duplicate output destination '{}'. Each output path must be unique.",
-                    relative_path.display()
-                )
-            } else {
-                format!(
-                    "Output destinations '{}' and '{}' differ only by ASCII case or path spelling and cannot coexist safely.",
-                    existing_path.display(),
-                    relative_path.display()
-                )
-            };
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                message,
-                OutputRejectionReason::DuplicateDestination,
-                string_table,
-            ));
-        }
-        identities.insert(identity.clone(), relative_path.clone());
-
-        let destination = output_root.join(&relative_path);
-        let canonical_destination = canonicalize_output_path(&destination).map_err(|_| {
-            file_error_with_rejection_reason(
-                &relative_path,
-                "Output destination contains a dangling symlink component and cannot be prepared safely.",
-                OutputRejectionReason::DanglingSymlinkInDestination,
-                string_table,
-            )
-        })?;
-        if !canonical_destination.starts_with(&canonical_output_root) {
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                format!(
-                    "Output destination '{}' resolves outside the validated output root '{}'.",
-                    relative_path.display(),
-                    output_root.display()
-                ),
-                OutputRejectionReason::EscapesOutputRoot,
-                string_table,
-            ));
-        }
-        if canonical_destination == canonical_output_root {
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                format!(
-                    "Output destination '{}' resolves to the output root itself.",
-                    relative_path.display()
-                ),
-                OutputRejectionReason::DestinationIsOutputRoot,
-                string_table,
-            ));
-        }
-        let canonical_relative_path = canonical_destination
-            .strip_prefix(&canonical_output_root)
-            .expect("preflight already validated output-root containment")
-            .to_path_buf();
-        if !is_lossless_portable_relative_path(&canonical_relative_path) {
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                format!(
-                    "Output destination '{}' resolves to a filesystem path that cannot be represented safely in the build manifest.",
-                    relative_path.display()
-                ),
-                OutputRejectionReason::NonLosslessCanonicalPath,
-                string_table,
-            ));
-        }
-        if path_starts_with_component_identity(
-            &canonical_relative_path,
-            Path::new(BUILD_MANIFEST_FILENAME),
-        ) {
-            return Err(file_error_with_rejection_reason(
-                &relative_path,
-                format!(
-                    "Output destination '{}' resolves to a path reserved for the internal build manifest.",
-                    relative_path.display()
-                ),
-                OutputRejectionReason::ReservedManifestDestinationCanonical,
-                string_table,
-            ));
-        }
-
+        let relative_path = output_file.relative_output_path();
         let is_directory = matches!(output_file.file_kind(), FileKind::Directory);
-        validate_existing_destination(
-            &canonical_destination,
-            &relative_path,
-            is_directory,
-            string_table,
+        let is_managed = !is_directory
+            && (project.cleanup_policy.manages_path(relative_path)
+                || matches!(output_file.file_kind(), FileKind::Bytes(_)));
+        prepare_one_destination(
+            &mut preparation,
+            DestinationRequest {
+                authored_path: relative_path,
+                is_directory,
+                is_managed,
+                kind: PreparedDestinationKind::OutputFile(output_file_index),
+            },
         )?;
-        if is_directory {
-            explicit_directory_paths.insert(canonical_relative_path.clone());
-        } else if project.cleanup_policy.manages_path(&relative_path)
-            || matches!(output_file.file_kind(), FileKind::Bytes(_))
-        {
-            managed_artifact_paths.insert(canonical_relative_path.clone());
-        }
+    }
 
-        destinations.push(PreparedDestination {
-            output_file_index,
-            relative_path,
-            canonical_relative_path,
-            destination: canonical_destination,
-            is_directory,
-        });
+    for (deferred_resource_index, deferred_resource) in
+        project.deferred_resources.iter().enumerate()
+    {
+        prepare_one_destination(
+            &mut preparation,
+            DestinationRequest {
+                authored_path: &deferred_resource.relative_output_path,
+                is_directory: false,
+                is_managed: true,
+                kind: PreparedDestinationKind::DeferredResource(deferred_resource_index),
+            },
+        )?;
     }
 
     reject_canonical_destination_conflicts(&destinations, string_table)?;
@@ -284,6 +215,148 @@ pub(crate) fn prepare_output_write(
         explicit_directory_paths,
         manifest_destination,
     })
+}
+
+fn prepare_one_destination(
+    preparation: &mut DestinationPreparation<'_>,
+    request: DestinationRequest<'_>,
+) -> Result<(), CompilerMessages> {
+    let DestinationRequest {
+        authored_path,
+        is_directory,
+        is_managed,
+        kind,
+    } = request;
+    let relative_path = validate_relative_output_path(authored_path, preparation.string_table)?;
+    let identity = output_path_identity(&relative_path).map_err(|_| {
+        file_error_with_rejection_reason(
+            &relative_path,
+            "Output path must use normal portable path components.",
+            OutputRejectionReason::NonPortablePathComponents,
+            preparation.string_table,
+        )
+    })?;
+    if path_starts_with_component_identity(&relative_path, Path::new(BUILD_MANIFEST_FILENAME)) {
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            format!(
+                "Output destination '{}' uses a path reserved for the internal build manifest.",
+                relative_path.display()
+            ),
+            OutputRejectionReason::ReservedManifestDestination,
+            preparation.string_table,
+        ));
+    }
+    if let Some(existing_path) = preparation.identities.get(&identity) {
+        let message = if existing_path == &relative_path {
+            format!(
+                "Duplicate output destination '{}'. Each output path must be unique.",
+                relative_path.display()
+            )
+        } else {
+            format!(
+                "Output destinations '{}' and '{}' differ only by ASCII case or path spelling and cannot coexist safely.",
+                existing_path.display(),
+                relative_path.display()
+            )
+        };
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            message,
+            OutputRejectionReason::DuplicateDestination,
+            preparation.string_table,
+        ));
+    }
+    preparation
+        .identities
+        .insert(identity, relative_path.clone());
+
+    let destination = preparation.output_root.join(&relative_path);
+    let canonical_destination = canonicalize_output_path(&destination).map_err(|_| {
+        file_error_with_rejection_reason(
+            &relative_path,
+            "Output destination contains a dangling symlink component and cannot be prepared safely.",
+            OutputRejectionReason::DanglingSymlinkInDestination,
+            preparation.string_table,
+        )
+    })?;
+    if !canonical_destination.starts_with(preparation.canonical_output_root) {
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            format!(
+                "Output destination '{}' resolves outside the validated output root '{}'.",
+                relative_path.display(),
+                preparation.output_root.display()
+            ),
+            OutputRejectionReason::EscapesOutputRoot,
+            preparation.string_table,
+        ));
+    }
+    if canonical_destination == preparation.canonical_output_root {
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            format!(
+                "Output destination '{}' resolves to the output root itself.",
+                relative_path.display()
+            ),
+            OutputRejectionReason::DestinationIsOutputRoot,
+            preparation.string_table,
+        ));
+    }
+    let canonical_relative_path = canonical_destination
+        .strip_prefix(preparation.canonical_output_root)
+        .expect("preflight already validated output-root containment")
+        .to_path_buf();
+    if !is_lossless_portable_relative_path(&canonical_relative_path) {
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            format!(
+                "Output destination '{}' resolves to a filesystem path that cannot be represented safely in the build manifest.",
+                relative_path.display()
+            ),
+            OutputRejectionReason::NonLosslessCanonicalPath,
+            preparation.string_table,
+        ));
+    }
+    if path_starts_with_component_identity(
+        &canonical_relative_path,
+        Path::new(BUILD_MANIFEST_FILENAME),
+    ) {
+        return Err(file_error_with_rejection_reason(
+            &relative_path,
+            format!(
+                "Output destination '{}' resolves to a path reserved for the internal build manifest.",
+                relative_path.display()
+            ),
+            OutputRejectionReason::ReservedManifestDestinationCanonical,
+            preparation.string_table,
+        ));
+    }
+
+    validate_existing_destination(
+        &canonical_destination,
+        &relative_path,
+        is_directory,
+        preparation.string_table,
+    )?;
+    if is_directory {
+        preparation
+            .explicit_directory_paths
+            .insert(canonical_relative_path.clone());
+    } else if is_managed {
+        preparation
+            .managed_artifact_paths
+            .insert(canonical_relative_path.clone());
+    }
+
+    preparation.destinations.push(PreparedDestination {
+        kind,
+        relative_path,
+        canonical_relative_path,
+        destination: canonical_destination,
+        is_directory,
+    });
+    Ok(())
 }
 
 fn prepare_manifest_destination(
@@ -577,40 +650,51 @@ impl OutputWriteSummary {
 
 /// Emit only the destinations prepared by [`prepare_output_write`].
 pub(crate) fn emit_prepared_output_files(
-    project: &Project,
+    project: &mut Project,
     prepared_write: &PreparedOutputWrite,
     write_mode: WriteMode,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> Result<OutputWriteSummary, CompilerMessages> {
     let mut destinations = Vec::with_capacity(prepared_write.destinations.len());
 
     for prepared_destination in &prepared_write.destinations {
-        let output_file = &project.output_files[prepared_destination.output_file_index];
         let destination = &prepared_destination.destination;
-
-        let outcome = match output_file.file_kind() {
-            // `prepare_output_write` drops `NotBuilt` artifacts, so no prepared destination
-            // carries one.
-            FileKind::NotBuilt => continue,
-            FileKind::Directory => {
-                fs::create_dir_all(destination).map_err(|error| {
-                    file_error_with_rejection_reason(
-                        destination,
-                        format!(
-                            "Failed to create output directory '{}': {error}",
-                            destination.display()
-                        ),
-                        OutputRejectionReason::DirectoryCreationFailed,
-                        string_table,
-                    )
-                })?;
-                OutputWriteOutcome::DirectoryCreated
-            }
-            FileKind::Js(content) | FileKind::Html(content) => {
-                write_string_output(destination, content, write_mode, string_table)?
-            }
-            FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
+        let outcome = match &prepared_destination.kind {
+            PreparedDestinationKind::DeferredResource(deferred_resource_index) => {
+                let source_id = project.deferred_resources[*deferred_resource_index].source_id;
+                let bytes = project
+                    .resource_inputs
+                    .read_source(source_id, string_table)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 write_bytes_output(destination, bytes, write_mode, string_table)?
+            }
+            PreparedDestinationKind::OutputFile(output_file_index) => {
+                let output_file = &project.output_files[*output_file_index];
+                match output_file.file_kind() {
+                    // `prepare_output_write` drops `NotBuilt` artifacts, so no prepared destination
+                    // carries one.
+                    FileKind::NotBuilt => continue,
+                    FileKind::Directory => {
+                        fs::create_dir_all(destination).map_err(|error| {
+                            file_error_with_rejection_reason(
+                                destination,
+                                format!(
+                                    "Failed to create output directory '{}': {error}",
+                                    destination.display()
+                                ),
+                                OutputRejectionReason::DirectoryCreationFailed,
+                                string_table,
+                            )
+                        })?;
+                        OutputWriteOutcome::DirectoryCreated
+                    }
+                    FileKind::Js(content) | FileKind::Html(content) => {
+                        write_string_output(destination, content, write_mode, string_table)?
+                    }
+                    FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
+                        write_bytes_output(destination, bytes, write_mode, string_table)?
+                    }
+                }
             }
         };
 

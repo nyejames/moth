@@ -95,10 +95,9 @@ pub struct HirBuilder<'a> {
     // === Result being built ===
     pub(super) module: HirModule,
 
-    // === Non-HIR metadata extracted during lowering ===
-    // WHAT: resolved documentation fragments and rendered-path usages pulled from the AST. These
-    //       are compiler metadata, not executable HIR state, and are returned through the typed
-    //       `HirLoweringMetadata` result boundary.
+    // WHAT: resolved documentation fragments pulled from the AST. These are compiler metadata,
+    //       not executable HIR state, and are returned through the typed `HirLoweringMetadata`
+    //       result boundary.
     pub(super) extracted_metadata: HirLoweringMetadata,
 
     // === AST warnings kept for error context only ===
@@ -370,7 +369,6 @@ impl<'a> HirBuilder<'a> {
         // Keep the AST warnings privately for error-context rendering only. They are not exposed
         // on the successful lowering result; frontend orchestration owns the merged warning vector.
         self.ast_warnings = ast.warnings.to_owned();
-        self.extracted_metadata.rendered_path_usages = ast.rendered_path_usages.to_owned();
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
         self.imported_fallible_carriers_by_origin = self

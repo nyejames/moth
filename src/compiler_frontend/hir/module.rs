@@ -8,10 +8,9 @@
 //! compiled-module boundary. HIR nodes store compact frontend `TypeId`s and do not own a separate
 //! semantic type table.
 //!
-//! Non-HIR compiler metadata — warnings, resolved documentation fragments, and rendered-path
-//! usages — is extracted by HIR lowering into `HirLoweringMetadata` and assembled into
-//! `ModuleCompilerMetadata` on the build-system module payload. `HirModule` carries only
-//! executable/semantic HIR state.
+//! Non-HIR compiler metadata — warnings and resolved documentation fragments — is extracted by
+//! HIR lowering into `HirLoweringMetadata` and assembled into `ModuleCompilerMetadata` on the
+//! build-system module payload. `HirModule` carries only executable/semantic HIR state.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;

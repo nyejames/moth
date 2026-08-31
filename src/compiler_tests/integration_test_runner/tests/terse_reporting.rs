@@ -14,6 +14,7 @@ use super::super::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
@@ -86,6 +87,8 @@ fn minimal_build_result() -> BuildResult {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
@@ -186,6 +189,8 @@ fn build_result_with_warning(
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],

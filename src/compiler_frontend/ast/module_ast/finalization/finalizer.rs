@@ -414,8 +414,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
             .with_type_context_for_all_diagnostics(type_environment.clone())
         })?;
-        let rendered_path_usages =
-            std::mem::take(&mut *owned_lookups.rendered_path_usages.borrow_mut());
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
             trait_roots: resolved_public_trait_roots,
@@ -435,7 +433,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 entry_path: self.context.entry_dir.to_owned(),
                 root_role: self.context.root_role,
                 const_top_level_fragments,
-                rendered_path_usages,
                 warnings: emitted.warnings,
                 choice_definitions,
                 imported_struct_definitions: owned_lookups.imported_struct_definitions,

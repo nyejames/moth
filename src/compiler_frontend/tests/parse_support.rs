@@ -7,9 +7,14 @@
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::FrontendBuildProfile;
-use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput, AstBuildResult};
+use crate::compiler_frontend::ast::{
+    Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
+    Stage0ResolutionFacts,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidCompileTimePathReason,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
@@ -18,19 +23,27 @@ use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_IT
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, PreparedFileReferenceTable, ResolvedFileReference,
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
     let cwd = std::env::temp_dir();
+
     ProjectPathResolver::new(
         cwd.clone(),
         cwd,
@@ -38,6 +51,62 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
         &crate::builder_surface::SourceFileKindRegistry::default(),
     )
     .expect("test path resolver should be valid")
+}
+
+/// Build deterministic Stage 0 facts for parser tests without reading the filesystem.
+///
+/// The single-file parser fixture has no project inventory, so file-value paths are represented
+/// as missing-target diagnostics while site roots and source-kind-only paths keep their structural
+/// outcomes. This exercises the same AST handoff as a prepared module.
+fn test_file_value_resolution_services(
+    source_file: FileId,
+    references: &PreparedFileReferenceTable,
+    path_syntax: &PathSyntaxTable,
+) -> Rc<FileValueResolutionServices> {
+    let mut resolved_references = ResolvedFileReferenceTable::new();
+
+    for reference in references.iter() {
+        let outcome = match reference.class {
+            PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
+                ResolvedFileReferenceOutcome::NoPhysicalTarget
+            }
+            PreparedFileReferenceClass::SourceKindNoFileValue => {
+                ResolvedFileReferenceOutcome::Target(
+                    ResolvedFileReferenceTarget::IdentifiedSourceKind,
+                )
+            }
+            PreparedFileReferenceClass::ContentSource
+            | PreparedFileReferenceClass::ResourceFile => ResolvedFileReferenceOutcome::Diagnostic(
+                Box::new(CompilerDiagnostic::invalid_compile_time_path(
+                    path_syntax
+                        .try_path(reference.path_syntax)
+                        .expect("prepared reference should point into its path table")
+                        .root
+                        .clone(),
+                    InvalidCompileTimePathReason::MissingTarget,
+                    reference.location.clone(),
+                )),
+            ),
+        };
+
+        resolved_references
+            .push(ResolvedFileReference {
+                source_file,
+                path_syntax: reference.path_syntax,
+                class: reference.class,
+                outcome,
+            })
+            .expect("parser fixture should contain unique path handles");
+    }
+
+    Rc::new(FileValueResolutionServices {
+        stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
+            resolved_references,
+            SourceFileTable::empty(),
+        ))),
+        module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+        module_origin: None,
+    })
 }
 
 pub(crate) fn parse_single_file_ast_build_result(
@@ -75,6 +144,14 @@ pub(crate) fn parse_single_file_ast_build_result(
                     error,
                 ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
             })?;
+    let source_file_id = output
+        .file_id
+        .expect("single-file parser fixture should assign a source FileId");
+    let file_value_resolution = test_file_value_resolution_services(
+        source_file_id,
+        &output.structural_file_references,
+        output.path_syntax.table(),
+    );
 
     let prepared_syntax =
         prepare_header_syntax(vec![output], &mut string_table).map_err(|bag| {
@@ -141,9 +218,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             string_table: &mut string_table,
             entry_dir: entry_path,
             build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: Some(test_project_path_resolver()),
-            file_value_resolution: None,
-            path_format_config: PathStringFormatConfig::default(),
+            file_value_resolution: Some(file_value_resolution),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

@@ -240,15 +240,6 @@ pub enum DiagnosticPayload {
 
     UnreachableMatchArm,
 
-    MothFilePathInTemplateOutput {
-        path: StringId,
-    },
-
-    LargeTrackedAsset {
-        path: StringId,
-        byte_size: u64,
-    },
-
     IdentifierNamingConvention {
         name: StringId,
         expected_style: NamingConvention,

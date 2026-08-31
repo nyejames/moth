@@ -7,22 +7,29 @@
 
 use super::super::{ArtifactAssertion, ArtifactKind};
 use crate::build_system::build::{BuildResult, FileKind, OutputFile};
-use crate::build_system::output::output_path_identity;
+use crate::build_system::output::{OutputPathIdentity, output_path_identity};
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::path::Path;
 
 /// One normalized, unique view of the artifacts a build actually produced.
 ///
-/// WHAT: maps every built artifact's portable relative path to its `OutputFile`, rejecting
-///       invalid output destinations, duplicate paths and portability aliases.
-/// WHY: first-match lookup silently inspects one of several artifacts claiming the same path,
-///      so every later assertion would read the winner and ignore the rest. Building the index
-///      once, before any success assertion runs, makes path identity a proved precondition
-///      rather than an assumption each assertion family repeats.
+/// WHAT: maps every built artifact's portable relative path to its output record or deferred
+///       resource destination, rejecting invalid output destinations, duplicate paths and
+///       portability aliases.
 pub(super) struct BuiltArtifactIndex<'a> {
-    by_path: BTreeMap<String, &'a OutputFile>,
+    by_path: BTreeMap<String, IndexedArtifact<'a>>,
+}
+
+/// One produced destination in the in-memory output set.
+///
+/// Deferred resources are planned destinations whose bytes are materialised by the central
+/// writer after output preflight. They still occupy a unique output path.
+enum IndexedArtifact<'a> {
+    File(&'a OutputFile),
+    DeferredResource,
 }
 
 /// Why a build result could not produce a usable artifact index.
@@ -81,7 +88,7 @@ impl<'a> BuiltArtifactIndex<'a> {
     /// writer would reject or fold case differently than production does. `portable_path_text`
     /// is used only for lookup keys, sorted display and failure reporting.
     pub(super) fn build(build_result: &'a BuildResult) -> Result<Self, ArtifactIndexError> {
-        let mut by_path: BTreeMap<String, &'a OutputFile> = BTreeMap::new();
+        let mut by_path: BTreeMap<String, IndexedArtifact<'a>> = BTreeMap::new();
         // `Page.js` and `page.js` are distinct spellings but one canonical identity, so
         // collisions are decided on the identity and reported with the spellings.
         let mut spelling_by_identity = HashMap::new();
@@ -90,48 +97,35 @@ impl<'a> BuiltArtifactIndex<'a> {
             if matches!(output.file_kind(), FileKind::NotBuilt) {
                 continue;
             }
+            insert_indexed_path(
+                output.relative_output_path(),
+                IndexedArtifact::File(output),
+                &mut by_path,
+                &mut spelling_by_identity,
+            )?;
+        }
 
-            let relative_path = output.relative_output_path();
-            let identity = match output_path_identity(relative_path) {
-                Ok(identity) => identity,
-                Err(InvalidOutputFolderReason::NonUtf8) => {
-                    return Err(ArtifactIndexError::NonUtf8Path {
-                        path: format!("{relative_path:?}"),
-                    });
-                }
-                Err(reason) => {
-                    return Err(ArtifactIndexError::InvalidOutputPath {
-                        path: portable_path_text(relative_path),
-                        reason,
-                    });
-                }
-            };
-
-            let spelling = portable_path_text(relative_path);
-            if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
-                return Err(if existing == spelling {
-                    ArtifactIndexError::DuplicatePath { path: spelling }
-                } else {
-                    ArtifactIndexError::PortabilityAlias {
-                        first: existing,
-                        second: spelling,
-                    }
-                });
-            }
-
-            // Two spellings sharing one identity were rejected above, so this insert never
-            // displaces an entry.
-            by_path.insert(spelling, output);
+        for deferred in &build_result.project.deferred_resources {
+            insert_indexed_path(
+                &deferred.relative_output_path,
+                IndexedArtifact::DeferredResource,
+                &mut by_path,
+                &mut spelling_by_identity,
+            )?;
         }
 
         Ok(Self { by_path })
     }
 
-    /// Look up exactly one built artifact by its authored relative path.
     pub(super) fn get(&self, relative_path: &str) -> Option<&'a OutputFile> {
-        self.by_path
-            .get(&portable_path_text(relative_path))
-            .copied()
+        match self.by_path.get(&portable_path_text(relative_path))? {
+            IndexedArtifact::File(output) => Some(*output),
+            IndexedArtifact::DeferredResource => None,
+        }
+    }
+
+    fn lookup(&self, relative_path: &str) -> Option<&IndexedArtifact<'a>> {
+        self.by_path.get(&portable_path_text(relative_path))
     }
 
     /// Every built artifact path, in portable sorted order.
@@ -168,7 +162,7 @@ pub(super) fn validate_artifact_assertions(
     assertions: &[ArtifactAssertion],
 ) -> Option<String> {
     for assertion in assertions {
-        let Some(output) = index.get(&assertion.path) else {
+        let Some(artifact) = index.lookup(&assertion.path) else {
             return Some(format!(
                 "Artifact assertion expected output '{}', but produced paths were {:?}.",
                 assertion.path,
@@ -176,8 +170,21 @@ pub(super) fn validate_artifact_assertions(
             ));
         };
 
-        if let Some(reason) = validate_single_artifact_assertion(output, assertion) {
-            return Some(reason);
+        match artifact {
+            IndexedArtifact::File(output) => {
+                if let Some(reason) = validate_single_artifact_assertion(output, assertion) {
+                    return Some(reason);
+                }
+            }
+            IndexedArtifact::DeferredResource => {
+                if assertion.kind != ArtifactKind::Binary {
+                    return Some(format!(
+                        "Artifact '{}' expected kind '{}', but produced a deferred resource.",
+                        assertion.path,
+                        artifact_kind_name(assertion.kind)
+                    ));
+                }
+            }
         }
     }
 
@@ -607,4 +614,41 @@ fn count_occurrences(text: &str, needle: &str) -> usize {
     }
 
     count
+}
+
+fn insert_indexed_path<'a>(
+    relative_path: &Path,
+    artifact: IndexedArtifact<'a>,
+    by_path: &mut BTreeMap<String, IndexedArtifact<'a>>,
+    spelling_by_identity: &mut HashMap<OutputPathIdentity, String>,
+) -> Result<(), ArtifactIndexError> {
+    let identity = match output_path_identity(relative_path) {
+        Ok(identity) => identity,
+        Err(InvalidOutputFolderReason::NonUtf8) => {
+            return Err(ArtifactIndexError::NonUtf8Path {
+                path: format!("{relative_path:?}"),
+            });
+        }
+        Err(reason) => {
+            return Err(ArtifactIndexError::InvalidOutputPath {
+                path: portable_path_text(relative_path),
+                reason,
+            });
+        }
+    };
+
+    let spelling = portable_path_text(relative_path);
+    if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
+        return Err(if existing == spelling {
+            ArtifactIndexError::DuplicatePath { path: spelling }
+        } else {
+            ArtifactIndexError::PortabilityAlias {
+                first: existing,
+                second: spelling,
+            }
+        });
+    }
+
+    by_path.insert(spelling, artifact);
+    Ok(())
 }

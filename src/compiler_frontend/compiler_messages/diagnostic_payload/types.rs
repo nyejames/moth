@@ -171,14 +171,15 @@ pub enum InvalidConfigReason {
         entry_point: StringId,
         existing_entry_point: StringId,
     },
-    TrackedAssetOutputConflict {
-        asset_path: StringId,
+    ResourceOutputPathCollision {
         output_path: StringId,
-        existing_owner: StringId,
+        existing_origin: StringId,
+        conflicting_origin: StringId,
     },
-    TrackedAssetBuilderOutputConflict {
-        asset_path: StringId,
+    ResourceOutputPathReserved {
         output_path: StringId,
+        origin: StringId,
+        artefact_kind: StringId,
     },
     ConfiguredEntryRootMissing {
         entry_root: StringId,
@@ -276,22 +277,24 @@ impl InvalidConfigReason {
                 *existing_entry_point = remap.get(*existing_entry_point);
             }
 
-            Self::TrackedAssetOutputConflict {
-                asset_path,
+            Self::ResourceOutputPathCollision {
                 output_path,
-                existing_owner,
+                existing_origin,
+                conflicting_origin,
             } => {
-                *asset_path = remap.get(*asset_path);
                 *output_path = remap.get(*output_path);
-                *existing_owner = remap.get(*existing_owner);
+                *existing_origin = remap.get(*existing_origin);
+                *conflicting_origin = remap.get(*conflicting_origin);
             }
 
-            Self::TrackedAssetBuilderOutputConflict {
-                asset_path,
+            Self::ResourceOutputPathReserved {
                 output_path,
+                origin,
+                artefact_kind,
             } => {
-                *asset_path = remap.get(*asset_path);
                 *output_path = remap.get(*output_path);
+                *origin = remap.get(*origin);
+                *artefact_kind = remap.get(*artefact_kind);
             }
 
             Self::ConfiguredEntryRootMissing { entry_root }
@@ -1584,13 +1587,6 @@ impl DeferredFeatureReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidPageMetadataReason {
     NotAString,
-
-    /// Sanctioned page-metadata refusal for the Phase 3 path-values changeset: extraction runs
-    /// before the build assigns URL contexts, so a structural string's resource or site-root
-    /// pieces have no final text to publish. The value is a legitimate string, so this must
-    /// never be reported as `NotAString`. Phase 4 carries piece-bearing forms through page
-    /// metadata (docs/roadmap/plans/path-values-and-resource-linking-plan.md).
-    NotYetRenderable,
     DuplicateDeclaration,
 }
 

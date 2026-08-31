@@ -3438,8 +3438,8 @@ role = "primary"
 [[case]]
 id = "html_builder_structural_page_metadata"
 path = "html_builder_structural_page_metadata"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.builder_structural_page_metadata_rejected"
+tags = ["integration", "html"]
+contract = "backend.html.builder_structural_page_metadata"
 role = "primary"
 
 [[case]]

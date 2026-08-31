@@ -15,6 +15,19 @@ pub(super) fn glue_module_output_path(module: &Module) -> PathBuf {
     PathBuf::from("_moth/js/glue").join(format!("module-{entry_hash}.js"))
 }
 
+/// Deterministic output paths for every required core runtime module.
+///
+/// This path-only preflight is intentionally separate from runtime source generation so builders
+/// can reject resource collisions before any provider-backed asset is read.
+pub(crate) fn planned_runtime_module_output_paths(
+    specifiers: &std::collections::BTreeSet<String>,
+) -> Vec<PathBuf> {
+    specifiers
+        .iter()
+        .map(|specifier| runtime_module_output_path(specifier))
+        .collect()
+}
+
 /// Deterministic output path for a core runtime module.
 pub(super) fn runtime_module_output_path(specifier: &str) -> PathBuf {
     let safe_name = runtime_module_safe_name(specifier);

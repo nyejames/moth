@@ -7,7 +7,7 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["/moth/assets/logo.png"]
+must_contain = ["./assets/logo.png"]
 
 [[backends.html.artifact_assertions]]
 path = "assets/logo.png"

@@ -36,7 +36,6 @@ pub(crate) enum PreparedFileReferenceClass {
 pub(crate) struct PreparedFileReference {
     pub(crate) source_file: Option<FileId>,
     pub(crate) path_syntax: PathSyntaxId,
-    pub(crate) authored_path: InternedPath,
     pub(crate) location: SourceLocation,
     pub(crate) class: PreparedFileReferenceClass,
 }
@@ -58,7 +57,6 @@ impl PreparedFileReferenceTable {
 
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for reference in &mut self.references {
-            reference.authored_path.remap_string_ids(remap);
             reference.location.remap_string_ids(remap);
         }
     }
@@ -97,7 +95,6 @@ pub(crate) fn classify_prepared_file_references(
         references.push(PreparedFileReference {
             source_file,
             path_syntax: path_id,
-            authored_path: row.root.clone(),
             location: row.location.clone(),
             class: classify_authored_path(&row.root, string_table),
         });

@@ -5,6 +5,7 @@
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::value_use::JsValueUse;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -13,7 +14,6 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
-
 #[derive(Clone, Copy)]
 enum OptionComparisonSide {
     Option { inner_type: TypeId },
@@ -78,9 +78,7 @@ impl<'hir> JsEmitter<'hir> {
             HirExpressionKind::Bool(value) => Ok(value.to_string()),
             HirExpressionKind::Char(value) => Ok(escape_js_char(*value)),
             HirExpressionKind::StringLiteral(value) => Ok(escape_js_string(value)),
-            HirExpressionKind::StructuralString { .. } => Err(CompilerError::compiler_error(
-                "Structural string reached JavaScript expression lowering before output-boundary rendering",
-            )),
+            HirExpressionKind::StructuralString { pieces } => self.lower_structural_string(pieces),
 
             HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {
                 self.lower_expression_for_use(expression, JsValueUse::PlainExpression)
@@ -178,6 +176,42 @@ impl<'hir> JsEmitter<'hir> {
                 field_index,
             } => self.lower_variant_payload_get(carrier, source, *variant_index, *field_index),
         }
+    }
+
+    fn lower_structural_string(
+        &self,
+        pieces: &[ConstStringPiece],
+    ) -> Result<String, CompilerError> {
+        let Some(url_map) = self.config.structural_string_urls.as_ref() else {
+            return Err(CompilerError::compiler_error(
+                "JavaScript lowering received a structural string without a builder URL map",
+            ));
+        };
+
+        let mut rendered = String::new();
+        for piece in pieces {
+            match piece {
+                ConstStringPiece::Text(text) => rendered.push_str(self.string_table.resolve(*text)),
+                ConstStringPiece::Resource(resource_id) => {
+                    let Some(url) = url_map.resource_urls.get(resource_id) else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "JavaScript lowering has no rendered URL for structural resource {resource_id:?}"
+                        )));
+                    };
+                    rendered.push_str(url);
+                }
+                ConstStringPiece::SiteRoot => {
+                    let Some(url) = url_map.site_root_url.as_deref() else {
+                        return Err(CompilerError::compiler_error(
+                            "JavaScript lowering has no rendered URL for a structural site root",
+                        ));
+                    };
+                    rendered.push_str(url);
+                }
+            }
+        }
+
+        Ok(escape_js_string(&rendered))
     }
 
     // ------------------

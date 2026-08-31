@@ -8,6 +8,7 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BackendBuilder, BuildResult, FileKind, OutputFile, Project, ProjectBuilder,
 };
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, ValidatedOutputPlan,
     WriteMode, WriteOptions, write_project_outputs,
@@ -56,6 +57,8 @@ fn html_build_result() -> BuildResult {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
@@ -92,6 +95,8 @@ fn multi_page_html_build_result() -> BuildResult {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("project")),
         warnings: vec![],
@@ -111,6 +116,8 @@ fn html_build_result_without_entry_page() -> BuildResult {
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
@@ -136,6 +143,8 @@ fn html_build_result_with_warning() -> BuildResult {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
@@ -156,6 +165,8 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_root.to_path_buf()),
         warnings: vec![],
@@ -216,7 +227,7 @@ impl DevBuildExecutor for FakeExecutor {
             .remove(0);
 
         match response {
-            Ok(build_result) => {
+            Ok(mut build_result) => {
                 let project_root = entry_file
                     .parent()
                     .map(Path::to_path_buf)
@@ -232,12 +243,12 @@ impl DevBuildExecutor for FakeExecutor {
                     })
                 };
                 write_project_outputs(
-                    &build_result.project,
+                    &mut build_result.project,
                     &WriteOptions {
                         output_plan,
                         write_mode: WriteMode::AlwaysWrite,
                     },
-                    &build_result.string_table,
+                    &mut build_result.string_table,
                 )?;
                 Ok(build_result)
             }
@@ -268,6 +279,8 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
                 string_table.get_or_intern("x".to_string()),
                 SourceLocation::from_path(&config.entry_dir, string_table),
             )],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         })
     }
 

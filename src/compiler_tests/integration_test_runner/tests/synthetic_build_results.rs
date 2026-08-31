@@ -12,11 +12,11 @@ use super::super::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
-
 /// The smallest document that satisfies the ordered HTML shell contract.
 pub(super) const VALID_HTML: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n  </head>\n  <body style=\"\">\n  </body>\n</html>\n";
 
@@ -45,6 +45,8 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
             warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),

@@ -25,6 +25,10 @@ use crate::build_system::output::{
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
+use crate::build_system::resource_unions::{
+    ResourceOriginUnion, append_entry_module_resources, append_exported_interface_resources,
+    append_reachable_resource_uses,
+};
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -34,8 +38,13 @@ use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
+use crate::compiler_frontend::paths::file_references::ResourceSourceId;
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
+};
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginDeclarationId,
+    OriginFunctionId, StableModuleOriginIdentity,
 };
 
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
@@ -75,6 +84,10 @@ pub struct ProjectCompilation {
     /// Retained source-package boundaries, each with its own dense identity space.
     source_packages: CompletedSourcePackageRegistry,
     entries: Vec<EntryAssembly>,
+    /// Optional project package-facade assembly selected from the public package surface.
+    #[allow(dead_code)]
+    // retained for future package-target backends; assembly still owns liveness
+    package_assembly: Option<PackageAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
         Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
@@ -104,7 +117,6 @@ pub struct ProjectCompilation {
     /// identity-keyed without risking JS identifier collisions between boundaries.
     all_generated_function_names: Arc<Vec<String>>,
     /// Build-only physical resource inputs discovered by Stage 0.
-    #[allow(dead_code)] // retained for the later build-owned resource emission phase
     pub(crate) resource_inputs: ResourceInputRegistry,
 }
 
@@ -411,6 +423,15 @@ impl ProjectCompilation {
                 })
                 .collect::<Vec<_>>();
             linked_modules.sort_by_key(|linked| linked.module_ref);
+            let mut resource_union = ResourceOriginUnion::new();
+            append_entry_module_resources(&mut resource_union, module, &reachability)?;
+            for linked in &linked_modules {
+                append_reachable_resource_uses(
+                    &mut resource_union,
+                    module_at(linked.module_ref),
+                    &linked.reachability,
+                )?;
+            }
 
             let mut external_imports = Vec::new();
             for (reachable_module, module_reachability) in std::iter::once((module, &reachability))
@@ -442,15 +463,26 @@ impl ProjectCompilation {
             entries.push(EntryAssembly {
                 module_ref: root_module_ref,
                 reachability,
+                resource_union,
                 external_imports,
                 linked_modules,
             });
         }
 
+        let package_assembly = assemble_project_package(
+            &project,
+            &source_packages,
+            &function_owner_by_origin,
+            &function_owner_by_private_identity,
+            &project_generated_owners,
+            &package_generated_owners,
+        )?;
+
         Ok(Self {
             project,
             source_packages,
             entries,
+            package_assembly,
             source_function_names,
             module_private_function_names,
             generated_function_names,
@@ -493,6 +525,7 @@ impl ProjectCompilation {
         for entry in &self.entries {
             let module = self.module_at(entry.module_ref);
             entries.push(ProjectEntry {
+                resource_union: &entry.resource_union,
                 module,
                 reachability: &entry.reachability,
                 external_imports: &entry.external_imports,
@@ -514,6 +547,19 @@ impl ProjectCompilation {
         }
 
         entries
+    }
+
+    /// Move the build-only resource registry into the output-emission owner.
+    ///
+    /// Entry views borrow the compilation's graph, so emission takes the registry only after
+    /// callers finish consuming those views.
+    pub(crate) fn take_resource_inputs(&mut self) -> ResourceInputRegistry {
+        std::mem::take(&mut self.resource_inputs)
+    }
+
+    #[allow(dead_code)] // package-target consumers are not threaded into HTML rendering in this slice
+    pub(crate) fn package_assembly(&self) -> Option<&PackageAssembly> {
+        self.package_assembly.as_ref()
     }
 
     /// The generated symbol lookup map for one module's owning boundary.
@@ -605,6 +651,45 @@ fn boundary_module_at<'a>(
     }
 }
 
+/// Resolve a published interface for a base module reference.
+///
+/// Generated sidecars intentionally have no public-interface lane; package selection starts from
+/// base export bindings and only reaches sidecars through their paired module/link facts.
+fn boundary_interface_at<'a>(
+    project: &'a CompiledGraphBoundary,
+    source_packages: &'a CompletedSourcePackageRegistry,
+    module_ref: CompiledModuleRef,
+) -> Result<&'a PublicSemanticInterface, CompilerError> {
+    match module_ref {
+        CompiledModuleRef::Project(module_id) => {
+            project.modules.interface(module_id)?.ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Project module ref {} has no published interface",
+                    module_id.index()
+                ))
+            })
+        }
+        CompiledModuleRef::SourcePackage {
+            package_id,
+            module_id,
+        } => source_packages
+            .package(package_id)?
+            .boundary
+            .modules
+            .interface(module_id)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Source-package module ref {} has no published interface",
+                    module_id.index()
+                ))
+            }),
+        CompiledModuleRef::GeneratedProject(_)
+        | CompiledModuleRef::GeneratedSourcePackage { .. } => Err(CompilerError::compiler_error(
+            format!("Generated module ref {module_ref:?} has no published public interface"),
+        )),
+    }
+}
+
 /// Resolve one generated identity only inside the boundary that made the call.
 ///
 /// WHAT: generated sidecars are owned by their consuming boundary, so a module can address only
@@ -638,6 +723,7 @@ fn generated_owner_for<'a>(
 pub(crate) struct EntryAssembly {
     module_ref: CompiledModuleRef,
     reachability: HirReachability,
+    resource_union: ResourceOriginUnion,
     external_imports: Vec<ModuleExternalImport>,
     linked_modules: Vec<LinkedModuleAssembly>,
 }
@@ -645,6 +731,325 @@ pub(crate) struct EntryAssembly {
 pub(crate) struct LinkedModuleAssembly {
     module_ref: CompiledModuleRef,
     reachability: HirReachability,
+}
+
+/// Assemble the optional project package facade from its externally visible export surface.
+///
+/// The facade has no implicit start. Exported concrete functions and receiver methods seed
+/// reachability in their owning base modules; exported constants/defaults select descendant
+/// interfaces without making their dormant roots executable. Every generated module reached by
+/// those link facts remains paired with the sidecar module that owns its resource table.
+fn assemble_project_package(
+    project: &CompiledGraphBoundary,
+    source_packages: &CompletedSourcePackageRegistry,
+    function_owner_by_origin: &FxHashMap<OriginFunctionId, (CompiledModuleRef, FunctionId)>,
+    function_owner_by_private_identity: &FxHashMap<
+        ModulePrivateExecutableIdentity,
+        (CompiledModuleRef, FunctionId),
+    >,
+    project_generated_owners: &FxHashMap<
+        GeneratedFunctionIdentity,
+        (CompiledModuleRef, FunctionId),
+    >,
+    package_generated_owners: &FxHashMap<
+        PackageBoundaryId,
+        FxHashMap<GeneratedFunctionIdentity, (CompiledModuleRef, FunctionId)>,
+    >,
+) -> Result<Option<PackageAssembly>, CompilerError> {
+    let Some(facade_module_id) = project.structure.facade() else {
+        return Ok(None);
+    };
+    let facade_module_ref = CompiledModuleRef::Project(facade_module_id);
+    let facade_interface = boundary_interface_at(project, source_packages, facade_module_ref)?;
+
+    let mut module_owner_by_origin =
+        FxHashMap::<StableModuleOriginIdentity, CompiledModuleRef>::default();
+    for node in project.structure.nodes() {
+        if module_owner_by_origin
+            .insert(
+                node.stable_origin().clone(),
+                CompiledModuleRef::Project(node.module_id()),
+            )
+            .is_some()
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Project package assembly found duplicate project module origin {:?}",
+                node.stable_origin()
+            )));
+        }
+    }
+    for (package_index, package) in source_packages.iter().enumerate() {
+        let package_id = PackageBoundaryId::from_index(package_index);
+        for node in package.boundary.structure.nodes() {
+            if module_owner_by_origin
+                .insert(
+                    node.stable_origin().clone(),
+                    CompiledModuleRef::SourcePackage {
+                        package_id,
+                        module_id: node.module_id(),
+                    },
+                )
+                .is_some()
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Project package assembly found duplicate module origin {:?}",
+                    node.stable_origin()
+                )));
+            }
+        }
+    }
+
+    let mut selected_base_modules = FxHashSet::default();
+    selected_base_modules.insert(facade_module_ref);
+    let mut roots_by_module = FxHashMap::<CompiledModuleRef, FxHashSet<FunctionId>>::default();
+
+    for binding in &facade_interface.export_bindings {
+        let module_ref = module_owner_by_origin
+            .get(binding.origin().module_origin())
+            .copied()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Project package export {:?} has no owning compiled module",
+                    binding.origin()
+                ))
+            })?;
+        selected_base_modules.insert(module_ref);
+
+        let declaration = facade_interface.declaration(binding.origin());
+        match binding.origin() {
+            OriginDeclarationId::Function(origin) => {
+                let generic = matches!(
+                    declaration.map(|declaration| &declaration.semantics),
+                    Some(PublicDeclarationSemantics::Function(function))
+                        if matches!(
+                            &function.category,
+                            PublicFunctionCategory::GenericTemplate(_)
+                        )
+                );
+                if !generic {
+                    add_package_function_root(
+                        &mut roots_by_module,
+                        function_owner_by_origin,
+                        origin,
+                    )?;
+                }
+            }
+            OriginDeclarationId::Type(_) => {
+                add_package_receiver_method_roots(
+                    &mut roots_by_module,
+                    function_owner_by_origin,
+                    declaration,
+                )?;
+            }
+            OriginDeclarationId::Constant(_) | OriginDeclarationId::Trait(_) => {}
+        }
+    }
+
+    // Signature-reachable nominal declarations are part of the closed facade surface even when
+    // the facade does not export the type name itself. Their receiver methods are executable roots
+    // of the package contract; only the facade's closed declaration set is consulted here, never
+    // unselected descendant-interface exports.
+    for declaration in &facade_interface.declarations {
+        if matches!(&declaration.origin, OriginDeclarationId::Type(_)) {
+            add_package_receiver_method_roots(
+                &mut roots_by_module,
+                function_owner_by_origin,
+                Some(declaration),
+            )?;
+        }
+    }
+
+    let mut pending_modules = roots_by_module.keys().copied().collect::<Vec<_>>();
+    pending_modules.sort();
+    let mut pending_modules = VecDeque::from(pending_modules);
+    let mut reachability_by_module = FxHashMap::default();
+
+    while let Some(reachable_module_ref) = pending_modules.pop_front() {
+        let mut roots = roots_by_module[&reachable_module_ref]
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|function_id| function_id.0);
+        let reachable_module = boundary_module_at(project, source_packages, reachable_module_ref)?;
+        let reachability = collect_reachability_from_function_link_facts(
+            &reachable_module.link_facts.functions,
+            &roots,
+        )?;
+
+        for origin in &reachability.reachable_cross_module_functions {
+            let Some((provider_module_ref, provider_function_id)) =
+                function_owner_by_origin.get(origin).copied()
+            else {
+                return Err(CompilerError::compiler_error(format!(
+                    "Project package assembly could not resolve cross-module function origin {origin:?}"
+                )));
+            };
+            if roots_by_module
+                .entry(provider_module_ref)
+                .or_default()
+                .insert(provider_function_id)
+            {
+                pending_modules.push_back(provider_module_ref);
+            }
+        }
+
+        for identity in &reachability.reachable_module_private_functions {
+            let Some((provider_module_ref, provider_function_id)) =
+                function_owner_by_private_identity.get(identity).copied()
+            else {
+                return Err(CompilerError::compiler_error(format!(
+                    "Project package assembly could not resolve module-private function identity {identity:?}"
+                )));
+            };
+            if roots_by_module
+                .entry(provider_module_ref)
+                .or_default()
+                .insert(provider_function_id)
+            {
+                pending_modules.push_back(provider_module_ref);
+            }
+        }
+
+        for identity in &reachability.reachable_generated_functions {
+            let Some((generated_module_ref, generated_function_id)) = generated_owner_for(
+                project_generated_owners,
+                package_generated_owners,
+                reachable_module_ref,
+                identity,
+            )
+            .copied() else {
+                return Err(CompilerError::compiler_error(format!(
+                    "Project package assembly could not resolve generated function identity {identity:?} in its calling boundary"
+                )));
+            };
+            if roots_by_module
+                .entry(generated_module_ref)
+                .or_default()
+                .insert(generated_function_id)
+            {
+                pending_modules.push_back(generated_module_ref);
+            }
+        }
+
+        reachability_by_module.insert(reachable_module_ref, reachability);
+    }
+
+    let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
+    let facade_reachability = reachability_by_module
+        .remove(&facade_module_ref)
+        .unwrap_or_default();
+    let mut linked_modules = reachability_by_module
+        .into_iter()
+        .map(|(module_ref, reachability)| LinkedModuleAssembly {
+            module_ref,
+            reachability,
+        })
+        .collect::<Vec<_>>();
+    linked_modules.sort_by_key(|linked| linked.module_ref);
+
+    selected_base_modules.remove(&facade_module_ref);
+    let mut selected_modules = selected_base_modules.into_iter().collect::<Vec<_>>();
+    selected_modules.sort();
+
+    let mut resource_union = ResourceOriginUnion::new();
+    append_exported_interface_resources(&mut resource_union, facade_interface)?;
+    append_reachable_resource_uses(&mut resource_union, facade_module, &facade_reachability)?;
+    for linked in &linked_modules {
+        append_reachable_resource_uses(
+            &mut resource_union,
+            boundary_module_at(project, source_packages, linked.module_ref)?,
+            &linked.reachability,
+        )?;
+    }
+
+    Ok(Some(PackageAssembly {
+        facade_module_ref,
+        facade_reachability,
+        selected_modules,
+        linked_modules,
+        resource_union,
+    }))
+}
+
+fn add_package_function_root(
+    roots_by_module: &mut FxHashMap<CompiledModuleRef, FxHashSet<FunctionId>>,
+    function_owner_by_origin: &FxHashMap<OriginFunctionId, (CompiledModuleRef, FunctionId)>,
+    origin: &OriginFunctionId,
+) -> Result<(), CompilerError> {
+    let Some((module_ref, function_id)) = function_owner_by_origin.get(origin).copied() else {
+        return Err(CompilerError::compiler_error(format!(
+            "Project package assembly could not resolve exported function origin {origin:?}"
+        )));
+    };
+    roots_by_module
+        .entry(module_ref)
+        .or_default()
+        .insert(function_id);
+    Ok(())
+}
+
+fn add_package_receiver_method_roots(
+    roots_by_module: &mut FxHashMap<CompiledModuleRef, FxHashSet<FunctionId>>,
+    function_owner_by_origin: &FxHashMap<OriginFunctionId, (CompiledModuleRef, FunctionId)>,
+    declaration: Option<&crate::compiler_frontend::public_interface::PublicDeclarationRecord>,
+) -> Result<(), CompilerError> {
+    let Some(declaration) = declaration else {
+        return Ok(());
+    };
+    let methods = match &declaration.semantics {
+        PublicDeclarationSemantics::Struct(structure) => &structure.receiver_methods,
+        PublicDeclarationSemantics::Choice(choice) => &choice.receiver_methods,
+        _ => return Ok(()),
+    };
+    for method in methods {
+        if matches!(
+            &method.category,
+            crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate
+        ) {
+            continue;
+        }
+        add_package_function_root(
+            roots_by_module,
+            function_owner_by_origin,
+            &method.method_origin,
+        )?;
+    }
+    Ok(())
+}
+
+/// Build-owned link plan for the optional project package facade.
+///
+/// The facade has no implicit `start`. Its exported function origins seed reachability, while
+/// exported folded values and selected descendant interfaces contribute metadata-only resources.
+#[allow(dead_code)] // package-target fields are consumed by later package backends
+pub(crate) struct PackageAssembly {
+    facade_module_ref: CompiledModuleRef,
+    facade_reachability: HirReachability,
+    selected_modules: Vec<CompiledModuleRef>,
+    linked_modules: Vec<LinkedModuleAssembly>,
+    resource_union: ResourceOriginUnion,
+}
+#[allow(dead_code)] // package-target fields are consumed by later package backends
+impl PackageAssembly {
+    pub(crate) fn resource_union(&self) -> &ResourceOriginUnion {
+        &self.resource_union
+    }
+
+    pub(crate) fn selected_modules(&self) -> &[CompiledModuleRef] {
+        &self.selected_modules
+    }
+
+    pub(crate) fn linked_modules(&self) -> &[LinkedModuleAssembly] {
+        &self.linked_modules
+    }
+
+    pub(crate) fn facade_module_ref(&self) -> CompiledModuleRef {
+        self.facade_module_ref
+    }
+
+    pub(crate) fn facade_reachability(&self) -> &HirReachability {
+        &self.facade_reachability
+    }
 }
 
 #[derive(Clone)]
@@ -664,6 +1069,9 @@ pub(crate) struct ProjectLinkedModule<'a> {
 #[derive(Clone)]
 pub(crate) struct ProjectEntry<'a> {
     pub(crate) module: &'a Module,
+    /// Exact stable-origin union owned by this entry's selected reachability and fragments.
+    #[allow(dead_code)] // entry resource union is reserved for a later output backend handoff
+    pub(crate) resource_union: &'a ResourceOriginUnion,
     pub(crate) reachability: &'a HirReachability,
     pub(crate) external_imports: &'a [ModuleExternalImport],
     pub(crate) linked_modules: Vec<ProjectLinkedModule<'a>>,
@@ -757,12 +1165,13 @@ pub(crate) struct BuildBootstrap {
 // -------------------------
 //  Output Payload
 // -------------------------
-
+#[derive(Clone)]
 pub struct OutputFile {
     relative_output_path: PathBuf,
     file_kind: FileKind,
 }
 
+#[derive(Clone)]
 pub enum FileKind {
     // This signals for the build system to not create this file.
     // Good for error checking / LSPs etc.
@@ -794,12 +1203,26 @@ impl OutputFile {
     }
 }
 
+/// One resource output whose bytes are materialised by the central output writer.
+///
+/// WHAT: carries the validated destination and Stage 0 physical source identity without reading
+///       the source bytes during backend planning.
+/// WHY: output conflict validation must cover resource destinations before any resource IO.
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredResourceOutput {
+    pub(crate) relative_output_path: PathBuf,
+    pub(crate) source_id: ResourceSourceId,
+}
+
+#[derive(Clone)]
 pub struct Project {
     pub output_files: Vec<OutputFile>,
     pub entry_page_rel: Option<PathBuf>,
     /// Builder-owned cleanup contract for manifest tracking and stale artifact removal.
     pub cleanup_policy: CleanupPolicy,
     pub warnings: Vec<CompilerDiagnostic>,
+    pub(crate) deferred_resources: Vec<DeferredResourceOutput>,
+    pub(crate) resource_inputs: ResourceInputRegistry,
 }
 
 /// Result of a successful core build orchestration run.

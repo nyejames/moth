@@ -1,12 +1,18 @@
 //! Tests for HTML page metadata extraction.
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::facts::{
+    ConstBindingScope, ConstBindingSource, ConstFactValueKind,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
+use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, InvalidPageMetadataReason, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::hir::const_facts::HirConstDeclarationFact;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::{FunctionId, HirConstId};
@@ -19,6 +25,10 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::projects::html_project::resource_output_plan::{
+    HtmlResourceOutputPlan, ResourceUrlContext,
+};
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::path::{Path, PathBuf};
 
 fn test_module(string_table: &mut StringTable) -> HirModule {
@@ -43,6 +53,25 @@ fn string_constant(name: &str, value: &str) -> HirModuleConst {
         ty: TypeId(0),
         value: HirConstValue::String(value.to_owned()),
     }
+}
+
+fn add_const_fact(
+    module: &mut HirModule,
+    name: &str,
+    location: SourceLocation,
+    string_table: &mut StringTable,
+) {
+    let declaration_path = InternedPath::from_single_str(name, string_table);
+    module.const_facts.declarations.insert(
+        declaration_path.clone(),
+        HirConstDeclarationFact {
+            declaration_path,
+            scope: ConstBindingScope::ExplicitTopLevel,
+            source: ConstBindingSource::ExplicitHash,
+            value_kind: ConstFactValueKind::RenderableTemplate,
+            location,
+        },
+    );
 }
 
 /// Interns one fixture resource origin so tests can build realistic `Resource` pieces.
@@ -87,17 +116,25 @@ fn extracts_reserved_entry_metadata() {
         module
             .start_function
             .expect("entry module should have start"),
+        &ModuleResourceTable::new(),
         &mut string_table,
     )
     .expect("metadata should parse");
-    assert_eq!(metadata.title, Some(String::from("Home")));
     assert_eq!(
-        metadata.extra_head_html,
-        Some(String::from("<meta name=\"x\" content=\"y\">"))
+        metadata.metadata.title,
+        Some(OwnedFoldedString::Text(String::from("Home")))
     );
-    assert_eq!(metadata.description, Some(String::from("Landing page")));
+    assert_eq!(
+        metadata.metadata.extra_head_html,
+        Some(OwnedFoldedString::Text(String::from(
+            "<meta name=\"x\" content=\"y\">"
+        )))
+    );
+    assert_eq!(
+        metadata.metadata.description,
+        Some(OwnedFoldedString::Text(String::from("Landing page")))
+    );
 }
-
 #[test]
 fn ignores_non_entry_constants() {
     let mut string_table = StringTable::new();
@@ -112,10 +149,14 @@ fn ignores_non_entry_constants() {
         module
             .start_function
             .expect("entry module should have start"),
+        &ModuleResourceTable::new(),
         &mut string_table,
     )
     .expect("metadata should parse");
-    assert_eq!(metadata.title, Some(String::from("Home")));
+    assert_eq!(
+        metadata.metadata.title,
+        Some(OwnedFoldedString::Text(String::from("Home")))
+    );
 }
 
 #[test]
@@ -134,6 +175,7 @@ fn rejects_non_string_reserved_values() {
         module
             .start_function
             .expect("entry module should have start"),
+        &ModuleResourceTable::new(),
         &mut string_table,
     )
     .expect_err("non-string metadata should fail");
@@ -152,8 +194,6 @@ fn rejects_non_string_reserved_values() {
         other => panic!("expected InvalidPageMetadata payload, got {other:?}"),
     }
 
-    // The rendered voice of NotAString must stay distinct from NotYetRenderable: this value
-    // genuinely is not a string, so the message claims it must fold to one.
     let message = metadata_error_message(&error.payload, &string_table);
     assert!(
         message.contains("must fold to a string"),
@@ -162,59 +202,122 @@ fn rejects_non_string_reserved_values() {
 }
 
 #[test]
-fn rejects_structural_string_reserved_values() {
+fn renders_structural_string_reserved_values() {
     let mut string_table = StringTable::new();
     let mut module = test_module(&mut string_table);
     let mut resources = ModuleResourceTable::new();
+    let resource_id = fixture_resource_id(&mut resources, "static/favicon.png");
+    let origin = resources
+        .try_origin(resource_id)
+        .expect("fixture resource should be present")
+        .origin
+        .clone();
     module.module_constants = vec![HirModuleConst {
         id: HirConstId(0),
         name: String::from("page_favicon"),
         ty: TypeId(0),
         value: HirConstValue::StructuralString {
-            pieces: vec![ConstStringPiece::Resource(fixture_resource_id(
-                &mut resources,
-                "static/favicon.png",
-            ))],
+            pieces: vec![ConstStringPiece::Resource(resource_id)],
         },
     }];
 
-    let error = extract_html_page_metadata(
+    let metadata = extract_html_page_metadata(
         &module,
         module
             .start_function
             .expect("entry module should have start"),
+        &resources,
         &mut string_table,
     )
-    .expect_err("structural string metadata should fail");
+    .expect("structural string metadata should render later");
     assert_eq!(
-        error.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)
+        metadata.metadata.favicon,
+        Some(OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Resource(origin.clone())
+        ]))
     );
-    match &error.payload {
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidPageMetadata {
-            reason,
-            ..
-        } => {
-            assert_eq!(*reason, InvalidPageMetadataReason::NotYetRenderable);
-        }
-        other => panic!("expected InvalidPageMetadata payload, got {other:?}"),
-    }
 
-    // The value is a legitimate string whose resource piece has no final text yet, so the
-    // message must not claim it is not a string or borrow the NotAString voice.
-    let message = metadata_error_message(&error.payload, &string_table);
-    assert!(
-        message.contains("is a string"),
-        "unexpected message: {message}"
+    let mut plan = HtmlResourceOutputPlan::new("page-metadata-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    plan.plan_origin(
+        origin,
+        Default::default(),
+        context.clone(),
+        &mut string_table,
+        true,
+    )
+    .expect("resource should be planned");
+    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let rendered = renderer
+        .render_owned(
+            metadata
+                .metadata
+                .favicon
+                .as_ref()
+                .expect("favicon should be present"),
+        )
+        .expect("structural favicon should render");
+    assert_eq!(rendered, "./static/favicon.png");
+}
+
+#[test]
+fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
+    let mut string_table = StringTable::new();
+    let mut module = test_module(&mut string_table);
+    let mut resources = ModuleResourceTable::new();
+    let resource_id = fixture_resource_id(&mut resources, "static/favicon.png");
+    let origin = resources
+        .try_origin(resource_id)
+        .expect("fixture resource should be present")
+        .origin
+        .clone();
+    let metadata_location = SourceLocation::new(
+        InternedPath::from_single_str("metadata.moth", &mut string_table),
+        CharPosition {
+            line_number: 11,
+            char_column: 3,
+        },
+        CharPosition {
+            line_number: 11,
+            char_column: 15,
+        },
     );
-    assert!(
-        !message.contains("not a string"),
-        "unexpected message: {message}"
+    module.module_constants = vec![HirModuleConst {
+        id: HirConstId(0),
+        name: String::from("page_favicon"),
+        ty: TypeId(0),
+        value: HirConstValue::StructuralString {
+            pieces: vec![
+                ConstStringPiece::Resource(resource_id),
+                ConstStringPiece::SiteRoot,
+            ],
+        },
+    }];
+    add_const_fact(
+        &mut module,
+        "page_favicon",
+        metadata_location.clone(),
+        &mut string_table,
     );
-    assert!(
-        !message.contains("must fold to a string"),
-        "unexpected message: {message}"
+
+    let plan = extract_html_page_metadata(
+        &module,
+        module
+            .start_function
+            .expect("entry module should have start"),
+        &resources,
+        &mut string_table,
+    )
+    .expect("metadata plan should parse");
+
+    assert_eq!(
+        plan.resource_uses,
+        vec![MetadataResourceUse {
+            origin,
+            authored_location: metadata_location,
+        }]
     );
+    assert!(plan.uses_site_root);
 }
 
 #[test]
@@ -231,6 +334,7 @@ fn rejects_duplicate_reserved_values() {
         module
             .start_function
             .expect("entry module should have start"),
+        &ModuleResourceTable::new(),
         &mut string_table,
     )
     .expect_err("duplicate metadata should fail");

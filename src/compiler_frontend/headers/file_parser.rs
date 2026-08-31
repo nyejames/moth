@@ -5,6 +5,7 @@
 //! WHY: file-level control flow is different from declaration parsing, dependency recording, and hash
 //! item handling; this module keeps the high-level loop visible while delegated modules own details.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword, reserved_trait_keyword_error,
 };
@@ -773,7 +774,8 @@ fn finish_file_output(
             .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
-    attach_structural_file_facts(&mut output, context.string_table);
+    attach_structural_file_facts(&mut output, context.string_table)
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
     Ok(output)
 }
 
@@ -787,7 +789,7 @@ fn finish_file_output(
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
-) {
+) -> Result<(), CompilerError> {
     output.structural_file_references = classify_prepared_file_references(
         output.path_syntax.table(),
         output
@@ -801,8 +803,9 @@ fn attach_structural_file_facts(
     collect_content_source_ordering_hints(
         &mut output.headers,
         &output.structural_file_references,
+        output.path_syntax.table(),
         string_table,
-    );
+    )
 }
 
 /// Validate generic parameter names against every dependency binding retained by this file.

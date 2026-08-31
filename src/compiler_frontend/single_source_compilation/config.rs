@@ -14,7 +14,6 @@
 //! the authored key-name spans config diagnostics underline. Config key schema and the application
 //! of folded values to project settings stay build-owned.
 
-use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
@@ -31,11 +30,8 @@ use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_IT
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -58,7 +54,6 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) binding_packages: &'a ExternalPackageRegistry,
-    pub(crate) source_file_kinds: &'a SourceFileKindRegistry,
 }
 
 /// The folded config source a caller validates and applies.
@@ -150,19 +145,6 @@ pub(crate) fn compile_config_source(
         collect_authored_config_key_name_locations(&sorted.headers, &authored_scope);
 
     // 5. Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
-    let config_root = request.canonical_path.parent().ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("Canonical config path has no project root"),
-            string_table,
-        )
-    })?;
-    let path_resolver = ProjectPathResolver::new(
-        config_root.to_path_buf(),
-        config_root.to_path_buf(),
-        PreparedSourcePackageRoots::empty(),
-        request.source_file_kinds,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let ast = Ast::new(
         AstBuildInput {
@@ -178,9 +160,7 @@ pub(crate) fn compile_config_source(
             string_table,
             entry_dir: authored_scope.clone(),
             build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: Some(path_resolver),
             file_value_resolution: None,
-            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

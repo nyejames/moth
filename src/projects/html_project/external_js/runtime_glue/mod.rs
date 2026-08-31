@@ -11,6 +11,7 @@ mod paths;
 mod runtime_modules;
 mod source;
 
+pub(crate) use paths::planned_runtime_module_output_paths;
 pub(crate) use runtime_modules::emit_build_runtime_modules;
 
 use crate::backends::js::external_module_export_glue_function_name;

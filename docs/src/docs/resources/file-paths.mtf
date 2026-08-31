@@ -1,4 +1,4 @@
-A file path is an explicit-extension path written in expression position. It names one regular file that the project owns. An accepted file path evaluates to a `String`; see @#file-values (File values) for what that string contains.
+A file path is an explicit-extension path written in expression position. Physical-target-bearing file paths name one regular file that the project owns. An accepted file path evaluates to a `String`; see @#file-values (File values) for what that string contains.
 
 Together with dependency clauses, which bring in source and provider files, file paths are how the compiler learns that a file participates in a build. Nothing scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover files.
 
@@ -26,7 +26,7 @@ A file path:
 - is not a directory
 - is not an external URL
 
-The explicit extension is what distinguishes one file value from a declaration namespace. `.mtf` and `.md` name content files and evaluate to their content. Every other accepted extension names a resource. `.moth` is the one recognised extension with no file value, because source declarations are consumed through dependency clauses.
+The explicit extension is what distinguishes one file value from a declaration namespace. `.mtf` and `.md` name content files and evaluate to their content. Every other accepted extension names a resource. `.moth` is the one recognised extension with no file value, because source declarations are consumed through dependency clauses. It is retained as a `SourceKindNoFileValue` structural diagnostic fact, not as a physical target.
 
 ### Context decides the meaning
 
@@ -56,7 +56,7 @@ Resolution starts at the owning module root, exactly like dependency paths. The 
 
 That resolves to `src/images/logo.svg`.
 
-The same authored file path is resolved once. Repeating it in the same module reuses the already resolved result.
+Each physical-target-bearing file path is resolved once. Repeating it in the same module reuses the already resolved result. A `SourceKindNoFileValue` occurrence has no physical target and is not resolved.
 
 ### Filesystem ownership
 
@@ -119,9 +119,9 @@ These remain ordinary untracked strings:
 
 They are not checked, copied, rewritten, watched or included in resource unions. Write a URL as a string when you mean a URL.
 
-### Every authored path is a build input
+### Every physical-target-bearing path is a build input
 
-A file path is a build dependency wherever it is authored, before any question of reachability. This includes a path in:
+A physical-target-bearing file path is a build dependency wherever it is authored, before any question of reachability. This includes a path in:
 
 - an unused private constant
 - a helper template that is never rendered
@@ -130,7 +130,7 @@ A file path is a build dependency wherever it is authored, before any question o
 - a generic template that is never materialised
 - a function that is unreachable from the selected entry
 
-In every one of those cases the file is resolved, validated and watched, and an error inside a referenced content file is still reported. Being an input and reaching an output are separate facts: a resource that no reachable output uses is never read, hashed or emitted.
+In every one of those cases the file is resolved, validated and watched, and an error inside a referenced content file is still reported. A `SourceKindNoFileValue` `.moth` occurrence has no physical target, semantic-source membership, source or watch record, and is never resolved. Being an input and reaching an output are separate facts: a resource that no reachable output uses is never read, hashed or emitted.
 
 ### Resource identity
 

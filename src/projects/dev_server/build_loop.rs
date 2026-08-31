@@ -126,12 +126,12 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 })
             };
             write_project_outputs(
-                &build_result.project,
+                &mut build_result.project,
                 &WriteOptions {
                     output_plan,
                     write_mode: WriteMode::SkipUnchanged,
                 },
-                &build_result.string_table,
+                &mut build_result.string_table,
             )
         });
         if let Err(mut messages) = output_result {

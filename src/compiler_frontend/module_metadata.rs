@@ -1,10 +1,10 @@
 //! Compiler-frontend-owned module metadata extracted during HIR lowering.
 //!
 //! WHAT: owns non-HIR compiler metadata that HIR lowering extracts from the AST — resolved
-//! documentation fragments and rendered-path usages — plus the typed lowering result boundary.
+//! documentation fragments — plus the typed lowering result boundary.
 //! WHY: these are compiler/builder-facing metadata lanes, not executable semantic HIR state. HIR
-//! must carry only executable/semantic IR; documentation fragments and rendered-path usages
-//! belong to the module compilation boundary, not the HIR payload.
+//! must carry only executable/semantic IR; documentation fragments belong to the module compilation
+//! boundary, not the HIR payload.
 //!
 //! ## Ownership boundary
 //!
@@ -24,7 +24,6 @@
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 // -------------------------
@@ -63,15 +62,14 @@ pub struct ModuleDocFragment {
 
 /// Non-HIR compiler metadata extracted by HIR lowering.
 ///
-/// WHAT: bundles resolved documentation fragments and rendered-path usages that HIR lowering pulls
-/// from the AST but must not store on `HirModule`.
+/// WHAT: bundles resolved documentation fragments that HIR lowering pulls from the AST but must
+/// not store on `HirModule`.
 /// WHY: HIR owns executable/semantic IR only. This typed metadata lets the build system assemble
-///      the module compiler-metadata lane without HIR temporarily carrying non-HIR state.
+/// the module compiler-metadata lane without HIR temporarily carrying non-HIR state.
 ///      Successful-module warnings are intentionally not duplicated here.
 #[derive(Debug, Clone, Default)]
 pub struct HirLoweringMetadata {
     pub doc_fragments: Vec<ModuleDocFragment>,
-    pub rendered_path_usages: Vec<RenderedPathUsage>,
 }
 
 impl HirLoweringMetadata {

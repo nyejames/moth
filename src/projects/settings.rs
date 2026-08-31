@@ -10,7 +10,6 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCon
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
-use crate::compiler_frontend::paths::path_format::{OutputPathStyle, PathStringFormatConfig};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -128,18 +127,9 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the rendered path origin and the template loop ceiling cross the
-    ///      boundary.
+    ///      translation, so only the template loop ceiling crosses the boundary.
     pub(crate) fn frontend_options(&self) -> FrontendOptions {
         FrontendOptions {
-            path_format_config: PathStringFormatConfig {
-                origin: self
-                    .settings
-                    .get("origin")
-                    .cloned()
-                    .unwrap_or_else(|| String::from("/")),
-                output_style: OutputPathStyle::Portable,
-            },
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
         }
     }

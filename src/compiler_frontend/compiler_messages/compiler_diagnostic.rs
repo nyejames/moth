@@ -707,31 +707,6 @@ impl CompilerDiagnostic {
     //  Warning Constructors
     // ------------------------------------------------------------------
 
-    pub(crate) fn moth_file_path_in_template_output(
-        path: StringId,
-        location: SourceLocation,
-    ) -> Self {
-        Self::with_severity(
-            DiagnosticKind::Rule(RuleDiagnosticKind::MothFilePathInTemplateOutput),
-            DiagnosticSeverity::Warning,
-            location,
-            DiagnosticPayload::MothFilePathInTemplateOutput { path },
-        )
-    }
-
-    pub(crate) fn large_tracked_asset(
-        path: StringId,
-        byte_size: u64,
-        location: SourceLocation,
-    ) -> Self {
-        Self::with_severity(
-            DiagnosticKind::Rule(RuleDiagnosticKind::LargeTrackedAsset),
-            DiagnosticSeverity::Warning,
-            location,
-            DiagnosticPayload::LargeTrackedAsset { path, byte_size },
-        )
-    }
-
     pub(crate) fn identifier_naming_convention(
         name: StringId,
         expected_style: NamingConvention,

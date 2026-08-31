@@ -20,6 +20,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_co
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -858,6 +859,7 @@ impl ModuleSyntaxDiscovery<'_> {
         &mut self,
         resolver: &mut crate::build_system::create_project_modules::file_reference_resolution::FileReferenceResolver<'_>,
         consumer_module_id: crate::build_system::create_project_modules::module_identity::ModuleId,
+        path_syntax: &PathSyntaxTable,
         reference: &crate::compiler_frontend::paths::file_references::PreparedFileReference,
         discovered_content_sources: &mut Vec<
             crate::build_system::create_project_modules::source_tree_index::SourceId,
@@ -868,6 +870,7 @@ impl ModuleSyntaxDiscovery<'_> {
     > {
         resolver.resolve(
             consumer_module_id,
+            path_syntax,
             reference,
             &self.source_files,
             &mut self.string_table,

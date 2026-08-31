@@ -192,7 +192,7 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
     let resource = resource_table.intern_origin(resource_origin, SourceLocation::default());
     let structural_expression = Expression::new(
         crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
-            pieces: vec![ConstStringPiece::Resource(resource)],
+            pieces: vec![ConstStringPiece::Resource(resource), ConstStringPiece::SiteRoot],
         },
         SourceLocation::default(),
         builtin_type_ids::STRING,
@@ -253,9 +253,20 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
         vec![
             FoldedConstTemplatePiece::Text("before".to_owned()),
             FoldedConstTemplatePiece::Resource(resource),
+            FoldedConstTemplatePiece::SiteRoot,
             FoldedConstTemplatePiece::Text("after".to_owned()),
         ],
         "resource anchors must preserve authored order and prevent text-run coalescing",
+    );
+    assert_eq!(
+        pattern.emission,
+        TemplateEmission::Output(ConstStringValue::Pieces(vec![
+            ConstStringPiece::Text(before),
+            ConstStringPiece::Resource(resource),
+            ConstStringPiece::SiteRoot,
+            ConstStringPiece::Text(after),
+        ])),
+        "emission must flush text after the final structural anchor",
     );
     Ok(())
 }

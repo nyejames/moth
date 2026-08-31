@@ -262,6 +262,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
+        .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_file_visibility(Arc::clone(&input.visibility))
         .with_resolved_type_aliases(Rc::clone(
             &self.environment.lookups.resolved_type_aliases_by_path,
@@ -272,10 +273,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_resolved_struct_fields_by_path(Rc::clone(
             &self.environment.lookups.resolved_struct_fields_by_path,
         ))
-        .with_project_path_resolver(self.context.project_path_resolver.clone())
-        .with_path_format_config(self.context.path_format_config.clone())
-        .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
-        .with_rendered_path_usage_sink(Rc::clone(&self.environment.lookups.rendered_path_usages))
         .with_generic_function_instantiation_sink(Rc::clone(
             &self.generic_function_instantiation_requests,
         ))

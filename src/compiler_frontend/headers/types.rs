@@ -761,7 +761,7 @@ impl Header {
     /// Falls back to the logical source-file path when no OS path is recorded.
     ///
     /// WHY: const-template scopes use synthetic paths; the canonical path is needed for
-    /// project-path-resolver lookups and rendered-path-usage tracking.
+    /// project-path-resolver lookups.
     pub(crate) fn canonical_source_file(&self, string_table: &mut StringTable) -> InternedPath {
         // Canonical filesystem paths are project-derived inputs that must be interned before
         // downstream stages can use them as InternedPath values.

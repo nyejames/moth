@@ -6,12 +6,9 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terse::format_terse_diagnostic_with_context,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, ImportDiagnosticKind, InvalidCompileTimePathReason, InvalidImportPathReason,
-    RuleDiagnosticKind,
+    DiagnosticPayload, ImportDiagnosticKind, InvalidImportPathReason,
 };
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathResolutionError,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -148,170 +145,6 @@ fn typed_dependency_diagnostic(
     diagnostic.as_ref()
 }
 
-fn compile_time_path_diagnostic_payload(
-    error: &CompileTimePathResolutionError,
-) -> &DiagnosticPayload {
-    let CompileTimePathResolutionError::Diagnostic(diagnostic) = error else {
-        panic!("expected typed compile-time path diagnostic, got infrastructure error");
-    };
-
-    assert_eq!(
-        diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-            RuleDiagnosticKind::InvalidCompileTimePath
-        )
-    );
-
-    &diagnostic.payload
-}
-
-// -----------------------------------------------------------------------
-// Relative file resolution
-// -----------------------------------------------------------------------
-
-#[test]
-fn relative_file_resolves_from_declaring_directory() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&[".", "pages", "about.moth"]);
-    let declaring_source = h.declaring_source();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("relative file should resolve");
-
-    assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
-    assert!(result.filesystem_path.ends_with("src/pages/about.moth"));
-}
-
-// -----------------------------------------------------------------------
-// Entry root fallback resolution
-// -----------------------------------------------------------------------
-
-#[test]
-fn entry_root_file_resolves_through_fallback() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&["pages", "about.moth"]);
-    let declaring_source = h.declaring_source();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("entry root file should resolve");
-
-    assert_eq!(result.base, CompileTimePathBase::EntryRoot);
-}
-
-// -----------------------------------------------------------------------
-// Target rejection
-// -----------------------------------------------------------------------
-
-#[test]
-fn non_existent_target_is_rejected() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&["pages", "does_not_exist.moth"]);
-    let declaring_source = h.declaring_source();
-
-    let err = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect_err("missing file should produce error");
-
-    assert!(matches!(
-        compile_time_path_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidCompileTimePath {
-            reason: InvalidCompileTimePathReason::MissingTarget,
-            ..
-        }
-    ));
-}
-
-/// A path value names one file, so an existing directory is a distinct authoring
-/// mistake from a target that is not there at all.
-#[test]
-fn existing_directory_target_is_rejected_as_a_directory() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&["assets", "images"]);
-    let declaring_source = h.declaring_source();
-
-    let err = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect_err("directory should produce error");
-
-    assert!(matches!(
-        compile_time_path_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidCompileTimePath {
-            reason: InvalidCompileTimePathReason::TargetIsDirectory,
-            ..
-        }
-    ));
-}
-
-// -----------------------------------------------------------------------
-// Project root escape rejection
-// -----------------------------------------------------------------------
-
-#[test]
-fn path_escaping_project_root_is_rejected() {
-    let mut h = TestHarness::new();
-    // From src/index.moth, going ../../.. escapes the project root.
-    let path = h.make_path(&[".", "..", "..", "..", "escape.txt"]);
-    let declaring_source = h.declaring_source();
-
-    let err = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect_err("escape should produce error");
-
-    assert!(matches!(
-        compile_time_path_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidCompileTimePath {
-            reason: InvalidCompileTimePathReason::EscapesProjectRoot,
-            ..
-        }
-    ));
-}
-
-// -----------------------------------------------------------------------
-// Public path segment preservation
-// -----------------------------------------------------------------------
-
-#[test]
-fn relative_path_public_path_keeps_dot_prefix() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&[".", "pages", "about.moth"]);
-    let declaring_source = h.declaring_source();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("should resolve");
-
-    let public = result.public_path.to_portable_string(&h.string_table);
-    assert!(public.starts_with("./"));
-}
-
-/// `@/` interns as an empty path. Expression classification renders it as the site-root URL and
-/// dependency clauses reject it, so the resolver never sees one from valid source. An empty row
-/// arriving here is compiler corruption, not an authoring mistake with a user-facing reason.
-#[test]
-fn the_site_root_never_resolves_as_a_compile_time_path() {
-    let mut h = TestHarness::new();
-    let path = InternedPath::new();
-    let declaring_source = h.declaring_source();
-
-    let error = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect_err("the site root is not a path value");
-
-    assert!(matches!(
-        error,
-        CompileTimePathResolutionError::Infrastructure(_)
-    ));
-}
-
 #[test]
 fn source_package_dependency_resolves_to_package_root() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
@@ -350,7 +183,7 @@ fn source_package_dependency_resolves_to_package_root() {
         .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
-    assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
+    assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
         result.1,
         fs::canonicalize(package_root.join("utils.moth")).unwrap(),
@@ -399,7 +232,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
         .resolve_dependency_as_compile_time_path(&path, &declaring_source, &mut string_table)
         .expect("source-backed package dependency should resolve");
 
-    assert_eq!(result.0.base, CompileTimePathBase::SourcePackageRoot);
+    assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
     assert_eq!(
         result.1,
         fs::canonicalize(package_root.join("utils.moth")).unwrap()
@@ -660,7 +493,7 @@ fn package_scan_root_name_is_not_package_prefix() {
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
-        result.0.base,
+        result.0,
         CompileTimePathBase::EntryRoot,
         "scan root name 'lib' must not be treated as a package prefix"
     );
@@ -705,7 +538,7 @@ fn package_direct_child_is_package_prefix() {
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
-        result.0.base,
+        result.0,
         CompileTimePathBase::SourcePackageRoot,
         "direct child of scan root must be a valid package prefix"
     );
@@ -742,7 +575,7 @@ fn entry_root_dependency_fallback_success() {
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
-        result.0.base,
+        result.0,
         CompileTimePathBase::EntryRoot,
         "non-relative dependencies without a package prefix must fall back to entry root"
     );
@@ -790,7 +623,7 @@ fn source_package_prefix_wins_consistently() {
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
-        result.0.base,
+        result.0,
         CompileTimePathBase::SourcePackageRoot,
         "source-backed package prefix must consistently win over entry-root collision"
     );

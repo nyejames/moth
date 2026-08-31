@@ -7,24 +7,28 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["/assets/site.css"]
+must_contain = ["./assets/site.css"]
 
 [[backends.html.artifact_assertions]]
 path = "docs/index.html"
 kind = "html"
-must_contain = ["../shared/docs.css"]
+must_contain = ["./shared/docs.css"]
 
 [[backends.html.artifact_assertions]]
 path = "docs/getting-started/index.html"
 kind = "html"
-must_contain = ["../../shared/docs.css"]
+must_contain = ["./shared/docs.css"]
 
 [[backends.html.artifact_assertions]]
 path = "assets/site.css"
 kind = "binary"
 
 [[backends.html.artifact_assertions]]
-path = "shared/docs.css"
+path = "docs/shared/docs.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "docs/getting-started/shared/docs.css"
 kind = "binary"
 
 [backends.html_wasm]
@@ -34,17 +38,17 @@ warnings = "forbid"
 [[backends.html_wasm.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["/assets/site.css", "<script src=\"./page.js\"></script>"]
+must_contain = ["./assets/site.css", "<script src=\"./page.js\"></script>"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "docs/index.html"
 kind = "html"
-must_contain = ["../shared/docs.css", "<script src=\"./page.js\"></script>"]
+must_contain = ["./shared/docs.css", "<script src=\"./page.js\"></script>"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "docs/getting-started/index.html"
 kind = "html"
-must_contain = ["../../shared/docs.css", "<script src=\"./page.js\"></script>"]
+must_contain = ["./shared/docs.css", "<script src=\"./page.js\"></script>"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.js"
@@ -81,5 +85,9 @@ path = "assets/site.css"
 kind = "binary"
 
 [[backends.html_wasm.artifact_assertions]]
-path = "shared/docs.css"
+path = "docs/shared/docs.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "docs/getting-started/shared/docs.css"
 kind = "binary"

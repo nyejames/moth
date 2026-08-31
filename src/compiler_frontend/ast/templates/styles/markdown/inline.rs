@@ -160,7 +160,12 @@ pub(super) fn render_inline_atoms(
                     );
                     open_wrapper(&mut output, wrapper_tag, &mut wrapper_open);
                     output.push_raw("<a href=\"");
-                    output.push_escaped_text(&link.target);
+                    if link.target.starts_with('/') && !link.target.starts_with("//") {
+                        output.push_site_root();
+                        output.push_escaped_text(&link.target[1..]);
+                    } else {
+                        output.push_escaped_text(&link.target);
+                    }
                     output.push_raw("\">");
                     output.push_escaped_text(&link.label);
                     output.push_raw("</a>");

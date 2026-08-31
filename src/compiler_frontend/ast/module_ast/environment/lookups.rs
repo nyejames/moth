@@ -26,16 +26,12 @@ use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnviron
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationMetadata, ModuleSymbols,
 };
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -66,7 +62,6 @@ pub(crate) struct AstModuleLookups {
     /// constant, once per capacity expression. Answering from a set makes that a hash lookup
     /// instead of retaining a second declaration vector beside the indexed declaration table.
     pub(crate) resolved_module_constants: Rc<ResolvedConstantSet>,
-    pub(crate) rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
 
     // Resolved nominal-type side tables.
@@ -118,8 +113,6 @@ pub(crate) struct AstModuleLookups {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
-    pub(crate) path_format_config: PathStringFormatConfig,
 }
 
 /// Final AST module environment paired with its canonical TypeEnvironment.

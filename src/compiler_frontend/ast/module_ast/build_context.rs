@@ -22,8 +22,6 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -153,15 +151,10 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Current build profile (dev/release) affecting optimization and diagnostic levels.
     pub build_profile: FrontendBuildProfile,
 
-    /// Optional project-relative path resolver for source-backed package and dependency resolution.
-    pub project_path_resolver: Option<ProjectPathResolver>,
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
-
-    /// Formatting rules for rendering interned paths in diagnostics and output.
-    pub path_format_config: PathStringFormatConfig,
 
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
@@ -197,8 +190,6 @@ pub(crate) struct AstPhaseContext<'a> {
     >,
     pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
-    pub(crate) path_format_config: PathStringFormatConfig,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 
@@ -231,9 +222,7 @@ impl<'a> AstPhaseContext<'a> {
             entry_dir,
             root_role,
             build_profile,
-            project_path_resolver,
             file_value_resolution,
-            path_format_config,
             template_const_loop_iteration_limit,
             capacity_estimate,
             #[cfg(feature = "timers")]
@@ -253,9 +242,7 @@ impl<'a> AstPhaseContext<'a> {
                 entry_dir,
                 root_role,
                 build_profile,
-                project_path_resolver,
                 file_value_resolution,
-                path_format_config,
                 template_const_loop_iteration_limit,
                 capacity_estimate,
                 template_ir_store,

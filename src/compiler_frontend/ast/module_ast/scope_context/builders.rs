@@ -217,14 +217,6 @@ impl ScopeContext {
         self
     }
 
-    pub(crate) fn with_project_path_resolver(
-        mut self,
-        resolver: Option<ProjectPathResolver>,
-    ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).project_path_resolver = resolver;
-        self
-    }
-
     pub fn with_source_file_scope(mut self, source_file: InternedPath) -> ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self
@@ -244,25 +236,8 @@ impl ScopeContext {
         self
     }
 
-    pub fn with_path_format_config(mut self, config: PathStringFormatConfig) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).path_format_config = config;
-        self
-    }
-
     pub fn with_template_const_loop_iteration_limit(mut self, limit: usize) -> ScopeContext {
         Rc::make_mut(&mut self.shared).template_const_loop_iteration_limit = limit;
-        self
-    }
-
-    /// Attach a sink for tracking rendered path usages.
-    ///
-    /// WHAT: collects path references that appear in template output so the
-    /// build system can emit dependency metadata.
-    pub fn with_rendered_path_usage_sink(
-        mut self,
-        sink: Rc<RefCell<Vec<RenderedPathUsage>>>,
-    ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).rendered_path_usages = sink;
         self
     }
 

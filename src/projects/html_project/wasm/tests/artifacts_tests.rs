@@ -4,6 +4,11 @@ use super::*;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
+use crate::projects::html_project::resource_output_plan::{
+    HtmlResourceOutputPlan, ResourceUrlContext,
+};
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{create_test_module, expect_js_output};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,12 +35,15 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
+    let page_metadata_plan = HtmlPageMetadataPlan::default();
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        resource_table: &module.executable.resource_table,
         reachability: &reachability,
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
+        page_metadata_plan: &page_metadata_plan,
         borrow_analysis: &module.executable.borrow_analysis,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
@@ -45,9 +53,17 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
-    let compiled =
-        compile_html_module_wasm(&compile_input, &mut string_table, Path::new("index.html"))
-            .expect("wasm mode compilation should succeed");
+    let output_plan = HtmlResourceOutputPlan::new("");
+    let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let structural_url_renderer =
+        StructuralUrlRenderer::new(&output_plan, &resource_url_context, Some("/"));
+    let compiled = compile_html_module_wasm(
+        &compile_input,
+        &mut string_table,
+        Path::new("index.html"),
+        &structural_url_renderer,
+    )
+    .expect("wasm mode compilation should succeed");
     let js = expect_js_output(&compiled.output_files, "page.js");
 
     assert!(
@@ -127,12 +143,15 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let module = create_test_module(PathBuf::from("docs/@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
+    let page_metadata_plan = HtmlPageMetadataPlan::default();
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
+        resource_table: &module.executable.resource_table,
         reachability: &reachability,
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
         borrow_analysis: &module.executable.borrow_analysis,
+        page_metadata_plan: &page_metadata_plan,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
@@ -141,10 +160,15 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
+    let output_plan = HtmlResourceOutputPlan::new("");
+    let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    let structural_url_renderer =
+        StructuralUrlRenderer::new(&output_plan, &resource_url_context, Some("/"));
     let compiled = compile_html_module_wasm(
         &compile_input,
         &mut string_table,
         Path::new("docs/index.html"),
+        &structural_url_renderer,
     )
     .expect("wasm mode compilation should succeed for nested route");
 

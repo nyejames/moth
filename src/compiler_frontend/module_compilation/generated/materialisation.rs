@@ -142,10 +142,6 @@ fn materialise_generated_request(
                 external_package_registry: context.external_packages.as_ref(),
                 style_directives: context.style_directives,
                 build_profile: context.build_profile,
-                project_path_resolver: context
-                    .project_path_resolver
-                    .clone()
-                    .or_else(|| requester_context.project_path_resolver.clone()),
                 template_const_loop_iteration_limit: context
                     .options
                     .template_const_loop_iteration_limit,
@@ -158,10 +154,6 @@ fn materialise_generated_request(
                 &request.identity,
                 requester_context,
                 &request.diagnostic_location,
-                context
-                    .project_path_resolver
-                    .clone()
-                    .or_else(|| requester_context.project_path_resolver.clone()),
                 #[cfg(feature = "timers")]
                 request.timing_context,
             ),
@@ -334,7 +326,6 @@ fn materialise_generated_request(
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: lowering_metadata.doc_fragments,
-            rendered_path_usages: lowering_metadata.rendered_path_usages,
             materialisation_context: None,
         },
     };

@@ -27,7 +27,6 @@ fn compiles_one_authored_source_to_folded_values_and_key_spans() {
             source_code: "entry_root #= \"src\"\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
-            source_file_kinds: &surface.source_file_kinds,
         },
         &mut string_table,
     )

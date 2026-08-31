@@ -39,9 +39,6 @@ use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -66,15 +63,12 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     pub style_directives: StyleDirectiveRegistry,
-    pub project_path_resolver: Option<ProjectPathResolver>,
     pub file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
-    pub path_format_config: PathStringFormatConfig,
     pub template_const_loop_iteration_limit: usize,
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
     pub build_profile: FrontendBuildProfile,
-    pub rendered_path_usages: Rc<RefCell<Vec<RenderedPathUsage>>>,
 }
 
 /// State that changes between constants, supplied by the environment builder per call.
@@ -226,10 +220,7 @@ impl ConstantResolutionSession {
         )
         .with_style_directives(&module_view.style_directives)
         .with_build_profile(module_view.build_profile)
-        .with_project_path_resolver(module_view.project_path_resolver.clone())
-        .with_path_format_config(module_view.path_format_config.clone())
         .with_template_const_loop_iteration_limit(module_view.template_const_loop_iteration_limit)
-        .with_rendered_path_usage_sink(Rc::clone(&module_view.rendered_path_usages))
         // Keep full module declarations for path identity, but gate every file-local lookup
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/start body contexts.

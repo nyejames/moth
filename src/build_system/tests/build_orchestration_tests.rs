@@ -4,7 +4,10 @@
 
 use super::*;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{FileKind, OutputFile, Project, ProjectBuilder, build_project};
+use crate::build_system::build::{
+    DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder, build_project,
+};
+use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 #[cfg(unix)]
 use crate::build_system::output::ValidatedOutputPlan;
 use crate::build_system::output::manifest::BUILD_MANIFEST_FILENAME;
@@ -246,6 +249,8 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let summary = write_project_outputs(&project, &always_write_options(root.clone(), None))
@@ -302,6 +307,8 @@ fn write_project_outputs_rejects_invalid_paths() {
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         Project {
             output_files: vec![OutputFile::new(
@@ -311,6 +318,8 @@ fn write_project_outputs_rejects_invalid_paths() {
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         Project {
             output_files: vec![OutputFile::new(
@@ -320,6 +329,8 @@ fn write_project_outputs_rejects_invalid_paths() {
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
         Project {
             output_files: vec![OutputFile::new(
@@ -329,6 +340,8 @@ fn write_project_outputs_rejects_invalid_paths() {
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         },
     ];
 
@@ -360,6 +373,8 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
     let result = write_project_outputs(
         &collision_project,
@@ -392,6 +407,8 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
         let result = write_project_outputs(
             &descendant_project,
@@ -538,6 +555,8 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
         let Err(messages) = result else {
@@ -624,6 +643,8 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
         let Err(messages) = result else {
@@ -667,6 +688,8 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -714,6 +737,8 @@ fn canonical_case_collisions_are_rejected_before_emission() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -789,6 +814,8 @@ fn hard_linked_outputs_are_rejected_before_emission() {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
 
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -863,6 +890,8 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1336,6 +1365,8 @@ fn duplicate_output_destination_causes_zero_files_written() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1366,6 +1397,8 @@ fn windows_ambiguous_output_aliases_fail_before_emission() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1396,6 +1429,8 @@ fn file_ancestor_conflict_causes_zero_files_written() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1429,6 +1464,8 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
 
         let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1449,6 +1486,104 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
 }
 
 #[test]
+fn deferred_resource_file_ancestor_conflict_stays_unhashed() {
+    let _temp = tempfile::tempdir().expect("should create deferred resource fixture");
+    let root = _temp.path().to_path_buf();
+    let output_root = root.join("out");
+    let source_path = root.join("resource.bin");
+    fs::write(&source_path, [1_u8, 2, 3]).expect("should write deferred resource");
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_id = resource_inputs.register_source(
+        fs::canonicalize(&source_path).expect("deferred resource should canonicalize"),
+    );
+    let mut project = Project {
+        output_files: vec![OutputFile::new(
+            PathBuf::from("assets/app.js"),
+            FileKind::Js(String::from("console.log('app');")),
+        )],
+        entry_page_rel: None,
+        cleanup_policy: generic_cleanup_policy(),
+        warnings: vec![],
+        deferred_resources: vec![DeferredResourceOutput {
+            relative_output_path: PathBuf::from("assets/app.js/logo.bin"),
+            source_id,
+        }],
+        resource_inputs,
+    };
+
+    let mut string_table = StringTable::new();
+    let result = write_project_outputs_with_table(
+        &mut project,
+        &always_write_options(output_root.clone(), None),
+        &mut string_table,
+    );
+    let Err(messages) = result else {
+        panic!("a deferred resource below a file output must be rejected");
+    };
+
+    assert_output_rejection(&messages, "file-ancestor-conflict");
+    assert_eq!(
+        project.resource_inputs.records()[0].content(),
+        ResourceContentState::Unhashed,
+        "file-ancestor conflicts must occur before deferred resource IO"
+    );
+    assert_path_missing(&output_root);
+}
+
+#[cfg(unix)]
+#[test]
+fn deferred_resource_symlink_destination_conflict_stays_unhashed() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create deferred symlink fixture");
+    let root = _temp.path().to_path_buf();
+    let output_root = root.join("out");
+    let real_directory = output_root.join("real");
+    fs::create_dir_all(&real_directory).expect("should create real output directory");
+    symlink(&real_directory, output_root.join("alias")).expect("should create output symlink");
+
+    let source_path = root.join("resource.bin");
+    fs::write(&source_path, [4_u8, 5, 6]).expect("should write deferred resource");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_id = resource_inputs.register_source(
+        fs::canonicalize(&source_path).expect("deferred resource should canonicalize"),
+    );
+    let mut project = Project {
+        output_files: vec![OutputFile::new(
+            PathBuf::from("real/logo.bin"),
+            FileKind::Js(String::from("console.log('builder');")),
+        )],
+        entry_page_rel: None,
+        cleanup_policy: generic_cleanup_policy(),
+        warnings: vec![],
+        deferred_resources: vec![DeferredResourceOutput {
+            relative_output_path: PathBuf::from("alias/logo.bin"),
+            source_id,
+        }],
+        resource_inputs,
+    };
+
+    let mut string_table = StringTable::new();
+    let result = write_project_outputs_with_table(
+        &mut project,
+        &always_write_options(output_root.clone(), None),
+        &mut string_table,
+    );
+    let Err(messages) = result else {
+        panic!("canonical aliases must reject a deferred resource before emission");
+    };
+
+    assert_output_rejection(&messages, "canonical-destination-collision");
+    assert_eq!(
+        project.resource_inputs.records()[0].content(),
+        ResourceContentState::Unhashed,
+        "canonical destination conflicts must occur before deferred resource IO"
+    );
+    assert_path_missing(&real_directory.join("logo.bin"));
+}
+
+#[test]
 fn explicit_directory_output_may_contain_child_files() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -1464,6 +1599,8 @@ fn explicit_directory_output_may_contain_child_files() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     write_project_outputs(&project, &always_write_options(root.clone(), None))
@@ -1491,6 +1628,8 @@ fn file_and_directory_same_destination_is_rejected_before_writing() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1520,6 +1659,8 @@ fn case_only_output_collision_causes_zero_files_written() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1551,6 +1692,8 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1587,6 +1730,8 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1615,6 +1760,8 @@ fn nested_explicit_directory_outputs_may_contain_child_files() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     write_project_outputs(&project, &always_write_options(root.clone(), None))
@@ -1651,6 +1798,8 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
@@ -1687,6 +1836,8 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
     let Err(messages) = result else {
@@ -1713,6 +1864,8 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));
     let Err(messages) = result else {
@@ -1754,6 +1907,8 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: generic_cleanup_policy(),
             warnings: vec![],
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
         };
         let options = WriteOptions {
             output_plan: OutputPlan::Directory(ValidatedOutputPlan {
@@ -1805,6 +1960,8 @@ fn invalid_later_output_path_causes_zero_files_written() {
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
         warnings: vec![],
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
     };
 
     let result = write_project_outputs(&project, &always_write_options(root.clone(), None));

@@ -31,7 +31,6 @@ use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::pipeline::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -207,9 +206,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             string_table: &mut string_table,
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: Some(project_path_resolver),
             file_value_resolution: None,
-            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
@@ -424,9 +421,7 @@ impl MothTemplateScopeFixture {
                 string_table: &mut string_table,
                 entry_dir,
                 build_profile: FrontendBuildProfile::Dev,
-                project_path_resolver: Some(self.project_path_resolver.clone()),
                 file_value_resolution: None,
-                path_format_config: PathStringFormatConfig::default(),
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 capacity_estimate: Default::default(),
                 #[cfg(feature = "timers")]
@@ -1812,9 +1807,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             string_table: &mut string_table,
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
-            project_path_resolver: Some(project_path_resolver),
             file_value_resolution: None,
-            path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

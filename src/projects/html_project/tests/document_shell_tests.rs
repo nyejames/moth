@@ -3,10 +3,14 @@
 use super::*;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
+use crate::projects::html_project::resource_output_plan::{
+    HtmlResourceOutputPlan, ResourceUrlContext,
+};
+use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{
     assert_fragment_before_body_close, assert_has_basic_shell,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn render_shell(
     config: &HtmlDocumentConfig,
@@ -16,15 +20,20 @@ fn render_shell(
     body_html: &str,
     script_html: &str,
 ) -> String {
-    render_html_document_shell(
+    let output_plan = HtmlResourceOutputPlan::new(project_name);
+    let context = ResourceUrlContext::PageDocument(PathBuf::from(logical_html_path));
+    let structural_url_renderer = StructuralUrlRenderer::new(&output_plan, &context, Some("/"));
+
+    render_html_document_shell(HtmlDocumentShellInput {
         config,
         page_metadata,
-        Path::new(logical_html_path),
+        structural_url_renderer: &structural_url_renderer,
+        logical_html_path: Path::new(logical_html_path),
         project_name,
-        body_html.to_owned(),
-        script_html.to_owned(),
-        None,
-    )
+        body_html: body_html.to_owned(),
+        script_html: script_html.to_owned(),
+        import_map_html: None,
+    })
     .expect("document shell should render for valid route inputs")
 }
 
