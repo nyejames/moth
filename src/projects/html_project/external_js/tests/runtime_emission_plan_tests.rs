@@ -1,25 +1,24 @@
 //! Tests for `HtmlExternalRuntimeEmissionPlan`.
 
-use crate::builder_surface::external_import_providers::provider::{
-    RequiredRuntimeImport, RuntimeAssetIdentity,
-};
+use crate::builder_surface::external_import_providers::provider::RequiredRuntimeImport;
 use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
-use crate::projects::html_project::tests::test_support::create_test_module;
-use std::path::PathBuf;
+use crate::projects::html_project::tests::test_support::{
+    create_test_module, js_runtime_asset_import, non_js_runtime_asset_import,
+};
+use std::path::{Path, PathBuf};
 
 #[test]
-fn plan_collects_js_assets_by_canonical_path() {
+fn plan_collects_js_assets_by_provider_origin() {
     let mut string_table = StringTable::new();
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let asset = js_runtime_asset_import(Path::new("lib.js"), PathBuf::from("/project/lib.js"));
+    let asset_origin = asset.origin.clone();
     module.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: PathBuf::from("/project/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
+        runtime_asset: Some(asset),
         required_runtime_imports: vec![],
     }];
 
@@ -29,10 +28,7 @@ fn plan_collects_js_assets_by_canonical_path() {
         .as_slice()]);
 
     assert_eq!(plan.js_assets().len(), 1);
-    assert!(
-        plan.js_assets()
-            .contains_key(&PathBuf::from("/project/lib.js"))
-    );
+    assert!(plan.js_assets().contains_key(&asset_origin));
 }
 
 #[test]
@@ -41,10 +37,10 @@ fn plan_ignores_non_js_assets() {
     let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: PathBuf::from("/project/lib.css"),
-            asset_kind: "css".to_owned(),
-        }),
+        runtime_asset: Some(non_js_runtime_asset_import(
+            "css",
+            PathBuf::from("/project/lib.css"),
+        )),
         required_runtime_imports: vec![],
     }];
 
@@ -84,20 +80,20 @@ fn plan_dedupes_js_assets_across_modules() {
     let mut module_a = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     module_a.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: PathBuf::from("/project/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
+        runtime_asset: Some(js_runtime_asset_import(
+            Path::new("lib.js"),
+            PathBuf::from("/project/lib.js"),
+        )),
         required_runtime_imports: vec![],
     }];
 
     let mut module_b = create_test_module(PathBuf::from("docs/@page.moth"), &mut string_table);
     module_b.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(2),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: PathBuf::from("/project/lib.js"),
-            asset_kind: "js".to_owned(),
-        }),
+        runtime_asset: Some(js_runtime_asset_import(
+            Path::new("lib.js"),
+            PathBuf::from("/project/lib.js"),
+        )),
         required_runtime_imports: vec![],
     }];
 

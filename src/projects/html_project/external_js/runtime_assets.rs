@@ -1,86 +1,101 @@
-//! Runtime asset emission for provider-backed external JavaScript modules.
+//! Provider JS runtime asset identity and registry attachment.
 //!
-//! WHAT: turns module-carried JS runtime asset metadata into ordinary HTML builder outputs.
-//! WHY: external JS files are backend artifacts, not frontend source files. Keeping their
-//!      output naming and passthrough emission here keeps `HtmlProjectBuilder` focused on
-//!      orchestration while preserving a single output path policy for JS assets.
+//! WHAT: declares the stable provider-owned resource identity of one external JS runtime
+//!       asset and attaches its canonical byte source to the shared resource registry.
+//! WHY: external JS files are backend artifacts, not frontend source files. Their identity
+//!      and declared output paths join the shared resource plan and conflict authority, and
+//!      the central writer alone reads their bytes, so this module owns no filesystem reads.
 
-use crate::build_system::build::{FileKind, OutputFile};
-use crate::build_system::output::validate_relative_output_path;
-use crate::build_system::utils::file_error_messages;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::external_js::path_identity::{
-    sanitized_path_stem, stable_path_hash_hex,
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
 };
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
-use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// Emits all provider-backed JS runtime assets from a pre-built emission plan.
+/// Provider kind of the HTML JS lane that owns emitted JS runtime assets.
+pub(crate) const JS_RUNTIME_PROVIDER_KIND: &str = "html-js";
+
+/// Build the stable provider-owned identity of one JS runtime asset.
 ///
-/// WHAT: reads each canonical JS source once and produces a `FileKind::Js` output under
-/// `_moth/js/`.
-/// WHY: the plan already deduplicated by canonical source path, so this function only
-///      handles output-path validation, conflict checks, and filesystem reads.
-pub(crate) fn emit_external_js_runtime_assets(
+/// WHAT: interns a provider resource origin whose logical path is the declared stable output
+///       path under `_moth/js/`, spelled out component-wise from the portable logical source
+///       path. The canonical source path stays a byte-source fact.
+/// WHY: JS runtime assets join the shared resource identity and conflict authority rather
+///      than keying emission on a filesystem `PathBuf`, and they must never emit beside pages.
+pub(crate) fn js_runtime_asset_identity(
+    package: StablePackageIdentity,
+    logical_source_path: &PortableResourcePath,
+    canonical_source_path: PathBuf,
+    authored_import_location: SourceLocation,
+) -> Result<RuntimeAssetIdentity, CompilerError> {
+    let declared_output_path = js_runtime_asset_output_path(logical_source_path);
+    let logical_path = PortableResourcePath::from_relative_logical_path(&declared_output_path)?;
+
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        JS_RUNTIME_PROVIDER_KIND,
+        package,
+    ));
+
+    Ok(RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(owner, logical_path),
+        canonical_source_path,
+        asset_kind: String::from("js"),
+        authored_import_location,
+    })
+}
+
+/// Register every planned JS runtime asset as a byte source of the shared registry.
+///
+/// WHAT: deduplicates the canonical sources, then attaches each provider-owned origin to its
+///       physical source through one preflighted association batch.
+/// WHY: JS assets are deferred resource outputs. The central writer reads their bytes only
+///      after the complete destination preflight has passed, exactly like module-owned
+///      resources.
+pub(crate) fn register_js_runtime_asset_sources(
     plan: &HtmlExternalRuntimeEmissionPlan,
-    occupied_output_paths: &mut HashSet<PathBuf>,
-    string_table: &mut StringTable,
-) -> Result<Vec<OutputFile>, CompilerMessages> {
-    let mut output_files = Vec::with_capacity(plan.js_assets().len());
+    resource_inputs: &mut ResourceInputRegistry,
+) -> Result<(), CompilerError> {
+    let mut associations = Vec::with_capacity(plan.js_assets().len());
 
     for asset in plan.js_assets().values() {
-        let output_path = js_runtime_asset_output_path(&asset.canonical_source_path);
-        validate_relative_output_path(&output_path, string_table)?;
-
-        if !occupied_output_paths.insert(output_path.clone()) {
-            return Err(external_js_asset_conflicts_with_existing_output_error(
-                &asset.canonical_source_path,
-                &output_path,
-                string_table,
-            ));
-        }
-
-        let content = fs::read_to_string(&asset.canonical_source_path).map_err(|error| {
-            file_error_messages(
-                &asset.canonical_source_path,
-                format!(
-                    "Failed to read external JS asset '{}': {error}",
-                    asset.canonical_source_path.display()
-                ),
-                string_table,
-            )
-        })?;
-
-        output_files.push(OutputFile::new(output_path, FileKind::Js(content)));
+        let source = resource_inputs.register_source(asset.canonical_source_path.clone());
+        associations.push(ResourceSourceAssociation {
+            origin: asset.origin.clone(),
+            source,
+        });
     }
 
-    Ok(output_files)
+    let publication = resource_inputs.preflight_resource_source_associations(&associations)?;
+    resource_inputs.reserve_resource_source_associations(&publication);
+    resource_inputs.commit_resource_source_associations(publication);
+
+    Ok(())
 }
 
-fn external_js_asset_conflicts_with_existing_output_error(
-    source_path: &Path,
-    output_path: &Path,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let message = format!(
-        "External JS asset '{}' would emit to '{}' which conflicts with an existing output.",
-        source_path.display(),
-        output_path.display()
-    );
-    CompilerMessages::from_error(CompilerError::compiler_error(message), string_table.clone())
-}
-
-/// Generate a deterministic, collision-resistant output path for a JS runtime asset.
+/// Generate the declared output path for a JS runtime asset.
 ///
-/// WHAT: produces a stable relative path under `_moth/js/` using the source file stem
-/// plus a stable hash of the canonical source path.
-/// WHY: same-named JS files in different directories must not collide, and output names
-/// should remain stable across dev rebuilds for caching/debugging.
-pub(crate) fn js_runtime_asset_output_path(canonical_source_path: &Path) -> PathBuf {
-    let safe_stem = sanitized_path_stem(canonical_source_path, "asset");
-    let hash = stable_path_hash_hex(canonical_source_path);
-    PathBuf::from("_moth/js").join(format!("{safe_stem}-{hash}.js"))
+/// WHAT: joins `_moth/js/` with the portable logical source spelling component by component.
+/// WHY: the mapping is purely structural, so distinct logical sources always produce distinct
+///      output paths without any hash of a machine-local canonical path. `output_path_for_origin`
+///      trusts this contract: a provider origin's logical path is its declared output path.
+fn js_runtime_asset_output_path(logical_source_path: &PortableResourcePath) -> PathBuf {
+    let mut output_path = PathBuf::from("_moth");
+    output_path.push("js");
+
+    for component in logical_source_path.as_str().split('/') {
+        output_path.push(component);
+    }
+
+    output_path
 }
+
+#[cfg(test)]
+#[path = "tests/runtime_asset_identity_tests.rs"]
+mod tests;

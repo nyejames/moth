@@ -7,6 +7,7 @@
 //! synthesis and should remain independently auditable.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -21,9 +22,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     AstDocFragment, AstDocFragmentKind,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::cell::RefCell;
@@ -156,21 +156,19 @@ fn collect_doc_fragments(
                 .into());
             }
         };
-        // Documentation fragments are rendered text metadata; their provenance has no semantic
-        // consumer at this boundary.
+        // Documentation is rendered text metadata. Site-root anchors keep their authored `@/`
+        // spelling. Resource pieces still need a builder URL context, so they stay a concrete-text
+        // diagnostic rather than an internal Phase 4 error.
         let TemplateFoldResult { emission, .. } =
             fold_prepared_template(&prepared, view, &mut fold_context)?;
         let rendered = match emission {
-            TemplateEmission::Output(
-                crate::compiler_frontend::ast::const_values::store::ConstStringValue::Text(value),
-            ) => value,
-            TemplateEmission::Output(
-                crate::compiler_frontend::ast::const_values::store::ConstStringValue::Pieces(_),
-            ) => {
-                return Err(CompilerError::compiler_error(
-                    "Phase 4 owns structural string rendering at the documentation-fragment boundary.",
-                )
-                .into());
+            TemplateEmission::Output(ConstStringValue::Text(value)) => value,
+            TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => {
+                flatten_documentation_string(
+                    pieces,
+                    fold_context.string_table,
+                    template.location.to_owned(),
+                )?
             }
             TemplateEmission::NoOutput => fold_context.string_table.intern(""),
             TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
@@ -204,4 +202,28 @@ fn comment_kind_at_doc_fragment_boundary(
             TemplateType::Comment(kind) => Some(kind),
             _ => None,
         })
+}
+
+fn flatten_documentation_string(
+    pieces: Vec<ConstStringPiece>,
+    string_table: &mut StringTable,
+    location: crate::compiler_frontend::compiler_messages::source_location::SourceLocation,
+) -> Result<crate::compiler_frontend::symbols::string_interning::StringId, TemplateError> {
+    let mut text = String::new();
+    for piece in pieces {
+        match piece {
+            ConstStringPiece::Text(value) => text.push_str(string_table.resolve(value)),
+            ConstStringPiece::SiteRoot => text.push_str("@/"),
+            ConstStringPiece::Resource(_) => {
+                let operation = string_table.intern("documentation fragment");
+                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
+                    Some(operation),
+                    location,
+                )
+                .into());
+            }
+        }
+    }
+    Ok(string_table.get_or_intern(text))
 }

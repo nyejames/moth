@@ -20,7 +20,7 @@ use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOriginId, StableResourceOwnerId,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::diagnostics::{
     resource_output_path_collision_messages, resource_output_path_reserved_messages,
@@ -29,6 +29,7 @@ use crate::projects::html_project::page_metadata::{HtmlPageMetadataPlan, Metadat
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+
 /// The artefact whose URL rules observe one resource-bearing string.
 ///
 /// The current HTML entry pipeline has one explicit page-document context. Stylesheet contexts are
@@ -37,6 +38,8 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResourceUrlContext {
     PageDocument(PathBuf),
+    /// Constructed only by focused tests until the standalone CSS lane exists.
+    #[allow(dead_code)]
     Stylesheet(PathBuf),
 }
 
@@ -46,13 +49,6 @@ impl ResourceUrlContext {
         Ok(Self::PageDocument(path.to_path_buf()))
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn stylesheet(path: &Path) -> Result<Self, CompilerError> {
-        validate_output_path(path, "stylesheet")?;
-        Ok(Self::Stylesheet(path.to_path_buf()))
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn artefact_path(&self) -> &Path {
         match self {
             Self::PageDocument(path) | Self::Stylesheet(path) => path,
@@ -67,6 +63,17 @@ pub(crate) struct PlannedResourceUse {
     pub(crate) authored_location: SourceLocation,
 }
 
+/// The lane through which one output record observes a resource URL use.
+///
+/// Executable uses are HIR-reachable and claim the record's first authored location over
+/// metadata uses. Metadata uses are compile-time fragment and page-metadata observations, which
+/// keep a resource output-planned without an executable reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResourceUseKind {
+    Executable,
+    Metadata,
+}
+
 /// One deduplicated resource output record.
 ///
 /// The record contains no bytes and no content hash. One origin may carry several uses when
@@ -77,22 +84,28 @@ pub(crate) struct PlannedResourceOutput {
     pub(crate) output_path: PathBuf,
     pub(crate) first_authored_location: SourceLocation,
     pub(crate) uses: Vec<PlannedResourceUse>,
-    has_live_use: bool,
+    has_executable_use: bool,
 }
 
 /// Authored locations for one origin, with intern-table fallback last.
+///
+/// `executable` holds HIR-reachable uses. `metadata` holds compile-time fragment and
+/// page-metadata uses, which are output-live but not HIR-reachable.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OriginAuthoredLocations {
-    pub live: Vec<SourceLocation>,
-    pub non_live: Vec<SourceLocation>,
+    pub executable: Vec<SourceLocation>,
+    pub metadata: Vec<SourceLocation>,
     pub fallback: Option<SourceLocation>,
 }
 
-#[derive(Clone, Copy)]
-enum PlannedResourceUseKind {
-    Live,
-    NonLive,
-    Fallback,
+/// One page-observed URL use claimed while planning an origin.
+///
+/// Provider-declared outputs carry no observed use: their placement comes from the
+/// provider's declared stable output path rather than a rendered reference.
+#[derive(Clone)]
+struct ObservedResourceUse {
+    context: ResourceUrlContext,
+    kind: ResourceUseKind,
 }
 
 /// Byte-free HTML resource plan accumulated across all selected entries.
@@ -101,6 +114,8 @@ pub(crate) struct HtmlResourceOutputPlan {
     project_name: String,
     records: Vec<PlannedResourceOutput>,
     record_by_output: HashMap<OutputPathIdentity, usize>,
+    /// Direct origin index for renderer lookups; `record_by_output` owns collision detection.
+    record_by_origin: HashMap<StableResourceOriginId, usize>,
     builder_output_paths: HashMap<OutputPathIdentity, StringId>,
 }
 
@@ -179,23 +194,21 @@ impl HtmlResourceOutputPlan {
         first_authored_location: SourceLocation,
         context: ResourceUrlContext,
         string_table: &mut StringTable,
-        is_live_use: bool,
+        use_kind: ResourceUseKind,
     ) -> Result<(), CompilerMessages> {
         let output_path = self
             .output_path_for_origin(&origin)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        let use_kind = if is_live_use {
-            PlannedResourceUseKind::Live
-        } else {
-            PlannedResourceUseKind::NonLive
+        let observed_use = ObservedResourceUse {
+            context,
+            kind: use_kind,
         };
         self.plan_one_origin(
             origin,
             output_path,
             first_authored_location,
-            context,
+            Some(observed_use),
             string_table,
-            use_kind,
         )
     }
 
@@ -211,14 +224,44 @@ impl HtmlResourceOutputPlan {
                 resource_use.authored_location.clone(),
                 context.clone(),
                 string_table,
-                false,
+                ResourceUseKind::Metadata,
             )?;
         }
         Ok(())
     }
 
-    pub(crate) fn records(&self) -> &[PlannedResourceOutput] {
-        &self.records
+    /// Plan one provider-owned runtime asset origin into the shared byte-free plan.
+    ///
+    /// Provider assets have no page-observed URL use: the provider's declared output path is
+    /// the stable placement contract. Planning the origin still rejects collisions with
+    /// every other planned origin and reserved builder path before any byte read.
+    pub(crate) fn plan_provider_runtime_asset(
+        &mut self,
+        origin: StableResourceOriginId,
+        first_authored_location: SourceLocation,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        let output_path = self
+            .output_path_for_origin(&origin)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+        self.plan_one_origin(
+            origin,
+            output_path,
+            first_authored_location,
+            None,
+            string_table,
+        )
+    }
+
+    /// Look up one planned record directly by its stable resource origin.
+    pub(crate) fn record_for_origin(
+        &self,
+        origin: &StableResourceOriginId,
+    ) -> Option<&PlannedResourceOutput> {
+        self.record_by_origin
+            .get(origin)
+            .map(|&record_index| &self.records[record_index])
     }
 
     /// Consume the plan into its records for a writer-owned handoff.
@@ -245,37 +288,40 @@ impl HtmlResourceOutputPlan {
                 .output_path_for_origin(origin)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-            for authored_location in &authored_locations.live {
+            for authored_location in &authored_locations.executable {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
                     authored_location.clone(),
-                    context.clone(),
+                    Some(ObservedResourceUse {
+                        context: context.clone(),
+                        kind: ResourceUseKind::Executable,
+                    }),
                     string_table,
-                    PlannedResourceUseKind::Live,
                 )?;
             }
 
-            for authored_location in &authored_locations.non_live {
+            for authored_location in &authored_locations.metadata {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
                     authored_location.clone(),
-                    context.clone(),
+                    Some(ObservedResourceUse {
+                        context: context.clone(),
+                        kind: ResourceUseKind::Metadata,
+                    }),
                     string_table,
-                    PlannedResourceUseKind::NonLive,
                 )?;
             }
 
-            if authored_locations.live.is_empty() && authored_locations.non_live.is_empty() {
+            if authored_locations.executable.is_empty() && authored_locations.metadata.is_empty() {
                 if let Some(fallback) = &authored_locations.fallback {
                     self.plan_one_origin(
                         origin.clone(),
                         output_path,
                         fallback.clone(),
-                        context.clone(),
+                        None,
                         string_table,
-                        PlannedResourceUseKind::Fallback,
                     )?;
                 } else {
                     let error = CompilerError::compiler_error(format!(
@@ -294,9 +340,8 @@ impl HtmlResourceOutputPlan {
         origin: StableResourceOriginId,
         output_path: PathBuf,
         first_authored_location: SourceLocation,
-        context: ResourceUrlContext,
+        observed_use: Option<ObservedResourceUse>,
         string_table: &mut StringTable,
-        use_kind: PlannedResourceUseKind,
     ) -> Result<(), CompilerMessages> {
         let output_identity = validate_output_path(&output_path, "resource")
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
@@ -313,24 +358,23 @@ impl HtmlResourceOutputPlan {
                 ));
             }
 
-            match use_kind {
-                PlannedResourceUseKind::Live if !record.has_live_use => {
-                    record.first_authored_location = first_authored_location.clone();
-                    record.has_live_use = true;
+            if let Some(observed_use) = observed_use {
+                match observed_use.kind {
+                    ResourceUseKind::Executable => {
+                        if !record.has_executable_use {
+                            record.first_authored_location = first_authored_location.clone();
+                            record.has_executable_use = true;
+                        }
+                    }
+                    ResourceUseKind::Metadata => {
+                        if !record.has_executable_use && record.uses.is_empty() {
+                            record.first_authored_location = first_authored_location.clone();
+                        }
+                    }
                 }
-                PlannedResourceUseKind::NonLive
-                    if !record.has_live_use && record.uses.is_empty() =>
-                {
-                    record.first_authored_location = first_authored_location.clone();
-                }
-                PlannedResourceUseKind::Live
-                | PlannedResourceUseKind::NonLive
-                | PlannedResourceUseKind::Fallback => {}
-            }
 
-            if !matches!(use_kind, PlannedResourceUseKind::Fallback) {
                 let use_record = PlannedResourceUse {
-                    context,
+                    context: observed_use.context.clone(),
                     authored_location: first_authored_location,
                 };
                 if !record.uses.contains(&use_record) {
@@ -352,20 +396,24 @@ impl HtmlResourceOutputPlan {
         }
 
         let record_index = self.records.len();
-        let uses = if matches!(use_kind, PlannedResourceUseKind::Fallback) {
-            Vec::new()
-        } else {
-            vec![PlannedResourceUse {
-                context,
-                authored_location: first_authored_location.clone(),
-            }]
-        };
+        let has_executable_use = observed_use
+            .as_ref()
+            .is_some_and(|observed_use| observed_use.kind == ResourceUseKind::Executable);
+        let uses = observed_use
+            .map(|observed_use| {
+                vec![PlannedResourceUse {
+                    context: observed_use.context,
+                    authored_location: first_authored_location.clone(),
+                }]
+            })
+            .unwrap_or_default();
+        self.record_by_origin.insert(origin.clone(), record_index);
         self.records.push(PlannedResourceOutput {
             origin,
             output_path,
             first_authored_location,
             uses,
-            has_live_use: matches!(use_kind, PlannedResourceUseKind::Live),
+            has_executable_use,
         });
         self.record_by_output.insert(output_identity, record_index);
         Ok(())
@@ -428,8 +476,8 @@ fn first_authored_locations(
             locations
                 .entry(resource.origin.clone())
                 .or_insert_with(|| OriginAuthoredLocations {
-                    live: Vec::new(),
-                    non_live: Vec::new(),
+                    executable: Vec::new(),
+                    metadata: Vec::new(),
                     fallback: Some(resource.first_authored_location.clone()),
                 });
         }
@@ -451,7 +499,7 @@ fn record_reachable_resource_locations(
         locations
             .entry(resource.origin.clone())
             .or_default()
-            .live
+            .executable
             .push(resource_use.location.clone());
     }
 
@@ -472,7 +520,7 @@ fn record_const_fragment_resource_locations(
                 locations
                     .entry(origin.clone())
                     .or_default()
-                    .non_live
+                    .metadata
                     .push(fragment.location.clone());
             }
         }
@@ -492,9 +540,7 @@ fn package_relative_path(module_path: &str, resource_path: &str) -> PathBuf {
 ///
 /// Hex encoding keeps the prefix portable while making both the package origin and canonical name
 /// injective. Consumer aliases never enter this identity.
-pub(crate) fn package_output_prefix(
-    package: &crate::compiler_frontend::semantic_identity::StablePackageIdentity,
-) -> PathBuf {
+pub(crate) fn package_output_prefix(package: &StablePackageIdentity) -> PathBuf {
     let mut encoded_name = String::from("p");
     for byte in package.name().as_bytes() {
         let _ = write!(encoded_name, "{byte:02x}");
@@ -515,6 +561,7 @@ fn package_origin_tag(origin: PackageOrigin) -> &'static str {
         PackageOrigin::Dependency => "dependency",
     }
 }
+
 fn validate_output_path(
     output_path: &Path,
     artefact_kind: &str,

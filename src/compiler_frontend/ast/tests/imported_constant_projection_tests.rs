@@ -247,7 +247,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     );
 
     let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
-    assert!(consumer_materialiser.module_resources.is_empty());
+    assert!(consumer_materialiser.module_resources.origins().is_empty());
     let consumer_string_type_id = consumer_materialiser.type_environment.builtins().string;
     let mut consumer_string_table = StringTable::new();
     let materialised = materialize_public_folded_value(

@@ -49,7 +49,7 @@
 
 mod compilation;
 pub(crate) mod compiled_boundary;
-mod file_reference_resolution;
+pub(crate) mod file_reference_resolution;
 pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;
 pub(crate) mod module_identity;

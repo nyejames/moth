@@ -1069,8 +1069,7 @@ pub(crate) struct ProjectLinkedModule<'a> {
 #[derive(Clone)]
 pub(crate) struct ProjectEntry<'a> {
     pub(crate) module: &'a Module,
-    /// Exact stable-origin union owned by this entry's selected reachability and fragments.
-    #[allow(dead_code)] // entry resource union is reserved for a later output backend handoff
+    /// Exact stable-origin union consumed by the HTML resource planner.
     pub(crate) resource_union: &'a ResourceOriginUnion,
     pub(crate) reachability: &'a HirReachability,
     pub(crate) external_imports: &'a [ModuleExternalImport],

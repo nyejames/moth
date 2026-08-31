@@ -5,16 +5,19 @@
 //! WHY: `@web/canvas` is a JS-only built-in binding package that shares the same parser, registry,
 //!      and emission path as project-local `.js` imports.
 
-use crate::builder_surface::external_import_providers::provider::{
-    BuilderRuntimePackageMetadata, RuntimeAssetIdentity,
-};
+use crate::builder_surface::PackageOrigin;
+use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
+use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::projects::html_project::external_js::package_registration::{
     register_parsed_js_module, required_runtime_imports_from_parsed,
 };
 use crate::projects::html_project::external_js::parser::parse_js_module;
+use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Registers the built-in `@web/canvas` package in the external package registry.
 ///
@@ -49,14 +52,17 @@ pub fn register_web_canvas_package(
 
     let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
 
-    let canonical_source_path = canvas_js_path();
+    let runtime_asset = js_runtime_asset_identity(
+        StablePackageIdentity::binding(PackageOrigin::Builder, "@web/canvas"),
+        &canvas_logical_source_path(),
+        canvas_js_path(),
+        SourceLocation::default(),
+    )
+    .expect("built-in canvas asset identity is a proven internal invariant");
 
     BuilderRuntimePackageMetadata {
         package_id,
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path,
-            asset_kind: "js".to_owned(),
-        }),
+        runtime_asset: Some(runtime_asset),
         required_runtime_imports,
     }
 }
@@ -64,4 +70,9 @@ pub fn register_web_canvas_package(
 fn canvas_js_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src/projects/html_project/binding_packages/web/canvas/canvas.js")
+}
+
+fn canvas_logical_source_path() -> PortableResourcePath {
+    PortableResourcePath::from_relative_logical_path(Path::new("canvas.js"))
+        .expect("built-in canvas logical source path is a proven internal invariant")
 }

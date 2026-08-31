@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Dense module-local handle for one resolved resource origin.
@@ -148,26 +149,17 @@ impl ModuleResourceTable {
     pub(crate) fn resource_source_associations(&self) -> &[ResourceSourceAssociation] {
         &self.source_associations
     }
+
     /// Every resolved origin currently owned by this module, in interning order.
-    ///
-    /// This is the module-owned identity view used by focused table diagnostics.
-    #[allow(dead_code)] // focused table diagnostics inspect current ownership
     pub(crate) fn origins(&self) -> &[ModuleResourceOrigin] {
         &self.origins
     }
-    /// Whether this module currently owns no resolved resource origins.
-    #[allow(dead_code)] // focused table diagnostics inspect current ownership
-    pub(crate) fn is_empty(&self) -> bool {
-        self.origins.is_empty()
-    }
+
     /// Remap source-location string IDs after this table's owning module joins a string table.
     ///
     /// Resource identity and dense handles are module-local and never change; only diagnostic
     /// provenance carries interned IDs across the remap boundary.
-    pub(crate) fn remap_string_ids(
-        &mut self,
-        remap: &crate::compiler_frontend::symbols::string_interning::StringIdRemap,
-    ) {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for origin in &mut self.origins {
             origin.first_authored_location.remap_string_ids(remap);
         }

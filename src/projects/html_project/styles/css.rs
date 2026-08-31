@@ -579,3 +579,7 @@ fn advance_scan_state(state: &mut ScanState, chars: &[char], index: &mut usize) 
 
     false
 }
+
+#[cfg(test)]
+#[path = "../../../compiler_frontend/ast/templates/tests/css_tests.rs"]
+mod css_tests;

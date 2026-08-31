@@ -25,11 +25,11 @@ The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensi
 
 ### Ordinary Markdown links versus Moth md links
 
-In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or tracked as assets.
+In plain Markdown, links use ordinary Markdown syntax. The href and src values are rendered literally. They are not rewritten or treated as resources.
 
 In Moth's md renderer (used by moth template files), at-path link syntax creates Moth-aware links. This syntax is not available in plain Markdown.
 
-Moth-aware link targets are still URLs rather than resource paths, so they are never resolved, copied or tracked. The one thing the renderer supplies is the site root: a target beginning with a single `/` renders through the configured `origin`. Every other target renders literally.
+Moth-aware link targets are still URLs rather than resource paths, so they are never resolved, copied or watched. The one thing the renderer supplies is the site root: a target beginning with a single `/` renders through the configured `origin`. Every other target renders literally.
 
 ### Renderer configuration
 

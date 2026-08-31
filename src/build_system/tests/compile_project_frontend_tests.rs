@@ -10,6 +10,7 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -20,7 +21,12 @@ use crate::compiler_frontend::external_packages::{
     ExternalTypeId, ExternalTypeSpec,
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
 use crate::compiler_frontend::public_call_summary::PublicCallMutationEffect;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1422,6 +1428,25 @@ fn register_dummy_package(
         .map_err(|error| provider_error_to_messages(error, context.string_table))
 }
 
+/// Build one JS runtime asset fixture whose origin carries a stable provider owner.
+fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdentity {
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        "html-js",
+        StablePackageIdentity::binding(PackageOrigin::ProjectLocal, "@test/fixtures"),
+    ));
+
+    RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(
+            owner,
+            PortableResourcePath::from_portable_spelling("_moth/js/fixture.js".to_owned())
+                .expect("fixture asset logical path should be valid"),
+        ),
+        canonical_source_path,
+        asset_kind: "js".to_owned(),
+        authored_import_location: SourceLocation::default(),
+    }
+}
+
 fn register_dummy_widget_type(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
@@ -1621,10 +1646,9 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
             package_id,
             exported_types: Vec::new(),
             exported_free_functions: vec![draw_function_id],
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: request.canonical_source_path.clone(),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(fixture_dummy_js_runtime_asset(
+                request.canonical_source_path.clone(),
+            )),
             diagnostics: Vec::new(),
             required_runtime_imports: Vec::new(),
         }))

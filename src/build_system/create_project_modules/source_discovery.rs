@@ -30,6 +30,7 @@ use crate::compiler_frontend::paths::path_normalization::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_resolution::ResolvedDependencyFile;
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -1482,14 +1483,20 @@ fn invoke_provider_and_record_resolution(
         return Ok(());
     }
 
+    // The provider request carries the portable logical spelling so stable package and asset
+    // identity never keys on this machine's checkout path.
+    let logical_source = request
+        .project_path_resolver
+        .logical_path_for_canonical_file(&canonical_source_path, string_table)
+        .map_err(SourceDiscoveryError::from)?;
+    let logical_source_path = PortableResourcePath::from_relative_logical_path(&logical_source)
+        .map_err(SourceDiscoveryError::from)?;
+
     let provider_request = ExternalImportRequest {
         import_path: request.import_path.to_portable_string(string_table),
+        logical_source_path,
         canonical_source_path: canonical_source_path.clone(),
-        source_location:
-            crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-                request.consumer_canonical_path,
-                string_table,
-            ),
+        source_location: SourceLocation::from_path(request.consumer_canonical_path, string_table),
     };
 
     let result = {

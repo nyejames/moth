@@ -194,6 +194,48 @@ fn js_text(output: &OutputFile) -> &str {
     }
 }
 
+/// The one deferred output matching the built-in canvas asset path, proving exactly one exists.
+#[track_caller]
+fn deferred_canvas_output_path(project: &Project) -> String {
+    let mut matches: Vec<String> = project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .filter(|path| path.starts_with("_moth/js/canvas.js"))
+        .collect();
+
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one deferred built-in canvas asset, got: {matches:?}"
+    );
+    matches.remove(0)
+}
+
+/// Read one deferred resource through the shared registry, as the central writer does.
+#[track_caller]
+fn deferred_resource_text(
+    project: &mut Project,
+    relative_path: &str,
+    string_table: &mut StringTable,
+) -> String {
+    let source_id = project
+        .deferred_resources
+        .iter()
+        .find(|resource| portable_path_text(&resource.relative_output_path) == relative_path)
+        .map(|resource| resource.source_id)
+        .unwrap_or_else(|| panic!("expected a deferred resource at '{relative_path}'"));
+
+    let bytes = project
+        .resource_inputs
+        .read_source(source_id, string_table)
+        .unwrap_or_else(|error| {
+            panic!("deferred resource '{relative_path}' should read from its source: {error:?}")
+        });
+
+    String::from_utf8(bytes.to_vec()).expect("deferred JS resource text should be UTF-8")
+}
+
 mod built_outputs_tests {
     use super::*;
     use crate::compiler_tests::test_support::assert_panics_with;
@@ -424,19 +466,27 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         "the page should import the emitted glue module '{glue_path}': {html}"
     );
 
-    // The provider module is emitted once and the glue imports it.
-    let provider_path = outputs
-        .exactly_one_path("provider JS module", |path| {
-            path.starts_with("_moth/js/drawing-")
-        })
-        .to_owned();
-    let provider_file = provider_path
+    // The provider module is a deferred resource output planned at its declared stable path,
+    // and the glue imports that same final component.
+    let provider_paths: Vec<String> = result
+        .project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .filter(|path| path.starts_with("_moth/js/drawing.js"))
+        .collect();
+    assert_eq!(
+        provider_paths.len(),
+        1,
+        "expected exactly one deferred provider JS module, got: {provider_paths:?}"
+    );
+    let provider_file = provider_paths[0]
         .rsplit('/')
         .next()
         .expect("a portable path always has a final component");
     assert!(
         glue.contains(&format!("from \"../{provider_file}\"")),
-        "the glue should import the emitted provider module '{provider_file}': {glue}"
+        "the glue should import the deferred provider module '{provider_file}': {glue}"
     );
 }
 
@@ -621,7 +671,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.none_matching("built-in canvas asset", |path| {
-        path.starts_with("_moth/js/canvas-")
+        path.starts_with("_moth/js/canvas.js")
     });
     outputs.none_matching("generated glue module", |path| {
         path.starts_with(GLUE_MODULE_PREFIX)
@@ -629,6 +679,18 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     outputs.none_matching("runtime module", |path| {
         path.starts_with("_moth/js/runtime/")
     });
+
+    assert!(
+        !result
+            .project
+            .deferred_resources
+            .iter()
+            .any(
+                |resource| portable_path_text(&resource.relative_output_path)
+                    .starts_with("_moth/js/canvas.js")
+            ),
+        "an unreachable canvas helper should not defer a canvas asset output"
+    );
 
     let html = html_text(outputs.at("index.html"));
     assert!(html.contains("<canvas"));
@@ -656,10 +718,22 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     )
     .expect("@web/canvas should build through generated glue");
 
+    let mut result = result;
+    let canvas_output_path = deferred_canvas_output_path(&result.project);
+    let canvas_asset = deferred_resource_text(
+        &mut result.project,
+        &canvas_output_path,
+        &mut result.string_table,
+    );
+
     let outputs = BuiltOutputs::index(&result.project);
-    let canvas_asset = js_text(outputs.exactly_one("built-in canvas asset", |path| {
-        path.starts_with("_moth/js/canvas-")
-    }));
+    assert!(
+        !outputs
+            .paths()
+            .iter()
+            .any(|path| path.starts_with("_moth/js/canvas.js")),
+        "the built-in canvas asset must be a deferred resource, not an eager artifact"
+    );
     assert!(canvas_asset.contains("export function getCanvas"));
     assert!(canvas_asset.contains("@moth.opaque Canvas2d"));
     assert!(canvas_asset.contains("@moth.opaque CanvasGradient"));
@@ -675,7 +749,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     assert!(glue.contains("addColorStop as __moth_external_fn"));
     assert!(glue.contains("setFillGradient as __moth_external_fn"));
     assert!(
-        glue.contains("from \"../canvas-"),
+        glue.contains("from \"../canvas.js\""),
         "glue imports should be relative to the glue module"
     );
 
@@ -709,17 +783,28 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     .expect("should write page");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let result = build_project(
+    let mut result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
     )
     .expect("reachable @html canvas helper should build through generated glue");
 
+    let canvas_output_path = deferred_canvas_output_path(&result.project);
+    let canvas_asset = deferred_resource_text(
+        &mut result.project,
+        &canvas_output_path,
+        &mut result.string_table,
+    );
+
     let outputs = BuiltOutputs::index(&result.project);
-    let canvas_asset = js_text(outputs.exactly_one("built-in canvas asset", |path| {
-        path.starts_with("_moth/js/canvas-")
-    }));
+    assert!(
+        !outputs
+            .paths()
+            .iter()
+            .any(|path| path.starts_with("_moth/js/canvas.js")),
+        "the built-in canvas asset must be a deferred resource, not an eager artifact"
+    );
     assert!(canvas_asset.contains("export function getCanvas"));
     assert!(canvas_asset.contains("export function context2d"));
 
@@ -729,7 +814,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     assert!(glue.contains("getCanvas as __moth_external_fn"));
     assert!(glue.contains("context2d as __moth_external_fn"));
     assert!(
-        glue.contains("from \"../canvas-"),
+        glue.contains("from \"../canvas.js\""),
         "glue imports should be relative to the glue module"
     );
 

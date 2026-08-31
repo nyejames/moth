@@ -169,7 +169,7 @@ body {
     </style>
 <style>@font-face {
     font-family: "Computer Modern Sans";
-    src: url("/moth/fonts/cmunss.woff2") format("woff2");
+    src: url("../../styles/fonts/cmunss.woff2") format("woff2");
     font-style: normal;
     letter-spacing: 10em;
     font-weight: 400;
@@ -582,7 +582,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Supported</td>
  <td style="padding: 0.1em 0.5em; "> Broad extensionless dependency, direct alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension and module-root rejection coverage.</td>
  <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
- <td style="padding: 0.1em 0.5em; "> <code>.md</code> files are plain Markdown content assets that render to HTML at compile time and synthesize one private <code>content #String</code> constant. They do not parse Moth dependency clauses, declarations, interpolation, templates, frontmatter, metadata or same-directory module-root scope. Links/images render literally and are not tracked assets in V1.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>.md</code> files are plain Markdown content assets that render to HTML at compile time and synthesize one private <code>content #String</code> constant. They do not parse Moth dependency clauses, declarations, interpolation, templates, frontmatter, metadata or same-directory module-root scope. Links/images render literally and are not resource outputs in V1.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -859,10 +859,10 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> File paths in value position</td>
- <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> Targeted</td>
+ <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Broad prepared-reference and Stage 0 physical-input resolution, fixed-point content discovery, AST String/file-kind semantics, structural Resource/SiteRoot flow, public/generated/service boundaries, provider JS identity, output-link planning, boundary, symlink, missing-watch, config-rejection and ordinary user-defined <code>Path</code> coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / HTML builder</td>
- <td style="padding: 0.1em 0.5em; "> Accepted design only. The accepted surface is an explicit-extension path in expression position evaluating to a <code>String</code>: <code>.mtf</code> and <code>.md</code> give that file's compiler-owned content, any other accepted file gives a resource-bearing string, and <code>.moth</code> has no file value. Every authored file path is graph-active before reachability, filesystem resolution happens once before AST, and resource and site-root anchors stay structural through folded values, TIR and HIR until a builder assigns output placement and a URL context. The site root is spelled bare <code>@/</code> in expression position and as a single-slash Moth-aware Markdown link target. There is no source-visible <code>Path</code> type. What exists today is the legacy compile-time path literal: it resolves and validates one regular file, renders eagerly through the configured origin, and the HTML builder reconstructs tracked assets from module-wide rendered-path metadata. Direct <code>.mtf</code> and <code>.md</code> file values do not exist yet, and only top-level dependency clauses contribute graph edges. A <code>Path</code> type annotation still parses from an earlier superseded direction, but no expression can produce a value for it; the redirect removes that spelling. Current fixtures cover file existence, missing targets, directory rejection, origin rendering, project-root escape and template-head use. The current lane renders the bare <code>@/</code> site root eagerly through the configured origin, but still renders Moth-aware Markdown link targets literally, so it lags the accepted site-root URL contract. Complete when graph-active file references, one-time Stage 0 resolution, structural strings and build-owned resource link planning replace that lane.</td>
+ <td style="padding: 0.1em 0.5em; "> Every physical-target-bearing non-dependency path token is classified during retained preparation and resolved once during Stage 0. Referenced <code>.mtf</code> and <code>.md</code> sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; <code>SourceKindNoFileValue</code> for <code>.moth</code> plus extensionless and site-root rows remain no-physical-target outcomes for AST. AST interprets published outcomes as ordinary <code>String</code> values, including structural Resource/SiteRoot pieces. Direct <code>.mtf</code> compilation consumes the same Stage 0 facts, provider JS assets share resource identity and IO authority, and CSS validation preserves opaque anchors. Config bootstrap rejects file-value paths. The superseded source-visible <code>Path</code> type is gone, so <code>Path</code> is an ordinary user identifier.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -876,9 +876,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> HTML project builds</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad routing, API-only artifact filtering, document shell, metadata, tracked asset, config, output cleanup, external JS glue, and page-fragment coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad routing, API-only artifact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage.</td>
  <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
- <td style="padding: 0.1em 0.5em; "> This is the release-critical project backend. Only roots with HTML artifact activity participate in page, runtime asset, tracked asset, and homepage planning. HTML-Wasm behavior is tracked under experimental surfaces.</td>
+ <td style="padding: 0.1em 0.5em; "> This is the release-critical project backend. Only roots with HTML artifact activity participate in page, runtime asset, resource-output and homepage planning. HTML-Wasm behavior is tracked under experimental surfaces.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

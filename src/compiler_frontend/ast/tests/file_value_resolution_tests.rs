@@ -135,7 +135,7 @@ fn bare_site_root_file_value_folds_to_one_site_root_piece() {
         [ConstStringPiece::SiteRoot],
     );
     assert!(
-        module_resources.borrow().is_empty(),
+        module_resources.borrow().origins().is_empty(),
         "site root should not intern a resource origin"
     );
 }
@@ -263,7 +263,7 @@ fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero
 fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() {
     // Stage 0 owns the module-boundary verdict, so this fixture hands the value lane the settled
     // rejection row directly. The value site must surface Stage 0's diagnostic verbatim instead
-    // of resolving, inventing a target or falling back to the eager rendered-path lane.
+    // of resolving the path or inventing a target.
     let mut boundary_strings = StringTable::new();
     let result = resolve_file_value_fixture(
         "@child/existing.mtf",

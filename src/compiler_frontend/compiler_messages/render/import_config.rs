@@ -549,6 +549,21 @@ pub(crate) fn duplicate_moth_template_input_path_message(
     )
 }
 
+pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
+    first_path: &InternedPath,
+    second_path: &InternedPath,
+    string_table: &StringTable,
+) -> String {
+    let first_path = first_path.to_portable_string(string_table);
+    let second_path = second_path.to_portable_string(string_table);
+    format!(
+        "Moth template inputs `{first_path}` and `{second_path}` share no common ancestor \
+         directory, so their portable module identities cannot be derived.\n\
+         Pass file inputs that live under one common directory, or give every in-memory source \
+         a consistent relative display path."
+    )
+}
+
 pub(crate) fn unsupported_external_extension_message(
     path: &InternedPath,
     extension: StringId,

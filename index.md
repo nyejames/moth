@@ -62,13 +62,12 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
   - [file_references.rs](src/compiler_frontend/paths/file_references.rs): prepared non-dependency path classification and the keyed, remappable Stage 0 resolved-reference handoff consumed by module semantics.
   - [resource_identity.rs](src/compiler_frontend/paths/resource_identity.rs): portable owner-relative resource paths and stable module/provider resource origins. kw: StableResourceOriginId, PortableResourcePath.
   - [module_resources.rs](src/compiler_frontend/paths/module_resources.rs): module-local dense resource origin table. kw: ResourceId, ModuleResourceOrigin.
-  - [site_root.rs](src/compiler_frontend/paths/site_root.rs): site-root URL rendering for the bare `@/` spelling. kw: render_site_root_url, origin.
 - [source_packages](src/compiler_frontend/source_packages/): package-root registration and public dependency boundaries.
 - [semantic_identity.rs](src/compiler_frontend/semantic_identity.rs): stable package, module, declaration, trait, evidence and callable origin identities plus `ExportBinding`.
 - [canonical_type_identity.rs](src/compiler_frontend/canonical_type_identity.rs): owned cross-module identities and fallible `TypeId` projection for builtin, source nominal, binding-backed opaque, constructed and exported generic-parameter type shapes.
 - [public_interface/](src/compiler_frontend/public_interface/): declaration-centric direct-interface model, export/type/receiver/trait/evidence projection and post-borrow local finalization. kw: `DirectExportSeed`, `CallableSeed`, `PublicInterfaceDraft`, `LocalPublicInterface`.
 - [folded_value.rs](src/compiler_frontend/folded_value.rs): one owned backend-neutral folded-value vocabulary and converter shared by exported constants and retained defaults.
-- [module_metadata.rs](src/compiler_frontend/module_metadata.rs): named HIR-lowering result, resolved documentation metadata, rendered-path handoff and non-HIR metadata validation.
+- [module_metadata.rs](src/compiler_frontend/module_metadata.rs): named HIR-lowering result, resolved documentation metadata, structural resource handoff and non-HIR metadata validation.
 - [external_packages](src/compiler_frontend/external_packages/): virtual package registry, external IDs. kw: @core, @web, opaque.
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.

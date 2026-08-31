@@ -11,6 +11,7 @@
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationContext, ModuleMaterialisationPreparation,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 
 use rustc_hash::FxHashMap;
@@ -33,33 +34,79 @@ pub(crate) struct ProviderMaterialisationRegistry {
 }
 
 impl ProviderMaterialisationRegistry {
-    /// Record one published declaring context for a generic declaration it owns.
+    /// Diagnose a declaring-context collision without mutating the registry.
+    ///
+    /// Re-publishing the same declaring context and template row is idempotent.
+    pub(crate) fn preflight_publish(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+        context: &Arc<ModuleMaterialisationContext>,
+        template_index: usize,
+    ) -> Result<(), CompilerError> {
+        if let Some(existing) = self.published.get(identity) {
+            if Arc::ptr_eq(&existing.context, context) && existing.template_index == template_index
+            {
+                return Ok(());
+            }
+
+            return Err(CompilerError::compiler_error(format!(
+                "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
+                identity
+            )));
+        }
+        Ok(())
+    }
+
+    /// Preflight and record one published declaring context for a generic declaration it owns.
     ///
     /// WHY: within one lane an identity resolves to exactly one declaring context, and each lane
     ///      proves that before publishing here: the module store rejects an identity published by
     ///      two materialisation contexts, and the package registry rejects one published by two
-    ///      packages. Neither proof sees the other lane, so a cross-lane collision does reach this
-    ///      insert and replaces the package seed with the project module. That is the resolution
-    ///      the pre-registry lookup produced for the same collision, and
-    ///      `ProjectFrontendCompilation::new` rejects the pair at the boundary handoff — but it
-    ///      runs after the boundary has compiled, so it is not a preflight for this call.
+    ///      packages. Neither proof sees the other lane, so a cross-lane collision can reach this
+    ///      call. Diagnose it here instead of allowing the later publication to replace the
+    ///      earlier one and deferring the error until the boundary handoff.
     ///
-    /// Seeding completed packages before any module publishes is therefore load-bearing: reversing
-    /// that order would change which context a colliding identity resolves to for the rest of the
-    /// boundary.
+    /// Re-publishing the same declaring context and template row is idempotent.
     pub(crate) fn publish(
         &mut self,
         identity: GeneratedDeclarationIdentity,
         context: Arc<ModuleMaterialisationContext>,
         template_index: usize,
-    ) {
-        self.published.insert(
-            identity,
-            PublishedMaterialisation {
+    ) -> Result<(), CompilerError> {
+        self.preflight_publish(&identity, &context, template_index)?;
+        self.published
+            .entry(identity)
+            .or_insert(PublishedMaterialisation {
                 context,
                 template_index,
-            },
-        );
+            });
+        Ok(())
+    }
+
+    /// Record every declaring row from one context, or leave the registry unchanged.
+    pub(crate) fn publish_context(
+        &mut self,
+        context: &Arc<ModuleMaterialisationContext>,
+    ) -> Result<(), CompilerError> {
+        let rows: Vec<_> = context.declaration_rows().collect();
+        let mut pending = FxHashMap::default();
+        for (identity, template_index) in &rows {
+            self.preflight_publish(identity, context, *template_index)?;
+            if let Some(&existing_index) = pending.get(identity) {
+                if existing_index != *template_index {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
+                        identity
+                    )));
+                }
+            } else {
+                pending.insert(*identity, *template_index);
+            }
+        }
+        for (identity, template_index) in rows {
+            self.publish(identity.clone(), Arc::clone(context), template_index)?;
+        }
+        Ok(())
     }
 
     fn published_template(

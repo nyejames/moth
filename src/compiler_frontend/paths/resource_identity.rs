@@ -25,8 +25,8 @@ use std::path::Path;
 /// the same logical resource compare differently across checkout roots and path separators.
 ///
 /// Construction is total. Empty paths and paths whose final component carries no explicit
-/// extension are internal invariant violations rather than diagnostics: the AST resource
-/// classifier reports those authoring mistakes with source context before identity is built.
+/// extension are internal invariant violations rather than diagnostics: prepared file-reference
+/// classification reports those authoring mistakes with source context before identity is built.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct PortableResourcePath {
     spelling: String,
@@ -50,7 +50,8 @@ impl PortableResourcePath {
         if !has_explicit_extension(&spelling) {
             return Err(CompilerError::compiler_error(format!(
                 "resource path {spelling:?} has no explicit extension on its final component; \
-                 extension validation is an AST diagnostic that runs before identity construction"
+                 extension validation is a file-reference diagnostic that runs before identity \
+                 construction"
             )));
         }
 
@@ -61,6 +62,7 @@ impl PortableResourcePath {
     pub(crate) fn as_str(&self) -> &str {
         &self.spelling
     }
+
     /// Rebuild a resource path from its already-portable forward-slash spelling.
     ///
     /// Persistent generic materialisation has no filesystem path to pass back through the
@@ -101,7 +103,6 @@ pub(crate) struct StableProviderResourceOwnerId {
 }
 
 impl StableProviderResourceOwnerId {
-    #[allow(dead_code)] // provider-owned resources are not interned until provider emission
     pub(crate) fn new(provider_kind: &str, package: StablePackageIdentity) -> Self {
         Self {
             provider_kind: provider_kind.to_owned(),
@@ -125,7 +126,6 @@ impl StableProviderResourceOwnerId {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum StableResourceOwnerId {
     Module(StableModuleOriginIdentity),
-    #[allow(dead_code)] // provider-owned resources are not interned until provider emission
     Provider(StableProviderResourceOwnerId),
 }
 

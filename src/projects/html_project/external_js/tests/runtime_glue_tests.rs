@@ -14,9 +14,11 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
-use crate::projects::html_project::tests::test_support::create_test_module;
+use crate::projects::html_project::tests::test_support::{
+    create_test_module, js_runtime_asset_import,
+};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn relative_url_path_same_directory() {
@@ -84,12 +86,10 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
-            runtime_asset: Some(
-                crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
-                    canonical_source_path: PathBuf::from("/project/lib.js"),
-                    asset_kind: "js".to_owned(),
-                },
-            ),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
             required_runtime_imports: Vec::new(),
         },
     );
@@ -122,12 +122,10 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
-            runtime_asset: Some(
-                crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
-                    canonical_source_path: PathBuf::from("/project/lib.js"),
-                    asset_kind: "js".to_owned(),
-                },
-            ),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
             required_runtime_imports: Vec::new(),
         },
     );
@@ -178,12 +176,10 @@ fn generate_module_glue_nested_html_output_path() {
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
-            runtime_asset: Some(
-                crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
-                    canonical_source_path: PathBuf::from("/project/lib.js"),
-                    asset_kind: "js".to_owned(),
-                },
-            ),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
             required_runtime_imports: Vec::new(),
         },
     );
@@ -217,12 +213,10 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
-            runtime_asset: Some(
-                crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
-                    canonical_source_path: PathBuf::from("/project/lib.js"),
-                    asset_kind: "js".to_owned(),
-                },
-            ),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
             required_runtime_imports: Vec::new(),
         },
     );
@@ -244,10 +238,10 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
     let FileKind::Js(source) = result.glue_output_files[0].file_kind() else {
         panic!("glue file must be JS");
     };
-    // Asset is at _moth/js/lib-{hash}.js; glue is at _moth/js/glue/module-{hash}.js.
-    // Relative path from glue to asset should be ../lib-{hash}.js.
+    // Asset is at _moth/js/lib.js; glue is at _moth/js/glue/module-{hash}.js.
+    // Relative path from glue to asset should be ../lib.js.
     assert!(
-        source.contains("from \"../lib-"),
+        source.contains("from \"../lib.js\""),
         "expected asset import relative to glue module, got:\n{source}"
     );
 }
@@ -259,12 +253,10 @@ fn generate_module_glue_fallible_wrapper_validates_result_shape() {
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
-            runtime_asset: Some(
-                crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity {
-                    canonical_source_path: PathBuf::from("/project/lib.js"),
-                    asset_kind: "js".to_owned(),
-                },
-            ),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
             required_runtime_imports: Vec::new(),
         },
     );

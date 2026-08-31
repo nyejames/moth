@@ -3,8 +3,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation as MessageSourceLocation;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
-use crate::compiler_frontend::hir::ids::FunctionId;
-use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableSiteRootUse};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -14,7 +12,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext,
+    HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
 use std::path::{Path, PathBuf};
 
@@ -34,7 +32,7 @@ impl<'a> StructuralUrlRenderer<'a> {
                     let origin = &resources.try_origin(*resource_id)?.origin;
                     rendered.push_str(&self.render_resource_origin(origin)?)
                 }
-                ConstStringPiece::SiteRoot => rendered.push_str(&self.render_site_root_url()?),
+                ConstStringPiece::SiteRoot => rendered.push_str(&self.render_site_root_url()),
             }
         }
         Ok(rendered)
@@ -56,9 +54,16 @@ fn origin(module_path: &str, resource_path: &str) -> StableResourceOriginId {
 fn renderer<'a>(
     plan: &'a HtmlResourceOutputPlan,
     context: &'a ResourceUrlContext,
-    site_origin: Option<&'a str>,
+    site_origin: &'a str,
 ) -> StructuralUrlRenderer<'a> {
     StructuralUrlRenderer::new(plan, context, site_origin)
+}
+
+/// Render one origin straight through a standalone renderer, with no resource uses in play.
+fn site_root_url(site_origin: &str) -> String {
+    let plan = HtmlResourceOutputPlan::new("renderer-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    StructuralUrlRenderer::new(&plan, &context, site_origin).render_site_root_url()
 }
 
 fn plan_origin_for(
@@ -72,7 +77,7 @@ fn plan_origin_for(
         MessageSourceLocation::default(),
         context,
         string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .expect("resource should be planned");
 }
@@ -90,7 +95,7 @@ fn nested_route_resource_is_relative_to_context_parent() {
         &mut StringTable::new(),
     );
 
-    let rendered = renderer(&plan, &context, Some("/moth"))
+    let rendered = renderer(&plan, &context, "/moth")
         .render_owned(&OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Resource(resource_origin),
         ]))
@@ -112,7 +117,7 @@ fn parent_relative_resource_retains_parent_segments() {
         &mut StringTable::new(),
     );
 
-    let rendered = renderer(&plan, &context, Some("/"))
+    let rendered = renderer(&plan, &context, "/")
         .render_owned(&OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Resource(resource_origin),
         ]))
@@ -134,7 +139,7 @@ fn resource_segments_are_percent_encoded_as_utf8() {
         &mut StringTable::new(),
     );
 
-    let rendered = renderer(&plan, &context, Some("/docs"))
+    let rendered = renderer(&plan, &context, "/docs")
         .render_owned(&OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Resource(resource_origin),
         ]))
@@ -166,13 +171,13 @@ fn one_planned_origin_renders_relative_to_each_consuming_page() {
     let value = OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(resource_origin)]);
 
     assert_eq!(
-        renderer(&plan, &first_context, Some("/docs"))
+        renderer(&plan, &first_context, "/docs")
             .render_owned(&value)
             .unwrap(),
         "./assets/logo.svg"
     );
     assert_eq!(
-        renderer(&plan, &second_context, Some("/docs"))
+        renderer(&plan, &second_context, "/docs")
             .render_owned(&value)
             .unwrap(),
         "../assets/logo.svg"
@@ -202,22 +207,22 @@ fn stylesheet_and_page_contexts_use_their_own_parents() {
     let value = OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(resource_origin)]);
 
     assert_eq!(
-        renderer(&plan, &page_context, Some("/"))
+        renderer(&plan, &page_context, "/")
             .render_owned(&value)
             .unwrap(),
         "../assets/site.css"
     );
     assert_eq!(
-        renderer(&plan, &stylesheet_context, Some("/"))
+        renderer(&plan, &stylesheet_context, "/")
             .render_owned(&value)
             .unwrap(),
         "../../assets/site.css"
     );
     assert_ne!(
-        renderer(&plan, &page_context, Some("/"))
+        renderer(&plan, &page_context, "/")
             .render_owned(&value)
             .unwrap(),
-        renderer(&plan, &stylesheet_context, Some("/"))
+        renderer(&plan, &stylesheet_context, "/")
             .render_owned(&value)
             .unwrap(),
         "page and stylesheet parents must produce different relatives"
@@ -234,13 +239,11 @@ fn site_root_uses_consuming_origin_policy() {
     ]);
 
     assert_eq!(
-        renderer(&plan, &context, Some("/"))
-            .render_owned(&value)
-            .unwrap(),
+        renderer(&plan, &context, "/").render_owned(&value).unwrap(),
         "/docs/"
     );
     assert_eq!(
-        renderer(&plan, &context, Some("/moth"))
+        renderer(&plan, &context, "/moth")
             .render_owned(&value)
             .unwrap(),
         "/moth/docs/"
@@ -248,18 +251,35 @@ fn site_root_uses_consuming_origin_policy() {
 }
 
 #[test]
-fn no_origin_policy_rejects_reachable_site_root_use() {
-    let mut reachability = HirReachability::default();
-    reachability
-        .reachable_site_root_uses
-        .push(ReachableSiteRootUse {
-            owner: FunctionId(0),
-            location: SourceLocation::default(),
-        });
+fn an_unset_origin_renders_the_bare_site_root() {
+    assert_eq!(site_root_url("/"), "/");
+}
 
-    let result = validate_site_root_policy(&reachability, false, None);
+#[test]
+fn a_configured_origin_renders_with_one_trailing_slash() {
+    assert_eq!(site_root_url("/moth"), "/moth/");
+}
 
-    assert!(result.is_err());
+#[test]
+fn a_nested_origin_keeps_every_prefix_segment() {
+    assert_eq!(site_root_url("/moth/docs"), "/moth/docs/");
+}
+
+/// The rendered site root always ends in `/`, so `[@/]docs/` composes by concatenation rather than
+/// by a separator rule at each authored use.
+#[test]
+fn a_rendered_site_root_composes_with_an_authored_suffix() {
+    assert_eq!(format!("{}docs/", site_root_url("/moth")), "/moth/docs/");
+    assert_eq!(format!("{}docs/", site_root_url("/")), "/docs/");
+}
+
+/// Project configuration rejects an origin that is empty, lacks a leading `/` or carries a
+/// trailing `/` beyond the bare root, so only the direct lane and other builders can still supply
+/// degenerate spellings; they collapse to the bare site root.
+#[test]
+fn a_degenerate_origin_still_renders_the_bare_site_root() {
+    assert_eq!(site_root_url(""), "/");
+    assert_eq!(site_root_url("///"), "/");
 }
 
 #[test]
@@ -277,7 +297,7 @@ fn hir_resource_id_renders_through_its_module_table() {
         &mut string_table,
     );
 
-    let rendered = renderer(&plan, &context, Some("/"))
+    let rendered = renderer(&plan, &context, "/")
         .render_hir_pieces(
             &[ConstStringPiece::Resource(resource_id)],
             &resources,

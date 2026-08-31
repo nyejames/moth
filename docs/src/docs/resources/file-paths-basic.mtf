@@ -17,7 +17,7 @@ An extension is required, and it tells the compiler what kind of file you mean.
     intro #= @docs/intro.mtf
 ]
 
-`@images/logo` has no extension and is rejected. `.mtf` and `.md` files give you their content. Every other extension names a tracked resource, copied into your site when something you actually build uses it. `.moth` files are different: they hold declarations, so you bring those in with a dependency clause instead.
+`@images/logo` has no extension and is rejected. `.mtf` and `.md` files give you their content. Every other accepted extension names a resource-bearing `String`, copied into your site when something you actually build uses it. `.moth` files are different: they hold declarations, so you bring those in with a dependency clause instead.
 
 ### Linking to your own pages
 

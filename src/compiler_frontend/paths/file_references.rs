@@ -9,6 +9,8 @@
 //! Path syntax rows stay spelling and location only. This table does not store resource identity,
 //! output placement, hashes or byte contents.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -131,8 +133,6 @@ fn explicit_extension(name: &str) -> Option<&str> {
     }
 }
 
-// Resolved targets are published by Stage 0 and consumed by AST. They are declared beside
-// classification so the handoff types have one owner before the resolver is wired.
 /// Dense handle for one Stage 0 resolved file reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ResolvedFileReferenceId(u32);
@@ -180,7 +180,7 @@ pub(crate) enum ResolvedFileReferenceOutcome {
     /// extensionless path retained for AST's typed diagnostic).
     NoPhysicalTarget,
     Target(ResolvedFileReferenceTarget),
-    Diagnostic(Box<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>),
+    Diagnostic(Box<CompilerDiagnostic>),
 }
 
 /// Module-compilation table pairing prepared path rows with Stage 0 resolved targets.
@@ -199,6 +199,41 @@ pub(crate) struct ResolvedFileReference {
     pub(crate) outcome: ResolvedFileReferenceOutcome,
 }
 
+/// True when a settled outcome is structurally compatible with the prepared class.
+///
+/// Any diagnostic outcome is accepted for every class: an authoring mistake stays beside the
+/// path identity so a surrounding AST syntax diagnostic remains primary.
+fn class_accepts_outcome(
+    class: PreparedFileReferenceClass,
+    outcome: &ResolvedFileReferenceOutcome,
+) -> bool {
+    match class {
+        PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
+            matches!(
+                outcome,
+                ResolvedFileReferenceOutcome::NoPhysicalTarget
+                    | ResolvedFileReferenceOutcome::Diagnostic(_)
+            )
+        }
+        PreparedFileReferenceClass::ContentSource => matches!(
+            outcome,
+            ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource { .. })
+                | ResolvedFileReferenceOutcome::Diagnostic(_)
+        ),
+        PreparedFileReferenceClass::ResourceFile => matches!(
+            outcome,
+            ResolvedFileReferenceOutcome::Target(
+                ResolvedFileReferenceTarget::ResourceSource { .. }
+            ) | ResolvedFileReferenceOutcome::Diagnostic(_)
+        ),
+        PreparedFileReferenceClass::SourceKindNoFileValue => matches!(
+            outcome,
+            ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::IdentifiedSourceKind)
+                | ResolvedFileReferenceOutcome::Diagnostic(_)
+        ),
+    }
+}
+
 impl ResolvedFileReferenceTable {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -207,16 +242,13 @@ impl ResolvedFileReferenceTable {
     pub(crate) fn push(
         &mut self,
         reference: ResolvedFileReference,
-    ) -> Result<ResolvedFileReferenceId, crate::compiler_frontend::compiler_errors::CompilerError>
-    {
+    ) -> Result<ResolvedFileReferenceId, CompilerError> {
         let key = (reference.source_file, reference.path_syntax);
         if self.by_key.contains_key(&key) {
-            return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                    "duplicate resolved file reference for FileId {} and PathSyntaxId {:?}",
-                    reference.source_file.0, reference.path_syntax
-                )),
-            );
+            return Err(CompilerError::compiler_error(format!(
+                "duplicate resolved file reference for FileId {} and PathSyntaxId {:?}",
+                reference.source_file.0, reference.path_syntax
+            )));
         }
 
         let reference_id = ResolvedFileReferenceId(self.targets.len() as u32);
@@ -238,83 +270,40 @@ impl ResolvedFileReferenceTable {
         self.targets.iter()
     }
 
-    pub(crate) fn validate(
-        &self,
-    ) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    pub(crate) fn validate(&self) -> Result<(), CompilerError> {
         if self.targets.len() != self.by_key.len() {
-            return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "resolved file-reference table has an inconsistent key index",
-                ),
-            );
+            return Err(CompilerError::compiler_error(
+                "resolved file-reference table has an inconsistent key index",
+            ));
         }
         for reference in self.iter() {
             let Some(indexed) = self.get(reference.source_file, reference.path_syntax) else {
-                return Err(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "resolved file-reference table lost a composite-key row",
-                    ),
-                );
+                return Err(CompilerError::compiler_error(
+                    "resolved file-reference table lost a composite-key row",
+                ));
             };
             if !std::ptr::eq(indexed, reference) {
-                return Err(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "resolved file-reference table composite key points at the wrong row",
-                    ),
-                );
+                return Err(CompilerError::compiler_error(
+                    "resolved file-reference table composite key points at the wrong row",
+                ));
             }
-
-            let valid_outcome = match reference.class {
-                PreparedFileReferenceClass::SiteRoot
-                | PreparedFileReferenceClass::Extensionless => {
-                    matches!(
-                        reference.outcome,
-                        ResolvedFileReferenceOutcome::NoPhysicalTarget
-                            | ResolvedFileReferenceOutcome::Diagnostic(_)
-                    )
-                }
-                PreparedFileReferenceClass::ContentSource => matches!(
-                    reference.outcome,
-                    ResolvedFileReferenceOutcome::Target(
-                        ResolvedFileReferenceTarget::ContentSource { .. }
-                    ) | ResolvedFileReferenceOutcome::Diagnostic(_)
-                ),
-                PreparedFileReferenceClass::ResourceFile => matches!(
-                    reference.outcome,
-                    ResolvedFileReferenceOutcome::Target(
-                        ResolvedFileReferenceTarget::ResourceSource { .. }
-                    ) | ResolvedFileReferenceOutcome::Diagnostic(_)
-                ),
-                PreparedFileReferenceClass::SourceKindNoFileValue => matches!(
-                    reference.outcome,
-                    ResolvedFileReferenceOutcome::Target(
-                        ResolvedFileReferenceTarget::IdentifiedSourceKind
-                    ) | ResolvedFileReferenceOutcome::Diagnostic(_)
-                ),
-            };
-            if !valid_outcome {
-                return Err(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "resolved file-reference class does not match its settled outcome",
-                    ),
-                );
+            if !class_accepts_outcome(reference.class, &reference.outcome) {
+                return Err(CompilerError::compiler_error(
+                    "resolved file-reference class does not match its settled outcome",
+                ));
             }
         }
 
         for (key, reference_id) in &self.by_key {
             let Some(reference) = self.targets.get(reference_id.0 as usize) else {
-                return Err(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "resolved file-reference table key points outside its rows",
-                    ),
-                );
+                return Err(CompilerError::compiler_error(
+                    "resolved file-reference table key points outside its rows",
+                ));
             };
             if (reference.source_file, reference.path_syntax) != *key {
-                return Err(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "resolved file-reference table key disagrees with its row",
-                    ),
-                );
+                return Err(CompilerError::compiler_error(
+                    "resolved file-reference table key disagrees with its row",
+                ));
             }
         }
         Ok(())

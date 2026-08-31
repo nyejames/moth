@@ -13,7 +13,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext,
+    HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{
@@ -64,7 +64,7 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
 fn render_entry_fragments_preserves_runtime_slot_order() {
     let plan = HtmlResourceOutputPlan::new("js-path-tests");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let (body_html, slot_ids) =
         render_entry_fragments(&[], 2, &renderer).expect("plain runtime slots should render");
 
@@ -147,7 +147,7 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
 
     let plan = HtmlResourceOutputPlan::new("js-path-tests");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let (text_html, text_slot_ids) = render_entry_fragments(&text_fragments, 2, &renderer)
         .expect("text fragments should render");
     let (piece_html, piece_slot_ids) = render_entry_fragments(&piece_fragments, 2, &renderer)
@@ -179,10 +179,10 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
         Default::default(),
         context.clone(),
         &mut string_table,
-        true,
+        ResourceUseKind::Metadata,
     )
     .expect("resource should be planned");
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
         location: SourceLocation::default(),
@@ -204,7 +204,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
 fn render_entry_fragments_renders_site_root_piece_at_builder_boundary() {
     let plan = HtmlResourceOutputPlan::new("js-path-tests");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/moth"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/moth");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
         location: SourceLocation::default(),
@@ -237,7 +237,7 @@ fn no_runtime_fragments_still_emits_start_call() {
 
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
         &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
@@ -294,7 +294,7 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
         &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {

@@ -3,6 +3,12 @@
 //! WHAT: groups HTML document generation, routing/output planning, and backend-specific helpers.
 //! WHY: HTML builds stitch together several focused subsystems around the shared frontend/HIR
 //! pipeline.
+//!
+//! Resource placement and URL text are separate owners:
+//! - `resource_output_plan`    — byte-free output placement and conflict preflight for planned
+//!   resource origins, before any provider or resource reader runs
+//! - `structural_url_renderer` — final context-sensitive URL text, rendered per consuming
+//!   artefact once output planning has assigned that artefact a URL context
 
 pub(crate) mod binding_packages;
 pub(crate) mod compile_input;

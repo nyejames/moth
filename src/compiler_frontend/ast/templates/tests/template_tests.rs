@@ -172,6 +172,17 @@ fn collects_and_strips_top_level_doc_comment_templates() {
 }
 
 #[test]
+fn collects_doc_comment_with_site_root_markdown_link() {
+    let (ast, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
+
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "<p> See <a href=\"@/docs\">Docs</a></p>"
+    );
+}
+
+#[test]
 fn collects_top_level_doc_fragments_in_source_order() {
     let (ast, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
     let doc_fragments = ast.doc_fragments;

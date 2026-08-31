@@ -67,6 +67,13 @@ impl DiagnosticPayload {
                 remap_path_import_payload(path, remap);
                 first_location.remap_string_ids(remap);
             }
+            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+                first_path,
+                second_path,
+            } => {
+                remap_path_import_payload(first_path, remap);
+                remap_path_import_payload(second_path, remap);
+            }
 
             DiagnosticPayload::InvalidImportPath { path, reason } => {
                 remap_invalid_import_path_payload(path, reason, remap);
@@ -772,6 +779,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedSourceFileKind { .. }
             | DiagnosticPayload::InvalidSourceFileEntry { .. }
             | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
+            | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
             | DiagnosticPayload::UnsupportedExternalExtension { .. }
             | DiagnosticPayload::InvalidExternalModule { .. }
             | DiagnosticPayload::BorrowConflict { .. }

@@ -14,6 +14,6 @@ use std::collections::HashMap;
 pub(crate) struct StructuralStringUrlMap {
     /// URL text keyed by the module-local resource handle carried in HIR.
     pub(crate) resource_urls: HashMap<ResourceId, String>,
-    /// URL text for `SiteRoot` pieces, when the consuming builder supplies an origin policy.
+    /// URL text for `SiteRoot` pieces, `None` when no reachable use rendered one.
     pub(crate) site_root_url: Option<String>,
 }

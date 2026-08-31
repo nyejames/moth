@@ -24,7 +24,7 @@ Choose the content format based on what the content needs.
 
 ### Distinguishing raw asset files
 
-Raw asset files such as images, stylesheets or JavaScript files are not content dependencies. They are tracked assets handled by the builder. Use normal Moth asset paths when a file should participate in tracked-asset output.
+Raw asset files such as images, stylesheets or JavaScript files are not content dependencies. They are ordinary resource files. Write a Moth file path in value position when a file should participate in resource output.
 
 ### Distinguishing package source
 

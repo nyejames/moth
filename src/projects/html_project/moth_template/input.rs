@@ -63,17 +63,22 @@ impl MothTemplateCompileRequest {
                 for path in paths {
                     units.push(read_file_unit(path, None, string_table)?);
                 }
+                assign_common_ancestor_relative_paths(&mut units, string_table)?;
                 units
             }
+            MothTemplateInput::Sources(sources) => {
+                let mut units = sources
+                    .into_iter()
+                    .map(|source| MothTemplateSourceUnit {
+                        source_path: normalize_path_for_identity(&source.display_path),
+                        relative_path: None,
+                        source_text: source.source_text,
+                    })
+                    .collect::<Vec<_>>();
 
-            MothTemplateInput::Sources(sources) => sources
-                .into_iter()
-                .map(|source| MothTemplateSourceUnit {
-                    source_path: normalize_path_for_identity(&source.display_path),
-                    relative_path: None,
-                    source_text: source.source_text,
-                })
-                .collect(),
+                assign_in_memory_relative_paths(&mut units, string_table)?;
+                units
+            }
         };
 
         reject_duplicate_source_paths(&units, string_table)?;
@@ -135,6 +140,176 @@ fn collect_directory_units(
     }
 
     Ok(units)
+}
+
+/// Give every file-list unit its portable identity relative to the files' longest common
+/// ancestor directory.
+///
+/// Distinct directories under that ancestor yield distinct module origins, so same-named
+/// resources in different documents cannot collide. One file's relative path is its file name,
+/// which keeps the entry-root empty module path correct for a single-file request.
+fn assign_common_ancestor_relative_paths(
+    units: &mut [MothTemplateSourceUnit],
+    string_table: &mut StringTable,
+) -> Result<(), CompilerMessages> {
+    if units.is_empty() {
+        return Ok(());
+    }
+
+    let canonical_paths = units
+        .iter()
+        .map(|unit| unit.source_path.clone())
+        .collect::<Vec<_>>();
+    let Some(ancestor) = common_ancestor_directory(&canonical_paths) else {
+        return Err(no_common_ancestor_messages(
+            &canonical_paths[0],
+            &canonical_paths[1],
+            string_table,
+        ));
+    };
+
+    for unit in units.iter_mut() {
+        unit.relative_path = Some(normalized_relative_path(&ancestor, &unit.source_path));
+    }
+
+    Ok(())
+}
+
+/// Give every in-memory unit the request's portable display identity.
+///
+/// Relative display paths are portable identities directly. Absolute display paths fall back to
+/// the common-ancestor rule on the display paths. A request mixing relative and absolute display
+/// paths has no shared portable basis, so it is diagnosed instead of minting colliding empty
+/// module origins.
+fn assign_in_memory_relative_paths(
+    units: &mut [MothTemplateSourceUnit],
+    string_table: &mut StringTable,
+) -> Result<(), CompilerMessages> {
+    if units.is_empty() {
+        return Ok(());
+    }
+
+    let basis_is_relative = units[0].source_path.is_relative();
+    if let Some(mixed_index) = units
+        .iter()
+        .position(|unit| unit.source_path.is_relative() != basis_is_relative)
+    {
+        let first_path = units[0].source_path.clone();
+        let mixed_path = units[mixed_index].source_path.clone();
+        return Err(no_common_ancestor_messages(
+            &first_path,
+            &mixed_path,
+            string_table,
+        ));
+    }
+
+    if basis_is_relative {
+        for unit in units.iter_mut() {
+            unit.relative_path = Some(unit.source_path.clone());
+        }
+
+        return Ok(());
+    }
+
+    // An absolute display path is no portable identity by itself; the display paths' common
+    // ancestor directory plays the same role a request root plays for file inputs.
+    let display_paths = units
+        .iter()
+        .map(|unit| unit.source_path.clone())
+        .collect::<Vec<_>>();
+    let Some(ancestor) = common_ancestor_directory(&display_paths) else {
+        return Err(no_common_ancestor_messages(
+            &display_paths[0],
+            &display_paths[1],
+            string_table,
+        ));
+    };
+
+    for unit in units.iter_mut() {
+        unit.relative_path = Some(normalized_relative_path(&ancestor, &unit.source_path));
+    }
+
+    Ok(())
+}
+
+/// The longest shared directory of the given paths, or `None` when they share none.
+///
+/// Each path's file component is excluded: two sibling files share their parent directory,
+/// while files whose leading components differ (for example files on separate Windows drives)
+/// share no ancestor directory at all.
+fn common_ancestor_directory(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut component_prefixes = paths.iter().map(|path| {
+        let mut components: Vec<&std::ffi::OsStr> = path
+            .components()
+            .map(|component| component.as_os_str())
+            .collect();
+        components.pop();
+        components
+    });
+
+    let mut shared = component_prefixes.next()?;
+    for components in component_prefixes {
+        let shared_length = shared
+            .iter()
+            .zip(components.iter())
+            .take_while(|(left, right)| left == right)
+            .count();
+        shared.truncate(shared_length);
+
+        if shared.is_empty() {
+            return None;
+        }
+    }
+
+    Some(shared.into_iter().collect())
+}
+
+/// Reject a request whose inputs cannot derive portable module identities.
+fn no_common_ancestor_messages(
+    first_path: &Path,
+    second_path: &Path,
+    string_table: &mut StringTable,
+) -> CompilerMessages {
+    let first_interned = intern_filesystem_path_identity(first_path, string_table);
+    let second_interned = intern_filesystem_path_identity(second_path, string_table);
+    let (first_interned, second_interned) = match (first_interned, second_interned) {
+        (Ok(first), Ok(second)) => (first, second),
+        (Err(failure), _) | (_, Err(failure)) => {
+            return CompilerMessages::from_error_ref(failure, string_table);
+        }
+    };
+    let location = SourceLocation::new(
+        second_interned.clone(),
+        CharPosition::default(),
+        CharPosition::default(),
+    );
+    let diagnostic = CompilerDiagnostic::moth_template_inputs_share_no_common_ancestor(
+        first_interned,
+        second_interned,
+        location,
+    );
+
+    CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+}
+
+/// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
+/// duplicate-input check does.
+fn intern_filesystem_path_identity(
+    path: &Path,
+    string_table: &mut StringTable,
+) -> Result<InternedPath, CompilerError> {
+    InternedPath::try_from_filesystem_path(path, string_table).map_err(
+        |NonUtf8PathComponent { path: bad_path }| {
+            CompilerError::file_error(
+                &bad_path,
+                format!(
+                    "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
+                 identity requires UTF-8 paths."
+                ),
+                string_table,
+            )
+        },
+    )
 }
 
 fn collect_moth_template_paths_in_directory(

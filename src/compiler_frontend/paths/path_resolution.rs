@@ -1,8 +1,8 @@
 //! Project-aware dependency resolution.
 //!
 //! `ProjectPathResolver` owns Stage 0 source/dependency path rules and canonical source lookup.
-//! Structural file values are resolved from Stage 0 facts rather than through an eager rendered
-//! path lane.
+//! Structural file values stay resolved physical targets here; their URL text is rendered later
+//! by the consuming builder.
 //!
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};

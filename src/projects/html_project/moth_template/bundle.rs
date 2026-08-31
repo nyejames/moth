@@ -1,0 +1,387 @@
+//! Stage 0 bundle construction for one direct Moth template compilation.
+//!
+//! WHAT: walks one template's content-source fixed point with the build-owned physical resolver,
+//!       prepares every nested `.mtf`/`.md` dependency in deterministic discovery order and
+//!       assembles the compiler service's file-value bundle.
+//! WHY:  physical file-reference resolution stays build-owned. The compiler service folds settled
+//!       Stage 0 facts and never probes the filesystem, while watch and invalidation policy stays
+//!       with this direct API's callers.
+//!
+//! The fixed point mirrors synthetic single-file discovery: content targets resolve relative to
+//! the compiling template's directory (this lane's entry root), nested `.mtf`/`.md` sources join
+//! the same source identity table before their own preparation, and every prepared occurrence
+//! keeps its settled outcome. Route and output placement are never built here.
+
+use crate::build_system::create_project_modules::extract_source_code;
+use crate::build_system::create_project_modules::file_reference_resolution::{
+    SingleFileReferenceOutcome, SingleFileReferenceResolver, SingleFileResolvedReference,
+};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::headers::parse_file_headers::{
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
+};
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
+    ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+};
+use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
+use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::SourceFileTable;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::{
+    CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
+    FrontendFilePrepareSource,
+};
+use crate::projects::html_project::moth_template::input::MothTemplateSourceUnit;
+use rustc_hash::FxHashSet;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+
+/// The project-local package identity of one direct-template compilation request.
+///
+/// Direct template compilation has no configured project, so the module origin and the render
+/// plan agree on this name. Matching names keep resource placement bare: a resource's output
+/// path is its path relative to the document's portable directory under the request's shared
+/// module identity.
+pub(super) const DIRECT_TEMPLATE_PROJECT_NAME: &str = "moth-template";
+
+/// One file the content fixed point has not prepared yet.
+enum QueuedSource {
+    /// The compiling template itself; its text is already in the source unit.
+    Entry,
+    /// A content dependency read from disk when reached.
+    Content { path: PathBuf, kind: SourceFileKind },
+}
+
+impl QueuedSource {
+    fn pop_parts(
+        self,
+        unit: &MothTemplateSourceUnit,
+        string_table: &mut StringTable,
+    ) -> Result<(PathBuf, SourceFileKind, String), CompilerMessages> {
+        match self {
+            Self::Entry => Ok((
+                unit.source_path.clone(),
+                SourceFileKind::MothTemplate,
+                unit.source_text.clone(),
+            )),
+            Self::Content { path, kind } => {
+                let source_code = extract_source_code(&path, string_table)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                Ok((path, kind, source_code))
+            }
+        }
+    }
+}
+
+/// Prepare one direct template's file-value bundle and register its physical facts.
+///
+/// The template's own directory is the entry root: references resolve module-root-relative to it
+/// and cannot reach another module. The registry is supplied by the request's owner so issued
+/// resource sources and their origin attachments outlive this one document; this lane never
+/// creates a private one for it to be dropped from.
+pub(super) fn prepare_file_value_bundle(
+    unit: &MothTemplateSourceUnit,
+    style_directives: &StyleDirectiveRegistry,
+    string_table: &mut StringTable,
+    resource_inputs: &mut ResourceInputRegistry,
+) -> Result<MothTemplateFileValueBundle, CompilerMessages> {
+    let module_root = unit
+        .source_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let source_file_kinds = recognised_source_file_kinds();
+    let path_resolver = ProjectPathResolver::new(
+        module_root.clone(),
+        module_root.clone(),
+        PreparedSourcePackageRoots::empty(),
+        &source_file_kinds,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    // Direct-template resources belong to the module origin the document's portable relative
+    // directory names: sibling documents in distinct directories mint distinct origins, while a
+    // single-file request keeps the entry-root empty module path. Sharing the project name with
+    // the render plan keeps resource placement relative to the template's directory.
+    let module_relative_path = unit
+        .relative_path
+        .as_deref()
+        .unwrap_or_else(|| Path::new(""));
+    let module_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local(DIRECT_TEMPLATE_PROJECT_NAME),
+        module_relative_path
+            .parent()
+            .unwrap_or_else(|| Path::new("")),
+        ModuleRootRole::Normal,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    // 1. Register the template's identity so preparation stamps the final FileId.
+    let mut source_files = SourceFileTable::empty();
+    source_files
+        .insert(
+            unit.source_path.clone(),
+            &unit.source_path,
+            Some(&path_resolver),
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let Some(entry_file_id) = source_files
+        .get_by_canonical_path(&unit.source_path)
+        .map(|identity| identity.file_id)
+    else {
+        return Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "direct Moth template did not register its own source identity",
+            ),
+            string_table,
+        ));
+    };
+
+    // 2. Walk the content fixed point: nested `.mtf`/`.md` targets join the source set and are
+    //    prepared in BFS order, so no second scan or parse exists for this lane.
+    let options = HeaderParseOptions {
+        entry_file_id: Some(entry_file_id),
+        project_path_resolver: Some(path_resolver.clone()),
+        active_root_role: ModuleRootRole::Normal,
+    };
+    // The request owner's registry receives every source this resolver issues. Watch and
+    // missing-target interests remain this lane's physical facts for the caller to use.
+    let mut resolver =
+        SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
+
+    let mut queue = VecDeque::new();
+    queue.push_back(QueuedSource::Entry);
+    let mut prepared_content_sources = Vec::new();
+    let mut resolved_file_references = ResolvedFileReferenceTable::new();
+    let mut visited = FxHashSet::default();
+
+    while let Some(pending) = queue.pop_front() {
+        let visit_path = match &pending {
+            QueuedSource::Entry => unit.source_path.clone(),
+            QueuedSource::Content { path, .. } => path.clone(),
+        };
+        if !visited.insert(visit_path) {
+            continue;
+        }
+        let (path, kind, source_code) = pending.pop_parts(unit, string_table)?;
+
+        // 3. Prepare one file against the settled identity table.
+        let prepared = prepare_one_source(
+            &source_files,
+            &path,
+            kind,
+            source_code,
+            &options,
+            style_directives,
+            string_table,
+        )?;
+        let owner_source_file = source_files
+            .get_by_canonical_path(&path)
+            .map(|identity| identity.file_id)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "prepared Moth template source {path:?} has no file identity before \
+                         reference resolution"
+                    )),
+                    string_table,
+                )
+            })?;
+        let path_syntax_table = prepared.path_syntax.table();
+        let structural_references = prepared.structural_file_references.references();
+
+        for reference in structural_references {
+            let resolved = resolver
+                .resolve(&path, path_syntax_table, reference, string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let outcome = settle_reference_outcome(
+                resolved,
+                &mut source_files,
+                &path_resolver,
+                &mut queue,
+                &source_file_kinds,
+                string_table,
+            )?;
+            resolved_file_references
+                .push(ResolvedFileReference {
+                    source_file: owner_source_file,
+                    path_syntax: reference.path_syntax,
+                    class: reference.class,
+                    outcome,
+                })
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        }
+
+        // The template's own prepared output stays with the compiler service; only dependencies
+        // are handed to it.
+        if path != unit.source_path {
+            prepared_content_sources.push(prepared);
+        }
+    }
+
+    Ok(MothTemplateFileValueBundle {
+        prepared_content_sources,
+        resolved_file_references,
+        source_files,
+        module_origin: Some(module_origin),
+    })
+}
+
+/// Map one build-owned physical outcome onto the compiler-facing resolved row, queueing content
+/// targets so the fixed point reaches every nested dependency.
+///
+/// This is the direct lane's identity join: canonical target paths resolved before the full
+/// source inventory was known become the bundle table's `FileId`s here.
+fn settle_reference_outcome(
+    resolved: SingleFileResolvedReference,
+    source_files: &mut SourceFileTable,
+    path_resolver: &ProjectPathResolver,
+    queue: &mut VecDeque<QueuedSource>,
+    source_file_kinds: &SourceFileKindRegistry,
+    string_table: &mut StringTable,
+) -> Result<ResolvedFileReferenceOutcome, CompilerMessages> {
+    match resolved.outcome {
+        SingleFileReferenceOutcome::NoPhysicalTarget => {
+            Ok(ResolvedFileReferenceOutcome::NoPhysicalTarget)
+        }
+        SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+            Ok(ResolvedFileReferenceOutcome::Diagnostic(diagnostic))
+        }
+        SingleFileReferenceOutcome::Resource {
+            source,
+            owner_relative_path,
+        } => Ok(ResolvedFileReferenceOutcome::Target(
+            ResolvedFileReferenceTarget::ResourceSource {
+                source,
+                owner_relative_path,
+            },
+        )),
+        SingleFileReferenceOutcome::IdentifiedSourceKind => {
+            if resolved.class != PreparedFileReferenceClass::SourceKindNoFileValue {
+                return Err(incompatible_class_messages(string_table));
+            }
+
+            Ok(ResolvedFileReferenceOutcome::Target(
+                ResolvedFileReferenceTarget::IdentifiedSourceKind,
+            ))
+        }
+        SingleFileReferenceOutcome::Source { canonical } => {
+            if resolved.class != PreparedFileReferenceClass::ContentSource {
+                return Err(incompatible_class_messages(string_table));
+            }
+
+            // A nested content source is never re-prepared: the identity table dedupes, and the
+            // caller's visited set skips a file already reached.
+            let extension = canonical
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default();
+            let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "resolved supported content target has no registered source kind",
+                    ),
+                    string_table,
+                ));
+            };
+            let target_file = source_files
+                .insert(
+                    canonical.clone(),
+                    canonical.as_path(),
+                    Some(path_resolver),
+                    string_table,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            queue.push_back(QueuedSource::Content {
+                path: canonical,
+                kind,
+            });
+
+            Ok(ResolvedFileReferenceOutcome::Target(
+                ResolvedFileReferenceTarget::ContentSource {
+                    source: target_file,
+                },
+            ))
+        }
+    }
+}
+
+fn prepare_one_source(
+    source_files: &SourceFileTable,
+    source_path: &Path,
+    kind: SourceFileKind,
+    source_code: String,
+    options: &HeaderParseOptions,
+    style_directives: &StyleDirectiveRegistry,
+    string_table: &mut StringTable,
+) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+    let context = FrontendFilePrepareContext {
+        source_files,
+        style_directives,
+        entry_file_path: source_path,
+        options,
+    };
+    let source = match kind {
+        SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
+            source_code,
+            source_path: source_path.to_path_buf(),
+        },
+        SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
+            source_code,
+            source_path: source_path.to_path_buf(),
+        },
+        SourceFileKind::Moth => {
+            return Err(CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "direct template content closure reached a Moth module source",
+                ),
+                string_table,
+            ));
+        }
+    };
+    let input = FrontendFilePrepareInput {
+        source,
+        const_template_offset: 0,
+        runtime_fragment_offset: 0,
+    };
+
+    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table).map_err(|error| {
+        match error {
+            FileFrontendPrepareFailure::Diagnosed(error) => {
+                let mut messages =
+                    CompilerMessages::from_diagnostic(*error.diagnostic, string_table.clone());
+                messages.prepend_diagnostics_preserving_context(error.warnings);
+                messages
+            }
+            FileFrontendPrepareFailure::Infrastructure(error) => {
+                CompilerMessages::from_error(error, string_table.clone())
+            }
+        }
+    })
+}
+
+fn recognised_source_file_kinds() -> SourceFileKindRegistry {
+    let mut registry = SourceFileKindRegistry::new();
+    for supported in SourceFileKind::recognized_kinds() {
+        registry.register(supported.extension, supported.kind);
+    }
+    registry
+}
+
+fn incompatible_class_messages(string_table: &mut StringTable) -> CompilerMessages {
+    CompilerMessages::from_error_ref(
+        CompilerError::compiler_error(
+            "direct template content closure retained an incompatible physical outcome class",
+        ),
+        string_table,
+    )
+}

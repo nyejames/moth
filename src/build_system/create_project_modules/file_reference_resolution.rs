@@ -8,7 +8,7 @@
 //! owner is the only physical resolver for directory paths, so later stages receive settled
 //! targets and cannot rediscover the filesystem. It never parses expressions or reads bytes.
 
-use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
@@ -16,9 +16,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, PreparedFileReferenceClass, ResolvedFileReference,
-    ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget, ResourceSourceId,
 };
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
@@ -714,6 +714,10 @@ fn invalid_reason(
     }
 }
 
+/// Reject authored components that can never be a physical path under the module root.
+///
+/// Leading `@` is deliberately absent here: it is a parser concern — unquoted `@@` is already
+/// rejected by the parser, and quoted `"@logo.svg"` is a legal filesystem component.
 fn invalid_components_diagnostic(
     components: &[String],
     authored_path: &InternedPath,
@@ -734,21 +738,29 @@ fn invalid_components_diagnostic(
                 location.clone(),
             ));
         }
-
         let path = Path::new(component);
-        let kind = if path.is_absolute() {
-            Some(PathKind::InvalidComponent)
-        } else if component.starts_with('@') {
-            Some(PathKind::LeadingAtInPathComponent)
-        } else {
-            None
-        };
-        if let Some(kind) = kind {
-            return Some(CompilerDiagnostic::invalid_path(kind, location.clone()));
+        if path.is_absolute() {
+            return Some(CompilerDiagnostic::invalid_path(
+                PathKind::InvalidComponent,
+                location.clone(),
+            ));
         }
     }
 
     None
+}
+
+/// One retained invalid-path diagnostic for a synthesized single-file reference.
+fn invalid_path_outcome(
+    authored_path: &InternedPath,
+    reason: InvalidCompileTimePathReason,
+    location: &SourceLocation,
+) -> SingleFileReferenceOutcome {
+    SingleFileReferenceOutcome::Diagnostic(Box::new(CompilerDiagnostic::invalid_compile_time_path(
+        authored_path.clone(),
+        reason,
+        location.clone(),
+    )))
 }
 
 /// A Stage 0 outcome retained while synthetic single-file discovery is still assembling its
@@ -756,7 +768,7 @@ fn invalid_components_diagnostic(
 #[derive(Clone, Debug)]
 pub(crate) struct SingleFileResolvedReference {
     pub(crate) source_path: PathBuf,
-    pub(crate) path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId,
+    pub(crate) path_syntax: PathSyntaxId,
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: SingleFileReferenceOutcome,
 }
@@ -769,7 +781,7 @@ pub(crate) enum SingleFileReferenceOutcome {
     },
     IdentifiedSourceKind,
     Resource {
-        source: crate::compiler_frontend::paths::file_references::ResourceSourceId,
+        source: ResourceSourceId,
         owner_relative_path: PortableResourcePath,
     },
     Diagnostic(Box<CompilerDiagnostic>),
@@ -787,7 +799,7 @@ pub(crate) struct SingleFileReferenceResolver<'a> {
     root_directory: PathBuf,
     containment_root: PathBuf,
     boundary_cache: FxHashMap<PathBuf, bool>,
-    source_file_kinds: &'a crate::builder_surface::SourceFileKindRegistry,
+    source_file_kinds: &'a SourceFileKindRegistry,
     resource_inputs: &'a mut ResourceInputRegistry,
     settled: FxHashMap<(PathBuf, PathBuf, PreparedFileReferenceClass), PhysicalResolution>,
 }
@@ -795,7 +807,7 @@ pub(crate) struct SingleFileReferenceResolver<'a> {
 impl<'a> SingleFileReferenceResolver<'a> {
     pub(crate) fn new(
         root_directory: PathBuf,
-        source_file_kinds: &'a crate::builder_surface::SourceFileKindRegistry,
+        source_file_kinds: &'a SourceFileKindRegistry,
         resource_inputs: &'a mut ResourceInputRegistry,
     ) -> Self {
         let containment_root = root_directory.clone();
@@ -860,13 +872,11 @@ impl<'a> SingleFileReferenceResolver<'a> {
         };
         if lexically_escapes {
             return Ok(SingleFileResolvedReference {
-                outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                    CompilerDiagnostic::invalid_compile_time_path(
-                        authored_path.clone(),
-                        InvalidCompileTimePathReason::EscapesModuleBoundary,
-                        reference.location.clone(),
-                    ),
-                )),
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::EscapesModuleBoundary,
+                    &reference.location,
+                ),
                 ..result
             });
         }
@@ -892,37 +902,31 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 };
                 if escapes {
                     return Ok(SingleFileResolvedReference {
-                        outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                            CompilerDiagnostic::invalid_compile_time_path(
-                                authored_path.clone(),
-                                InvalidCompileTimePathReason::EscapesModuleBoundary,
-                                reference.location.clone(),
-                            ),
-                        )),
+                        outcome: invalid_path_outcome(
+                            authored_path,
+                            InvalidCompileTimePathReason::EscapesModuleBoundary,
+                            &reference.location,
+                        ),
                         ..result
                     });
                 }
                 self.resource_inputs.record_missing_target_watch(watch_path);
                 return Ok(SingleFileResolvedReference {
-                    outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                        CompilerDiagnostic::invalid_compile_time_path(
-                            authored_path.clone(),
-                            InvalidCompileTimePathReason::MissingTarget,
-                            reference.location.clone(),
-                        ),
-                    )),
+                    outcome: invalid_path_outcome(
+                        authored_path,
+                        InvalidCompileTimePathReason::MissingTarget,
+                        &reference.location,
+                    ),
                     ..result
                 });
             }
             PhysicalResolution::Invalid(reason) => {
                 return Ok(SingleFileResolvedReference {
-                    outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                        CompilerDiagnostic::invalid_compile_time_path(
-                            authored_path.clone(),
-                            invalid_reason(reason, string_table),
-                            reference.location.clone(),
-                        ),
-                    )),
+                    outcome: invalid_path_outcome(
+                        authored_path,
+                        invalid_reason(reason, string_table),
+                        &reference.location,
+                    ),
                     ..result
                 });
             }
@@ -930,13 +934,11 @@ impl<'a> SingleFileReferenceResolver<'a> {
 
         if self.chain_escapes_module_boundary(&canonical, string_table)? {
             return Ok(SingleFileResolvedReference {
-                outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                    CompilerDiagnostic::invalid_compile_time_path(
-                        authored_path.clone(),
-                        InvalidCompileTimePathReason::EscapesModuleBoundary,
-                        reference.location.clone(),
-                    ),
-                )),
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::EscapesModuleBoundary,
+                    &reference.location,
+                ),
                 ..result
             });
         }

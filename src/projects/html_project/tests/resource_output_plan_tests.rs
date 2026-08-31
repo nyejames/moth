@@ -87,12 +87,16 @@ fn authored_location(path: &str, string_table: &mut StringTable) -> SourceLocati
 
 #[test]
 fn shared_origin_across_entries_emits_one_planned_record() {
-    // WHAT: one origin observed from two pages becomes one output record with two uses.
-    // WHY: output identity belongs to the semantic origin, not to a consumer entry or alias.
+    // WHAT: one origin observed across several contexts becomes one output record with one use
+    //       per context.
+    // WHY: output identity belongs to the semantic origin, not to a consumer entry, alias or
+    //      observing artefact kind.
     let mut string_table = StringTable::new();
     let origin = module_resource_origin("app", "docs", "assets/logo.svg");
     let first_location = authored_location("docs/first.moth", &mut string_table);
     let second_location = authored_location("docs/second.moth", &mut string_table);
+    let third_location = authored_location("docs/third.moth", &mut string_table);
+
     let mut plan = HtmlResourceOutputPlan::new("app");
 
     plan.plan_origin(
@@ -100,24 +104,32 @@ fn shared_origin_across_entries_emits_one_planned_record() {
         first_location,
         ResourceUrlContext::page_document(Path::new("docs/first.html")).unwrap(),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
+    )
+    .unwrap();
+    plan.plan_origin(
+        origin.clone(),
+        second_location,
+        ResourceUrlContext::page_document(Path::new("docs/second.html")).unwrap(),
+        &mut string_table,
+        ResourceUseKind::Executable,
     )
     .unwrap();
     plan.plan_origin(
         origin,
-        second_location,
-        ResourceUrlContext::page_document(Path::new("docs/second.html")).unwrap(),
+        third_location,
+        ResourceUrlContext::Stylesheet(PathBuf::from("docs/styles/main.css")),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .unwrap();
 
-    assert_eq!(plan.records().len(), 1);
+    assert_eq!(plan.records.len(), 1);
     assert_eq!(
-        plan.records()[0].output_path,
+        plan.records[0].output_path,
         PathBuf::from("docs/assets/logo.svg")
     );
-    assert_eq!(plan.records()[0].uses.len(), 2);
+    assert_eq!(plan.records[0].uses.len(), 3);
 }
 
 #[test]
@@ -137,7 +149,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_locations() {
         first_location,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .unwrap();
     let error = plan
@@ -146,7 +158,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_locations() {
             second_location,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .unwrap_err();
 
@@ -197,7 +209,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
         first_location,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .unwrap();
     let error = plan
@@ -206,7 +218,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
             second_location,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .unwrap_err();
 
@@ -258,7 +270,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
         first_location,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .unwrap();
     let error = plan
@@ -267,7 +279,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
             second_location,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .unwrap_err();
 
@@ -319,7 +331,7 @@ fn reserved_html_output_rejects_resource_planning() {
             location,
             ResourceUrlContext::page_document(Path::new("other.html")).unwrap(),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .unwrap_err();
 
@@ -355,7 +367,7 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
             location,
             ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .unwrap_err();
 
@@ -425,8 +437,9 @@ fn live_resource_use_locations_override_intern_location() {
     )
     .unwrap();
 
-    let record = &plan.records()[0];
+    let record = &plan.records[0];
     assert_eq!(record.first_authored_location, first_live_location);
+    assert!(record.has_executable_use);
     assert_eq!(record.uses.len(), 2);
     assert_eq!(record.uses[0].authored_location, first_live_location);
     assert_eq!(record.uses[1].authored_location, second_live_location);
@@ -450,8 +463,8 @@ fn later_live_use_replaces_intern_fallback_location() {
     fallback_locations.insert(
         origin.clone(),
         OriginAuthoredLocations {
-            live: Vec::new(),
-            non_live: Vec::new(),
+            executable: Vec::new(),
+            metadata: Vec::new(),
             fallback: Some(intern_location.clone()),
         },
     );
@@ -462,21 +475,21 @@ fn later_live_use_replaces_intern_fallback_location() {
         &mut string_table,
     )
     .unwrap();
-    assert_eq!(plan.records()[0].first_authored_location, intern_location);
+    assert_eq!(plan.records[0].first_authored_location, intern_location);
 
     let mut live_locations = HashMap::new();
     live_locations.insert(
         origin,
         OriginAuthoredLocations {
-            live: vec![live_location.clone()],
-            non_live: Vec::new(),
+            executable: vec![live_location.clone()],
+            metadata: Vec::new(),
             fallback: Some(intern_location),
         },
     );
     plan.plan_union(&union, &live_locations, context, &mut string_table)
         .unwrap();
 
-    let record = &plan.records()[0];
+    let record = &plan.records[0];
     assert_eq!(record.first_authored_location, live_location);
     assert_eq!(record.uses.len(), 1);
     assert_eq!(record.uses[0].authored_location, live_location);
@@ -525,7 +538,7 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
         metadata_location.clone(),
         context.clone(),
         &mut string_table,
-        false,
+        ResourceUseKind::Metadata,
     )
     .unwrap();
     plan.plan_origin(
@@ -533,14 +546,15 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
         fragment_location.clone(),
         context.clone(),
         &mut string_table,
-        false,
+        ResourceUseKind::Metadata,
     )
     .unwrap();
     plan.plan_union(&union, &locations, context, &mut string_table)
         .unwrap();
 
-    let record = &plan.records()[0];
+    let record = &plan.records[0];
     assert_eq!(record.first_authored_location, live_location);
+    assert!(record.has_executable_use);
     assert!(
         record
             .uses
@@ -556,6 +570,77 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
 }
 
 #[test]
+fn metadata_only_use_plans_output_without_an_executable_use() {
+    // WHAT: a metadata-only origin still plans a byte-free output record.
+    // WHY: compile-time fragment and page-metadata uses keep a resource output-planned without
+    //      any HIR-reachable reference, and they own the first location until an executable use
+    //      overrides it.
+    let mut string_table = StringTable::new();
+    let origin = module_resource_origin("app", "", "assets/logo.svg");
+    let metadata_location = authored_location("metadata.moth", &mut string_table);
+    let mut plan = HtmlResourceOutputPlan::new("app");
+
+    plan.plan_origin(
+        origin.clone(),
+        metadata_location.clone(),
+        ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+        &mut string_table,
+        ResourceUseKind::Metadata,
+    )
+    .unwrap();
+
+    let record = plan
+        .record_for_origin(&origin)
+        .expect("a planned origin should be indexed");
+    assert_eq!(record.output_path, PathBuf::from("assets/logo.svg"));
+    assert_eq!(record.first_authored_location, metadata_location);
+    assert!(!record.has_executable_use);
+    assert_eq!(record.uses.len(), 1);
+}
+
+#[test]
+fn record_for_origin_resolves_planned_records_directly() {
+    // WHAT: the origin index resolves one planned record per origin without scanning.
+    // WHY: the structural URL renderer looks up one origin per rendered resource piece.
+    let mut string_table = StringTable::new();
+    let first = module_resource_origin("app", "", "assets/logo.svg");
+    let second = module_resource_origin("app", "docs", "assets/banner.svg");
+    let unrecorded = module_resource_origin("app", "", "assets/absent.svg");
+    let mut plan = HtmlResourceOutputPlan::new("app");
+
+    plan.plan_origin(
+        first.clone(),
+        authored_location("first.moth", &mut string_table),
+        ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+        &mut string_table,
+        ResourceUseKind::Executable,
+    )
+    .unwrap();
+    plan.plan_origin(
+        second.clone(),
+        authored_location("second.moth", &mut string_table),
+        ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html")),
+        &mut string_table,
+        ResourceUseKind::Executable,
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.record_for_origin(&first)
+            .expect("first origin should be indexed")
+            .output_path,
+        PathBuf::from("assets/logo.svg")
+    );
+    assert_eq!(
+        plan.record_for_origin(&second)
+            .expect("second origin should be indexed")
+            .output_path,
+        PathBuf::from("docs/assets/banner.svg")
+    );
+    assert!(plan.record_for_origin(&unrecorded).is_none());
+}
+
+#[test]
 fn project_local_origin_preserves_entry_root_relative_path() {
     // WHAT: project-local module resources retain their module-relative output spelling.
     // WHY: adding an artificial package prefix would break authored page-relative URLs.
@@ -568,12 +653,12 @@ fn project_local_origin_preserves_entry_root_relative_path() {
         authored_location("docs/getting-started/@page.moth", &mut string_table),
         ResourceUrlContext::page_document(Path::new("docs/getting-started/index.html")).unwrap(),
         &mut string_table,
-        true,
+        ResourceUseKind::Executable,
     )
     .unwrap();
 
     assert_eq!(
-        plan.records()[0].output_path,
+        plan.records[0].output_path,
         PathBuf::from("docs/getting-started/assets/logo.svg")
     );
 }
@@ -583,5 +668,5 @@ fn site_root_is_not_planned_as_a_resource_output() {
     // WHAT: an empty resource plan has no synthetic root output.
     // WHY: SiteRoot is a semantic reachability fact, not a resource and has no output path.
     let plan = HtmlResourceOutputPlan::new("app");
-    assert!(plan.records().is_empty());
+    assert!(plan.records.is_empty());
 }

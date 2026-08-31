@@ -30,6 +30,4 @@ pub(crate) use policy::{
     ValidatedDirectoryOutputSettings, ValidatedOutputPlan,
 };
 
-pub(crate) use manifest::validate_relative_output_path;
-
 pub(crate) use orchestrator::{WriteMode, WriteOptions, write_project_outputs};

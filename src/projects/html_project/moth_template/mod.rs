@@ -13,9 +13,11 @@
 // tooling can adopt the stable surface without forcing artificial in-tree callers.
 #![allow(dead_code)]
 
+mod bundle;
 mod compile;
 mod input;
 mod output;
+mod render;
 mod scope;
 
 // This is the crate-facing API surface for future HTML tooling and command wrappers.

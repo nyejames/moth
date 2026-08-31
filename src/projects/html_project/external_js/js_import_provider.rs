@@ -6,15 +6,17 @@
 //! WHY: project-local `.js` imports and built-in JS-backed packages need a compiler frontend
 //!      surface before AST can resolve calls and types.
 
+use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
-    RuntimeAssetIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::package_registration::{
@@ -24,11 +26,8 @@ use crate::projects::html_project::external_js::parser::parse_js_module;
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
     JsParserDiagnostic, ParsedJsModule,
 };
-use crate::projects::html_project::external_js::path_identity::{
-    sanitized_path_stem, stable_path_hash_hex,
-};
+use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
-use std::path::Path;
 
 /// HTML-owned JS external import provider.
 ///
@@ -128,11 +127,11 @@ impl ExternalImportProvider for JsExternalImportProvider {
             ));
         }
 
-        let package_path = js_provider_package_path(&request.canonical_source_path);
+        let package_path = js_provider_package_path(&request.logical_source_path);
         let package_id = context
             .package_registry
             .register_package(
-                package_path,
+                &package_path,
                 crate::builder_surface::PackageOrigin::ProjectLocal,
             )
             .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
@@ -144,14 +143,19 @@ impl ExternalImportProvider for JsExternalImportProvider {
 
         let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
 
+        let runtime_asset = js_runtime_asset_identity(
+            StablePackageIdentity::binding(PackageOrigin::ProjectLocal, &package_path),
+            &request.logical_source_path,
+            request.canonical_source_path,
+            request.source_location,
+        )
+        .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
+
         Ok(Some(ResolvedExternalImport {
             package_id,
             exported_types: registered.exported_types,
             exported_free_functions: registered.exported_free_functions,
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: request.canonical_source_path,
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(runtime_asset),
             diagnostics,
             required_runtime_imports,
         }))
@@ -162,11 +166,13 @@ impl ExternalImportProvider for JsExternalImportProvider {
 //  Package path
 // ------------------------------------------
 
-fn js_provider_package_path(canonical_source_path: &Path) -> String {
-    let safe_stem = sanitized_path_stem(canonical_source_path, "module");
-    let hash = stable_path_hash_hex(canonical_source_path);
-
-    format!("@html-js/{safe_stem}-{hash}")
+/// Build the stable project-local package path for one JS source.
+///
+/// WHAT: spells the package as `@html-js/` plus the full portable logical source path.
+/// WHY: two JS files at different logical locations must register distinct packages, and the
+///      spelling must not vary with the checkout root the file was found in.
+pub(crate) fn js_provider_package_path(logical_source_path: &PortableResourcePath) -> String {
+    format!("@html-js/{}", logical_source_path.as_str())
 }
 
 // ------------------------------------------

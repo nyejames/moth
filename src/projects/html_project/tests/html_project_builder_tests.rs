@@ -11,7 +11,6 @@ use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
     WriteOptions, write_project_outputs,
 };
-use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -32,13 +31,14 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::projects::html_project::resource_output_plan::ResourceUseKind;
 use crate::projects::html_project::tests::test_support::{
     add_reachable_external_import, collect_output_paths, create_test_module, expect_html_output,
-    expect_js_output,
+    js_runtime_asset_import, non_js_runtime_asset_import,
 };
 use crate::projects::settings::Config;
-use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 
 fn attach_origin(
     registry: &mut ResourceInputRegistry,
@@ -302,7 +302,7 @@ fn resource_destination_collision_preflights_before_read() {
             SourceLocation::default(),
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .expect("resource should be planned");
 
@@ -363,7 +363,7 @@ fn missing_module_source_preflights_before_reading_other_records() {
                 SourceLocation::default(),
                 ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
                 &mut string_table,
-                true,
+                ResourceUseKind::Executable,
             )
             .expect("resource should be planned");
     }
@@ -413,7 +413,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
             SourceLocation::default(),
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
-            true,
+            ResourceUseKind::Executable,
         )
         .expect("resource should be planned");
 
@@ -602,7 +602,7 @@ fn directory_build_maps_routes_relative_to_entry_root() {
 }
 
 #[test]
-fn js_runtime_asset_emitted_verbatim() {
+fn js_runtime_asset_is_deferred_and_written_verbatim() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src dir");
@@ -614,14 +614,14 @@ fn js_runtime_asset_emitted_verbatim() {
     let mut string_table = StringTable::new();
 
     let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
+    let runtime_asset =
+        js_runtime_asset_import(Path::new("src/lib.js"), canonical_root.join("src/lib.js"));
+    let asset_output_path = PathBuf::from(runtime_asset.origin.logical_path().as_str());
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("src/lib.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(runtime_asset),
             required_runtime_imports: vec![],
         },
     );
@@ -636,19 +636,52 @@ fn js_runtime_asset_emitted_verbatim() {
         )
         .expect("build with JS asset should succeed");
 
-    let js_paths: Vec<_> = collect_output_paths(&project.output_files)
-        .into_iter()
-        .filter(|p| portable_path_text(p).contains("_moth/js/"))
-        .collect();
+    assert!(
+        collect_output_paths(&project.output_files)
+            .iter()
+            .all(|path| !portable_path_text(path).contains("_moth/js/")),
+        "planned JS runtime assets must not emit eager output files"
+    );
+    assert_eq!(project.deferred_resources.len(), 1);
     assert_eq!(
-        js_paths.len(),
-        1,
-        "should emit exactly one JS runtime asset"
+        project.deferred_resources[0].relative_output_path,
+        asset_output_path
+    );
+    assert!(
+        project
+            .resource_inputs
+            .records()
+            .iter()
+            .all(|record| record.content() == ResourceContentState::Unhashed),
+        "HTML planning must not read or hash JS asset bytes"
     );
 
-    let js_path = js_paths[0].to_str().unwrap();
-    let js_content = expect_js_output(&project.output_files, js_path);
-    assert_eq!(js_content, "export function foo() {}");
+    let output_root = root.join("output");
+    let mut project = project;
+    let options = WriteOptions {
+        output_plan: OutputPlan::SingleFile(SingleFileOutputPlan {
+            output_root: output_root.clone(),
+            project_root: None,
+            owner: OutputOwner {
+                builder: BuilderKind::Html,
+                profile: BuildProfile::Dev,
+            },
+            setting_location: SourceLocation::default(),
+        }),
+        write_mode: WriteMode::AlwaysWrite,
+    };
+    write_project_outputs(&mut project, &options, &mut string_table)
+        .expect("central writer should materialise the deferred JS asset");
+
+    assert_eq!(
+        fs::read_to_string(output_root.join(&asset_output_path))
+            .expect("JS asset output should exist"),
+        "export function foo() {}"
+    );
+    assert!(matches!(
+        project.resource_inputs.records()[0].content(),
+        ResourceContentState::Read { .. }
+    ));
 }
 
 #[test]
@@ -668,10 +701,10 @@ fn js_runtime_asset_deduped_across_modules() {
         &mut module_a,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("src/lib.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("src/lib.js"),
+                canonical_root.join("src/lib.js"),
+            )),
             required_runtime_imports: vec![],
         },
     );
@@ -682,10 +715,10 @@ fn js_runtime_asset_deduped_across_modules() {
         &mut module_b,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("src/lib.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("src/lib.js"),
+                canonical_root.join("src/lib.js"),
+            )),
             required_runtime_imports: vec![],
         },
     );
@@ -700,13 +733,10 @@ fn js_runtime_asset_deduped_across_modules() {
         )
         .expect("build should succeed");
 
-    let js_count = collect_output_paths(&project.output_files)
-        .iter()
-        .filter(|p| portable_path_text(p).contains("_moth/js/"))
-        .count();
     assert_eq!(
-        js_count, 1,
-        "same canonical JS source referenced by multiple modules should emit one output file"
+        project.deferred_resources.len(),
+        1,
+        "same canonical JS source referenced by multiple modules should plan one deferred output"
     );
 }
 
@@ -729,10 +759,10 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
         &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("a/lib.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("a/lib.js"),
+                canonical_root.join("a/lib.js"),
+            )),
             required_runtime_imports: vec![],
         },
     );
@@ -740,10 +770,10 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
         &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(2),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("b/lib.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("b/lib.js"),
+                canonical_root.join("b/lib.js"),
+            )),
             required_runtime_imports: vec![],
         },
     );
@@ -758,16 +788,23 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
         )
         .expect("build should succeed");
 
-    let js_paths: Vec<_> = collect_output_paths(&project.output_files)
-        .into_iter()
-        .filter(|p| portable_path_text(p).contains("_moth/js/"))
+    let asset_paths: Vec<_> = project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
         .collect();
     assert_eq!(
-        js_paths.len(),
+        asset_paths.len(),
         2,
         "two JS assets with same stem but different paths should get distinct output paths"
     );
-    assert_ne!(js_paths[0], js_paths[1]);
+    assert_ne!(asset_paths[0], asset_paths[1]);
+    for asset_path in &asset_paths {
+        assert!(
+            asset_path.contains("_moth/js/"),
+            "every JS asset should plan under _moth/js, got: {asset_path}"
+        );
+    }
 }
 
 #[test]
@@ -787,10 +824,10 @@ fn non_js_runtime_asset_is_ignored() {
         &mut module,
         ModuleExternalImport {
             package_id: ExternalPackageId(1),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: canonical_root.join("src/lib.css"),
-                asset_kind: "css".to_owned(),
-            }),
+            runtime_asset: Some(non_js_runtime_asset_import(
+                "css",
+                canonical_root.join("src/lib.css"),
+            )),
             required_runtime_imports: vec![],
         },
     );
@@ -809,8 +846,8 @@ fn non_js_runtime_asset_is_ignored() {
         .iter()
         .any(|p| portable_path_text(p).contains("_moth/js/"));
     assert!(
-        !has_js_assets,
-        "non-JS runtime assets should not be emitted as JS"
+        !has_js_assets && project.deferred_resources.is_empty(),
+        "non-JS runtime assets should be neither eagerly emitted nor deferred"
     );
 }
 
@@ -894,10 +931,10 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     api_only.metadata.root_activity = ModuleRootActivity::default();
     api_only.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
-        runtime_asset: Some(RuntimeAssetIdentity {
-            canonical_source_path: entry_root.join("missing-runtime.js"),
-            asset_kind: "js".to_owned(),
-        }),
+        runtime_asset: Some(js_runtime_asset_import(
+            Path::new("missing-runtime.js"),
+            entry_root.join("missing-runtime.js"),
+        )),
         required_runtime_imports: vec![],
     }];
 

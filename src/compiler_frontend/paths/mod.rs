@@ -3,8 +3,8 @@
 //! WHAT: keeps path parsing (`const_paths`), project/dependency resolution (`path_resolution`),
 //! compile-time path bases (`compile_time_paths`), module-root discovery (`module_roots`),
 //! normalization helpers (`path_normalization`), structural file references (`file_references`),
-//! stable resource identity (`resource_identity`), the module-local resource origin table
-//! (`module_resources`) and site-root URL rendering (`site_root`) behind one frontend module map.
+//! stable resource identity (`resource_identity`) and the module-local resource origin table
+//! (`module_resources`) behind one frontend module map.
 //! WHY: paths cross Stage 0, header parsing, AST folding, diagnostics, and backend builders.
 //! This module should expose those owners without letting dependency semantics, path literal values,
 //! and structural output pieces collapse into one implementation path.
@@ -22,4 +22,3 @@ pub(crate) mod path_normalization;
 pub(crate) mod path_resolution;
 pub(crate) mod path_syntax;
 pub(crate) mod resource_identity;
-pub(crate) mod site_root;

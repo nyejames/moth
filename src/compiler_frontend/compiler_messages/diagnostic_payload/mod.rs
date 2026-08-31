@@ -147,6 +147,11 @@ pub enum DiagnosticPayload {
         path: InternedPath,
     },
 
+    MothTemplateInputsShareNoCommonAncestor {
+        first_path: InternedPath,
+        second_path: InternedPath,
+    },
+
     DuplicateMothTemplateInputPath {
         path: InternedPath,
         first_location: SourceLocation,

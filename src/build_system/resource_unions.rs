@@ -34,7 +34,6 @@ pub(crate) struct ResourceOriginUnion {
     seen: FxHashSet<StableResourceOriginId>,
 }
 
-#[allow(dead_code)] // accessors are consumed by output backends after this planning slice
 impl ResourceOriginUnion {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -49,26 +48,14 @@ impl ResourceOriginUnion {
         true
     }
 
-    /// Add origins in the supplied order.
-    pub(crate) fn extend<I>(&mut self, origins: I)
-    where
-        I: IntoIterator<Item = StableResourceOriginId>,
-    {
-        for origin in origins {
-            self.insert(origin);
-        }
-    }
-
+    #[cfg(test)]
     pub(crate) fn origins(&self) -> &[StableResourceOriginId] {
         &self.origins
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.origins.is_empty()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.origins.len()
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &StableResourceOriginId> {

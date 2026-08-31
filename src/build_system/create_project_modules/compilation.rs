@@ -88,10 +88,10 @@ pub(super) struct ModuleBoundaryPublication<'a> {
 /// Publish one successful module, its generated sidecars and its resource-source associations as
 /// one boundary transaction.
 ///
-/// WHAT: preflights all three mutable registries before reserving or committing any of them, then
-///       executes only infallible commits.
-/// WHY: a successful semantic result has one ownership boundary; publishing any lane separately
-///      would make atomicity depend on a later invariant remaining impossible.
+/// WHAT: runs every fallible check before reserving or committing any registry, then executes only
+///       infallible reservations and commits.
+/// WHY: separating collision detection from the successful publication path keeps a rejected
+///      materialisation from partially publishing module, generated or resource state.
 pub(super) fn publish_module_and_generated(
     publication: ModuleBoundaryPublication<'_>,
 ) -> Result<(), CompilerError> {
@@ -113,11 +113,11 @@ pub(super) fn publish_module_and_generated(
     let generated_publication = generated.preflight(&generated_delta)?;
     let resource_publication =
         resource_inputs.preflight_resource_source_associations(&resource_source_associations)?;
+    publish_materialisation_templates(materialisations, &artifact)?;
 
     modules.reserve_success_commit(&module_publication);
     generated.reserve_commit(&generated_publication);
     resource_inputs.reserve_resource_source_associations(&resource_publication);
-    publish_materialisation_templates(materialisations, &artifact);
     modules.commit_success(module_publication, artifact);
     generated.commit(generated_publication, generated_delta);
     resource_inputs.commit_resource_source_associations(resource_publication);
@@ -132,14 +132,12 @@ pub(super) fn publish_module_and_generated(
 fn publish_materialisation_templates(
     materialisations: &mut ProviderMaterialisationRegistry,
     artifact: &CompiledModuleArtifact,
-) {
+) -> Result<(), CompilerError> {
     let Some(context) = artifact.module.metadata.materialisation_context.as_ref() else {
-        return;
+        return Ok(());
     };
 
-    for (identity, template_index) in context.declaration_rows() {
-        materialisations.publish(identity.clone(), Arc::clone(context), template_index);
-    }
+    materialisations.publish_context(context)
 }
 
 /// Seed a boundary registry with every generic template completed source packages already expose.
@@ -150,17 +148,24 @@ fn seed_completed_package_materialisations(
     completed_packages: &CompletedSourcePackageRegistry,
 ) -> Result<ProviderMaterialisationRegistry, CompilerError> {
     let mut registry = ProviderMaterialisationRegistry::default();
+    let mut rows = Vec::new();
     for (identity, location) in completed_packages.materialisation_locations() {
         let package = completed_packages.package(location.package_id)?;
         let context = package
             .boundary
             .modules
             .materialisation_context_at(location.location)?;
-        registry.publish(
+        rows.push((
             identity.clone(),
             Arc::clone(context),
             location.location.template_index,
-        );
+        ));
+    }
+    for (identity, context, template_index) in &rows {
+        registry.preflight_publish(identity, context, *template_index)?;
+    }
+    for (identity, context, template_index) in rows {
+        registry.publish(identity, context, template_index)?;
     }
     Ok(registry)
 }

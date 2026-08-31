@@ -20,8 +20,10 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
@@ -115,7 +117,7 @@ impl From<CompilerError> for ConstValueStoreError {
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValueMetadata {
     pub(crate) type_id: TypeId,
-    pub(crate) diagnostic_type: crate::compiler_frontend::datatypes::DataType,
+    pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
     pub(crate) location: SourceLocation,
     pub(crate) reactive_source: Option<ReactiveSource>,
@@ -154,10 +156,7 @@ pub(crate) enum ConstStringValue {
 pub(crate) enum ConstStringPiece {
     /// A literal text run inside a piece-bearing value.
     ///
-    /// WHAT: folds that interleave text with resource or site-root pieces keep every plain run
-    /// in this compact interned form. TIR const-template emission interns each buffered text run
-    /// into the fold's piece list, and public const-template projection plus import projection
-    /// re-intern piece text when projecting folded strings back into module AST.
+    /// WHAT: the compact interned form an ordinary folded string keeps for plain runs.
     /// WHY: each run's position among the structural pieces around it must survive fold,
     /// projection and handoff until the builder resolves every piece's URL context.
     Text(StringId),
@@ -310,7 +309,7 @@ impl ConstValueStore {
         type_environment: &TypeEnvironment,
         template_builder: &mut impl FnMut(
             Option<&InternedPath>,
-            &crate::compiler_frontend::ast::templates::template::Template,
+            &Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<ConstValueId, ConstValueStoreError> {
         let (payload, value_kind, hir_visible, provenance) = match &expression.kind {

@@ -341,6 +341,22 @@ impl CompilerDiagnostic {
         )
     }
 
+    pub(crate) fn moth_template_inputs_share_no_common_ancestor(
+        first_path: InternedPath,
+        second_path: InternedPath,
+        location: SourceLocation,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
+            location.clone(),
+            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+                first_path,
+                second_path,
+            },
+        )
+        .with_labels(vec![DiagnosticLabel::primary(location)])
+    }
+
     pub(crate) fn duplicate_moth_template_input_path(
         path: InternedPath,
         first_location: SourceLocation,

@@ -31,9 +31,7 @@ use crate::projects::html_project::diagnostics::{
 };
 use crate::projects::html_project::document_config::parse_html_document_config;
 use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
-use crate::projects::html_project::external_js::runtime_assets::{
-    emit_external_js_runtime_assets, js_runtime_asset_output_path,
-};
+use crate::projects::html_project::external_js::runtime_assets::register_js_runtime_asset_sources;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::external_js::runtime_glue::{
     emit_build_runtime_modules, planned_runtime_module_output_paths,
@@ -117,7 +115,7 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = HtmlEntryPathPlan::from_config(config, string_table)?;
-        let resource_inputs = project_compilation.take_resource_inputs();
+        let mut resource_inputs = project_compilation.take_resource_inputs();
 
         let mut output_files = Vec::new();
         let mut output_paths = HashSet::new();
@@ -190,7 +188,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             let structural_url_renderer = StructuralUrlRenderer::new(
                 &resource_output_plan,
                 &resource_url_context,
-                Some(site_config.origin.as_str()),
+                site_config.origin.as_str(),
             );
 
             let compiled_artifacts = self.compile_one_module(
@@ -253,11 +251,16 @@ impl BackendBuilder for HtmlProjectBuilder {
         let runtime_emission_plan = HtmlExternalRuntimeEmissionPlan::from_import_sets(
             artifact_entries.iter().map(|entry| entry.external_imports),
         );
+
+        // Provider JS assets become deferred resource outputs. Their canonical byte sources
+        // attach to the shared registry and their declared destinations join the resource
+        // plan, so a collision with a page resource fails naming both semantic origins.
+        register_js_runtime_asset_sources(&runtime_emission_plan, &mut resource_inputs)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         for asset in runtime_emission_plan.js_assets().values() {
-            let output_path = js_runtime_asset_output_path(&asset.canonical_source_path);
-            resource_output_plan.reserve_builder_output_path(
-                &output_path,
-                "JavaScript",
+            resource_output_plan.plan_provider_runtime_asset(
+                asset.origin.clone(),
+                asset.authored_import_location.clone(),
                 string_table,
             )?;
         }
@@ -270,12 +273,6 @@ impl BackendBuilder for HtmlProjectBuilder {
                 string_table,
             )?;
         }
-
-        output_files.extend(emit_external_js_runtime_assets(
-            &runtime_emission_plan,
-            &mut output_paths,
-            string_table,
-        )?);
 
         output_files.extend(emit_build_runtime_modules(
             &runtime_emission_plan,
@@ -426,9 +423,6 @@ impl HtmlProjectBuilder {
             string_table,
         )
         .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
-        structural_url_renderer
-            .validate_site_root_policy(reachability, page_metadata_plan.uses_site_root)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -461,9 +455,6 @@ impl HtmlProjectBuilder {
             .map_err(|diagnostic| {
                 CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
             })?;
-            structural_url_renderer
-                .validate_site_root_policy(linked.reachability, false)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             validate_hir_backend_feature_support(
                 BackendFeatureValidationInput {
                     hir: &linked.module.executable.hir,
@@ -535,9 +526,9 @@ impl HtmlProjectBuilder {
 /// Resolve the byte-free resource plan into deferred destinations after all builder output paths
 /// are reserved.
 ///
-/// Module-owned origins must have an explicit Stage 0 attachment. Provider-owned origins remain
-/// with their provider emitters when no file source was attached, because their logical output path
-/// is not permission to guess a filesystem source.
+/// Every planned origin must carry an explicit Stage 0 or provider source attachment before the
+/// writer may materialise it, so a planned output with no registered source is an internal
+/// invariant violation rather than a guessable filesystem source.
 fn emit_planned_resource_outputs(
     resource_output_plan: HtmlResourceOutputPlan,
     resource_inputs: &ResourceInputRegistry,
@@ -550,16 +541,19 @@ fn emit_planned_resource_outputs(
     let mut deferred_resources = Vec::with_capacity(planned_resource_outputs.len());
 
     // Resolve every source attachment and reserve every destination before touching resource IO.
-    // Provider-owned records without an attachment remain with their provider emitters.
     for record in planned_resource_outputs {
         let Some(source_id) = resource_inputs.source_for_origin(&record.origin) else {
-            if matches!(record.origin.owner(), StableResourceOwnerId::Provider(_)) {
-                continue;
-            }
+            let owner_kind = if matches!(record.origin.owner(), StableResourceOwnerId::Provider(_))
+            {
+                "provider-owned"
+            } else {
+                "module-owned"
+            };
 
             let error = CompilerError::new(
                 format!(
-                    "planned module-owned resource origin {:?} has no Stage 0 source attachment",
+                    "planned {owner_kind} resource origin {:?} has no registered source \
+                     attachment",
                     record.origin
                 ),
                 record.first_authored_location.clone(),

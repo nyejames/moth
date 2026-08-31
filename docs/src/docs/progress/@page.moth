@@ -191,7 +191,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad extensionless dependency, direct alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension and module-root rejection coverage.]
             [: HTML builder / frontend]
-            [: [$html:<code>.md</code>] files are plain Markdown content assets that render to HTML at compile time and synthesize one private [$html:<code>content #String</code>] constant. They do not parse Moth dependency clauses, declarations, interpolation, templates, frontmatter, metadata or same-directory module-root scope. Links/images render literally and are not tracked assets in V1.]
+            [: [$html:<code>.md</code>] files are plain Markdown content assets that render to HTML at compile time and synthesize one private [$html:<code>content #String</code>] constant. They do not parse Moth dependency clauses, declarations, interpolation, templates, frontmatter, metadata or same-directory module-root scope. Links/images render literally and are not resource outputs in V1.]
         ]
 
         [data:
@@ -468,10 +468,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: File paths in value position]
-            [: Partial]
-            [: Targeted prepared-reference and Stage 0 physical-input resolution, fixed-point content discovery, AST String/file-kind semantics, structural Resource/SiteRoot flow, output-link planning, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
+            [: Supported]
+            [: Broad prepared-reference and Stage 0 physical-input resolution, fixed-point content discovery, AST String/file-kind semantics, structural Resource/SiteRoot flow, public/generated/service boundaries, provider JS identity, output-link planning, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
             [: Frontend / HTML builder]
-            [: Every physical-target-bearing non-dependency path token is classified during retained preparation and resolved once during Stage 0 across directory, source-package and synthetic single-file flows. Referenced [$html:<code>.mtf</code>] and [$html:<code>.md</code>] sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; [$html:<code>SourceKindNoFileValue</code>] for [$html:<code>.moth</code>] plus extensionless and site-root rows remain no-physical-target outcomes for AST. AST interprets the published outcomes as ordinary [$html:<code>String</code>] values, including structural Resource/SiteRoot pieces. Config bootstrap rejects file-value paths, and module, support-package, strict-case and symlink boundaries are settled before semantics. Phase 5 still closes exported and re-exported resource-string and package liveness, generated sidecars and public fingerprints, direct [$html:<code>.mtf</code>] service parity, provider/generated resource identity and reachability, dependency artefact compatibility, and CSS opaque-anchor validation. The superseded source-visible [$html:<code>Path</code>] type and its compile-time-only availability rules are gone, so [$html:<code>Path</code>] is an ordinary user identifier.]
+            [: Every physical-target-bearing non-dependency path token is classified during retained preparation and resolved once during Stage 0. Referenced [$html:<code>.mtf</code>] and [$html:<code>.md</code>] sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; [$html:<code>SourceKindNoFileValue</code>] for [$html:<code>.moth</code>] plus extensionless and site-root rows remain no-physical-target outcomes for AST. AST interprets published outcomes as ordinary [$html:<code>String</code>] values, including structural Resource/SiteRoot pieces. Direct [$html:<code>.mtf</code>] compilation consumes the same Stage 0 facts, provider JS assets share resource identity and IO authority, and CSS validation preserves opaque anchors. Config bootstrap rejects file-value paths. The superseded source-visible [$html:<code>Path</code>] type is gone, so [$html:<code>Path</code>] is an ordinary user identifier.]
         ]
 
         [data:

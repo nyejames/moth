@@ -9,7 +9,7 @@ path = "index.html"
 kind = "html"
 must_contain = ["<canvas"]
 must_not_contain = [
-    "_moth/js/canvas-",
+    "_moth/js/canvas.js",
     "_moth/js/glue/module-",
     "_moth/js/runtime/moth-runtime",
     "<script type=\"importmap\">",

@@ -20,6 +20,11 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -56,10 +61,10 @@ impl ExternalImportProvider for DummyProvider {
             package_id,
             exported_types: vec![ExternalTypeId(1)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(2)],
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: PathBuf::from("/test/asset.js"),
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(fixture_js_runtime_asset(
+                PathBuf::from("/test/asset.js"),
+                "registry",
+            )),
             diagnostics: vec![],
             required_runtime_imports: vec![RequiredRuntimeImport {
                 module_name: "@moth/runtime".to_owned(),
@@ -72,6 +77,31 @@ impl ExternalImportProvider for DummyProvider {
 // ------------------------------
 //  BuilderSurface initialization
 // ------------------------------
+
+/// Build one JS runtime asset fixture whose origin carries a stable provider owner.
+fn fixture_js_runtime_asset(
+    canonical_source_path: PathBuf,
+    destination_stem: &str,
+) -> RuntimeAssetIdentity {
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        "html-js",
+        StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+            "@test/fixtures",
+        ),
+    ));
+
+    RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(
+            owner,
+            PortableResourcePath::from_portable_spelling(format!("_moth/js/{destination_stem}.js"))
+                .expect("fixture asset logical path should be valid"),
+        ),
+        canonical_source_path,
+        asset_kind: "js".to_owned(),
+        authored_import_location: SourceLocation::default(),
+    }
+}
 
 #[test]
 fn builder_surface_with_mandatory_core_has_no_external_import_providers() {
@@ -195,6 +225,8 @@ fn dummy_provider_resolves_import_with_all_fields() {
 
     let request = ExternalImportRequest {
         import_path: "@test/dummy".to_owned(),
+        logical_source_path: PortableResourcePath::from_portable_spelling("dummy.js".to_owned())
+            .expect("fixture logical path should be portable"),
         canonical_source_path: PathBuf::from("/test/dummy.js"),
         source_location: SourceLocation::default(),
     };

@@ -56,7 +56,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
     let output_plan = HtmlResourceOutputPlan::new("");
     let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
     let structural_url_renderer =
-        StructuralUrlRenderer::new(&output_plan, &resource_url_context, Some("/"));
+        StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
         &mut string_table,
@@ -163,7 +163,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let output_plan = HtmlResourceOutputPlan::new("");
     let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
     let structural_url_renderer =
-        StructuralUrlRenderer::new(&output_plan, &resource_url_context, Some("/"));
+        StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
         &mut string_table,

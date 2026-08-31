@@ -855,10 +855,6 @@ GenericInferenceConflict:
   fact 3 = packed subject + generic parameter ID
   extra  = optional previous-evidence secondary label
 
-LargeTrackedAsset:
-  fact 0 = path StringId or PathId
-  facts 1..2 = byte size u64
-  fact 3 = unused/zero
 ```
 
 The schema tests validate that unused words and reserved bits are zero.

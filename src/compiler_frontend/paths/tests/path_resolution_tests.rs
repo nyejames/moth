@@ -1,12 +1,13 @@
 //! Unit tests for compile-time path resolution.
 
 use crate::builder_surface::PackageOrigin;
+use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terse::format_terse_diagnostic_with_context,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, ImportDiagnosticKind, InvalidImportPathReason,
+    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidImportPathReason,
 };
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
@@ -34,8 +35,7 @@ fn prepared_source_package_roots(
         build_source_package_boundary_indexes(
             source_packages,
             &SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::
-                ExternalImportProviderRegistry::default(),
+            &ExternalImportProviderRegistry::default(),
             &mut prep_string_table,
         )
         .expect("test source package boundary indexes should build")
@@ -44,7 +44,7 @@ fn prepared_source_package_roots(
 
 impl TestHarness {
     fn new() -> Self {
-        Self::with_source_packages(&crate::builder_surface::SourcePackageRegistry::default())
+        Self::with_source_packages(&SourcePackageRegistry::default())
     }
 
     fn with_source_packages(
@@ -58,7 +58,7 @@ impl TestHarness {
 
     fn with_source_file_kinds(source_file_kinds: &SourceFileKindRegistry) -> Self {
         Self::with_packages_and_source_file_kinds(
-            &crate::builder_surface::SourcePackageRegistry::default(),
+            &SourcePackageRegistry::default(),
             source_file_kinds,
         )
     }
@@ -127,9 +127,7 @@ fn dependency_diagnostic_payload(error: &DependencyPathResolutionError) -> &Diag
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::InvalidImportPath
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::InvalidImportPath)
     );
 
     &diagnostic.payload
@@ -158,7 +156,7 @@ fn source_package_dependency_resolves_to_package_root() {
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -207,7 +205,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -276,9 +274,7 @@ fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::UnsupportedSourceFileKind
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind)
     );
     assert!(matches!(
         &diagnostic.payload,
@@ -305,9 +301,7 @@ fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::ExplicitSourceExtension
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::ExplicitSourceExtension)
     );
     assert!(matches!(
         &diagnostic.payload,
@@ -335,9 +329,7 @@ fn moth_template_and_moth_same_stem_are_ambiguous() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 
@@ -360,9 +352,7 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 
@@ -379,7 +369,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
 
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -401,9 +391,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 
@@ -421,7 +409,7 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
     fs::write(package_root.join("helpers.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder);
 
     let resolver = ProjectPathResolver::new(
@@ -467,7 +455,7 @@ fn package_scan_root_name_is_not_package_prefix() {
     fs::write(entry_root.join("lib/thing.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -512,7 +500,7 @@ fn package_direct_child_is_package_prefix() {
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -555,7 +543,7 @@ fn entry_root_dependency_fallback_success() {
     fs::write(entry_root.join("pages/about.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -597,7 +585,7 @@ fn source_package_prefix_wins_consistently() {
     fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -646,7 +634,7 @@ fn dependency_dotdot_rejected() {
     fs::create_dir_all(&entry_root).unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -683,7 +671,7 @@ fn missing_dependency_target_is_typed_diagnostic() {
     fs::create_dir_all(&entry_root).unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -705,9 +693,7 @@ fn missing_dependency_target_is_typed_diagnostic() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::MissingImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget)
     );
     assert!(matches!(
         diagnostic.payload,
@@ -724,7 +710,7 @@ fn dependency_escape_project_root_rejected() {
     fs::create_dir_all(&entry_root).unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -772,7 +758,7 @@ fn dependency_escape_package_root_rejected() {
     fs::write(package_root.join("@mod.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root(
         "helper",
         package_root.clone(),
@@ -825,7 +811,7 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
     fs::write(entry_root.join("helper/thing.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -901,7 +887,7 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
     fs::write(entry_root.join("pages/about.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
-    let source_packages = crate::builder_surface::SourcePackageRegistry::new();
+    let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new(
         project_root.clone(),
         entry_root.clone(),
@@ -991,9 +977,7 @@ fn markdown_dependency_rejected_when_unsupported() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::UnsupportedSourceFileKind
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind)
     );
 }
 
@@ -1017,9 +1001,7 @@ fn markdown_and_moth_same_stem_are_ambiguous() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 
@@ -1042,9 +1024,7 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 
@@ -1069,9 +1049,7 @@ fn markdown_and_moth_template_same_stem_are_ambiguous() {
 
     assert_eq!(
         diagnostic.kind,
-        crate::compiler_frontend::compiler_messages::DiagnosticKind::Import(
-            ImportDiagnosticKind::AmbiguousImportTarget
-        )
+        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
     );
 }
 

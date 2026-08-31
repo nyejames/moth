@@ -284,7 +284,7 @@ const BASIC_METRIC_POLICY: &[MetricPolicy] = &[
             TimingMetric::BackendAssetsPlan,
             TimingMetric::BackendAssetsEmit,
         ],
-        label: "Tracked assets",
+        label: "Resource outputs",
         section: SectionId::Backend,
         children: &[],
     },

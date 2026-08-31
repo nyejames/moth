@@ -44,6 +44,7 @@ pub(crate) struct PublicFoldedField {
     pub(crate) name: String,
     pub(crate) value: PublicFoldedValue,
 }
+
 /// One owned structural piece of a folded string.
 ///
 /// WHAT: keeps literal text, resource origins and the site root distinct while owned values cross
@@ -96,6 +97,7 @@ impl OwnedFoldedString {
         }
     }
 }
+
 /// Convert a module-local folded string to its owned boundary representation.
 ///
 /// WHAT: resolves text IDs through the donor string table and resource IDs through the donor's
@@ -343,6 +345,7 @@ impl GenericParameterOriginResolver for FoldedValueGenericParameterResolver {
         )))
     }
 }
+
 /// Shared inputs for converting one folded value into public owned form.
 ///
 /// WHAT: carries the type, string and canonical-projection authorities used by both direct

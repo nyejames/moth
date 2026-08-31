@@ -160,6 +160,39 @@ fn single_slash_link_emits_site_root_anchor_before_suffix() {
 }
 
 #[test]
+fn non_site_root_link_targets_remain_literal_without_resource_anchors() {
+    let targets = [
+        "https://example.com",
+        "//cdn.example.com/lib.js",
+        "./local/path",
+        "../parent/path",
+        "#overview",
+        "?q=moth",
+    ];
+
+    for target in targets {
+        let input = format!("@{target} (Target)");
+        let pieces = render_markdown_stream(&split_text_into_lines(&input), "p");
+        let rendered = pieces
+            .into_iter()
+            .map(|piece| match piece {
+                FormatterOutputPiece::Text(text) => text,
+                FormatterOutputPiece::Opaque(anchor) => panic!(
+                    "non-site-root target {target:?} emitted an opaque {:?} anchor",
+                    anchor.kind
+                ),
+            })
+            .collect::<String>();
+
+        assert_eq!(
+            rendered,
+            format!("<p><a href=\"{target}\">Target</a></p>"),
+            "non-site-root markdown link targets must stay literal URLs"
+        );
+    }
+}
+
+#[test]
 fn requires_non_whitespace_or_start_before_at_sign() {
     let rendered = to_markdown("email@https://example.com (Example)", "p");
     assert_eq!(rendered, "<p>email@https://example.com (Example)</p>");

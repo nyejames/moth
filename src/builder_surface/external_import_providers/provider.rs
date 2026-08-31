@@ -11,6 +11,8 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 
@@ -75,14 +77,22 @@ impl From<&str> for ExternalFileExtension {
 
 /// Input facts passed to a provider when resolving a single external import.
 ///
-/// WHAT: carries the import path, canonical filesystem location, and source location
-///       so the provider can parse the file and emit diagnostics that point back to
-///       the Moth source that requested the import.
+/// WHAT: carries the import path, the portable logical source identity, the canonical
+///       filesystem location, and the source location so the provider can parse the file,
+///       build stable package identities, and emit diagnostics that point back to the
+///       Moth source that requested the import.
 /// WHY: context structs avoid long parameter lists and keep the trait stable.
 #[derive(Debug, Clone)]
 pub struct ExternalImportRequest {
     /// The import path as written in source (e.g. `@canvas/drawing.js`).
     pub import_path: String,
+    /// Portable, entry-root-relative logical path of the source inside its owning project.
+    ///
+    /// WHAT: the forward-slash spelling Stage 0 derives from the canonical file, independent
+    ///       of the checkout root the file was found under.
+    /// WHY: stable package and runtime-asset identity must come from this spelling; the
+    ///      canonical path varies per checkout and must remain a byte-source IO fact only.
+    pub(crate) logical_source_path: PortableResourcePath,
     /// Canonical absolute path to the external source file.
     pub canonical_source_path: PathBuf,
     /// Source location of the import statement in the requesting Moth file.
@@ -146,17 +156,22 @@ pub trait ExternalImportProvider: Send + Sync + std::fmt::Debug {
 
 /// Identity for a runtime asset that the backend must emit.
 ///
-/// WHAT: describes an external source file that should be copied or processed into
-///       the build output.
-/// WHY: separates asset tracking from package symbol metadata so backends can emit
-///      JS, WIT, or other asset kinds using the same general model.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// WHAT: carries the stable provider-owned semantic identity of one generated asset, its
+///       physical byte source, and the asset kind backends dispatch on.
+/// WHY: separates asset tracking from package symbol metadata so backends can emit JS, WIT,
+///      or other asset kinds using the same general model. The stable provider origin is the
+///      semantic key; the canonical source path is a byte-source IO fact only.
+#[derive(Debug, Clone)]
 pub struct RuntimeAssetIdentity {
-    /// Canonical path to the asset source file.
+    /// Stable provider-owned origin whose logical path is the declared output path.
+    pub(crate) origin: StableResourceOriginId,
+    /// Canonical path to the asset source file. A byte-source fact, never identity.
     pub canonical_source_path: PathBuf,
     /// General asset category used by backends to decide emission strategy.
     /// Examples: `"js"`, `"wit"`, `"rust"`.
     pub asset_kind: String,
+    /// Authored location of the import that requested the asset, for conflict diagnostics.
+    pub authored_import_location: SourceLocation,
 }
 
 /// A runtime module import required by an external resolved import.

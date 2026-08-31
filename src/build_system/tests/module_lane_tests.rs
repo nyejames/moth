@@ -51,6 +51,10 @@ use crate::compiler_frontend::module_compilation::{
     ModuleExternalImport, ModuleRootActivity,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -66,6 +70,25 @@ use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 use std::path::PathBuf;
 use std::sync::Arc;
+
+/// Build one JS runtime asset fixture whose origin carries a stable provider owner.
+fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdentity {
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        "html-js",
+        StablePackageIdentity::binding(PackageOrigin::ProjectLocal, "@test/lane"),
+    ));
+
+    RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(
+            owner,
+            PortableResourcePath::from_portable_spelling("_moth/js/lane.js".to_owned())
+                .expect("lane fixture asset logical path should be valid"),
+        ),
+        canonical_source_path,
+        asset_kind: "js".to_owned(),
+        authored_import_location: SourceLocation::default(),
+    }
+}
 
 /// Build the smallest valid HIR module with one entry start function, binding its name to a
 /// caller-supplied interned path in the caller-owned string table.
@@ -189,10 +212,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
         external_package_registry: Arc::new(ExternalPackageRegistry::new()),
         external_import_candidates: vec![ModuleExternalImport {
             package_id: ExternalPackageId(11),
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: asset_path.clone(),
-                asset_kind: String::from("js"),
-            }),
+            runtime_asset: Some(fixture_lane_js_runtime_asset(asset_path.clone())),
             required_runtime_imports: vec![],
         }],
         functions: function_link_facts,

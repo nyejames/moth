@@ -25,4 +25,6 @@ mod config;
 mod moth_template;
 
 pub(crate) use config::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
-pub(crate) use moth_template::{MothTemplateCompilationRequest, compile_moth_template_source};
+pub(crate) use moth_template::{
+    MothTemplateCompilationRequest, MothTemplateFileValueBundle, compile_moth_template_source,
+};

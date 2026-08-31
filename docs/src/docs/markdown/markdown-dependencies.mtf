@@ -59,7 +59,7 @@ Bound content participates in normal dependency tracking. The `.md` file is comp
 A `.md` content dependency clause is not a resource reference. It produces a compile-time
 `content #String` constant. Markdown links and images inside the file render literal `href` and
 `src` values: they are not resources, and they are not rewritten. Write a Moth file path when a
-file should become a tracked resource and take part in resource output.
+file should become a resource-bearing `String` and take part in resource output.
 
 ### Related concepts
 

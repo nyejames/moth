@@ -1245,7 +1245,7 @@ A resource-bearing string is an ordinary `String`. It may be mutable, a paramete
 
 The value stays structural until the builder knows the output artefact, so no compile-time operation can observe a guessed URL. In `.mtf`, use nested Moth template syntax such as `["[@images/ownership.webp]"]`. Plain Markdown paths stay text.
 
-Every authored file path is a build input wherever it is written, including in unused constants and statically inactive branches. Reaching an output is separate: an unused resource is never read, hashed or emitted.
+Every physical-target-bearing file path is a build input wherever it is written, including in unused constants and statically inactive branches. A `.moth` file value, an extensionless path and a site-root `@/` have no physical target. Reaching an output is separate: an unused resource is never read, hashed or emitted.
 
 External and protocol-relative URLs are ordinary untracked strings. The site root is different: it is structural placement metadata rather than plain text, though it is not a resource and is never copied or watched. Extensionless resource escapes and resource roots outside `entry_root` remain unsettled.
 

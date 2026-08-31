@@ -130,6 +130,5 @@ fn an_out_of_range_resource_handle_is_rejected() {
 fn a_module_that_names_no_resource_keeps_an_empty_table() {
     let table = ModuleResourceTable::new();
 
-    assert!(table.is_empty());
     assert!(table.origins().is_empty());
 }

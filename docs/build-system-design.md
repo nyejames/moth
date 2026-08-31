@@ -57,7 +57,7 @@ refactors or thorough reviews.
 - Entry activation, package assembly and backend partitioning never trigger deferred source compilation.
 - Project builders consume compiled graphs and explicit link plans. They do not rediscover source structure.
 - The build system owns output validation, writing, manifests and stale cleanup.
-- Graph and input membership is conservative and comes from the authored file path; output emission is exact and comes from entry or package reachability. Reachability never decides graph membership, and graph membership never forces emission.
+- Graph and input membership is conservative and comes from physical-target-bearing authored file references; output emission is exact and comes from entry or package reachability. Reachability never decides graph membership, and graph membership never forces emission. `SourceKindNoFileValue` and site-root `@/` have no physical target, source membership, input or watch record.
 - Resource origin, byte source, emitted output path and rendered URL are four separate facts owned by the build system after the compiler has published semantic resource facts.
 - Builders assign every reachable resource use one semantic URL context. No builder scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover resources.
 - Build configuration may specialise executable behaviour, but it cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology.
@@ -1554,7 +1554,6 @@ public interfaces or semantic module identity.
 - unchanged provider use and ordinary resource use deduplicate only when origin and output path agree
 - transformed or generated provider output has distinct identity
 - all output paths and conflicts validate before hashing, metadata reads or byte reads
-- warnings such as large-resource warnings are emitted once per reachable physical source
 - conflict diagnostics use semantic origins and authored use locations, never reconstructed strings
 
 ### Invalidation

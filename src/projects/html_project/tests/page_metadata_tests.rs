@@ -26,7 +26,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext,
+    HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::path::{Path, PathBuf};
@@ -244,10 +244,10 @@ fn renders_structural_string_reserved_values() {
         Default::default(),
         context.clone(),
         &mut string_table,
-        true,
+        ResourceUseKind::Metadata,
     )
     .expect("resource should be planned");
-    let renderer = StructuralUrlRenderer::new(&plan, &context, Some("/"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let rendered = renderer
         .render_owned(
             metadata

@@ -21,7 +21,6 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
-use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_output_path;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -120,8 +119,8 @@ fn build_package_asset_path_map(
         if asset.asset_kind != "js" {
             continue;
         }
-        let output_path = js_runtime_asset_output_path(&asset.canonical_source_path);
-        let relative = paths::relative_url_path(&glue_output_path, &output_path);
+        let output_path = Path::new(asset.origin.logical_path().as_str());
+        let relative = paths::relative_url_path(&glue_output_path, output_path);
         map.insert(external_import.package_id, relative);
     }
 

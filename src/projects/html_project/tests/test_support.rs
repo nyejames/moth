@@ -7,6 +7,7 @@
 
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
+use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::{
@@ -29,11 +30,17 @@ use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ModuleRootActivity,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::assertions::html_shell_violation;
-use std::path::PathBuf;
+use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Create the smallest valid HIR module with one entry start function.
@@ -226,4 +233,51 @@ pub(crate) fn assert_fragment_before_body_close(html: &str, fragment: &str) {
         fragment_pos < body_close,
         "expected '{fragment}' to appear before </body>"
     );
+}
+
+/// Build one provider-declared JS runtime asset fixture at production output-path facts.
+///
+/// `logical_source_path` is the owner-relative spelling the fixture pretends Stage 0 derived;
+/// fixtures that are not testing portability pass the bare file name.
+pub(crate) fn js_runtime_asset_import(
+    logical_source_path: &Path,
+    canonical_source_path: PathBuf,
+) -> RuntimeAssetIdentity {
+    let logical_source_path = PortableResourcePath::from_relative_logical_path(logical_source_path)
+        .expect("fixture JS logical source path should be portable");
+
+    js_runtime_asset_identity(
+        StablePackageIdentity::binding(PackageOrigin::ProjectLocal, "@test/js-runtime"),
+        &logical_source_path,
+        canonical_source_path,
+        SourceLocation::default(),
+    )
+    .expect("fixture JS runtime asset identity should be internally valid")
+}
+
+/// Build one non-JS runtime asset fixture, as another provider family would declare it.
+pub(crate) fn non_js_runtime_asset_import(
+    asset_kind: &str,
+    canonical_source_path: PathBuf,
+) -> RuntimeAssetIdentity {
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        &format!("fixture-{asset_kind}"),
+        StablePackageIdentity::binding(PackageOrigin::ProjectLocal, "@test/foreign"),
+    ));
+    let stem = canonical_source_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("foreign");
+    let logical_path = format!("_moth/{asset_kind}/{stem}-fixture.{asset_kind}");
+
+    RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(
+            owner,
+            PortableResourcePath::from_portable_spelling(logical_path)
+                .expect("fixture foreign asset path should be valid"),
+        ),
+        canonical_source_path,
+        asset_kind: asset_kind.to_owned(),
+        authored_import_location: SourceLocation::default(),
+    }
 }

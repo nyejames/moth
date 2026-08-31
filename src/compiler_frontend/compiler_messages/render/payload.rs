@@ -144,6 +144,7 @@ fn render_payload_message(
         | DiagnosticPayload::UnsupportedSourceFileKind { .. }
         | DiagnosticPayload::InvalidSourceFileEntry { .. }
         | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
+        | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
         | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
         | DiagnosticPayload::UnsupportedExternalExtension { .. }
         | DiagnosticPayload::InvalidExternalModule { .. } => {
@@ -856,6 +857,14 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
         DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
             duplicate_moth_template_input_path_message(path, string_table)
         }
+        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+            first_path,
+            second_path,
+        } => moth_template_inputs_share_no_common_ancestor_message(
+            first_path,
+            second_path,
+            string_table,
+        ),
         DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
             unsupported_external_extension_message(path, *extension, string_table)
         }

@@ -3478,52 +3478,52 @@ contract = "backend.html.api_only_module_artifact_filtering"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_entry_root_basic"
-path = "html_tracked_asset_entry_root_basic"
+id = "html_resource_entry_root_basic"
+path = "html_resource_entry_root_basic"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_entry_root"
+contract = "backend.html.resource_entry_root"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_large_warning"
-path = "html_tracked_asset_large_warning"
+id = "html_resource_large_warning"
+path = "html_resource_large_warning"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_large_warning"
+contract = "backend.html.resource_large_warning"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_origin_prefixed"
-path = "html_tracked_asset_origin_prefixed"
+id = "html_resource_origin_prefixed"
+path = "html_resource_origin_prefixed"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_origin_prefixed"
+contract = "backend.html.resource_origin_prefixed"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_relative_basic"
-path = "html_tracked_asset_relative_basic"
+id = "html_resource_relative_basic"
+path = "html_resource_relative_basic"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_relative_basic"
+contract = "backend.html.resource_relative_basic"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_relative_parent_normalization"
-path = "html_tracked_asset_relative_parent_normalization"
+id = "html_resource_relative_parent_normalization"
+path = "html_resource_relative_parent_normalization"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_relative_parent_normalization"
+contract = "backend.html.resource_relative_parent_normalization"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_root_folder_basic"
-path = "html_tracked_asset_root_folder_basic"
+id = "html_resource_root_folder_basic"
+path = "html_resource_root_folder_basic"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_root_folder"
+contract = "backend.html.resource_root_folder"
 role = "primary"
 
 [[case]]
-id = "html_tracked_asset_unreferenced_not_emitted"
-path = "html_tracked_asset_unreferenced_not_emitted"
+id = "html_resource_unreferenced_not_emitted"
+path = "html_resource_unreferenced_not_emitted"
 tags = ["integration", "html"]
-contract = "backend.html.tracked_asset_unreferenced_not_emitted"
+contract = "backend.html.resource_unreferenced_not_emitted"
 role = "primary"
 
 [[case]]
@@ -4685,7 +4685,7 @@ role = "primary"
 id = "path_exists_file"
 path = "path_exists_file"
 tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_relative_basic"
+contract = "backend.html.resource_relative_basic"
 role = "boundary"
 
 [[case]]
@@ -4713,21 +4713,21 @@ role = "primary"
 id = "path_origin_relative_stays_relative"
 path = "path_origin_relative_stays_relative"
 tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_origin_does_not_prefix_relative"
+contract = "backend.html.resource_origin_does_not_prefix_relative"
 role = "primary"
 
 [[case]]
 id = "path_origin_root_based"
 path = "path_origin_root_based"
 tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_origin_prefixed"
+contract = "backend.html.resource_origin_prefixed"
 role = "boundary"
 
 [[case]]
 id = "path_root_folder_preserved"
 path = "path_root_folder_preserved"
 tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_root_folder"
+contract = "backend.html.resource_root_folder"
 role = "boundary"
 
 [[case]]

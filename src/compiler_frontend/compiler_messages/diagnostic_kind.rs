@@ -359,6 +359,7 @@ pub enum ImportDiagnosticKind {
     UnsupportedSourceFileKind,
     InvalidSourceFileEntry,
     InvalidMothTemplateApiScopeItem,
+    MothTemplateInputsShareNoCommonAncestor,
     DuplicateMothTemplateInputPath,
     UnsupportedExternalExtension,
     InvalidExternalModule,

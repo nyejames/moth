@@ -617,7 +617,7 @@ fn js_lowering_aggregates_entry_and_linked_observations() {
 }
 
 #[test]
-fn wasm_and_tracked_asset_children_appear_when_significant() {
+fn wasm_and_resource_output_children_appear_when_significant() {
     let mut snapshot = build_snapshot();
     snapshot
         .timings
@@ -639,7 +639,7 @@ fn wasm_and_tracked_asset_children_appear_when_significant() {
         .collect::<Vec<_>>();
 
     assert!(labels.contains(&"Wasm build"));
-    assert!(labels.contains(&"Tracked assets"));
+    assert!(labels.contains(&"Resource outputs"));
     assert!(
         !labels.contains(&"Site config") && !labels.contains(&"Document config"),
         "config microsteps must stay hidden from basic output"

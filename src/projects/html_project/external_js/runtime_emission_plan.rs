@@ -11,8 +11,8 @@
 
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 
 /// Build-level emission plan for external JS runtime artifacts.
 ///
@@ -21,10 +21,10 @@ use std::path::PathBuf;
 /// WHY: the HTML builder can construct this once and feed it into both asset emission
 ///      and runtime module emission without re-scanning module metadata.
 pub(crate) struct HtmlExternalRuntimeEmissionPlan {
-    /// JS runtime assets keyed by canonical source path.
+    /// JS runtime assets keyed by stable provider-owned origin.
     ///
     /// Only `asset_kind == "js"` assets are included, preserving current backend behavior.
-    js_assets: BTreeMap<PathBuf, RuntimeAssetIdentity>,
+    js_assets: BTreeMap<StableResourceOriginId, RuntimeAssetIdentity>,
 
     /// Required runtime module specifiers, e.g. `"@moth/runtime"`.
     runtime_module_specifiers: BTreeSet<String>,
@@ -34,7 +34,7 @@ impl HtmlExternalRuntimeEmissionPlan {
     /// Build an emission plan from the exact runtime import union of each selected entry.
     ///
     /// WHAT: scans each entry import set once to collect:
-    ///       - JS runtime assets by canonical source path;
+    ///       - JS runtime assets by stable provider-owned origin;
     ///       - runtime module specifiers from `required_runtime_imports`.
     /// WHY: deterministic deduplication in one pass avoids redundant iteration later.
     pub(crate) fn from_import_sets<'a>(
@@ -49,7 +49,7 @@ impl HtmlExternalRuntimeEmissionPlan {
                     && asset.asset_kind == "js"
                 {
                     js_assets
-                        .entry(asset.canonical_source_path.clone())
+                        .entry(asset.origin.clone())
                         .or_insert_with(|| asset.clone());
                 }
 
@@ -65,7 +65,7 @@ impl HtmlExternalRuntimeEmissionPlan {
         }
     }
 
-    pub(crate) fn js_assets(&self) -> &BTreeMap<PathBuf, RuntimeAssetIdentity> {
+    pub(crate) fn js_assets(&self) -> &BTreeMap<StableResourceOriginId, RuntimeAssetIdentity> {
         &self.js_assets
     }
 

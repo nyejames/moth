@@ -696,6 +696,11 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid Moth template API scope item",
             DiagnosticSeverity::Error,
         ),
+        ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor => DiagnosticDescriptor::new(
+            "MOTH-IMPORT-0029",
+            "Moth template inputs share no common ancestor",
+            DiagnosticSeverity::Error,
+        ),
         ImportDiagnosticKind::DuplicateMothTemplateInputPath => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0028",
             "Duplicate Moth template input path",

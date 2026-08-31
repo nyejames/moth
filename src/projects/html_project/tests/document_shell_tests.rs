@@ -22,7 +22,7 @@ fn render_shell(
 ) -> String {
     let output_plan = HtmlResourceOutputPlan::new(project_name);
     let context = ResourceUrlContext::PageDocument(PathBuf::from(logical_html_path));
-    let structural_url_renderer = StructuralUrlRenderer::new(&output_plan, &context, Some("/"));
+    let structural_url_renderer = StructuralUrlRenderer::new(&output_plan, &context, "/");
 
     render_html_document_shell(HtmlDocumentShellInput {
         config,

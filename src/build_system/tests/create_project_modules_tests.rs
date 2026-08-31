@@ -49,6 +49,10 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
@@ -1609,6 +1613,25 @@ impl ResolvingCountingProvider {
     }
 }
 
+/// Build one JS runtime asset fixture whose origin carries a stable provider owner.
+fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdentity {
+    let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+        "html-js",
+        StablePackageIdentity::binding(PackageOrigin::Builder, "@test/fixtures"),
+    ));
+
+    RuntimeAssetIdentity {
+        origin: StableResourceOriginId::new(
+            owner,
+            PortableResourcePath::from_portable_spelling("_moth/js/fixture.js".to_owned())
+                .expect("fixture asset logical path should be valid"),
+        ),
+        canonical_source_path,
+        asset_kind: "js".to_owned(),
+        authored_import_location: SourceLocation::default(),
+    }
+}
+
 impl ExternalImportProvider for ResolvingCountingProvider {
     fn kind(&self) -> ExternalImportProviderKind {
         ExternalImportProviderKind::new("resolving-js")
@@ -1632,10 +1655,7 @@ impl ExternalImportProvider for ResolvingCountingProvider {
             package_id,
             exported_types: vec![ExternalTypeId(package_id.0)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id.0)],
-            runtime_asset: Some(RuntimeAssetIdentity {
-                canonical_source_path: request.canonical_source_path,
-                asset_kind: "js".to_owned(),
-            }),
+            runtime_asset: Some(fixture_js_runtime_asset(request.canonical_source_path)),
             diagnostics: vec![],
             required_runtime_imports: vec![RequiredRuntimeImport {
                 module_name: "@moth/runtime".to_owned(),

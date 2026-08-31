@@ -1,16 +1,23 @@
 //! HTML-builder-owned rendering of structural string pieces.
 //!
 //! WHAT: resolves resource and site-root pieces to text only after output planning has assigned an
-//! artefact URL context.
+//! artefact URL context, turning the configured project origin into the URL that the bare
+//! site-root spelling `@/` renders.
 //! WHY: resource identity and site-root policy belong to the builder, while HIR and owned folded
-//! values must remain structural until this final output boundary.
+//! values must remain structural until this final output boundary. A site-root URL and a resource
+//! URL answer different questions, and keeping them apart is what makes both correct: a site-root
+//! URL addresses a route rather than a file the build emits, so it is absolute and always carries
+//! the origin, while a resource URL is written relative to the artefact that observes it and never
+//! carries the origin. The site root names no file: it has no resource origin, owner, byte source
+//! or watch interest, and is never checked, copied, hashed, rewritten or included in a resource
+//! union.
 
 use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::paths::site_root::render_site_root_url;
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext,
 };
@@ -24,15 +31,15 @@ use std::sync::Arc;
 pub(crate) struct StructuralUrlRenderer<'a> {
     output_plan: &'a HtmlResourceOutputPlan,
     context: &'a ResourceUrlContext,
-    site_origin: Option<&'a str>,
+    site_origin: &'a str,
 }
 
 impl<'a> StructuralUrlRenderer<'a> {
-    /// Create a renderer for one planned artefact and consuming site-origin policy.
+    /// Create a renderer for one planned artefact and the builder's configured site origin.
     pub(crate) fn new(
         output_plan: &'a HtmlResourceOutputPlan,
         context: &'a ResourceUrlContext,
-        site_origin: Option<&'a str>,
+        site_origin: &'a str,
     ) -> Self {
         Self {
             output_plan,
@@ -54,7 +61,7 @@ impl<'a> StructuralUrlRenderer<'a> {
                             rendered.push_str(&self.render_resource_origin(origin)?)
                         }
                         OwnedFoldedStringPiece::SiteRoot => {
-                            rendered.push_str(&self.render_site_root_url()?)
+                            rendered.push_str(&self.render_site_root_url())
                         }
                     }
                 }
@@ -69,8 +76,6 @@ impl<'a> StructuralUrlRenderer<'a> {
         resources: &ModuleResourceTable,
         reachability: &HirReachability,
     ) -> Result<Arc<StructuralStringUrlMap>, CompilerError> {
-        validate_site_root_policy(reachability, false, self.site_origin)?;
-
         let mut resource_urls = HashMap::with_capacity(reachability.reachable_resource_uses.len());
         for resource_use in &reachability.reachable_resource_uses {
             let origin = &resources.try_origin(resource_use.resource_id)?.origin;
@@ -81,7 +86,7 @@ impl<'a> StructuralUrlRenderer<'a> {
         let site_root_url = if reachability.reachable_site_root_uses.is_empty() {
             None
         } else {
-            Some(self.render_site_root_url()?)
+            Some(self.render_site_root_url())
         };
 
         Ok(Arc::new(StructuralStringUrlMap {
@@ -90,24 +95,13 @@ impl<'a> StructuralUrlRenderer<'a> {
         }))
     }
 
-    /// Validate the target contract before a backend lowerer observes a site-root piece.
-    pub(crate) fn validate_site_root_policy(
-        &self,
-        reachability: &HirReachability,
-        uses_site_root: bool,
-    ) -> Result<(), CompilerError> {
-        validate_site_root_policy(reachability, uses_site_root, self.site_origin)
-    }
-
     fn render_resource_origin(
         &self,
-        origin: &crate::compiler_frontend::paths::resource_identity::StableResourceOriginId,
+        origin: &StableResourceOriginId,
     ) -> Result<String, CompilerError> {
         let record = self
             .output_plan
-            .records()
-            .iter()
-            .find(|record| record.origin == *origin)
+            .record_for_origin(origin)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "HTML structural URL renderer has no planned output path for resource origin {origin:?}"
@@ -153,32 +147,20 @@ impl<'a> StructuralUrlRenderer<'a> {
         Ok(relative)
     }
 
-    fn render_site_root_url(&self) -> Result<String, CompilerError> {
-        let Some(origin) = self.site_origin else {
-            return Err(CompilerError::compiler_error(
-                "HTML structural URL renderer cannot render a site-root piece without an origin policy",
-            ));
-        };
+    /// Render the site-root URL for the builder's configured project origin.
+    ///
+    /// The result always ends in `/`, so an authored suffix such as `[@/]docs/` composes by
+    /// concatenation. Project configuration spells an unset origin `/`, which renders as the bare
+    /// site root.
+    fn render_site_root_url(&self) -> String {
+        let prefix = self.site_origin.trim_end_matches('/');
 
-        Ok(render_site_root_url(origin))
+        if prefix.is_empty() {
+            return String::from("/");
+        }
+
+        format!("{prefix}/")
     }
-}
-
-/// Reject a reachable site-root use when the selected builder has no origin policy.
-pub(crate) fn validate_site_root_policy(
-    reachability: &HirReachability,
-    uses_site_root: bool,
-    site_origin: Option<&str>,
-) -> Result<(), CompilerError> {
-    if (uses_site_root || !reachability.reachable_site_root_uses.is_empty())
-        && site_origin.is_none()
-    {
-        return Err(CompilerError::compiler_error(
-            "target cannot lower a reachable site-root string without an origin policy",
-        ));
-    }
-
-    Ok(())
 }
 
 fn portable_segments<'a>(path: &'a Path, path_kind: &str) -> Result<Vec<&'a str>, CompilerError> {

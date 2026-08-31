@@ -68,8 +68,8 @@ pub(crate) struct ResourceInputRecord {
     bytes: Option<Vec<u8>>,
 }
 
+#[cfg(test)]
 impl ResourceInputRecord {
-    #[allow(dead_code)] // focused registry tests inspect content-state transitions
     pub(crate) fn content(&self) -> ResourceContentState {
         self.content
     }
@@ -120,7 +120,7 @@ impl ResourceInputRegistry {
         &self,
         associations: &[ResourceSourceAssociation],
     ) -> Result<ResourceSourcePublication, CompilerError> {
-        let mut pending_by_origin: FxHashMap<StableResourceOriginId, ResourceSourceId> =
+        let mut pending_by_origin: FxHashMap<&StableResourceOriginId, ResourceSourceId> =
             FxHashMap::default();
         let mut new_associations = Vec::new();
 
@@ -164,7 +164,7 @@ impl ResourceInputRegistry {
                 continue;
             }
 
-            pending_by_origin.insert(association.origin.clone(), source_id);
+            pending_by_origin.insert(&association.origin, source_id);
             new_associations.push(association.clone());
         }
 
@@ -236,7 +236,7 @@ impl ResourceInputRegistry {
         let (content_state, canonical_source_path) = self
             .records
             .get(source_index)
-            .map(|record| (record.content, record.canonical_source_path.clone()))
+            .map(|record| (record.content, &record.canonical_source_path))
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "resource source ID {} is outside the source registry",
@@ -246,9 +246,11 @@ impl ResourceInputRegistry {
 
         match content_state {
             ResourceContentState::Unhashed => {
-                let bytes = fs::read(&canonical_source_path).map_err(|error| {
+                // The filesystem read completes before the record below is borrowed mutably to
+                // store the cached result: the canonical path is borrowed, never copied.
+                let bytes = fs::read(canonical_source_path).map_err(|error| {
                     CompilerError::file_error(
-                        &canonical_source_path,
+                        canonical_source_path,
                         format!(
                             "Failed to read resource source '{}': {error}",
                             canonical_source_path.display()
