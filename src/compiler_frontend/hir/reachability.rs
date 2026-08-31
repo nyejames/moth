@@ -7,7 +7,7 @@
 //!
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.
-
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
@@ -40,6 +41,8 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_external_functions: FxHashSet<ExternalFunctionId>,
     pub(crate) reachable_external_calls: Vec<ReachableExternalCall>,
     pub(crate) reachable_map_uses: Vec<ReachableMapUse>,
+    pub(crate) reachable_resource_uses: Vec<ReachableResourceUse>,
+    pub(crate) reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     pub(crate) reachable_reactive_templates: Vec<ReachableReactiveTemplateUse>,
     pub(crate) reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
@@ -98,6 +101,8 @@ struct HirBlockRuntimeFacts {
     reachable_external_functions: FxHashSet<ExternalFunctionId>,
     reachable_external_calls: Vec<ReachableExternalCall>,
     reachable_map_uses: Vec<ReachableMapUse>,
+    reachable_resource_uses: Vec<ReachableResourceUse>,
+    reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     reachable_reactive_templates: Vec<ReachableReactiveTemplateUse>,
     reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
@@ -286,6 +291,29 @@ impl HirBackendSelection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableMapUse {
     pub(crate) kind: ReachableMapUseKind,
+    pub(crate) location: SourceLocation,
+}
+/// One reachable structural resource anchor and its executable owner.
+///
+/// WHAT: keeps the module-local `ResourceId`, authored source location and owning HIR function
+///       together for one resource use.
+/// WHY: resource liveness is selected from executable owners, while the resource table retains
+///      only the stable origin behind each dense handle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableResourceUse {
+    pub(crate) resource_id: ResourceId,
+    pub(crate) owner: FunctionId,
+    pub(crate) location: SourceLocation,
+}
+
+/// One reachable structural site-root anchor and its executable owner.
+///
+/// WHAT: keeps the authored source location and owning HIR function for one site-root use without
+///       inventing a resource identity.
+/// WHY: site-root output is liveness-bearing but has no `ResourceId` to enter the resource union.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableSiteRootUse {
+    pub(crate) owner: FunctionId,
     pub(crate) location: SourceLocation,
 }
 
@@ -536,6 +564,10 @@ impl HirReachability {
             .extend(direct.reachable_external_calls.iter().cloned());
         self.reachable_map_uses
             .extend(direct.reachable_map_uses.iter().cloned());
+        self.reachable_resource_uses
+            .extend(direct.reachable_resource_uses.iter().cloned());
+        self.reachable_site_root_uses
+            .extend(direct.reachable_site_root_uses.iter().cloned());
         self.reachable_reactive_templates
             .extend(direct.reachable_reactive_templates.iter().cloned());
         self.reachable_reactive_sinks
@@ -558,6 +590,12 @@ impl HirBlockRuntimeFacts {
         }
         for map_use in &mut self.reachable_map_uses {
             map_use.location.remap_string_ids(remap);
+        }
+        for resource_use in &mut self.reachable_resource_uses {
+            resource_use.location.remap_string_ids(remap);
+        }
+        for site_root_use in &mut self.reachable_site_root_uses {
+            site_root_use.location.remap_string_ids(remap);
         }
         for template in &mut self.reachable_reactive_templates {
             template.location.remap_string_ids(remap);
@@ -977,6 +1015,30 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         &field.value,
                         &expression_location,
                     );
+                }
+            }
+            HirExpressionKind::StructuralString { pieces } => {
+                for piece in pieces {
+                    match piece {
+                        ConstStringPiece::Text(_) => {}
+                        ConstStringPiece::Resource(resource_id) => {
+                            self.direct_facts
+                                .reachable_resource_uses
+                                .push(ReachableResourceUse {
+                                    resource_id: *resource_id,
+                                    owner: self.owner_function,
+                                    location: expression_location.clone(),
+                                });
+                        }
+                        ConstStringPiece::SiteRoot => {
+                            self.direct_facts
+                                .reachable_site_root_uses
+                                .push(ReachableSiteRootUse {
+                                    owner: self.owner_function,
+                                    location: expression_location.clone(),
+                                });
+                        }
+                    }
                 }
             }
 

@@ -44,6 +44,16 @@ The caller decides where to insert it. Bound content does not become a page frag
 
 This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.mtf` extension.
 
+### The same content as a file value
+
+The explicit-extension spelling that a clause rejects is valid in expression position, where it evaluates to the same `content` string:
+
+[codeblock, $code("moth"):
+    intro #= @docs/intro.mtf
+]
+
+Both forms name one compiled file and one `content` value. Use the clause when the bound name matters or the file is used repeatedly, and the direct file value when a template needs the content once. See @../resources/#file-values (File values).
+
 ### Relative path resolution
 
 Content dependency clauses follow the same path resolution rules as normal source dependency clauses. Both `@intro` and `@docs/intro` resolve from the declaring file's owning module root; the latter selects `docs/intro` below that root. `@./...` has no supported meaning.

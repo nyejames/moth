@@ -11,6 +11,7 @@
 //! Struct node emission reads the resolved field table produced by environment construction.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -56,6 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -99,6 +101,7 @@ struct BaseScopeContextInput<'scope> {
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
+    declaring_file_id: Option<FileId>,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }
@@ -248,7 +251,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     /// arm only adds emission-specific configuration (parameters for functions, etc.).
     /// WHY: avoids duplicating the same visibility/alias/field/setup sequence in three match arms.
     fn build_base_scope_context(&self, input: BaseScopeContextInput<'_>) -> ScopeContext {
-        ScopeContext::new(
+        let mut context = ScopeContext::new(
             input.kind,
             input.scope,
             Rc::clone(input.top_level_declarations),
@@ -280,6 +283,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_lookups(Rc::clone(&self.environment.lookups))
         .with_generated_evidence_pairs(Rc::clone(&self.environment.generated_evidence_pairs))
         .with_source_file_scope(input.source_file_scope)
+        .with_declaring_file_id(input.declaring_file_id);
+        if let Some(services) = &self.context.file_value_resolution {
+            context = context.with_file_value_resolution(Rc::clone(services));
+        }
+        context
     }
 
     pub(in crate::compiler_frontend::ast) fn emit(
@@ -376,6 +384,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         scope: template_tokens.src_path.to_owned(),
                         top_level_declarations: &top_level_declarations,
                         visibility,
+                        declaring_file_id: template_tokens.file_id,
                         source_file_scope,
                         scope_frame_capacity: scope_frame_capacity_budget.next_root_capacity(),
                     });
@@ -617,7 +626,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             ));
         };
 
-        let Some(mut token_stream) = template.body_tokens.clone() else {
+        let Some(body) = template.body_tokens.clone() else {
             let instance = GenericFunctionInstance {
                 instance_path: request.instance_path.clone(),
                 key: request.key.clone(),
@@ -627,6 +636,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.deferred_generic_requests.push(request);
             return Ok(());
         };
+        let mut token_stream = body.tokens().clone();
 
         let Some(mapping) = concrete_argument_mapping(
             template.generic_parameter_list_id,
@@ -682,12 +692,26 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: request.instance_path.clone(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
+                declaring_file_id: None,
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
             })
             .with_visible_declarations(Arc::new(visible_declarations))
             .with_active_generic_type_context(generic_type_context)
             .with_generic_function_instantiation_stack(active_instance_stack.clone());
+        if let Some(facts) = body.resolution_facts() {
+            let Some(services) = self.context.file_value_resolution.as_ref() else {
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(
+                        "Materialised generic body has Stage 0 facts but no file-value services",
+                    ),
+                    string_table,
+                ));
+            };
+            context = context.with_file_value_resolution(
+                services.with_stage0_resolution_facts(Arc::clone(facts)),
+            );
+        }
         context.expected_result_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
         context.current_function_return_type_ids = context.expected_result_type_ids.clone();
@@ -803,6 +827,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: header.tokens.src_path.to_owned(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
+                declaring_file_id: header.tokens.file_id,
                 source_file_scope,
                 scope_frame_capacity,
             })
@@ -882,6 +907,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: header.tokens.src_path.to_owned(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
+                declaring_file_id: header.tokens.file_id,
                 source_file_scope,
                 scope_frame_capacity,
             })
@@ -945,6 +971,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             scope: header.tokens.src_path.to_owned(),
             top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
             visibility,
+            declaring_file_id: header.tokens.file_id,
             source_file_scope,
             scope_frame_capacity,
         });
@@ -1121,7 +1148,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             };
         let value = match emission {
             TemplateEmission::Output(value) => value,
-            TemplateEmission::NoOutput => fold_context.string_table.intern(""),
+            TemplateEmission::NoOutput => {
+                ConstStringValue::Text(fold_context.string_table.intern(""))
+            }
             TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
                 drop(fold_context);
                 return Err(self.error_messages(

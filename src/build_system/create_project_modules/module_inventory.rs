@@ -26,19 +26,21 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
 use super::module_preparation::ModulePreparationContext;
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
+use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
     StructuralProviderAction, merge_prepared_owned_source, prepare_owned_source_input,
     prepare_owned_source_inputs, resolve_structural_provider_reference,
     should_parallelize_owned_source_preparation,
 };
-use super::source_tree_index::{SourceClassification, SourceOwnership};
+use super::source_tree_index::{SourceClassification, SourceId, SourceOwnership};
 
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
@@ -171,6 +173,7 @@ pub(crate) fn discover_all_modules_in_project(
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -181,6 +184,7 @@ pub(crate) fn discover_all_modules_in_project(
         style_directives,
         external_imports,
         directory_dependency_resolution,
+        resource_inputs,
         true,
         string_table,
         #[cfg(feature = "timers")]
@@ -196,6 +200,7 @@ pub(crate) fn discover_all_modules_in_package(
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -206,6 +211,7 @@ pub(crate) fn discover_all_modules_in_package(
         style_directives,
         external_imports,
         directory_dependency_resolution,
+        resource_inputs,
         false,
         string_table,
         #[cfg(feature = "timers")]
@@ -221,6 +227,7 @@ fn discover_all_modules_in_boundary(
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     require_normal_entry: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
@@ -255,6 +262,7 @@ fn discover_all_modules_in_boundary(
             source_origin_lookup: &source_origin_lookup,
         },
         external_imports,
+        resource_inputs,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -473,6 +481,7 @@ fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
     context: ModuleDiscoveryContext<'_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
@@ -492,7 +501,6 @@ fn discover_modules_serial_provider_capable(
         project_path_resolver: Some(project_path_resolver.clone()),
     };
     let source_tree_index = directory_dependency_resolution.source_tree_index();
-
     for seed in seeds {
         let module_edge_start = resolved_edges.len();
         let candidate_source_ids = source_tree_index
@@ -572,6 +580,8 @@ fn discover_modules_serial_provider_capable(
         let mut queued = BTreeSet::new();
         let mut queue = VecDeque::from([entry_source_id]);
         queued.insert(entry_source_id);
+        let mut file_reference_resolver =
+            FileReferenceResolver::new(source_tree_index, resource_inputs);
         while let Some(source_id) = queue.pop_front() {
             let order = source_order.get(&source_id).copied().ok_or_else(|| {
                 graph_inventory_mismatch_error(
@@ -693,6 +703,37 @@ fn discover_modules_serial_provider_capable(
                     }
                 }
             }
+
+            // File-value paths are graph-active independently of dependency clauses. The focused
+            // resolver owns module-root-relative physical validation and records resource inputs;
+            // this loop only queues newly discovered semantic content sources and publishes the
+            // resolved occurrence table.
+            let mut discovered_content_sources = Vec::<SourceId>::new();
+            for file_reference in prepared_output.structural_file_references.iter() {
+                let resolved = syntax
+                    .resolve_file_reference(
+                        &mut file_reference_resolver,
+                        seed.module_id,
+                        file_reference,
+                        &mut discovered_content_sources,
+                    )
+                    .map_err(|error| {
+                        CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                    })?;
+                syntax
+                    .record_resolved_file_reference(resolved)
+                    .map_err(|error| {
+                        CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                    })?;
+            }
+            discovered_content_sources.sort_unstable();
+            discovered_content_sources.dedup();
+            for target_source_id in discovered_content_sources {
+                if queued.insert(target_source_id) {
+                    queue.push_back(target_source_id);
+                }
+            }
+
             syntax.retain_prepared_output(order, prepared_output);
         }
         let prepared = syntax.finish()?;

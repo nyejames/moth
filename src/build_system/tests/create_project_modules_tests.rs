@@ -1,11 +1,13 @@
 use super::compiled_boundary::{
     CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
 };
+use super::file_reference_resolution::SingleFileReferenceOutcome;
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
 use super::prepared_source::PreparedSourceInput;
 use super::project_module_graph::ProjectModuleGraph;
+use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 use super::*;
 use crate::build_system::build::BackendBuilder;
@@ -17,20 +19,20 @@ use crate::build_system::create_project_modules::source_package_discovery::build
 use crate::build_system::project_config::{
     ProjectConfigParseServices, compile_project_config_file, load_project_config,
 };
-use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
     ExternalImportProviderKind, ExternalImportRequest, RequiredRuntimeImport,
     ResolvedExternalImport, RuntimeAssetIdentity,
 };
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
+use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload,
-    InvalidAssignmentTargetReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidOutputFolderReason, InvalidPackageFolderReason, PathKind,
+    InvalidAssignmentTargetReason, InvalidCompileTimePathReason, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidOutputFolderReason, InvalidPackageFolderReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -42,6 +44,10 @@ use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
+};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -220,6 +226,15 @@ fn discover_modules_for_test(
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+    discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
+        .map(|(schedule, _resource_inputs)| schedule)
+}
+
+fn discover_modules_for_test_with_resource_inputs(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+) -> Result<(ModuleCompilationSchedule, ResourceInputRegistry), CompilerMessages> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
@@ -264,17 +279,20 @@ fn discover_modules_for_test(
         cache: &mut external_import_cache,
         resolution_table: &mut external_dependency_resolution_table,
     };
-    discover_all_modules_in_project(
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let schedule = discover_all_modules_in_project(
         config,
         resolver,
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
         DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+        &mut resource_inputs,
         &mut string_table,
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
-    )
+    )?;
+    Ok((schedule, resource_inputs))
 }
 
 fn discover_modules_for_test_with_providers(
@@ -325,6 +343,7 @@ fn discover_modules_for_test_with_providers(
         cache: &mut external_import_cache,
         resolution_table: &mut external_dependency_resolution_table,
     };
+    let mut resource_inputs = ResourceInputRegistry::new();
 
     discover_all_modules_in_project(
         config,
@@ -333,6 +352,7 @@ fn discover_modules_for_test_with_providers(
         style_directives,
         &mut external_imports,
         DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+        &mut resource_inputs,
         &mut string_table,
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
@@ -397,6 +417,7 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
     }
     RetainedDependencyPath {
         path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: SourceLocation::default(),
         dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
@@ -427,12 +448,16 @@ fn collect_synthetic_inputs_for_test(
         cache: &mut external_import_cache,
         resolution_table: &mut external_dependency_resolution_table,
     };
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
 
     let collected = super::source_discovery::collect_reachable_input_files(
         entry_file_path,
         resolver,
         style_directives,
         &mut external_imports,
+        &source_file_kinds,
+        &mut resource_inputs,
         &mut string_table,
     )
     .expect("synthetic source discovery should succeed");
@@ -826,12 +851,16 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         cache: &mut external_import_cache,
         resolution_table: &mut external_dependency_resolution_table,
     };
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
+    let mut resource_inputs = ResourceInputRegistry::new();
 
     let messages = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
         &resolver,
         &style_directives,
         &mut external_imports,
+        &source_file_kinds,
+        &mut resource_inputs,
         &mut string_table,
     ) {
         Ok(_) => panic!("malformed synthetic preparation should diagnose"),
@@ -1060,6 +1089,7 @@ fn discover_modules_and_graph_for_test(
         cache: &mut external_import_cache,
         resolution_table: &mut external_dependency_resolution_table,
     };
+    let mut resource_inputs = ResourceInputRegistry::new();
 
     let modules = discover_all_modules_in_project(
         config,
@@ -1068,6 +1098,7 @@ fn discover_modules_and_graph_for_test(
         style_directives,
         &mut external_imports,
         DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+        &mut resource_inputs,
         &mut string_table,
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
@@ -2706,6 +2737,8 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
         &resolver,
         &style_directives,
         &mut external_imports,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut ResourceInputRegistry::new(),
         &mut string_table,
     )
     .expect("synthetic nested traversal should succeed");
@@ -2788,6 +2821,829 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
     assert!(entry_names.contains("@page.moth"));
     assert!(entry_names.contains("@layout.moth"));
     assert!(entry_names.contains("@lib.moth"));
+}
+
+#[test]
+fn directory_stage0_resolves_resource_from_consuming_module_root() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("assets")).expect("should create assets directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "unused #= @assets/logo.svg\n#[:ok]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("assets/logo.svg"), "resource bytes").expect("should write resource");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("resource reference should resolve during Stage 0");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+
+    let references = module.prepared.semantic.resolved_file_references.iter();
+    let references = references.collect::<Vec<_>>();
+    assert_eq!(references.len(), 1);
+    assert!(matches!(
+        &references[0].outcome,
+        ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+            owner_relative_path,
+            ..
+        }) if owner_relative_path.as_str() == "assets/logo.svg"
+    ));
+}
+
+#[test]
+fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discovery() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "unused #= @assets/missing.svg\n#[:ok]\n",
+    )
+    .expect("should write entry");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("missing user-authored resource should remain a retained outcome");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    let references = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 1);
+    assert!(matches!(
+        references[0].outcome,
+        ResolvedFileReferenceOutcome::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn directory_stage0_identifies_moth_value_without_preparing_it() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "helpers = @helpers.moth\n#[:ok]\n")
+        .expect("should write entry");
+    fs::write(src.join("helpers.moth"), "value #= 1\n").expect("should write moth target");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect(".moth value should be identified during Stage 0");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    assert_eq!(module_prepared_source_names(module), vec!["@page.moth"]);
+    let references = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 1);
+    assert!(matches!(
+        references[0].outcome,
+        ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::IdentifiedSourceKind)
+    ));
+}
+
+#[test]
+fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create source directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "value #= @not_a_directory/value.mtf\n#[:ok]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("not_a_directory"), "regular file").expect("should write blocker file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("NotADirectory should remain a typed path outcome");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    let references = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        &references[0].outcome,
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
+            if matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidCompileTimePath {
+                    reason: InvalidCompileTimePathReason::TargetNotRegular,
+                    ..
+                }
+            )
+    ));
+}
+
+#[test]
+fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_watch() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("child")).expect("should create child module directory");
+    fs::create_dir_all(src.join("support")).expect("should create support module directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "child_missing #= @child/missing.svg\nchild_existing #= @child/existing.svg\nsupport_missing #= @support/missing.svg\nsupport_existing #= @support/existing.svg\n#[:ok]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("child/existing.svg"), "child resource")
+        .expect("should write child resource");
+    fs::write(src.join("support/existing.svg"), "support resource")
+        .expect("should write support resource");
+    fs::write(src.join("child/@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(
+        src.join("support/+support.moth"),
+        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+    )
+    .expect("should write support root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let (modules, resource_inputs) =
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
+            .expect("child-boundary failures should remain retained outcomes");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    let reasons = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .filter_map(|reference| match &reference.outcome {
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
+                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasons.len(), 4);
+    assert!(
+        reasons
+            .iter()
+            .all(|reason| *reason == InvalidCompileTimePathReason::EscapesModuleBoundary)
+    );
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let _outside_root = tempfile::tempdir().expect("should create outside temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let child = src.join("child");
+    let support = src.join("support");
+    fs::create_dir_all(&child).expect("should create child module directory");
+    fs::create_dir_all(&support).expect("should create support module directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "external #= @external-alias/missing.svg\nchild #= @child-alias/missing.svg\nsupport #= @support-alias/missing.svg\ndangling_external #= @dangling-external/missing.svg\ndangling_child #= @dangling-child/missing.svg\ndangling_support #= @dangling-support/missing.svg\n#[:ok]\n",
+    )
+    .expect("should write entry");
+    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(
+        support.join("+support.moth"),
+        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+    )
+    .expect("should write support root");
+    symlink(_outside_root.path(), src.join("external-alias"))
+        .expect("should create external alias");
+    symlink(&child, src.join("child-alias")).expect("should create child alias");
+    symlink(&support, src.join("support-alias")).expect("should create support alias");
+    symlink(
+        _outside_root.path().join("missing-target"),
+        src.join("dangling-external"),
+    )
+    .expect("should create dangling external alias");
+    symlink(child.join("missing-target"), src.join("dangling-child"))
+        .expect("should create dangling child alias");
+    symlink(support.join("missing-target"), src.join("dangling-support"))
+        .expect("should create dangling support alias");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let (modules, resource_inputs) =
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
+            .expect("symlink-ancestor failures should remain retained outcomes");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    let reasons = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .filter_map(|reference| match &reference.outcome {
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
+                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasons.len(), 6);
+    assert!(
+        reasons.iter().all(
+            |reason| *reason == InvalidCompileTimePathReason::EscapesSymlink
+                || *reason == InvalidCompileTimePathReason::EscapesModuleBoundary
+        ),
+        "unexpected symlink-ancestor reasons: {reasons:?}"
+    );
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[test]
+fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let nested = src.join("nested");
+    fs::create_dir_all(nested.join("assets")).expect("should create nested module directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@a.moth"), "#[:ok]\n").expect("should write first root");
+    fs::write(
+        nested.join("@b.moth"),
+        "asset #= @Assets/logo.svg\n#[:ok]\n",
+    )
+    .expect("should write second root");
+    fs::write(nested.join("assets/logo.svg"), "resource").expect("should write resource");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("module discovery should retain the path diagnostic");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@b.moth")
+        })
+        .expect("nested module should be discovered");
+    let reference = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .next()
+        .expect("nested module should retain one file reference");
+    let diagnostic = match &reference.outcome {
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => diagnostic,
+        outcome => panic!("expected a retained diagnostic, got {outcome:?}"),
+    };
+    let DiagnosticPayload::InvalidCompileTimePath {
+        reason: InvalidCompileTimePathReason::CaseMismatch { provided, expected },
+        ..
+    } = &diagnostic.payload
+    else {
+        panic!("expected a retained case-mismatch diagnostic");
+    };
+    assert_eq!(
+        module.prepared.semantic.string_table.resolve(*provided),
+        "Assets"
+    );
+    assert_eq!(
+        module.prepared.semantic.string_table.resolve(*expected),
+        "assets"
+    );
+    let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context(
+        diagnostic,
+        crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
+            &module.prepared.semantic.string_table,
+        ),
+    );
+    assert!(rendered.contains("Assets") && rendered.contains("assets"));
+}
+
+#[test]
+fn synthetic_stage0_resolves_content_and_resource_references() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let docs = root.join("docs");
+    let assets = root.join("assets");
+    fs::create_dir_all(&docs).expect("should create docs directory");
+    fs::create_dir_all(&assets).expect("should create assets directory");
+    let entry = root.join("main.moth");
+    fs::write(
+        &entry,
+        "template #= @docs/intro.mtf\nmarkdown #= @docs/notes.md\nlogo #= @assets/logo.svg\nsource #= @helper.moth\n",
+    )
+    .expect("should write synthetic entry");
+    fs::write(
+        docs.join("intro.mtf"),
+        "template body [@docs/second.mtf] [@assets/logo.svg]\n",
+    )
+    .expect("should write template");
+    fs::write(docs.join("second.mtf"), "second template body\n")
+        .expect("should write transitive template");
+    fs::write(docs.join("notes.md"), "# notes\n").expect("should write markdown");
+    fs::write(assets.join("logo.svg"), "resource bytes").expect("should write resource");
+    fs::write(root.join("helper.moth"), "value #= 1\n").expect("should write source target");
+
+    let config = Config::new(root.clone());
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    source_file_kinds.register("md", SourceFileKind::PlainMarkdown);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+    let style_directives = test_style_directives();
+    let mut string_table = StringTable::new();
+    let mut external_packages = ExternalPackageRegistry::new();
+    let external_import_providers =
+        crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
+    let mut external_import_cache =
+        crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
+        );
+    let mut external_dependency_resolution_table =
+        crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+        external_packages: &mut external_packages,
+        providers: &external_import_providers,
+        cache: &mut external_import_cache,
+        resolution_table: &mut external_dependency_resolution_table,
+    };
+    let mut resource_inputs = ResourceInputRegistry::new();
+
+    let collected = super::source_discovery::collect_reachable_input_files(
+        &entry,
+        &resolver,
+        &style_directives,
+        &mut external_imports,
+        &source_file_kinds,
+        &mut resource_inputs,
+        &mut string_table,
+    )
+    .expect("synthetic structural references should resolve");
+
+    let input_paths = collected
+        .input_files
+        .iter()
+        .map(|input| {
+            input
+                .source_path()
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect::<HashSet<_>>();
+    assert!(input_paths.contains("main.moth"));
+    assert!(input_paths.contains("intro.mtf"));
+    assert!(input_paths.contains("second.mtf"));
+    assert!(input_paths.contains("notes.md"));
+    assert!(!input_paths.contains("helper.moth"));
+
+    let references = collected.resolved_file_references;
+    assert_eq!(references.len(), 6);
+    assert!(references.iter().any(|reference| {
+        reference.class == PreparedFileReferenceClass::ContentSource
+            && matches!(reference.outcome, SingleFileReferenceOutcome::Source { .. })
+    }));
+    assert!(references.iter().any(|reference| {
+        reference.class == PreparedFileReferenceClass::ResourceFile
+            && matches!(
+                reference.outcome,
+                SingleFileReferenceOutcome::Resource { .. }
+            )
+    }));
+    assert!(references.iter().any(|reference| {
+        reference.class == PreparedFileReferenceClass::SourceKindNoFileValue
+            && matches!(
+                reference.outcome,
+                SingleFileReferenceOutcome::IdentifiedSourceKind
+            )
+    }));
+    assert_eq!(resource_inputs.records().len(), 1);
+    resource_inputs
+        .validate()
+        .expect("resource registry is coherent");
+}
+
+#[test]
+fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
+    let child = root.join("child");
+    let support = root.join("support");
+    fs::create_dir_all(&child).expect("should create child directory");
+    fs::create_dir_all(&support).expect("should create support directory");
+    let entry = root.join("main.moth");
+    fs::write(
+        &entry,
+        "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n",
+    )
+    .expect("should write synthetic entry");
+    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
+    fs::write(
+        support.join("+support.moth"),
+        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+    )
+    .expect("should write support root");
+    fs::write(support.join("existing.svg"), "resource").expect("should write support resource");
+
+    let source_file_kinds = {
+        let mut kinds = crate::builder_surface::SourceFileKindRegistry::new();
+        kinds.register("mtf", SourceFileKind::MothTemplate);
+        kinds
+    };
+    let resolver = ProjectPathResolver::new_with_module_roots(
+        root.clone(),
+        root,
+        PreparedSourcePackageRoots::empty(),
+        &source_file_kinds,
+        crate::compiler_frontend::paths::module_roots::ModuleRootTable::empty(),
+    )
+    .expect("synthetic resolver should build without prepared module roots");
+
+    let style_directives = test_style_directives();
+    let mut string_table = StringTable::new();
+    let mut external_packages = ExternalPackageRegistry::new();
+    let external_import_providers =
+        crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
+    let mut external_import_cache =
+        crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
+        );
+    let mut external_dependency_resolution_table =
+        crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+        external_packages: &mut external_packages,
+        providers: &external_import_providers,
+        cache: &mut external_import_cache,
+        resolution_table: &mut external_dependency_resolution_table,
+    };
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let collected = super::source_discovery::collect_reachable_input_files(
+        &entry,
+        &resolver,
+        &style_directives,
+        &mut external_imports,
+        &source_file_kinds,
+        &mut resource_inputs,
+        &mut string_table,
+    )
+    .expect("ordinary synthetic Stage 0 should retain boundary diagnostics");
+
+    assert_eq!(collected.input_files.len(), 1);
+    assert_eq!(collected.resolved_file_references.len(), 4);
+    assert!(collected.resolved_file_references.iter().all(|reference| {
+        matches!(
+            &reference.outcome,
+            SingleFileReferenceOutcome::Diagnostic(diagnostic)
+                if matches!(
+                    &diagnostic.payload,
+                    DiagnosticPayload::InvalidCompileTimePath {
+                        reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
+                        ..
+                    }
+                )
+        )
+    }));
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[test]
+fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
+    let child = root.join("child");
+    let support = root.join("support");
+    fs::create_dir_all(&child).expect("should create child directory");
+    fs::create_dir_all(&support).expect("should create support directory");
+    let entry = root.join("main.moth");
+    fs::write(
+        &entry,
+        "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n#[:ok]\n",
+    )
+    .expect("should write synthetic entry");
+    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
+    fs::write(
+        support.join("+support.moth"),
+        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+    )
+    .expect("should write support root");
+    fs::write(support.join("existing.svg"), "resource").expect("should write support resource");
+
+    let config = Config::new(entry.clone());
+    let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    builder_surface
+        .source_file_kinds
+        .register("mtf", SourceFileKind::MothTemplate);
+    let mut string_table = StringTable::new();
+    let frontend = super::compilation::compile_single_file_frontend(
+        &config,
+        crate::compiler_frontend::FrontendBuildProfile::Dev,
+        &test_style_directives(),
+        &mut builder_surface,
+        entry.extension().expect("entry should have an extension"),
+        &mut string_table,
+    )
+    .expect("ordinary synthetic frontend should retain user diagnostics");
+
+    // AST now consumes file-value paths through Stage 0's resolved table, so the
+    // boundary-rejected value occurrences in the entry surface as this module's retained user
+    // diagnostics and the module is published as diagnosed. Stage 0 outcome rows are inspected by
+    // the preceding production discovery test; this invocation proves the complete frontend
+    // handoff preserves the physical registry even on the diagnosed path.
+    assert_eq!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .count(),
+        0
+    );
+    assert_eq!(frontend.project.diagnosed.len(), 1);
+    assert!(frontend.has_diagnosed_or_blocked());
+    assert!(frontend.resource_inputs.records().is_empty());
+    assert!(
+        frontend
+            .resource_inputs
+            .missing_watch_interests()
+            .is_empty()
+    );
+}
+
+#[test]
+fn directory_stage0_reaches_content_reference_fixed_point() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("docs")).expect("should create docs directory");
+    fs::create_dir_all(src.join("assets")).expect("should create assets directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "entry_root #= \"src\"\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "unused #= @docs/one.mtf\n#[:ok]\n")
+        .expect("should write entry");
+    fs::write(
+        src.join("docs/one.mtf"),
+        "[@docs/two.mtf]\n[@assets/logo.svg]\n[@assets/logo.svg]\n",
+    )
+    .expect("should write first content source");
+    fs::write(src.join("docs/two.mtf"), "second content\n")
+        .expect("should write second content source");
+    fs::write(src.join("assets/logo.svg"), "resource bytes").expect("should write resource");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
+        .expect("content references should reach a fixed point");
+    let module = modules
+        .waves()
+        .iter()
+        .flatten()
+        .find(|module| {
+            module
+                .prepared
+                .semantic
+                .entry_file_path()
+                .expect("entry identity should be retained")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+
+    let prepared_sources = module_prepared_source_names(module);
+    assert!(prepared_sources.contains(&"@page.moth".to_owned()));
+    assert!(prepared_sources.contains(&"one.mtf".to_owned()));
+    assert!(
+        prepared_sources.contains(&"two.mtf".to_owned()),
+        "prepared sources: {prepared_sources:?}"
+    );
+
+    let references = module
+        .prepared
+        .semantic
+        .resolved_file_references
+        .iter()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        references.len(),
+        4,
+        "each physical authored occurrence is retained"
+    );
+    assert!(
+        references
+            .iter()
+            .all(|reference| matches!(reference.outcome, ResolvedFileReferenceOutcome::Target(_)))
+    );
+    let resource_ids = references
+        .iter()
+        .filter_map(|reference| match &reference.outcome {
+            ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+                source,
+                ..
+            }) => Some(*source),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(resource_ids.len(), 2);
+    assert_eq!(resource_ids[0], resource_ids[1]);
 }
 
 #[test]
@@ -4768,6 +5624,8 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         &resolver,
         &style_directives,
         &mut external_imports,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut ResourceInputRegistry::new(),
         &mut string_table,
     )
     .expect("synthetic nested provider should resolve");
@@ -4838,6 +5696,8 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             &resolver,
             &style_directives,
             &mut external_imports,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &mut ResourceInputRegistry::new(),
             &mut string_table,
         )
         .expect("both nested provider clauses should resolve");
@@ -6625,6 +7485,7 @@ fn empty_module() -> Module {
     Module {
         executable: ModuleExecutable {
             hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },
@@ -6886,6 +7747,8 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
         &resolver,
         &style_directives,
         &mut external_imports,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut ResourceInputRegistry::new(),
         &mut string_table,
     )
     .expect("synthetic single-file traversal should succeed");

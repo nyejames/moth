@@ -28,9 +28,8 @@ use crate::compiler_frontend::module_compilation::artefact::{
 use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ModuleRootActivity,
 };
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -88,6 +87,7 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
     Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },
@@ -188,7 +188,6 @@ pub(crate) struct RenderedPathUsageInput<'a> {
     pub public_path_components: &'a [&'a str],
     pub filesystem_path: PathBuf,
     pub base: CompileTimePathBase,
-    pub kind: CompileTimePathKind,
     pub source_file_scope_components: &'a [&'a str],
     pub line_number: i32,
 }
@@ -202,7 +201,6 @@ pub(crate) fn rendered_path_usage(
         public_path_components,
         filesystem_path,
         base,
-        kind,
         source_file_scope_components,
         line_number,
     } = input;
@@ -212,7 +210,6 @@ pub(crate) fn rendered_path_usage(
         filesystem_path,
         public_path: interned_path(string_table, public_path_components),
         base,
-        kind,
         source_file_scope: scope.clone(),
         render_location: SourceLocation::new(
             scope,

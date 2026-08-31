@@ -7,6 +7,8 @@ use super::error::ExpressionParseError;
 use super::expression::Expression;
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
@@ -105,12 +107,29 @@ pub(super) fn parse_template_expression(
 
             let mut fold_context = template_context.new_tir_fold_context(string_table);
             let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)?;
-            let folded_string = match fold_result.emission {
+            let mut folded_expression = match fold_result.emission {
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
+                    ConstStringValue::Text(value),
+                ) => Expression::string_slice(
                     value,
-                ) => value,
+                    token_stream.current_location(),
+                    value_mode.as_owned(),
+                ),
+                crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
+                    ConstStringValue::Pieces(pieces),
+                ) => Expression::new(
+                    ExpressionKind::StructuralString { pieces },
+                    token_stream.current_location(),
+                    crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+                    crate::compiler_frontend::datatypes::DataType::StringSlice,
+                    value_mode.as_owned(),
+                ),
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::NoOutput => {
-                    fold_context.string_table.intern("")
+                    Expression::string_slice(
+                        fold_context.string_table.intern(""),
+                        token_stream.current_location(),
+                        value_mode.as_owned(),
+                    )
                 }
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Break(
                     _,
@@ -124,12 +143,6 @@ pub(super) fn parse_template_expression(
                     .into());
                 }
             };
-
-            let mut folded_expression = Expression::string_slice(
-                folded_string,
-                token_stream.current_location(),
-                value_mode.as_owned(),
-            );
             folded_expression.synthetic_interface_provenance = fold_result.provenance;
             Ok(Some(folded_expression))
         }

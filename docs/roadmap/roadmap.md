@@ -12,7 +12,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 ## Active implementation work
 
 - [Boracle - borrow checker test/reference solver for desiging and validating final borrow checker behaviour](./plans/boracle-reference-solver-implementation-plan.md) - Active in separate worktree
-- [Path values and resource linking](./plans/path-values-and-resource-linking-plan.md)
+- [File values and resource linking](./plans/path-values-and-resource-linking-plan.md)
 
 ## Queued documentation work
 

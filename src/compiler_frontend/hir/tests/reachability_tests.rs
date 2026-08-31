@@ -4,6 +4,7 @@
 //! WHY: runtime metadata consumers need deterministic function/block/external-call facts without
 //! coupling these tests to AST lowering or backend emission.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -25,7 +26,15 @@ use crate::compiler_frontend::hir::{
     expressions::HirMapOp,
 };
 use crate::compiler_frontend::hir::{expressions::ValueKind, ids::LocalId};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
+use std::path::Path;
 
 #[test]
 fn start_reachability_ignores_unreachable_function_external_calls() {
@@ -544,6 +553,239 @@ fn reachability_records_reachable_map_uses_only() {
 }
 
 #[test]
+fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
+    let mut resource_table = ModuleResourceTable::new();
+    let resource_id = resource_table.intern_origin(
+        StableResourceOriginId::module_owned(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("reachability-tests"),
+                String::new(),
+                ModuleRootRole::Normal,
+            ),
+            PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+                .expect("fixture resource path should be portable"),
+        ),
+        SourceLocation::default(),
+    );
+    let first_location = location_at(40, 2);
+    let second_location = location_at(41, 4);
+    let unreachable_location = location_at(50, 6);
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![
+                    structural_string_statement(
+                        10,
+                        vec![
+                            ConstStringPiece::Resource(resource_id),
+                            ConstStringPiece::SiteRoot,
+                        ],
+                        first_location.clone(),
+                    ),
+                    structural_string_statement(
+                        11,
+                        vec![ConstStringPiece::Resource(resource_id)],
+                        second_location.clone(),
+                    ),
+                ],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![structural_string_statement(
+                    12,
+                    vec![ConstStringPiece::Resource(resource_id)],
+                    unreachable_location,
+                )],
+                HirTerminator::Return(unit_expression(1)),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect structural uses");
+
+    assert_eq!(
+        reachability
+            .reachable_resource_uses
+            .iter()
+            .map(|resource_use| (
+                resource_use.resource_id,
+                resource_use.owner,
+                resource_use.location.start_pos.line_number,
+                resource_use.location.start_pos.char_column,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (resource_id, FunctionId(0), 40, 2),
+            (resource_id, FunctionId(0), 41, 4),
+        ],
+        "repeated origins retain each authored use in order"
+    );
+    assert_eq!(
+        reachability
+            .reachable_site_root_uses
+            .iter()
+            .map(|site_root_use| (
+                site_root_use.owner,
+                site_root_use.location.start_pos.line_number,
+                site_root_use.location.start_pos.char_column,
+            ))
+            .collect::<Vec<_>>(),
+        vec![(FunctionId(0), 40, 2)],
+        "site-root use keeps its exact executable owner"
+    );
+}
+
+#[test]
+fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
+    let mut resource_table = ModuleResourceTable::new();
+    let resource_id = resource_table.intern_origin(
+        StableResourceOriginId::module_owned(
+            StableModuleOriginIdentity::from_portable_path(
+                StablePackageIdentity::project_local("reachability-tests"),
+                String::new(),
+                ModuleRootRole::Normal,
+            ),
+            PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+                .expect("fixture resource path should be portable"),
+        ),
+        SourceLocation::default(),
+    );
+    let outer_location = location_at(40, 2);
+    let nested_branch_location = location_at(41, 4);
+    let sibling_branch_location = location_at(42, 6);
+    let after_branch_location = location_at(43, 8);
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![structural_string_statement(
+                    10,
+                    vec![
+                        ConstStringPiece::Resource(resource_id),
+                        ConstStringPiece::SiteRoot,
+                        ConstStringPiece::Resource(resource_id),
+                    ],
+                    outer_location.clone(),
+                )],
+                HirTerminator::If {
+                    condition: bool_expression(0),
+                    then_block: BlockId(2),
+                    else_block: BlockId(1),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![structural_string_statement(
+                    11,
+                    vec![
+                        ConstStringPiece::Resource(resource_id),
+                        ConstStringPiece::SiteRoot,
+                    ],
+                    sibling_branch_location.clone(),
+                )],
+                HirTerminator::Jump {
+                    target: BlockId(4),
+                    args: vec![],
+                },
+            ),
+            block(
+                BlockId(2),
+                vec![structural_string_statement(
+                    12,
+                    vec![
+                        ConstStringPiece::Resource(resource_id),
+                        ConstStringPiece::SiteRoot,
+                        ConstStringPiece::Resource(resource_id),
+                    ],
+                    nested_branch_location.clone(),
+                )],
+                HirTerminator::Jump {
+                    target: BlockId(4),
+                    args: vec![],
+                },
+            ),
+            block(
+                BlockId(4),
+                vec![structural_string_statement(
+                    13,
+                    vec![
+                        ConstStringPiece::Resource(resource_id),
+                        ConstStringPiece::SiteRoot,
+                        ConstStringPiece::Resource(resource_id),
+                    ],
+                    after_branch_location.clone(),
+                )],
+                HirTerminator::Return(unit_expression(4)),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect structural uses across CFG blocks");
+
+    assert_eq!(
+        reachability
+            .reachable_resource_uses
+            .iter()
+            .map(|resource_use| (
+                resource_use.resource_id,
+                resource_use.owner,
+                resource_use.location.start_pos.line_number,
+                resource_use.location.start_pos.char_column,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (resource_id, FunctionId(0), 40, 2),
+            (resource_id, FunctionId(0), 40, 2),
+            (resource_id, FunctionId(0), 41, 4),
+            (resource_id, FunctionId(0), 41, 4),
+            (resource_id, FunctionId(0), 42, 6),
+            (resource_id, FunctionId(0), 43, 8),
+            (resource_id, FunctionId(0), 43, 8),
+        ],
+        "resource uses must follow breadth-first block order and retain repeats",
+    );
+    assert_eq!(
+        reachability
+            .reachable_site_root_uses
+            .iter()
+            .map(|site_root_use| (
+                site_root_use.owner,
+                site_root_use.location.start_pos.line_number,
+                site_root_use.location.start_pos.char_column,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (FunctionId(0), 40, 2),
+            (FunctionId(0), 41, 4),
+            (FunctionId(0), 42, 6),
+            (FunctionId(0), 43, 8),
+        ],
+        "site-root uses must follow breadth-first block order",
+    );
+}
+
+#[test]
 fn missing_function_references_are_internal_hir_errors() {
     let module = hir_module(FunctionId(0), vec![], vec![]);
 
@@ -674,6 +916,24 @@ fn match_arm(body: BlockId) -> HirMatchArm {
         pattern: HirPattern::Wildcard,
         guard: None,
         body,
+    }
+}
+
+fn structural_string_statement(
+    id: u32,
+    pieces: Vec<ConstStringPiece>,
+    location: SourceLocation,
+) -> HirStatement {
+    HirStatement {
+        id: HirNodeId(id),
+        kind: HirStatementKind::Expr(HirExpression {
+            id: HirValueId(id),
+            kind: HirExpressionKind::StructuralString { pieces },
+            ty: builtin_type_ids::STRING,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+        }),
+        location,
     }
 }
 

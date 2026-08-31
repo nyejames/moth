@@ -3,13 +3,11 @@
 //! WHAT: formats resolved `CompileTimePath` values into public string
 //! representations, applying the origin prefix and output style policies.
 //!
-//! WHY: path-to-string coercion rules (origin prefix, trailing slash,
-//! relative preservation) belong in one shared module so all builders
-//! consume consistent output without reimplementing the rules.
+//! WHY: path-to-string coercion rules (origin prefix, relative preservation)
+//! belong in one shared module so all builders consume consistent output
+//! without reimplementing the rules.
 
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::{CompileTimePath, CompileTimePathBase};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -44,31 +42,25 @@ impl Default for PathStringFormatConfig {
 }
 
 /// WHAT: formats a compile-time path into a public string representation.
-/// WHY: this is the single place where the origin prefix, trailing slash, and
-/// relative-path preservation rules are applied.
+/// WHY: this is the single place where the origin prefix and relative-path
+/// preservation rules are applied.
 ///
 /// Rules:
 /// - Relative paths (`RelativeToFile`) stay relative; no origin is applied.
 /// - Root-based paths (`SourcePackageRoot`, `EntryRoot`) get a leading `/`
 ///   and are prefixed with origin when origin is not `"/"`.
-/// - Directory paths get a trailing `/`.
 /// - The `Portable` output style always uses forward slashes.
 pub fn format_compile_time_path(
     path: &CompileTimePath,
     config: &PathStringFormatConfig,
     string_table: &StringTable,
 ) -> String {
-    let raw = render_public_path(&path.public_path, &path.base, string_table);
-
-    let with_trailing = match path.kind {
-        CompileTimePathKind::Directory => ensure_trailing_slash(&raw),
-        CompileTimePathKind::File => raw,
-    };
+    let site_path = render_public_path(&path.public_path, &path.base, string_table);
 
     let formatted = match path.base {
-        CompileTimePathBase::RelativeToFile => with_trailing,
+        CompileTimePathBase::RelativeToFile => site_path,
         CompileTimePathBase::SourcePackageRoot | CompileTimePathBase::EntryRoot => {
-            apply_origin(&with_trailing, &config.origin)
+            apply_origin(&site_path, &config.origin)
         }
     };
 
@@ -93,23 +85,12 @@ fn render_public_path(
         }
         CompileTimePathBase::SourcePackageRoot | CompileTimePathBase::EntryRoot => {
             // Non-relative paths become absolute site paths: "/assets/logo.png".
-            // An empty public path here is the Moth public-root literal (`@/`),
-            // which renders as "/" before origin is applied.
             if portable.starts_with('/') {
                 portable
             } else {
                 format!("/{portable}")
             }
         }
-    }
-}
-
-/// Ensures the string ends with exactly one `/`.
-fn ensure_trailing_slash(s: &str) -> String {
-    if s.ends_with('/') {
-        s.to_owned()
-    } else {
-        format!("{s}/")
     }
 }
 

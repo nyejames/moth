@@ -19,7 +19,9 @@ use super::test_support::{
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueStore,
+};
 use crate::compiler_frontend::ast::expressions::expression::{
     ChoiceConstructInput, Expression, ExpressionKind,
 };
@@ -34,7 +36,13 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
+use crate::compiler_frontend::folded_value::{
+    FiniteFloat, OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
+};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTypeId,
 };
@@ -109,6 +117,7 @@ fn build_constant_records(
         string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &const_values,
+        module_resources: None,
     })
     .build()
     .map(|result| result.draft.declarations)
@@ -331,7 +340,7 @@ fn constant_record_owns_folded_template_string_value() {
     };
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::String("Hello, Moth!".to_owned())
+        PublicFoldedValue::String(OwnedFoldedString::Text("Hello, Moth!".to_owned()))
     );
 }
 
@@ -421,7 +430,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     assert_eq!(fields[0].name, "title");
     assert_eq!(
         fields[0].value,
-        PublicFoldedValue::String("Moth".to_owned())
+        PublicFoldedValue::String(OwnedFoldedString::Text("Moth".to_owned()))
     );
     assert_eq!(fields[1].name, "year");
     assert_eq!(fields[1].value, PublicFoldedValue::Int(2026));
@@ -961,4 +970,59 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
         message.contains("reached ConstValueStore without a folded value"),
         "expected an unsupported-shape diagnostic, got: {message}"
     );
+}
+
+#[test]
+fn public_structural_string_preserves_resource_identity_and_piece_order() {
+    let mut string_table = StringTable::new();
+    let mut resources = ModuleResourceTable::new();
+    let origin = StableResourceOriginId::module_owned(
+        module_origin(),
+        PortableResourcePath::from_relative_logical_path(std::path::Path::new("assets/logo.svg"))
+            .expect("relative resource path should be portable"),
+    );
+    let resource = resources.intern_origin(origin.clone(), SourceLocation::default());
+    let prefix = string_table.intern("assets/");
+    let folded = ConstStringValue::Pieces(vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::Resource(resource),
+        ConstStringPiece::SiteRoot,
+    ]);
+
+    let projected = owned_folded_string_from_const_string(&folded, &resources, &string_table)
+        .expect("structural string should project");
+    assert_eq!(
+        projected,
+        OwnedFoldedString::Pieces(vec![
+            crate::compiler_frontend::folded_value::OwnedFoldedStringPiece::Text(
+                "assets/".to_owned(),
+            ),
+            crate::compiler_frontend::folded_value::OwnedFoldedStringPiece::Resource(origin),
+            crate::compiler_frontend::folded_value::OwnedFoldedStringPiece::SiteRoot,
+        ])
+    );
+    assert_eq!(projected.into_text(), None);
+    assert_eq!(
+        OwnedFoldedString::Text("plain".to_owned()).into_text(),
+        Some("plain".to_owned())
+    );
+}
+
+#[test]
+fn text_is_available_for_a_piece_list_that_carries_only_text() {
+    let mut string_table = StringTable::new();
+    let resources = ModuleResourceTable::new();
+    let head = string_table.intern("docs/");
+    let tail = string_table.intern("intro.html");
+    let folded = ConstStringValue::Pieces(vec![
+        ConstStringPiece::Text(head),
+        ConstStringPiece::Text(tail),
+    ]);
+
+    let projected = owned_folded_string_from_const_string(&folded, &resources, &string_table)
+        .expect("an all-text piece list needs no resource table entry");
+
+    // Availability must match `require_concrete_text`: only a Resource or SiteRoot piece withholds
+    // text, so a piece list carrying only text concatenates in authored order.
+    assert_eq!(projected.into_text(), Some("docs/intro.html".to_owned()));
 }

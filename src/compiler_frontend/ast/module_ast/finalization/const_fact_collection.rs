@@ -582,12 +582,12 @@ impl<'a> ConstFactCollector<'a> {
                 }
             },
 
-            // Terminal expression kinds carry no nested structure to walk.
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::StringSlice(_)
+            | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_)
             | ExpressionKind::Reference(_)
@@ -595,9 +595,6 @@ impl<'a> ConstFactCollector<'a> {
             | ExpressionKind::Template(_)
             | ExpressionKind::RuntimeTemplateHandoff(_)
             | ExpressionKind::RuntimeSlotApplicationHandoff(_) => {}
-
-            #[cfg(test)]
-            ExpressionKind::Path(_) => {}
         }
 
         Ok(())

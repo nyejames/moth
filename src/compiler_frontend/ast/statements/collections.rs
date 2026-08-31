@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_eval::{ConstStringRequirement, require_concrete_text};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     CollectionExpressionType, Expression, MapLiteralEntry, MapLiteralExpressionType,
@@ -304,21 +305,64 @@ type KnownMapKeys = HashMap<KnownMapKey, SourceLocation>;
 
 /// Attempt to extract a `KnownMapKey` from a coerced key expression so
 /// duplicate-key detection can run for literal scalars.
-fn try_extract_known_map_key(key: &Expression) -> Option<KnownMapKey> {
-    match &key.kind {
-        ExpressionKind::StringSlice(id) => Some(KnownMapKey::String(*id)),
-        ExpressionKind::Int(v) => Some(KnownMapKey::Int(*v)),
-        ExpressionKind::Bool(v) => Some(KnownMapKey::Bool(*v)),
-        ExpressionKind::Char(v) => Some(KnownMapKey::Char(*v)),
-        _ => None,
+fn try_extract_known_map_key(
+    key: &Expression,
+    string_table: &mut StringTable,
+) -> CollectionParseResult<Option<KnownMapKey>> {
+    let known_key = match &key.kind {
+        ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
+            // A key whose final text is still unresolved is simply not knowable here, exactly like
+            // a runtime operand. The constant-context check above owns the refusal, so duplicate
+            // detection must not raise a second one from this collector.
+            let Ok(Some(id)) = require_concrete_text(
+                key,
+                ConstStringRequirement::DuplicateKeyValidation,
+                string_table,
+            ) else {
+                return Ok(None);
+            };
+            KnownMapKey::String(id)
+        }
+        ExpressionKind::Int(v) => KnownMapKey::Int(*v),
+        ExpressionKind::Bool(v) => KnownMapKey::Bool(*v),
+        ExpressionKind::Char(v) => KnownMapKey::Char(*v),
+        _ => return Ok(None),
+    };
+
+    Ok(Some(known_key))
+}
+
+/// Require concrete text before a string enters compile-time map-key handling.
+///
+/// WHAT: refuses a resource-bearing or site-root key only inside a constant context.
+/// WHY: a constant map must have its complete key set at compile time, so an unresolved key is a
+/// real error there. An ordinary runtime map may be keyed by a structural string, whose text the
+/// build resolves later, so rejecting it would remove legal expressive power; such a key is merely
+/// unknowable for compile-time duplicate detection.
+fn validate_compile_time_map_key(
+    key: &Expression,
+    context: &ScopeContext,
+    string_table: &mut StringTable,
+) -> CollectionParseResult<()> {
+    if context.kind.is_constant_context()
+        && matches!(
+            &key.kind,
+            ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. }
+        )
+    {
+        require_concrete_text(key, ConstStringRequirement::CompileTimeMapKey, string_table)
+            .map_err(ExpressionParseError::from)?;
     }
+
+    Ok(())
 }
 
 fn record_known_map_key(
     known_keys: &mut KnownMapKeys,
     key: &Expression,
+    string_table: &mut StringTable,
 ) -> CollectionParseResult<()> {
-    let Some(known_key) = try_extract_known_map_key(key) else {
+    let Some(known_key) = try_extract_known_map_key(key, string_table)? else {
         return Ok(());
     };
 
@@ -553,9 +597,10 @@ fn parse_map_literal(
                     type_interner.environment(),
                     &coerced_key.location,
                 )?;
+                validate_compile_time_map_key(&coerced_key, context, string_table)?;
 
                 // Detect duplicate known keys after coercion where cheaply knowable.
-                record_known_map_key(&mut known_keys, &coerced_key)?;
+                record_known_map_key(&mut known_keys, &coerced_key, string_table)?;
 
                 entries.push(MapLiteralEntry {
                     key: coerced_key,
@@ -689,13 +734,14 @@ fn parse_inferred_curly_literal(
                 type_interner.environment(),
                 &coerced_key.location,
             )?;
+            validate_compile_time_map_key(&coerced_key, context, string_table)?;
 
             let mut entries = vec![MapLiteralEntry {
                 key: coerced_key,
                 value: coerced_value,
             }];
             let mut known_keys: KnownMapKeys = HashMap::new();
-            record_known_map_key(&mut known_keys, &entries[0].key)?;
+            record_known_map_key(&mut known_keys, &entries[0].key, string_table)?;
 
             // Parse remaining map entries.
             let mut awaiting_entry = false;
@@ -797,8 +843,9 @@ fn parse_inferred_curly_literal(
                             type_interner.environment(),
                             &coerced_key.location,
                         )?;
+                        validate_compile_time_map_key(&coerced_key, context, string_table)?;
 
-                        record_known_map_key(&mut known_keys, &coerced_key)?;
+                        record_known_map_key(&mut known_keys, &coerced_key, string_table)?;
 
                         entries.push(MapLiteralEntry {
                             key: coerced_key,

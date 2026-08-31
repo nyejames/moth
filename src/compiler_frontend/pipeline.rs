@@ -20,7 +20,10 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
-use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput, AstBuildResult};
+use crate::compiler_frontend::ast::{
+    Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
+    Stage0ResolutionFacts,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -37,19 +40,24 @@ use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
-use crate::compiler_frontend::module_dependencies::{SortedHeaders, resolve_module_dependencies};
+use crate::compiler_frontend::module_dependencies::{
+    ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
+};
+use crate::compiler_frontend::module_metadata::HirLoweringResult;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
-
-use crate::compiler_frontend::module_metadata::HirLoweringResult;
 
 #[cfg(test)]
 use std::collections::HashMap;
@@ -161,6 +169,22 @@ pub(crate) struct FrontendFilePrepareInput {
     pub(crate) source: FrontendFilePrepareSource,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
+}
+
+/// Everything `headers_to_ast` needs to build one module's AST.
+///
+/// WHAT: the sorted header set, entry identity, build profile, arena estimate and the Stage 0
+///       file-value facts AST interprets for value-position paths.
+/// WHY: the stage outgrew a readable positional list once Stage 0 resolution joined it, and a
+///      named group keeps every call site self-describing instead of eight bare positions.
+pub(crate) struct AstBuildRequest<'a> {
+    pub(crate) sorted: SortedHeaders,
+    pub(crate) entry_file_path: &'a Path,
+    pub(crate) root_role: ModuleRootRole,
+    pub(crate) build_profile: FrontendBuildProfile,
+    pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
+    pub(crate) resolved_file_references: ResolvedFileReferenceTable,
+    pub(crate) module_origin: Option<StableModuleOriginIdentity>,
 }
 
 /// Stable identity facts for one source file as seen by the frontend.
@@ -368,22 +392,34 @@ impl CompilerFrontend {
     pub(in crate::compiler_frontend) fn sort_headers(
         &mut self,
         headers: BoundModuleHeaders,
+        resolved_file_references: &ResolvedFileReferenceTable,
     ) -> Result<SortedHeaders, DiagnosticBag> {
-        resolve_module_dependencies(headers, &mut self.string_table)
+        // Content-source ordering edges resolve through Stage 0's canonical targets, which this
+        // compiler instance already retains as the module source identities.
+        let content_source_targets = ContentSourceTargets::from_resolved_references(
+            resolved_file_references,
+            &self.source_files,
+            &mut self.string_table,
+        );
+
+        resolve_module_dependencies(headers, &content_source_targets, &mut self.string_table)
     }
 
-    // -----------------------------
-    //  AST CREATION
-    // -----------------------------
     pub(in crate::compiler_frontend) fn headers_to_ast(
         &mut self,
-        sorted: SortedHeaders,
-        entry_file_path: &Path,
-        root_role: ModuleRootRole,
-        build_profile: FrontendBuildProfile,
-        capacity_estimate: FrontendArenaCapacityEstimate,
+        request: AstBuildRequest<'_>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<AstBuildResult, CompilerMessages> {
+        let AstBuildRequest {
+            sorted,
+            entry_file_path,
+            root_role,
+            build_profile,
+            capacity_estimate,
+            resolved_file_references,
+            module_origin,
+        } = request;
+
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
             Some(identity) => identity.logical_path.clone(),
             None => match InternedPath::try_from_filesystem_path(
@@ -404,6 +440,15 @@ impl CompilerFrontend {
             },
         };
 
+        let file_value_resolution = Some(Rc::new(FileValueResolutionServices {
+            stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
+                resolved_file_references,
+                self.source_files.clone(),
+            ))),
+            module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+            module_origin,
+        }));
+
         Ast::new(
             AstBuildInput {
                 headers: sorted.headers,
@@ -419,6 +464,7 @@ impl CompilerFrontend {
                 root_role,
                 build_profile,
                 project_path_resolver: self.project_path_resolver.clone(),
+                file_value_resolution,
                 path_format_config: self.options.path_format_config.clone(),
                 template_const_loop_iteration_limit: self
                     .options
@@ -440,12 +486,13 @@ impl CompilerFrontend {
         &mut self,
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
+        module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     ) -> Result<HirLoweringResult, CompilerMessages> {
         lower_module(
             ast,
             &mut self.string_table,
-            self.options.path_format_config.clone(),
             function_origin_lookup,
+            module_resources,
         )
     }
 

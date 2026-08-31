@@ -20,6 +20,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, Module, ModuleRootActivity,
 };
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
@@ -52,6 +53,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
         module: Module {
             executable: ModuleExecutable {
                 hir: HirModule::new(),
+                resource_table: ModuleResourceTable::new(),
                 type_environment: TypeEnvironment::new(),
                 borrow_analysis: BorrowCheckReport::default(),
             },

@@ -35,9 +35,22 @@ pub(crate) struct SyntheticContentHeaderInput {
     pub(crate) initializer_references: Vec<InitializerReference>,
 }
 
+/// The synthetic content constant's graph path for one content source.
+///
+/// WHAT: derives `<content source>/content` — the exact path `synthetic_content_header` owns — so
+///       ordering facts can target the generated constant without a second content name.
+/// WHY: declaration ordering and the header stage must agree on the content constant identity from
+///       one owner of the synthetic name.
+pub(crate) fn content_constant_path(
+    content_source: &InternedPath,
+    string_table: &mut StringTable,
+) -> InternedPath {
+    content_source.append(string_table.intern(SYNTHETIC_CONTENT_NAME))
+}
+
 /// Build a private `content #String` constant header from generated initializer tokens.
 ///
-/// WHAT: interns the synthetic `content` name, builds the header path, and packages the supplied
+/// WHAT: builds the header path through `content_constant_path` and packages the supplied
 ///       initializer tokens into a normal constant header.
 /// WHY: later frontend stages should see an ordinary private constant, not a source-kind-specific
 ///      AST/HIR path.
@@ -45,8 +58,7 @@ pub(crate) fn synthetic_content_header(
     input: SyntheticContentHeaderInput,
     string_table: &mut StringTable,
 ) -> Header {
-    let content_name = string_table.intern(SYNTHETIC_CONTENT_NAME);
-    let header_path = input.source_file.append(content_name);
+    let header_path = content_constant_path(&input.source_file, string_table);
 
     let header_tokens = FileTokens::new_deferred_with_identity(
         header_path.clone(),

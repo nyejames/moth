@@ -1,0 +1,153 @@
+A file path is an explicit-extension path written in expression position. It names one regular file that the project owns. An accepted file path evaluates to a `String`; see @#file-values (File values) for what that string contains.
+
+Together with dependency clauses, which bring in source and provider files, file paths are how the compiler learns that a file participates in a build. Nothing scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover files.
+
+### Syntax
+
+A file path is an ordinary expression.
+
+[codeblock, $code("moth"):
+    logo  #= @images/logo.svg
+    font  #= @fonts/cmunss.woff2
+    intro #= @docs/intro.mtf
+
+    icons {String} = {
+        @icons/add.svg,
+        @icons/remove.svg,
+    }
+]
+
+A file path:
+
+- carries one explicit extension on its final component
+- resolves to an existing regular file
+- resolves from the owning module root rather than the physical source-file directory
+- cannot be followed by dependency selections
+- is not a directory
+- is not an external URL
+
+The explicit extension is what distinguishes one file value from a declaration namespace. `.mtf` and `.md` name content files and evaluate to their content. Every other accepted extension names a resource. `.moth` is the one recognised extension with no file value, because source declarations are consumed through dependency clauses.
+
+### Context decides the meaning
+
+The same explicit-extension spelling means different things in different positions.
+
+- In a dependency clause it names an already registered provider target.
+- In expression position it names one file value.
+
+[codeblock, $code("moth"):
+    @vendor/drawing.js as drawing
+
+    drawing_url = @vendor/drawing.js
+]
+
+The first binds the provider's namespace. The second is the file, as a resource string. These two owners never reinterpret one another's path family: a dependency clause does not become a file value, and a file value never exposes a provider namespace or invokes provider declaration semantics.
+
+Dependency-clause source rules are unchanged. `@docs/intro content` is the clause form and `@docs/intro.mtf content` stays a diagnostic, because dependency clauses require extensionless source paths. See @../packages/#dependency-paths (Dependency paths).
+
+### Resolution
+
+Resolution starts at the owning module root, exactly like dependency paths. The physical directory of the declaring file has no effect.
+
+[codeblock, $code("moth"):
+    -- in src/internal/deep/renderer.moth, whose module root is src/
+    logo #= @images/logo.svg
+]
+
+That resolves to `src/images/logo.svg`.
+
+The same authored file path is resolved once. Repeating it in the same module reuses the already resolved result.
+
+### Filesystem ownership
+
+A file path may address only a regular file inside the current module or package's private filesystem ownership.
+
+- traversal starts at the owning module root
+- ordinary unrooted directories owned by that module may be traversed
+- reaching a child normal module or a support package stops traversal
+- another module's private file cannot be addressed directly, including a private `.mtf`
+- the project package facade is not a global resource escape
+- support-package visibility follows the existing scoped-package rules
+- canonical containment rejects symlink escape
+- strict case validation reuses the source-path policy
+
+Cross-module content and resources travel through exported `String` constants or reachable function implementations. There is no public visibility table for files themselves.
+
+### Rejected spellings
+
+These are diagnostics rather than file values:
+
+- an absolute-root path such as `@/logo.svg`
+- `@./` and parent components such as `..`
+- `@@name`
+- a missing extension
+- a `.moth` file value
+- a directory target
+- a missing target
+- a path followed by dependency selections
+
+A file path in `config.moth` is also rejected. Config is compiled before the source graph exists, so it cannot name a build input by path.
+
+### Site-root URLs
+
+Bare `@/` is the site-root URL. It is a `String` and it names no file.
+
+[codeblock, $code("moth"):
+    home #= [$html:<a href="[@/]">Home</a>]
+    docs #= [$html:<a href="[@/]docs/">Docs</a>]
+]
+
+A resource URL and a site-root URL answer different questions. A resource URL is written relative to the artefact that observes it and never carries the project origin. A site-root URL is absolute and always carries it, because it addresses a route rather than a file the build emits.
+
+`@/` renders the project's configured `origin`, so a site served from a subpath keeps working without repeating that setting in every link. With no origin configured it renders `/`.
+
+A site-root URL has no resource identity. It is never checked, copied, hashed, rewritten, watched or included in a resource union.
+
+Only the bare spelling is a site-root URL. `@/logo.svg` is a rejected absolute-root path, because an absolute root would escape module ownership. That is the same rule a dependency clause applies, and `@/` remains invalid in a dependency clause for the same reason.
+
+Moth-aware Markdown links share that site root. A `$md` link target beginning with a single `/`, such as `@/docs/packages (Packages)`, renders through it and picks up the origin without spelling the site root out. See @../templates/#markdown-formatting (Markdown formatting).
+
+### External URLs
+
+These remain ordinary untracked strings:
+
+[codeblock, $code("moth"):
+    external  #= "https://example.com/logo.svg"
+    cdn       #= "//cdn.example.com/app.js"
+    favicon   #= "/favicon.svg"
+]
+
+They are not checked, copied, rewritten, watched or included in resource unions. Write a URL as a string when you mean a URL.
+
+### Every authored path is a build input
+
+A file path is a build dependency wherever it is authored, before any question of reachability. This includes a path in:
+
+- an unused private constant
+- a helper template that is never rendered
+- either branch of an ordinary `if`
+- a branch later removed by static Bool specialisation
+- a generic template that is never materialised
+- a function that is unreachable from the selected entry
+
+In every one of those cases the file is resolved, validated and watched, and an error inside a referenced content file is still reported. Being an input and reaching an output are separate facts: a resource that no reachable output uses is never read, hashed or emitted.
+
+### Resource identity
+
+Each resolved resource has one stable semantic origin: its owner plus its owner-relative logical path.
+
+Identity deliberately excludes absolute paths, output paths, routes, URLs, content hashes, aliases, export bindings and source locations.
+
+The observable consequences are:
+
+- moving a declaration between ordinary files in one module does not change resource identity
+- moving or renaming the resource itself does change resource identity
+- consumer-local aliases and re-exports preserve identity
+- changing a file's bytes does not change its identity
+
+### Related concepts
+
+- For what a file path evaluates to see @#file-values (File values).
+- For dependency clause paths see @../packages/#dependency-paths (Dependency paths).
+- For module roots and traversal boundaries see @../project-structure/#module-roots (Module roots).
+- For Markdown link and image behaviour see @../markdown/#markdown-dependencies (Markdown dependencies).

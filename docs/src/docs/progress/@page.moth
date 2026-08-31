@@ -467,11 +467,11 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Resource paths and [$html:<code>Path</code>] values]
-            [: Deferred]
-            [: Targeted]
+            [: File paths in value position]
+            [: Partial]
+            [: Targeted Stage 0 classification, directory/source-package/synthetic resolution, fixed-point content discovery, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
             [: Frontend / HTML builder]
-            [: Accepted design only. The accepted surface is an explicit-extension path in expression position producing one compile-time-only [$html:<code>Path</code>] value, one stable owner-relative resource identity, structural resource anchors through folded values, TIR and HIR, and builder-assigned URL contexts. What exists today is the legacy compile-time path literal: it resolves and validates one regular file, renders eagerly through the configured origin, and the HTML builder reconstructs tracked assets from module-wide rendered-path metadata. Current fixtures cover file existence, missing targets, directory rejection, origin rendering, project-root escape and template-head use. Complete when resource identity, [$html:<code>Path</code>] availability, structural strings and build-owned resource link planning replace that lane.]
+            [: Every non-dependency path token is now classified during retained preparation and resolved once during Stage 0 across directory, source-package and synthetic single-file flows. Referenced [$html:<code>.mtf</code>] and [$html:<code>.md</code>] sources extend preparation to a fixed point; ordinary resources produce byte-free physical input and watch records; [$html:<code>.moth</code>], extensionless and site-root rows remain explicit facts for AST; and module, support-package, strict-case and symlink boundaries are settled before semantics. Config bootstrap rejects file-value paths. The superseded source-visible [$html:<code>Path</code>] type and its compile-time-only availability rules are gone, so [$html:<code>Path</code>] is an ordinary user identifier. AST value interpretation is still incomplete: direct content-file values and structural resource/site-root strings are not wired, and the legacy eager rendered-path and HTML tracked-asset lanes remain until the resource-link cutover. Complete when structural strings flow through folded values, TIR, public values and HIR and builders own exact resource liveness, placement and URL rendering.]
         ]
 
         [data:

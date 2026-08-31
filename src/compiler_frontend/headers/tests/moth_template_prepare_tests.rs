@@ -20,14 +20,16 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
+use crate::compiler_frontend::module_dependencies::{
+    ContentSourceTargets, resolve_module_dependencies,
+};
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -187,7 +189,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     )
     .expect("Moth template headers should bind");
     let sorted_headers =
-        resolve_module_dependencies(headers, &mut string_table).expect("headers should sort");
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("headers should sort");
     let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
 
     let ast = Ast::new(
@@ -205,6 +208,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             project_path_resolver: Some(project_path_resolver),
+            file_value_resolution: None,
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
@@ -397,8 +401,9 @@ impl MothTemplateScopeFixture {
             prepared_relative_paths,
             source_provider_dependencies,
         )?;
-        let sorted_headers = resolve_module_dependencies(headers, &mut string_table)
-            .map_err(first_diagnostic_from_bag)?;
+        let sorted_headers =
+            resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+                .map_err(first_diagnostic_from_bag)?;
         let entry_dir =
             InternedPath::try_from_filesystem_path(&self.entry_file_path, &mut string_table)
                 .expect("test path should be UTF-8");
@@ -420,6 +425,7 @@ impl MothTemplateScopeFixture {
                 entry_dir,
                 build_profile: FrontendBuildProfile::Dev,
                 project_path_resolver: Some(self.project_path_resolver.clone()),
+                file_value_resolution: None,
                 path_format_config: PathStringFormatConfig::default(),
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 capacity_estimate: Default::default(),
@@ -1174,7 +1180,9 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
             origin: constant_origin,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String("from html".to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    "from html".to_owned(),
+                )),
             }),
         }],
         reusable_evidence: Vec::new(),
@@ -1203,7 +1211,9 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
             origin: custom_constant_origin,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String("from custom".to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    "from custom".to_owned(),
+                )),
             }),
         }],
         reusable_evidence: Vec::new(),
@@ -1280,7 +1290,9 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
             origin: collision_origin,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String("from html".to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    "from html".to_owned(),
+                )),
             }),
         }],
         reusable_evidence: Vec::new(),
@@ -1782,7 +1794,8 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     )
     .expect("authored md headers should bind");
     let sorted_headers =
-        resolve_module_dependencies(headers, &mut string_table).expect("headers should sort");
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("headers should sort");
     let entry_dir = InternedPath::from_single_str("src/@page.moth", &mut string_table);
 
     let authored_ast = Ast::new(
@@ -1800,6 +1813,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             project_path_resolver: Some(project_path_resolver),
+            file_value_resolution: None,
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),

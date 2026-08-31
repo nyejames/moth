@@ -33,9 +33,30 @@ Same-file constant evaluation follows source order.
 
 A same-file forward reference is invalid.
 
-Cross-file constant dependencies are represented in the top-level dependency graph and evaluated in dependency order.
+Cross-file constant dependencies are represented in the top-level dependency graph and evaluated in dependency order. A direct `.mtf` or `.md` file value creates one of these without a top-level clause, because it consumes that file's `content` constant.
 
-Circular constant dependencies are compilation errors.
+Circular constant dependencies are compilation errors. That includes a cycle formed through content-file values.
+
+### Structural values fold without final text
+
+A folded `String` is not always plain text. A file path, and the bare site root `@/`, fold to a
+`String` that carries a structural anchor rather than characters, because the final URL depends on
+output placement the frontend has not chosen yet.
+
+[codeblock, $code("moth"):
+    logo #= @assets/logo.svg
+    image #= [: <img src="[logo]">]
+]
+
+Both are complete constants. The compiler knows the whole semantic value, so composition, storage,
+export and template insertion all fold normally.
+
+What cannot fold is an operation that needs the final characters while an anchor is unresolved, such
+as comparing one of these strings against a literal URL. That is diagnosed rather than folded
+against a guessed path. The restriction is about placement being undecided, not about the value
+being a file: once a builder resolves each anchor, ordinary runtime string behaviour applies.
+
+See @../resources/#file-values (File values).
 
 ### Compile-time and runtime agreement
 

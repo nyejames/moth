@@ -116,10 +116,10 @@ observable semantics for their topics.
 - `docs/src/docs/constants/const-records.mtf`
 - `docs/src/docs/constants/const-templates.mtf`
 
-### Resources and Path values
+### Resources and file values
 
-- `docs/src/docs/resources/resource-paths.mtf`
-- `docs/src/docs/resources/path-values.mtf`
+- `docs/src/docs/resources/file-paths.mtf`
+- `docs/src/docs/resources/file-values.mtf`
 
 ### Aliases
 

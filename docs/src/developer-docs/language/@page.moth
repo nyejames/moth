@@ -57,7 +57,7 @@ page_head #= theme_head
 
     - @../../docs/project-structure (Project structure)
     - @../../docs/packages (Packages and dependencies)
-    - @../../docs/resources (Resources and Path values)
+    - @../../docs/resources (Resources and file values)
     - @../../docs/moth-templates (Moth template files)
     - @../../docs/markdown (Plain Markdown)
 

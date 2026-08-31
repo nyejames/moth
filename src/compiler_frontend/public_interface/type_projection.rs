@@ -66,7 +66,7 @@ use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, NominalTypeId, TypeId,
 };
 use crate::compiler_frontend::folded_value::{
-    PublicFoldedValue, convert_expression_to_folded_value,
+    FoldedValueProjectionContext, PublicFoldedValue, convert_expression_to_folded_value,
 };
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
@@ -777,6 +777,7 @@ pub(super) fn project_free_function_semantics(
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
     string_table: &StringTable,
+    folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<PublicFunctionSemantics, CompilerError> {
     let expected_origin = GenericDeclarationOrigin::free_function(function_origin.clone())?;
 
@@ -802,12 +803,7 @@ pub(super) fn project_free_function_semantics(
                 type_environment,
                 context,
             )?;
-            let folded_default = project_folded_default(
-                &declaration.value,
-                type_environment,
-                context,
-                string_table,
-            )?;
+            let folded_default = project_folded_default(&declaration.value, folded_value_context)?;
             let access = project_parameter_access(declaration)?;
             Ok(PublicParameterTypeSlot {
                 name,
@@ -853,6 +849,7 @@ pub(super) fn project_struct_parts(
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_trait_origins: &FxHashMap<InternedPath, OriginTraitId>,
     string_table: &StringTable,
+    folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<(Vec<PublicGenericParameterSurface>, Vec<PublicFieldTypeSlot>), CompilerError> {
     let definition = type_environment.get(type_id).ok_or_else(|| {
         CompilerError::compiler_error(format!(
@@ -904,6 +901,7 @@ pub(super) fn project_struct_parts(
         type_environment,
         context,
         string_table,
+        folded_value_context,
     )?;
 
     Ok((generic_parameters, projected_fields))
@@ -1059,6 +1057,7 @@ fn project_fields_with_defaults(
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
+    folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<Vec<PublicFieldTypeSlot>, CompilerError> {
     if struct_definition.fields.len() != field_declarations.len() {
         return Err(CompilerError::compiler_error(format!(
@@ -1124,8 +1123,7 @@ fn project_fields_with_defaults(
             context,
         )?;
 
-        let folded_default =
-            project_folded_default(&declaration.value, type_environment, context, string_table)?;
+        let folded_default = project_folded_default(&declaration.value, folded_value_context)?;
         projected_fields.push(PublicFieldTypeSlot {
             name,
             type_identity,
@@ -1195,15 +1193,12 @@ fn project_choice_variants(
 /// is an internal CompilerError naming the invariant violation.
 pub(super) fn project_folded_default(
     expression: &Expression,
-    type_environment: &TypeEnvironment,
-    context: &CanonicalTypeProjectionContext,
-    string_table: &StringTable,
+    folded_value_context: &FoldedValueProjectionContext<'_>,
 ) -> Result<Option<PublicFoldedValue>, CompilerError> {
     if matches!(expression.kind, ExpressionKind::NoValue) {
         return Ok(None);
     }
-    convert_expression_to_folded_value(expression, type_environment, string_table, context)
-        .map(Some)
+    convert_expression_to_folded_value(expression, folded_value_context).map(Some)
 }
 
 /// Projects declaration-owned access without consulting HIR or borrow-analysis side tables.

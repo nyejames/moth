@@ -28,6 +28,7 @@ use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionDelta,
     GeneratedFunctionSidecar, Module, ModuleRootActivity, ProviderMaterialisationRegistry,
 };
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -65,6 +66,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
         module: Module {
             executable: ModuleExecutable {
                 hir: HirModule::new(),
+                resource_table: ModuleResourceTable::new(),
                 type_environment: TypeEnvironment::new(),
                 borrow_analysis: BorrowCheckReport::default(),
             },
@@ -138,6 +140,7 @@ fn generated_sidecar(
     let mut module = Module {
         executable: ModuleExecutable {
             hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },

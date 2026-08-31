@@ -40,16 +40,26 @@ Binding a `.md` file and inserting its content into a template does not create a
 
 This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.md` extension.
 
+### The same content as a file value
+
+The explicit-extension spelling that a clause rejects is valid in expression position, where it evaluates to the same rendered `content` string:
+
+[codeblock, $code("moth"):
+    license #= @legal/license.md
+]
+
+Both forms name one compiled file and one `content` value, and plain Markdown links and images inside the file stay literal and untracked either way. See @../resources/#file-values (File values).
+
 ### Dependency tracking
 
 Bound content participates in normal dependency tracking. The `.md` file is compiled before the declaring file uses its `content` constant.
 
-### Distinction from asset dependencies
+### Distinction from resource dependencies
 
-`.md` content dependency clauses are not asset clauses. They produce a compile-time `content #String`
-constant, not a tracked asset path. Markdown links and images render literal `href` and `src`
-values. They are not tracked assets and are not rewritten. Use normal Moth asset paths when
-a file should participate in tracked-asset output.
+A `.md` content dependency clause is not a resource reference. It produces a compile-time
+`content #String` constant. Markdown links and images inside the file render literal `href` and
+`src` values: they are not resources, and they are not rewritten. Write a Moth file path when a
+file should become a tracked resource and take part in resource output.
 
 ### Related concepts
 

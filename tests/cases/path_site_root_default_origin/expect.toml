@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+# With no configured origin the site root is the bare `/`, and an authored suffix composes onto it
+# without a doubled separator.
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["href=\"/\"", "href=\"/docs/\""]
+must_not_contain = ["href=\"//\""]

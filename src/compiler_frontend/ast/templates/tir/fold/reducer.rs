@@ -8,6 +8,7 @@
 //! The reducer owns exact-view entry points, node dispatch and output assembly.
 //! Branch/loop semantics and virtual wrapper insertion live in sibling modules.
 
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
@@ -38,7 +39,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::type_coercion::string::{
@@ -114,33 +115,44 @@ impl<'view, 'store> FoldTraversalInput<'view, 'store> {
         Ok(self.view.effective_expression_for_site(site_id)?)
     }
 }
-
 /// AST-local result used to project a folded const-template value into a public interface.
 ///
-/// The reducer returns structured text and slot pieces before the donor-local TIR store is dropped.
+/// The reducer returns structured text, resource and site-root pieces and slot pieces before the
+/// donor-local TIR store is dropped. The pre-coalescing piece list deliberately differs from the
+/// final [`ConstStringValue`] emission because slots remain template composition markers.
 pub(crate) struct FoldedConstTemplatePattern {
     pub(crate) pieces: Vec<FoldedConstTemplatePiece>,
     pub(crate) emission: TemplateEmission,
     pub(crate) provenance: SyntheticInterfaceProvenance,
 }
 
+/// One pre-coalesced piece in a const-template projection.
+///
+/// WHAT: preserves authored text runs, module-local structural anchors and unresolved slot
+/// occurrences before projection groups non-slot runs into the shared owned string vocabulary.
+/// WHY: `Resource` and `SiteRoot` are hard boundaries for text coalescing, while `Slot` is a
+/// separate composition boundary that must remain visible to public const-template projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FoldedConstTemplatePiece {
     Text(String),
+    Resource(ResourceId),
+    SiteRoot,
     Slot(SlotOccurrenceId),
 }
 
 /// Mutable output state shared by recursive TIR fold walkers.
 ///
-/// WHAT: keeps rendered text, output presence and semantic provenance together
-///       while a fold descends through nodes, branches and wrapper subtrees.
-/// WHY: these values describe one fold result and must travel through the same
-///      recursive call chains without expanding each helper's parameter list.
+/// WHAT: keeps rendered text, structural emission pieces, output presence and semantic provenance
+/// together while a fold descends through nodes, branches and wrapper subtrees.
+/// WHY: these values describe one fold result and must travel through the same recursive call
+/// chains without expanding each helper's parameter list. The text buffer remains the fast path
+/// until the first structural anchor requires a [`ConstStringValue::Pieces`] result.
 pub(super) struct FoldOutputState {
     pub(super) output_buffer: String,
     pub(super) emitted_output: bool,
     pub(super) provenance: SyntheticInterfaceProvenance,
     pub(super) projection_pieces: Option<Vec<FoldedConstTemplatePiece>>,
+    structural_pieces: Option<Vec<ConstStringPiece>>,
 }
 
 impl FoldOutputState {
@@ -150,6 +162,7 @@ impl FoldOutputState {
             emitted_output: false,
             provenance: SyntheticInterfaceProvenance::empty(),
             projection_pieces: None,
+            structural_pieces: None,
         }
     }
 
@@ -166,6 +179,7 @@ impl FoldOutputState {
             emitted_output: false,
             provenance,
             projection_pieces: None,
+            structural_pieces: None,
         }
     }
 
@@ -173,7 +187,15 @@ impl FoldOutputState {
         self.projection_pieces = Some(Vec::new());
     }
 
+    /// Append text to the pre-coalesced projection and the current output run.
+    ///
+    /// WHAT: extends the trailing text run when possible and keeps text in the output buffer until
+    /// a structural anchor forces piece materialization.
+    /// WHY: text may coalesce only within one run. `Resource`, `SiteRoot` and `Slot` callers add a
+    /// boundary to the projection before later text reaches this method.
     pub(super) fn append_text(&mut self, text: &str) {
+        self.output_buffer.push_str(text);
+
         let Some(pieces) = &mut self.projection_pieces else {
             return;
         };
@@ -182,6 +204,71 @@ impl FoldOutputState {
             previous.push_str(text);
         } else if !text.is_empty() {
             pieces.push(FoldedConstTemplatePiece::Text(text.to_owned()));
+        }
+    }
+
+    /// Append one module-local structural string piece to fold output and projection output.
+    ///
+    /// WHAT: flushes the current text run before retaining a resource or site-root anchor, then
+    /// records the same boundary in the optional const-template projection.
+    /// WHY: the fold result must preserve authored order and cannot render an unresolved anchor as
+    /// text. The module-local `ResourceId` remains valid only until public projection or handoff.
+    pub(super) fn append_structural_piece(
+        &mut self,
+        piece: &ConstStringPiece,
+        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) {
+        self.start_structural_output(string_table);
+        self.flush_structural_text(string_table);
+
+        if let Some(structural_pieces) = &mut self.structural_pieces {
+            structural_pieces.push(piece.clone());
+        }
+
+        if let Some(projection_pieces) = &mut self.projection_pieces {
+            projection_pieces.push(match piece {
+                ConstStringPiece::Text(text) => {
+                    FoldedConstTemplatePiece::Text(string_table.resolve(*text).to_owned())
+                }
+                ConstStringPiece::Resource(resource) => {
+                    FoldedConstTemplatePiece::Resource(*resource)
+                }
+                ConstStringPiece::SiteRoot => FoldedConstTemplatePiece::SiteRoot,
+            });
+        }
+    }
+
+    /// Append an already folded value without duplicating its projection markers.
+    ///
+    /// WHAT: contributes only the emission value to the output state. Callers append a child
+    /// result's separate projection list when projection mode is active.
+    /// WHY: child projections include slots that cannot be represented by [`ConstStringValue`], so
+    /// combining both representations here would duplicate text or reorder slot boundaries.
+    pub(super) fn append_emission_value(
+        &mut self,
+        value: &ConstStringValue,
+        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) {
+        match value {
+            ConstStringValue::Text(text) => {
+                self.output_buffer.push_str(string_table.resolve(*text));
+            }
+            ConstStringValue::Pieces(pieces) => {
+                for piece in pieces {
+                    match piece {
+                        ConstStringPiece::Text(text) => {
+                            self.output_buffer.push_str(string_table.resolve(*text));
+                        }
+                        ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
+                            self.start_structural_output(string_table);
+                            self.flush_structural_text(string_table);
+                            if let Some(structural_pieces) = &mut self.structural_pieces {
+                                structural_pieces.push(piece.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -200,7 +287,17 @@ impl FoldOutputState {
 
         for piece in pieces_to_append {
             match piece {
-                FoldedConstTemplatePiece::Text(text) => self.append_text(text),
+                FoldedConstTemplatePiece::Text(text) => self.append_projection_text(text),
+                FoldedConstTemplatePiece::Resource(resource) => {
+                    if let Some(pieces) = &mut self.projection_pieces {
+                        pieces.push(FoldedConstTemplatePiece::Resource(*resource));
+                    }
+                }
+                FoldedConstTemplatePiece::SiteRoot => {
+                    if let Some(pieces) = &mut self.projection_pieces {
+                        pieces.push(FoldedConstTemplatePiece::SiteRoot);
+                    }
+                }
                 FoldedConstTemplatePiece::Slot(occurrence) => {
                     if let Some(pieces) = &mut self.projection_pieces {
                         pieces.push(FoldedConstTemplatePiece::Slot(*occurrence));
@@ -212,33 +309,86 @@ impl FoldOutputState {
         Ok(())
     }
 
+    fn append_projection_text(&mut self, text: &str) {
+        let Some(pieces) = &mut self.projection_pieces else {
+            return;
+        };
+
+        if let Some(FoldedConstTemplatePiece::Text(previous)) = pieces.last_mut() {
+            previous.push_str(text);
+        } else if !text.is_empty() {
+            pieces.push(FoldedConstTemplatePiece::Text(text.to_owned()));
+        }
+    }
+
     pub(super) fn append_slot(&mut self, occurrence: SlotOccurrenceId) {
         if let Some(pieces) = &mut self.projection_pieces {
             pieces.push(FoldedConstTemplatePiece::Slot(occurrence));
         }
     }
+
+    fn start_structural_output(
+        &mut self,
+        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) {
+        if self.structural_pieces.is_none() {
+            let mut pieces = Vec::new();
+            if !self.output_buffer.is_empty() {
+                pieces.push(ConstStringPiece::Text(
+                    string_table.intern(&self.output_buffer),
+                ));
+                self.output_buffer.clear();
+            }
+            self.structural_pieces = Some(pieces);
+        }
+    }
+
+    fn flush_structural_text(
+        &mut self,
+        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) {
+        let Some(structural_pieces) = &mut self.structural_pieces else {
+            return;
+        };
+        if !self.output_buffer.is_empty() {
+            structural_pieces.push(ConstStringPiece::Text(
+                string_table.intern(&self.output_buffer),
+            ));
+            self.output_buffer.clear();
+        }
+    }
+
+    pub(super) fn into_const_string_value(
+        mut self,
+        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> ConstStringValue {
+        let Some(mut structural_pieces) = self.structural_pieces.take() else {
+            return ConstStringValue::Text(string_table.intern(&self.output_buffer));
+        };
+
+        self.flush_structural_text(string_table);
+        ConstStringValue::Pieces(std::mem::take(&mut structural_pieces))
+    }
 }
 
 /// Optional virtual output inserted while one shared reducer walks a TIR tree.
 ///
-/// Normal folding has no insertion. Wrapper folding injects the already-folded
-/// child at one slot key, while aggregate-wrapper folding replaces one
-/// `AggregateOutput` marker. The reducer keeps these modes explicit instead of
-/// maintaining a parallel node match for each virtual tree shape.
+/// Normal folding has no insertion. Wrapper folding injects the already-folded child at one slot
+/// key, while aggregate-wrapper folding replaces one `AggregateOutput` marker. Each insertion
+/// borrows the same module-local [`ConstStringValue`] shape emitted by the reducer.
 #[derive(Clone, Copy)]
 pub(super) enum FoldInsertion<'a> {
     None,
     Slot {
         key: &'a SlotKey,
-        output: StringId,
+        output: &'a ConstStringValue,
         projection: Option<&'a [FoldedConstTemplatePiece]>,
     },
     Aggregate {
-        output: StringId,
+        output: &'a ConstStringValue,
         projection: Option<&'a [FoldedConstTemplatePiece]>,
     },
 }
-
 impl FoldInsertion<'_> {
     pub(super) fn is_aggregate(self) -> bool {
         matches!(self, Self::Aggregate { .. })
@@ -533,7 +683,6 @@ pub(super) fn fold_tir_node_into_buffer(
 
         TemplateIrNodeKind::Text { text, .. } => {
             let text = fold_context.string_table.resolve(*text);
-            output_state.output_buffer.push_str(text);
             output_state.append_text(text);
             output_state.emitted_output = true;
             Ok(None)
@@ -603,9 +752,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection)?;
                 }
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                output_state.append_emission_value(output, fold_context.string_table);
                 output_state.emitted_output = true;
                 return Ok(None);
             }
@@ -684,9 +831,7 @@ pub(super) fn fold_tir_node_into_buffer(
 
         TemplateIrNodeKind::AggregateOutput => match insertion {
             FoldInsertion::Aggregate { output, projection } => {
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                output_state.append_emission_value(output, fold_context.string_table);
                 output_state.append_pieces(projection)?;
                 output_state.emitted_output = true;
                 Ok(None)
@@ -794,17 +939,31 @@ fn fold_tir_dynamic_expression(
         return append_template_result_to_buffer(nested_result, output_state, fold_context);
     }
 
+    if let Some(pieces) = structural_string_pieces(&expression_ref.kind) {
+        for piece in pieces {
+            match piece {
+                ConstStringPiece::Text(text) => {
+                    output_state.append_text(fold_context.string_table.resolve(*text));
+                }
+                ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
+                    output_state.append_structural_piece(piece, fold_context.string_table);
+                }
+            }
+        }
+        output_state.emitted_output = true;
+        return Ok(None);
+    }
+
     match fold_expression_kind_to_string(&expression_ref.kind, fold_context.string_table) {
         Some(FoldedStringPiece::Text(text)) => {
-            output_state.output_buffer.push_str(&text);
             output_state.append_text(&text);
             output_state.emitted_output = true;
             Ok(None)
         }
 
         Some(FoldedStringPiece::Char(ch)) => {
-            output_state.output_buffer.push(ch);
-            output_state.append_text(&ch.to_string());
+            let text = ch.to_string();
+            output_state.append_text(&text);
             output_state.emitted_output = true;
             Ok(None)
         }
@@ -814,6 +973,19 @@ fn fold_tir_dynamic_expression(
             location.to_owned(),
         )
         .into()),
+    }
+}
+/// Returns structural string pieces through contextual coercion wrappers.
+///
+/// WHAT: exposes the module-local piece list that the reducer must append without asking the
+/// scalar string-coercion helper to render unresolved anchors.
+/// WHY: structural strings and scalar values share the language-level `String` type, but only the
+/// TIR reducer owns ordered template output and can preserve anchor boundaries.
+fn structural_string_pieces(kind: &ExpressionKind) -> Option<&[ConstStringPiece]> {
+    match kind {
+        ExpressionKind::StructuralString { pieces } => Some(pieces),
+        ExpressionKind::Coerced { value, .. } => structural_string_pieces(&value.kind),
+        _ => None,
     }
 }
 
@@ -974,7 +1146,7 @@ fn fold_resolved_slot_source(
 
 /// Builds a `TemplateEmission` from a filled output buffer.
 pub(super) fn build_emission_from_buffer(
-    output_state: FoldOutputState,
+    mut output_state: FoldOutputState,
     estimated_bytes: usize,
     signal: Option<TemplateLoopControlKind>,
     fold_context: &mut TirFoldContext<'_>,
@@ -1001,19 +1173,22 @@ pub(super) fn build_emission_from_buffer(
 
     let actual_len = output_state.output_buffer.len();
     record_tir_fold_output_estimate_miss(actual_len, estimated_bytes);
-    let output_id = fold_context
-        .string_table
-        .intern(&output_state.output_buffer);
+    let provenance = std::mem::replace(
+        &mut output_state.provenance,
+        SyntheticInterfaceProvenance::empty(),
+    );
+    let projection_pieces = output_state.projection_pieces.take();
+    let output = output_state.into_const_string_value(fold_context.string_table);
     record_tir_fold_output_intern(actual_len);
 
     Ok(TemplateFoldResult::with_projection(
         match signal {
-            None => TemplateEmission::Output(output_id),
-            Some(TemplateLoopControlKind::Break) => TemplateEmission::Break(Some(output_id)),
-            Some(TemplateLoopControlKind::Continue) => TemplateEmission::Continue(Some(output_id)),
+            None => TemplateEmission::Output(output),
+            Some(TemplateLoopControlKind::Break) => TemplateEmission::Break(Some(output)),
+            Some(TemplateLoopControlKind::Continue) => TemplateEmission::Continue(Some(output)),
         },
-        output_state.provenance,
-        output_state.projection_pieces,
+        provenance,
+        projection_pieces,
     ))
 }
 

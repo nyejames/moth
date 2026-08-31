@@ -11,6 +11,7 @@
 //! during HIR lowering, and `ResolvedCastEvidence::GenericBound` is validation-only and must not
 //! reach HIR.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
@@ -105,6 +106,25 @@ impl HirExpression {
                     entry.value.remap_string_ids(remap);
                 }
             }
+            HirExpressionKind::StructuralString { pieces } => {
+                for piece in pieces {
+                    match piece {
+                        // Text runs intern into the merged string table, so every handle
+                        // re-binds to the table that issued the remap.
+                        ConstStringPiece::Text(string_id) => *string_id = remap.get(*string_id),
+
+                        // A `Resource` handle is a module-local dense id paired with the
+                        // module's own resource table; a string-table merge cannot stale it.
+                        // Rewriting resource origins for generic capture is item 6's work, and
+                        // the generated lane rejects pieces it cannot maintain at its own
+                        // preflight boundary.
+                        ConstStringPiece::Resource(_) => {}
+
+                        // The site root carries no interned identity.
+                        ConstStringPiece::SiteRoot => {}
+                    }
+                }
+            }
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
             | HirExpressionKind::Bool(_)
@@ -184,6 +204,9 @@ pub enum HirExpressionKind {
     Bool(bool),
     Char(char),
     StringLiteral(String),
+    StructuralString {
+        pieces: Vec<ConstStringPiece>,
+    },
 
     // -------------------------
     //  Memory & Data Flow

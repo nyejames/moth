@@ -1,0 +1,5 @@
+@sub render
+
+value = render("x")
+
+[: [value] ]

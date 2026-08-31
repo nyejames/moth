@@ -4691,6 +4691,7 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
 fn malformed_direct_selection_clause(range: DependencySelectionRange) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
         path: InternedPath::new(),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: SourceLocation::default(),
         dependency_shell_id: DependencyShellId::new(FileId(0), 0),

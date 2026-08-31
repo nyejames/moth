@@ -40,7 +40,7 @@ page_head #= theme_head
     - @./project-structure (Project structure)
     - @./packages (Packages and dependencies)
     - @./packages/core (Core packages)
-    - @./resources (Resources and Path values)
+    - @./resources (Resources and file values)
     - @./moth-templates (Moth template files)
     - @./markdown (Plain Markdown)
     - @./design-scope (Design scope)

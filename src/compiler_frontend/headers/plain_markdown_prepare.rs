@@ -79,6 +79,7 @@ pub(crate) fn prepare_plain_markdown_file(
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path,
         headers: vec![content_header],

@@ -25,12 +25,17 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
+use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
+
+#[cfg(test)]
+#[path = "tests/store_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod test_support;
@@ -63,15 +68,21 @@ struct ConstValueRow {
 /// resulting neutral value.  The callback is invoked with the original template reference, so
 /// callers cannot classify a template from a reconstructed or flattened shape.
 pub(crate) enum ConstTemplateValue {
+    /// A renderable template's fully folded string, plain text or structural pieces.
+    ///
+    /// WHAT: the same [`ConstStringValue`] an ordinary folded string stores, so a
+    /// piece-bearing template fold stays structural exactly like a file-value constant.
     Folded {
-        string: StringId,
+        value: ConstStringValue,
         provenance: SyntheticInterfaceProvenance,
     },
     Public {
         template: PublicConstTemplate,
         kind: ConstValueKind,
         hir_visible: bool,
-        folded: Option<StringId>,
+        /// The template's folded string when finalization produced one; structural pieces
+        /// stay intact until a consumer can represent them.
+        folded: Option<ConstStringValue>,
         provenance: SyntheticInterfaceProvenance,
     },
 }
@@ -123,6 +134,41 @@ pub(crate) struct ConstValueField {
     pub(crate) value: ConstValueId,
 }
 
+/// A folded `String` value: plain text or an ordered sequence of structural pieces.
+///
+/// WHAT: the value graph's representation of every folded `String`. Plain-text values keep the
+/// compact fast path and never allocate a piece vector - authored slices and folds that emit
+/// only text land there - while folds whose output carries structural pieces produce the
+/// `Pieces` form, where resource origins and the site root stay structural instead of being
+/// rendered to URL text at fold time.
+/// WHY: a resource-bearing `String` is an ordinary `String` at the language level, so its
+/// structure must survive folding until the builder resolves each piece's URL context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ConstStringValue {
+    Text(StringId),
+    Pieces(Vec<ConstStringPiece>),
+}
+
+/// One structural piece of a folded `String`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ConstStringPiece {
+    /// A literal text run inside a piece-bearing value.
+    ///
+    /// WHAT: folds that interleave text with resource or site-root pieces keep every plain run
+    /// in this compact interned form. TIR const-template emission interns each buffered text run
+    /// into the fold's piece list, and public const-template projection plus import projection
+    /// re-intern piece text when projecting folded strings back into module AST.
+    /// WHY: each run's position among the structural pieces around it must survive fold,
+    /// projection and handoff until the builder resolves every piece's URL context.
+    Text(StringId),
+
+    /// One resource origin interned in the module resource table.
+    Resource(ResourceId),
+
+    /// The site root, rendered with the consuming artefact's project-origin policy.
+    SiteRoot,
+}
+
 /// Payload variants stored in the module-local value graph.
 #[derive(Clone, Debug)]
 pub(crate) enum ConstValuePayload {
@@ -130,7 +176,7 @@ pub(crate) enum ConstValuePayload {
     Float(f64),
     Bool(bool),
     Char(char),
-    String(StringId),
+    String(ConstStringValue),
     Collection(Vec<ConstValueId>),
     Record(Vec<ConstValueField>),
     Choice {
@@ -147,7 +193,7 @@ pub(crate) enum ConstValuePayload {
     OptionNone,
     Template {
         template: PublicConstTemplate,
-        folded: Option<StringId>,
+        folded: Option<ConstStringValue>,
     },
 }
 
@@ -167,7 +213,7 @@ pub(crate) enum ConstValueVisit<'a, T> {
     Float(f64),
     Bool(bool),
     Char(char),
-    String(StringId),
+    String(&'a ConstStringValue),
     Collection(Vec<T>),
     Record(Vec<ConstValueFieldVisit<'a, T>>),
     Choice {
@@ -184,7 +230,7 @@ pub(crate) enum ConstValueVisit<'a, T> {
     OptionNone,
     Template {
         template: &'a PublicConstTemplate,
-        folded: Option<StringId>,
+        folded: Option<&'a ConstStringValue>,
     },
 }
 
@@ -293,7 +339,13 @@ impl ConstValueStore {
                 None,
             ),
             ExpressionKind::StringSlice(value) => (
-                ConstValuePayload::String(*value),
+                ConstValuePayload::String(ConstStringValue::Text(*value)),
+                ConstValueKind::Literal,
+                true,
+                None,
+            ),
+            ExpressionKind::StructuralString { pieces } => (
+                ConstValuePayload::String(ConstStringValue::Pieces(pieces.clone())),
                 ConstValueKind::Literal,
                 true,
                 None,
@@ -402,8 +454,8 @@ impl ConstValueStore {
             ExpressionKind::Template(template) => {
                 let result = template_builder(defining_path, template)?;
                 match result {
-                    ConstTemplateValue::Folded { string, provenance } => (
-                        ConstValuePayload::String(string),
+                    ConstTemplateValue::Folded { value, provenance } => (
+                        ConstValuePayload::String(value),
                         ConstValueKind::RenderableTemplate,
                         true,
                         Some(provenance),
@@ -502,11 +554,15 @@ impl ConstValueStore {
             .map(|entry| entry.value)
     }
 
+    /// The text-only string accessor.
+    ///
+    /// Piece-bearing strings have no final text until the builder resolves each piece's URL
+    /// context, so the accessor reports none instead of flattening structure.
     pub(crate) fn string_value(&self, id: ConstValueId) -> Option<StringId> {
         match self.payload(id)? {
-            ConstValuePayload::String(value) => Some(*value),
+            ConstValuePayload::String(ConstStringValue::Text(value)) => Some(*value),
             ConstValuePayload::Template {
-                folded: Some(value),
+                folded: Some(ConstStringValue::Text(value)),
                 ..
             } => Some(*value),
             ConstValuePayload::Coerced(value) => self.string_value(*value),
@@ -544,7 +600,7 @@ impl ConstValueStore {
                 visitor(&value.metadata, ConstValueVisit::Char(*scalar))
             }
             ConstValuePayload::String(string) => {
-                visitor(&value.metadata, ConstValueVisit::String(*string))
+                visitor(&value.metadata, ConstValueVisit::String(string))
             }
             ConstValuePayload::Collection(items) => {
                 let mapped = items
@@ -613,7 +669,7 @@ impl ConstValueStore {
                 &value.metadata,
                 ConstValueVisit::Template {
                     template,
-                    folded: *folded,
+                    folded: folded.as_ref(),
                 },
             ),
         }
@@ -669,7 +725,12 @@ impl ConstValueStore {
             ConstValuePayload::Float(value) => ExpressionKind::Float(*value),
             ConstValuePayload::Bool(value) => ExpressionKind::Bool(*value),
             ConstValuePayload::Char(value) => ExpressionKind::Char(*value),
-            ConstValuePayload::String(value) => ExpressionKind::StringSlice(*value),
+            ConstValuePayload::String(string) => match string {
+                ConstStringValue::Text(value) => ExpressionKind::StringSlice(*value),
+                ConstStringValue::Pieces(pieces) => ExpressionKind::StructuralString {
+                    pieces: pieces.clone(),
+                },
+            },
             ConstValuePayload::Collection(items) => ExpressionKind::Collection(
                 items
                     .iter()

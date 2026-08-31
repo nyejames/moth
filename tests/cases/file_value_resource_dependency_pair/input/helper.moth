@@ -1,0 +1,2 @@
+drawing_url = @vendor/drawing.js
+@vendor/drawing.js as drawing

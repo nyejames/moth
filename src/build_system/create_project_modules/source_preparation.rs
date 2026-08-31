@@ -4,6 +4,7 @@
 //! the same lexical pass. Stage 0 reads its dependency clauses from that output without rescanning
 //! tokens, while final module preparation consumes the output's headers and selection table.
 
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
@@ -35,6 +36,7 @@ use super::source_loading::extract_source_code;
 pub(super) struct PreparedDiscoverySource {
     pub(super) prepared_output: FileFrontendPrepareOutput,
     pub(super) source_byte_len: usize,
+    pub(super) source_kind: SourceFileKind,
 }
 
 pub(super) fn prepare_discovery_source(
@@ -116,6 +118,45 @@ pub(super) fn prepare_discovery_source_text(
     Ok(PreparedDiscoverySource {
         prepared_output,
         source_byte_len: source.len(),
+        source_kind: SourceFileKind::Moth,
+    })
+}
+
+/// Prepare one tokenized Moth-template body during synthetic discovery.
+pub(super) fn prepare_discovery_template_source(
+    file_path: &Path,
+    style_directives: &StyleDirectiveRegistry,
+    project_path_resolver: &Option<ProjectPathResolver>,
+    entry_file_path: &Path,
+    source_files: &mut SourceFileTable,
+    string_table: &mut StringTable,
+) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
+    let source =
+        extract_source_code(file_path, string_table).map_err(SourceDiscoveryError::from)?;
+    let source_byte_len = source.len();
+
+    source_files.insert(
+        file_path.to_path_buf(),
+        entry_file_path,
+        project_path_resolver.as_ref(),
+        string_table,
+    )?;
+    let prepared_output = prepare_discovery_output(
+        FrontendFilePrepareSource::MothTemplate {
+            source_code: source,
+            source_path: file_path.to_path_buf(),
+        },
+        style_directives,
+        project_path_resolver,
+        entry_file_path,
+        source_files,
+        string_table,
+    )?;
+
+    Ok(PreparedDiscoverySource {
+        prepared_output,
+        source_byte_len,
+        source_kind: SourceFileKind::MothTemplate,
     })
 }
 
@@ -128,6 +169,27 @@ pub(super) fn prepare_discovery_source_text(
 fn prepare_discovery_file(
     file_path: &Path,
     tokens: FileTokens,
+    style_directives: &StyleDirectiveRegistry,
+    project_path_resolver: &Option<ProjectPathResolver>,
+    entry_file_path: &Path,
+    source_files: &SourceFileTable,
+    string_table: &mut StringTable,
+) -> Result<FileFrontendPrepareOutput, SourceDiscoveryError> {
+    prepare_discovery_output(
+        FrontendFilePrepareSource::Moth {
+            source_path: file_path.to_path_buf(),
+            tokens: Box::new(tokens),
+        },
+        style_directives,
+        project_path_resolver,
+        entry_file_path,
+        source_files,
+        string_table,
+    )
+}
+
+fn prepare_discovery_output(
+    source: FrontendFilePrepareSource,
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
@@ -154,10 +216,7 @@ fn prepare_discovery_file(
         options: &options,
     };
     let input = FrontendFilePrepareInput {
-        source: FrontendFilePrepareSource::Moth {
-            source_path: file_path.to_path_buf(),
-            tokens: Box::new(tokens),
-        },
+        source,
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };

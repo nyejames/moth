@@ -14,6 +14,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -154,6 +155,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
     let module = Module {
         executable: ModuleExecutable {
             hir,
+            resource_table: ModuleResourceTable::new(),
             type_environment:
                 crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
             borrow_analysis,

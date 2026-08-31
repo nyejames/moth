@@ -7,8 +7,9 @@ use super::super::template_helpers::{
     FinalizedTemplateValue, TemplateValueFinalizationInputs, finalize_template_value,
 };
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstTemplateValue, ConstValueStore, ConstValueStoreError,
+    ConstStringValue, ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -16,6 +17,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::{
+    FoldedValueMaterialiser, materialize_public_const_template,
+};
 use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
@@ -43,12 +47,24 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::{
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplatePiece,
+};
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -58,7 +74,55 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
+use std::path::Path;
 
+/// Consumer-local materializer used to verify that projected const-template strings rebuild as
+/// structural TIR expressions rather than rendered text.
+struct ConstTemplateProjectionMaterializer {
+    type_environment: TypeEnvironment,
+    module_resources: ModuleResourceTable,
+    template_ir_store: Rc<RefCell<TemplateIrStore>>,
+}
+
+impl ConstTemplateProjectionMaterializer {
+    fn new() -> Self {
+        Self {
+            type_environment: TypeEnvironment::new(),
+            module_resources: ModuleResourceTable::new(),
+            template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
+        }
+    }
+}
+
+impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
+    fn intern_resource_origin(
+        &mut self,
+        origin: &StableResourceOriginId,
+        location: &SourceLocation,
+    ) -> Result<ResourceId, CompilerError> {
+        Ok(self
+            .module_resources
+            .intern_origin(origin.clone(), location.clone()))
+    }
+
+    fn intern_canonical_type(
+        &mut self,
+        _identity: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity,
+        _string_table: &mut StringTable,
+    ) -> Result<crate::compiler_frontend::datatypes::ids::TypeId, CompilerError> {
+        Err(CompilerError::compiler_error(
+            "const-template structural-string test materializer does not intern canonical types",
+        ))
+    }
+
+    fn type_environment(&self) -> &TypeEnvironment {
+        &self.type_environment
+    }
+
+    fn template_ir_store(&self) -> Rc<RefCell<TemplateIrStore>> {
+        Rc::clone(&self.template_ir_store)
+    }
+}
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::ast_counters::{
     reset_ast_counters, test_read_ast_counter,
@@ -68,8 +132,8 @@ use std::rc::Rc;
 
 fn finalized_folded(value: FinalizedTemplateValue) -> StringId {
     // This helper owns text-only assertions; provenance is covered by the focused fold tests.
-    let FinalizedTemplateValue::Folded(value, _) = value else {
-        panic!("test expected a folded finalization value");
+    let FinalizedTemplateValue::Folded(ConstStringValue::Text(value), _) = value else {
+        panic!("test expected a folded text finalization value");
     };
     value
 }
@@ -520,6 +584,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -644,6 +709,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -709,6 +775,7 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -821,6 +888,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -899,6 +967,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -1012,6 +1081,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_template_for_hir(&mut template, &mut context)
@@ -1610,6 +1680,7 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -1659,6 +1730,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
     let store = template_ir_store.borrow();
     let view = TirView::new(
@@ -1723,6 +1795,7 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
         &template_ir_store.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
     )
     .expect("a runtime slot plan must classify rather than fail preparation");
     let Err(result) = const_template_value_from_projection(projected, template) else {
@@ -2087,6 +2160,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2170,6 +2244,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2336,6 +2411,7 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2464,6 +2540,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         &template_ir_store.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
     )
     .expect("selected exact TIR fold should project module constants");
     assert_eq!(
@@ -2477,6 +2554,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2520,6 +2598,7 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2614,6 +2693,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2689,6 +2769,7 @@ fn nested_runtime_template_normalizes_through_final_view() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -2889,6 +2970,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     normalize_expression_templates(&mut expression, &mut context)
@@ -3100,6 +3182,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store,
+        module_resources: None,
     };
     for ast_node in candidate.ast_mut() {
         normalize_ast_node_templates(ast_node, &mut normalization_context)
@@ -3180,6 +3263,7 @@ fn helper_artifact_rejected_after_final_view_traversal() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
     };
 
     let result = normalize_expression_templates(&mut expression, &mut context);
@@ -3284,6 +3368,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         string_table: &mut string_table,
         template_ir_store,
+        module_resources: None,
     };
 
     normalize_ast_node_templates(&mut node, &mut context)
@@ -3808,6 +3893,7 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
         &registry.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
     )
     .expect("slot template should project as a const template value");
 
@@ -3830,5 +3916,144 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
             }
         ),
         "a wrapper module constant keeps its public projection and its folded string"
+    );
+}
+
+#[test]
+fn const_template_projection_round_trips_structural_resource_and_site_root() {
+    let location = SourceLocation::default();
+    let mut producer_strings = StringTable::new();
+    let mut producer_resources = ModuleResourceTable::new();
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("const-template-test"),
+        "pages".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let resource_origin = StableResourceOriginId::module_owned(
+        module_origin,
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("test resource path should be portable"),
+    );
+    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location.clone());
+    let before = producer_strings.intern("before");
+    let after = producer_strings.intern("after");
+    let structural_expression = Expression::new(
+        ExpressionKind::StructuralString {
+            pieces: vec![
+                ConstStringPiece::Text(before),
+                ConstStringPiece::Resource(resource_id),
+                ConstStringPiece::SiteRoot,
+                ConstStringPiece::Text(after),
+            ],
+        },
+        location.clone(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+
+    let mut producer_store = TemplateIrStore::new();
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut producer_store);
+        let dynamic_node = builder.push_dynamic_expression_node(
+            structural_expression,
+            TemplateSegmentOrigin::Body,
+            None,
+            location.clone(),
+        );
+        let root = builder.push_sequence_node(vec![dynamic_node], location.clone());
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location.clone(),
+        )
+    };
+    let template = template_with_reference(
+        TemplateTirReference {
+            root: template_id,
+            phase: TemplateTirPhase::Composed,
+            context: TemplateViewContext::default(),
+        },
+        location.clone(),
+    );
+
+    let projected = project_const_template_value(
+        &template,
+        &producer_store,
+        &mut producer_strings,
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        Some(&producer_resources),
+    )
+    .expect("structural const-template projection should succeed");
+    let public = projected
+        .public
+        .expect("foldable structural template should have a public projection");
+    assert_eq!(
+        public.pieces,
+        vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(
+            vec![
+                OwnedFoldedStringPiece::Text("before".to_owned()),
+                OwnedFoldedStringPiece::Resource(resource_origin.clone()),
+                OwnedFoldedStringPiece::SiteRoot,
+                OwnedFoldedStringPiece::Text("after".to_owned()),
+            ]
+        ),)],
+        "projection must keep structural anchors inside one owned text run",
+    );
+
+    let mut consumer = ConstTemplateProjectionMaterializer::new();
+    let mut consumer_strings = StringTable::new();
+    let consumer_store_handle = Rc::clone(&consumer.template_ir_store);
+    let imported = materialize_public_const_template(
+        &mut consumer,
+        &public,
+        &consumer_store_handle,
+        &mut consumer_strings,
+        location,
+    )
+    .expect("consumer const-template materialization should succeed");
+    let consumer_store = consumer.template_ir_store.borrow();
+    let root = consumer_store
+        .get_template(imported.tir_reference.root)
+        .expect("materialized template should have a TIR entry")
+        .root;
+    let TemplateIrNodeKind::Sequence { children } = &consumer_store
+        .get_node(root)
+        .expect("materialized template root should exist")
+        .kind
+    else {
+        panic!("materialized const-template root should be a sequence");
+    };
+    assert_eq!(children.len(), 1);
+    let TemplateIrNodeKind::DynamicExpression { expression, .. } = &consumer_store
+        .get_node(children[0])
+        .expect("materialized structural text node should exist")
+        .kind
+    else {
+        panic!("structural owned text should materialize as a dynamic expression");
+    };
+    let ExpressionKind::StructuralString { pieces } = &expression.kind else {
+        panic!("structural owned text should remain a structural string expression");
+    };
+    let [
+        ConstStringPiece::Text(consumer_before),
+        ConstStringPiece::Resource(consumer_resource),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(consumer_after),
+    ] = pieces.as_slice()
+    else {
+        panic!("consumer materialization changed structural piece order");
+    };
+    assert_eq!(consumer_strings.resolve(*consumer_before), "before");
+    assert_eq!(consumer_strings.resolve(*consumer_after), "after");
+    assert_eq!(
+        consumer
+            .module_resources
+            .try_origin(*consumer_resource)
+            .expect("consumer resource handle should resolve")
+            .origin,
+        resource_origin,
     );
 }

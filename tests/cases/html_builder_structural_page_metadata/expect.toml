@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0061"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0061"
+reason = "invalid_page_metadata.not_yet_renderable"

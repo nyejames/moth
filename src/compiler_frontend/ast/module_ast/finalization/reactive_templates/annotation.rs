@@ -806,12 +806,10 @@ fn annotate_expression(
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_) => {}
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => {}
     }
 
     expression.reactive_template =

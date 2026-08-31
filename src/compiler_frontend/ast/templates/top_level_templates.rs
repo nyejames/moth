@@ -7,6 +7,7 @@
 //! PushStartRuntimeFragment nodes.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -26,37 +27,38 @@ use std::rc::Rc;
 
 /// A top-level const template that has been folded to a string at compile time.
 ///
-/// WHAT: carries the folded string value and its insertion index relative to runtime fragments.
+/// WHAT: carries the folded string value, including any unresolved structural pieces, and its
+/// insertion index relative to runtime fragments.
 /// WHY: builders merge const fragments with the runtime fragment list using the insertion index
-/// to reconstruct source-order interleaving.
+/// to reconstruct source-order interleaving, while resolving structural pieces at their boundary.
 #[derive(Clone, Debug)]
 pub struct AstConstTopLevelFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
-    pub value: StringId,
+    pub value: ConstStringValue,
     pub _location: SourceLocation,
 }
 
 /// Folded value for a top-level const template.
 ///
 /// WHAT: carries the already-folded string value produced from the template's
-///       shared TIR authority.
+///       shared TIR authority, including unresolved structural pieces.
 /// WHY: top-level fragment collection is keyed by source file and consumes the
 ///      folded value after AST emission has already validated and folded the
 ///      template.
 #[derive(Clone, Debug)]
 pub(crate) struct FoldedConstTemplateResult {
-    value: StringId,
+    value: ConstStringValue,
 }
 
 impl FoldedConstTemplateResult {
-    pub(crate) fn new(value: StringId) -> Self {
+    pub(crate) fn new(value: ConstStringValue) -> Self {
         Self { value }
     }
 
-    /// Returns the folded string value.
-    pub(crate) fn value(&self) -> StringId {
-        self.value
+    /// Returns a copy of the folded string value.
+    pub(crate) fn value(&self) -> ConstStringValue {
+        self.value.clone()
     }
 }
 
@@ -80,8 +82,10 @@ pub struct AstDocFragment {
 ///
 /// WHAT: maps each header-parsed const fragment to its folded string value using the
 /// const template result map produced during AST emission.
-/// WHY: const fragments are folded during emit; this function gathers the results into
-/// the ordered `AstConstTopLevelFragment` list consumed by HIR/builders.
+/// WHY: const fragments are folded during emit; this function gathers the results into the
+/// ordered `AstConstTopLevelFragment` list. HIR never consumes fragments: module compilation
+/// converts each one into an owned structural string on the module metadata, which builders read
+/// to render entry fragments.
 pub(crate) fn collect_const_top_level_fragments(
     top_level_const_fragments: &[TopLevelConstFragment],
     const_templates_by_path: &FxHashMap<InternedPath, FoldedConstTemplateResult>,

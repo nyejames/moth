@@ -13,6 +13,9 @@
 //! - `module_namespace`         — boundary-aware indexed module namespaces for dependency resolution
 //! - `project_module_graph`     — canonical structural project module graph and compile order
 //! - `module_inventory`         — project-level module assembly
+//! - `file_reference_resolution` — one shared physical resolver for graph-active file-value paths,
+//!   including containment, ownership and missing-target settlement
+//! - `resource_inputs`          — byte-free physical resource sources and watch interests
 //!
 //! # Source preparation
 //! - `source_loading`           — raw file I/O
@@ -46,6 +49,7 @@
 
 mod compilation;
 pub(crate) mod compiled_boundary;
+mod file_reference_resolution;
 pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;
 pub(crate) mod module_identity;
@@ -57,6 +61,7 @@ mod prepared_source;
 pub(crate) mod project_module_graph;
 mod project_roots;
 mod project_structure_diagnostics;
+pub(crate) mod resource_inputs;
 mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;

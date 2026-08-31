@@ -106,14 +106,7 @@ pub(crate) fn validate_dependency_case_sensitivity(
     };
 
     let relative_canonical = relative_canonical.with_extension("");
-    let canonical_components: Vec<String> = relative_canonical
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(segment) => segment.to_str(),
-            _ => None,
-        })
-        .map(str::to_owned)
-        .collect();
+    let canonical_components = canonical_normal_components(&relative_canonical);
 
     let user_components: Vec<String> = match base_kind {
         CompileTimePathBase::SourcePackageRoot => dependency_path
@@ -147,24 +140,69 @@ pub(crate) fn validate_dependency_case_sensitivity(
         &user_components[..]
     };
 
-    if user_file_components.len() != canonical_components.len() {
-        return Ok(());
-    }
-
-    for (user, canonical) in user_file_components.iter().zip(canonical_components.iter()) {
-        if user != canonical {
-            let location = SourceLocation::from_path(declaring_file, string_table);
-            let reason = InvalidImportPathReason::CaseMismatch {
-                provided: string_table.intern(user),
-                expected: string_table.intern(canonical),
-            };
-            let diagnostic =
-                CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, location);
-            return Err(DependencyPathResolutionError::Diagnostic(Box::new(
-                diagnostic,
-            )));
-        }
+    if let Some((provided, expected)) =
+        first_case_mismatch(user_file_components, &canonical_components)
+    {
+        let location = SourceLocation::from_path(declaring_file, string_table);
+        let reason = InvalidImportPathReason::CaseMismatch {
+            provided: string_table.intern(&provided),
+            expected: string_table.intern(&expected),
+        };
+        let diagnostic =
+            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, location);
+        return Err(DependencyPathResolutionError::Diagnostic(Box::new(
+            diagnostic,
+        )));
     }
 
     Ok(())
+}
+
+/// Compare an authored module-root-relative spelling with a canonical filesystem path.
+///
+/// WHAT: centralizes the exact-case policy shared by extensionless dependency candidates and
+///       explicit file-value paths. The dependency path caller strips its selected extension
+///       before calling this helper; file-value callers retain the complete filename.
+/// WHY: case-insensitive hosts must not turn two distinct authored spellings into one graph fact.
+#[cfg(test)]
+pub(crate) fn exact_case_mismatch_for_components(
+    authored_components: &[String],
+    canonical_base: &Path,
+    canonical_file: &Path,
+    strip_final_extension: bool,
+) -> Option<(String, String)> {
+    let relative = canonical_file.strip_prefix(canonical_base).ok()?;
+    let relative = if strip_final_extension {
+        relative.with_extension("")
+    } else {
+        relative.to_path_buf()
+    };
+    let canonical_components = canonical_normal_components(&relative);
+    first_case_mismatch(authored_components, &canonical_components)
+}
+
+fn canonical_normal_components(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(segment) => segment.to_str(),
+            _ => None,
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+fn first_case_mismatch(
+    authored_components: &[String],
+    canonical_components: &[String],
+) -> Option<(String, String)> {
+    if authored_components.len() != canonical_components.len() {
+        return None;
+    }
+
+    authored_components
+        .iter()
+        .zip(canonical_components)
+        .find_map(|(authored, canonical)| {
+            (authored != canonical).then(|| (authored.clone(), canonical.clone()))
+        })
 }

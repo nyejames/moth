@@ -9,12 +9,11 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::tests::test_support::{
@@ -238,7 +237,7 @@ fn emits_const_fragment_and_calls_start() {
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
-        rendered_text: String::from("<meta charset=\"utf-8\">"),
+        value: OwnedFoldedString::Text(String::from("<meta charset=\"utf-8\">")),
     }];
 
     let project = builder
@@ -604,7 +603,6 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
                 public_path_components: &["assets", "missing-asset.png"],
                 filesystem_path: entry_root.join("missing-asset.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["api", "@api.moth"],
                 line_number: 1,
             },
@@ -788,7 +786,6 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
                 public_path_components: &["assets", "logo.png"],
                 filesystem_path: canonical_root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
@@ -806,7 +803,6 @@ fn build_backend_emits_tracked_assets_and_dedupes_same_source_output() {
                 public_path_components: &["assets", "logo.png"],
                 filesystem_path: canonical_root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["docs", "@page.moth"],
                 line_number: 1,
             },
@@ -863,7 +859,6 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
                 public_path_components: &[".", "logo.png"],
                 filesystem_path: canonical_root.join("shared/logo.png"),
                 base: CompileTimePathBase::RelativeToFile,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
@@ -883,7 +878,6 @@ fn build_backend_allows_same_source_file_to_emit_multiple_relative_outputs() {
                 public_path_components: &["..", "shared", "logo.png"],
                 filesystem_path: canonical_root.join("shared/logo.png"),
                 base: CompileTimePathBase::RelativeToFile,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["blog", "post", "@page.moth"],
                 line_number: 1,
             },
@@ -934,7 +928,6 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
                 public_path_components: &["assets", "logo.png"],
                 filesystem_path: canonical_root.join("assets/logo-a.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },
@@ -952,7 +945,6 @@ fn build_backend_rejects_conflicting_tracked_asset_output_paths() {
                 public_path_components: &["assets", "logo.png"],
                 filesystem_path: canonical_root.join("assets/logo-b.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["docs", "@page.moth"],
                 line_number: 1,
             },
@@ -1002,7 +994,6 @@ fn build_backend_rejects_tracked_asset_output_that_matches_generated_html() {
                 public_path_components: &["index.html"],
                 filesystem_path: canonical_root.join("assets/copied.html"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },

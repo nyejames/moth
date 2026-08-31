@@ -62,13 +62,23 @@ pub(crate) fn resolve_parsed_type_annotation(
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
+    resolve_parsed_type_annotation_inner(source_ref, location, context, string_table, scope_context)
+}
+
+fn resolve_parsed_type_annotation_inner(
+    source_ref: ParsedTypeRef,
+    location: &SourceLocation,
+    context: &mut TypeResolutionContext<'_>,
+    string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
+) -> TypeResolutionResult<ResolvedTypeAnnotation> {
     match &source_ref {
         ParsedTypeRef::Collection {
             element,
             fixed_capacity,
             location: collection_location,
         } => {
-            let element_annotation = resolve_parsed_type_annotation(
+            let element_annotation = resolve_parsed_type_annotation_inner(
                 *element.clone(),
                 collection_location,
                 context,
@@ -144,14 +154,14 @@ pub(crate) fn resolve_parsed_type_annotation(
                 )));
             }
 
-            let key_annotation = resolve_parsed_type_annotation(
+            let key_annotation = resolve_parsed_type_annotation_inner(
                 *key.clone(),
                 map_location,
                 context,
                 string_table,
                 scope_context,
             )?;
-            let value_annotation = resolve_parsed_type_annotation(
+            let value_annotation = resolve_parsed_type_annotation_inner(
                 *value.clone(),
                 map_location,
                 context,
@@ -443,7 +453,6 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
             returns_diagnostic_type_to_type_id_opt(values, type_environment)
         }
         DataType::External { type_id } => Some(type_environment.intern_external(*type_id)),
-        DataType::Path(_) => Some(type_environment.builtins().string),
         DataType::Parameters(_)
         | DataType::Inferred
         | DataType::NamedType(_)

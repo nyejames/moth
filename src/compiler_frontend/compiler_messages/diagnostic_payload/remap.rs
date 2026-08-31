@@ -324,8 +324,13 @@ impl DiagnosticPayload {
             }
 
             DiagnosticPayload::InvalidControlFlowStatement { .. }
-            | DiagnosticPayload::InvalidFallibleHandling { .. }
-            | DiagnosticPayload::CompileTimeEvaluationError { .. } => {}
+            | DiagnosticPayload::InvalidFallibleHandling { .. } => {}
+
+            DiagnosticPayload::CompileTimeEvaluationError { operation, .. } => {
+                if let Some(operation) = operation {
+                    *operation = remap.get(*operation);
+                }
+            }
 
             DiagnosticPayload::InvalidDeclaration { name, reason } => {
                 if let Some(name) = name {
@@ -564,8 +569,9 @@ impl DiagnosticPayload {
                 *key = remap.get(*key);
             }
 
-            DiagnosticPayload::InvalidCompileTimePath { path, .. } => {
+            DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
                 path.remap_string_ids(remap);
+                reason.remap_string_ids(remap);
             }
 
             DiagnosticPayload::DirectSymbolPathImport { path }

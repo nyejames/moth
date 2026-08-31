@@ -7,6 +7,7 @@
 //!
 //! WHY: production finalization folds through stable store-backed `TirView`s,
 //!      so the final-view entry point needs focused coverage for those surfaces.
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
@@ -46,6 +47,13 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -53,6 +61,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 };
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
+use std::path::Path;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -77,9 +86,15 @@ fn bool_expression(value: bool) -> Expression {
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
     match emission {
         TemplateEmission::NoOutput => String::new(),
-        TemplateEmission::Output(output) => string_table.resolve(output).to_owned(),
-        TemplateEmission::Break(Some(output)) | TemplateEmission::Continue(Some(output)) => {
+        TemplateEmission::Output(ConstStringValue::Text(output))
+        | TemplateEmission::Break(Some(ConstStringValue::Text(output)))
+        | TemplateEmission::Continue(Some(ConstStringValue::Text(output))) => {
             string_table.resolve(output).to_owned()
+        }
+        TemplateEmission::Output(ConstStringValue::Pieces(_))
+        | TemplateEmission::Break(Some(ConstStringValue::Pieces(_)))
+        | TemplateEmission::Continue(Some(ConstStringValue::Pieces(_))) => {
+            panic!("structural emission reached a text-only assertion")
         }
         TemplateEmission::Break(None) | TemplateEmission::Continue(None) => String::new(),
     }
@@ -158,6 +173,92 @@ fn project_pattern_for_template(
     Ok(fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?.pieces)
 }
 
+#[test]
+fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let before = string_table.intern("before");
+    let after = string_table.intern("after");
+    let resource_origin = StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("fold-test"),
+            "pages".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("test resource path should be portable"),
+    );
+    let mut resource_table = ModuleResourceTable::new();
+    let resource = resource_table.intern_origin(resource_origin, SourceLocation::default());
+    let structural_expression = Expression::new(
+        crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
+            pieces: vec![ConstStringPiece::Resource(resource)],
+        },
+        SourceLocation::default(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let before_node = builder.push_text_node(
+            before,
+            "before".len(),
+            TemplateSegmentOrigin::Body,
+            SourceLocation::default(),
+        );
+        let resource_node = builder.push_dynamic_expression_node(
+            structural_expression,
+            TemplateSegmentOrigin::Body,
+            None,
+            SourceLocation::default(),
+        );
+        let after_node = builder.push_text_node(
+            after,
+            "after".len(),
+            TemplateSegmentOrigin::Body,
+            SourceLocation::default(),
+        );
+        let root = builder.push_sequence_node(
+            vec![before_node, resource_node, after_node],
+            SourceLocation::default(),
+        );
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            SourceLocation::default(),
+        )
+    };
+
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )?;
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
+    let mut fold_context = build_test_fold_context(&mut string_table);
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+
+    assert_eq!(
+        pattern.pieces,
+        vec![
+            FoldedConstTemplatePiece::Text("before".to_owned()),
+            FoldedConstTemplatePiece::Resource(resource),
+            FoldedConstTemplatePiece::Text("after".to_owned()),
+        ],
+        "resource anchors must preserve authored order and prevent text-run coalescing",
+    );
+    Ok(())
+}
 #[test]
 fn const_template_projection_preserves_structured_slot_order() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
@@ -1225,12 +1326,11 @@ fn final_view_fold_formatted_markdown_text() {
 #[test]
 fn final_view_runtime_slot_application_requires_handoff() {
     let mut string_table = StringTable::new();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
+    let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
-        let wrapper_text = string_table.intern("<shell>");
         let handoff = OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Text {
-                text: wrapper_text,
+                text: OwnedFoldedString::Text("<shell>".to_owned()),
                 reactive_subscription: None,
                 location: SourceLocation::default(),
             },

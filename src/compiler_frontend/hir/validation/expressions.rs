@@ -233,7 +233,8 @@ impl<'a> HirValidator<'a> {
             HirExpressionKind::Int(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_) => {}
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => {}
 
             // Moth `Float` is finite f64. Non-finite values (NaN, Infinity) must never
             // survive HIR lowering — rejecting them here catches backend-invariant breaches

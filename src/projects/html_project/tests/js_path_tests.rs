@@ -1,6 +1,14 @@
 //! Tests for the JS-only HTML rendering path.
 
 use super::*;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::tests::test_support::{
@@ -49,7 +57,8 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
 
 #[test]
 fn render_entry_fragments_preserves_runtime_slot_order() {
-    let (body_html, slot_ids) = render_entry_fragments(&[], 2);
+    let (body_html, slot_ids) =
+        render_entry_fragments(&[], 2).expect("plain runtime slots should render");
 
     let slot0_pos = body_html
         .find("moth-slot-0")
@@ -65,6 +74,136 @@ fn render_entry_fragments_preserves_runtime_slot_order() {
     assert_eq!(slot_ids.len(), 2);
     assert_eq!(slot_ids[0], "moth-slot-0");
     assert_eq!(slot_ids[1], "moth-slot-1");
+}
+
+/// Builds a stable resource origin for renderer error-path tests.
+fn fixture_resource_origin() -> StableResourceOriginId {
+    StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("js-path-tests"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("fixture resource path should be portable"),
+    )
+}
+
+#[test]
+fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
+    // WHAT: identical authored bytes, insertion indices, and slot counts render identically
+    //      whether const fragments use concrete text or all-text structural pieces.
+    // WHY: converting an all-text Pieces value at the builder boundary must not change source
+    //      order, introduce separators, or otherwise alter the final HTML bytes.
+    let text_fragments = vec![
+        ResolvedConstFragment {
+            runtime_insertion_index: 0,
+            value: OwnedFoldedString::Text(String::from("<head>")),
+        },
+        ResolvedConstFragment {
+            runtime_insertion_index: 2,
+            value: OwnedFoldedString::Text(String::from("</html>")),
+        },
+        ResolvedConstFragment {
+            runtime_insertion_index: 1,
+            value: OwnedFoldedString::Text(String::from("<main>body")),
+        },
+    ];
+    let piece_fragments = vec![
+        ResolvedConstFragment {
+            runtime_insertion_index: 0,
+            value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
+                "<head>",
+            ))]),
+        },
+        ResolvedConstFragment {
+            runtime_insertion_index: 2,
+            value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
+                "</html>",
+            ))]),
+        },
+        ResolvedConstFragment {
+            runtime_insertion_index: 1,
+            value: OwnedFoldedString::Pieces(vec![
+                OwnedFoldedStringPiece::Text(String::from("<main>")),
+                OwnedFoldedStringPiece::Text(String::from("body")),
+            ]),
+        },
+    ];
+
+    let (text_html, text_slot_ids) =
+        render_entry_fragments(&text_fragments, 2).expect("text fragments should render");
+    let (piece_html, piece_slot_ids) =
+        render_entry_fragments(&piece_fragments, 2).expect("all-text fragments should render");
+    let expected_html = "<head>\n<div id=\"moth-slot-0\"></div>\n<main>body\n<div id=\"moth-slot-1\"></div>\n</html>\n";
+    let expected_slot_ids = vec![String::from("moth-slot-0"), String::from("moth-slot-1")];
+
+    assert_eq!(text_html, expected_html);
+    assert_eq!(piece_html, expected_html);
+    assert_eq!(
+        text_html, piece_html,
+        "Text and all-text Pieces fragments must render byte-identical HTML"
+    );
+    assert_eq!(
+        text_slot_ids, piece_slot_ids,
+        "Text and all-text Pieces fragments must produce identical slot IDs"
+    );
+    assert_eq!(text_slot_ids, expected_slot_ids);
+}
+
+#[test]
+fn render_entry_fragments_rejects_resource_piece_at_builder_boundary() {
+    // WHAT: a resource-bearing const fragment remains an internal renderer error.
+    // WHY: URL assignment has not landed yet, so final HTML text cannot be produced for a
+    //      structural resource piece.
+    let fragments = vec![ResolvedConstFragment {
+        runtime_insertion_index: 0,
+        value: OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text(String::from("before")),
+            OwnedFoldedStringPiece::Resource(fixture_resource_origin()),
+            OwnedFoldedStringPiece::Text(String::from("after")),
+        ]),
+    }];
+
+    let error = render_entry_fragments(&fragments, 0)
+        .expect_err("a resource piece must remain unresolved at the builder boundary");
+
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("HTML builder boundary"),
+        "resource rendering should report the builder-boundary wall: {message}"
+    );
+    assert!(
+        message.contains("URL assignment"),
+        "resource rendering should identify the missing URL assignment: {message}"
+    );
+}
+
+#[test]
+fn render_entry_fragments_rejects_site_root_piece_at_builder_boundary() {
+    // WHAT: a site-root const fragment remains an internal renderer error.
+    // WHY: site-root URL context is also assigned only after this builder boundary.
+    let fragments = vec![ResolvedConstFragment {
+        runtime_insertion_index: 0,
+        value: OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text(String::from("before")),
+            OwnedFoldedStringPiece::SiteRoot,
+            OwnedFoldedStringPiece::Text(String::from("after")),
+        ]),
+    }];
+
+    let error = render_entry_fragments(&fragments, 0)
+        .expect_err("a site-root piece must remain unresolved at the builder boundary");
+
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("HTML builder boundary"),
+        "site-root rendering should report the builder-boundary wall: {message}"
+    );
+    assert!(
+        message.contains("URL assignment"),
+        "site-root rendering should identify the missing URL assignment: {message}"
+    );
 }
 
 #[test]

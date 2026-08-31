@@ -74,6 +74,7 @@ define_stable_reason_keys! {
         &InvalidConfigReason::NoRootModuleEntries { .. } => "invalid_config.no_root_module_entries",
         &InvalidConfigReason::MultipleModuleRootFiles { .. } => "invalid_config.multiple_module_root_files",
         &InvalidConfigReason::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
+        &InvalidConfigReason::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
         &InvalidConfigReason::LegacyModuleRootFileName { .. } => "invalid_config.legacy_module_root_file_name",
         &InvalidConfigReason::OutputFoldersNotDistinct { .. } => "invalid_config.output_folders_not_distinct",
@@ -180,6 +181,13 @@ define_stable_reason_keys! {
 
     InvalidCompileTimePathReason => {
     &InvalidCompileTimePathReason::MissingTarget => "invalid_compile_time_path.missing_target",
+    &InvalidCompileTimePathReason::TargetIsDirectory => "invalid_compile_time_path.target_is_directory",
+    &InvalidCompileTimePathReason::TargetNotRegular => "invalid_compile_time_path.target_not_regular",
+    &InvalidCompileTimePathReason::CurrentDirectorySegment => "invalid_compile_time_path.current_directory_segment",
+    &InvalidCompileTimePathReason::ParentDirectorySegment => "invalid_compile_time_path.parent_directory_segment",
+    &InvalidCompileTimePathReason::CaseMismatch { .. } => "invalid_compile_time_path.case_mismatch",
+    &InvalidCompileTimePathReason::EscapesModuleBoundary => "invalid_compile_time_path.escapes_module_boundary",
+    &InvalidCompileTimePathReason::EscapesSymlink => "invalid_compile_time_path.escapes_symlink",
     &InvalidCompileTimePathReason::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
     },
 
@@ -648,6 +656,7 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext => "compile_time_evaluation_error.none_literal_requires_optional_type_context",
     &CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported => "compile_time_evaluation_error.external_type_construction_not_supported",
     &CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable => "compile_time_evaluation_error.struct_field_default_not_foldable",
+    &CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => "compile_time_evaluation_error.structural_string_requires_final_text",
     },
 
     InvalidFallibleOperandReason => {
@@ -698,12 +707,15 @@ define_stable_reason_keys! {
 
     InvalidPageMetadataReason => {
     &InvalidPageMetadataReason::NotAString => "invalid_page_metadata.not_a_string",
+    &InvalidPageMetadataReason::NotYetRenderable => "invalid_page_metadata.not_yet_renderable",
     &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
     },
 
     InvalidExpressionReason => {
     &InvalidExpressionReason::ExpectedOperatorBeforeExpression => "invalid_expression.expected_operator_before_expression",
     &InvalidExpressionReason::UnresolvedStackShape => "invalid_expression.unresolved_stack_shape",
+    &InvalidExpressionReason::MothFileHasNoValue => "invalid_expression.moth_file_has_no_value",
+    &InvalidExpressionReason::ExtensionlessFileValue => "invalid_expression.extensionless_file_value",
     },
 
     InvalidStandaloneStatementReason => {

@@ -6,6 +6,7 @@
 //! lowering review focused on the data contract first.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{ExpressionRpn, PlaceExpression};
@@ -26,8 +27,6 @@ use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-#[cfg(test)]
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePath;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -86,13 +85,13 @@ pub enum ExpressionKind {
     Bool(bool),
     Char(char),
 
-    /// One resolved compile-time path literal.
+    /// A folded `String` whose resource and site-root anchors remain structural.
     ///
-    /// Deferred until source path expression parsing is wired. Retained because const folding,
-    /// HIR lowering, and path tests already share this AST shape.
-    #[cfg(test)]
-    Path(Box<CompileTimePath>),
-
+    /// Value-position file paths use this form instead of manufacturing URL text. Plain authored
+    /// strings retain the compact `StringSlice` representation.
+    StructuralString {
+        pieces: Vec<ConstStringPiece>,
+    },
     /// Reference to a variable by name.
     Reference(InternedPath),
 
@@ -314,13 +313,9 @@ impl ExpressionKind {
                 | ExpressionKind::Bool(_)
                 | ExpressionKind::StringSlice(_)
                 | ExpressionKind::Char(_)
+                | ExpressionKind::StructuralString { .. }
                 | ExpressionKind::ChoiceConstruct { .. }
         ) {
-            return true;
-        }
-
-        #[cfg(test)]
-        if matches!(self, ExpressionKind::Path(_)) {
             return true;
         }
 

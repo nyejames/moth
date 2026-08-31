@@ -169,6 +169,11 @@ impl HirModule {
             }
         }
 
+        // Structural string constants carry interned `Text` handles alongside the
+        // executable lane, so they re-bind on the same merge.
+        for constant in &mut self.module_constants {
+            constant.value.remap_string_ids(remap);
+        }
         self.side_table.remap_string_ids(remap);
         self.const_facts.remap_string_ids(remap);
     }

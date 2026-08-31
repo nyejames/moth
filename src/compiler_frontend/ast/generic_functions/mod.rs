@@ -32,7 +32,7 @@ pub(crate) use materialisation::{
     ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     ModuleMaterialisationPreparationBuilder, bootstrap_call_summary_from_signature,
 };
-pub(crate) use templates::GenericFunctionTemplate;
+pub(crate) use templates::{GenericFunctionBody, GenericFunctionTemplate};
 
 #[cfg(test)]
 #[path = "tests/diagnostics_tests.rs"]

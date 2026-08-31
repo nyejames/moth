@@ -47,12 +47,20 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
@@ -75,9 +83,10 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
 
 fn handoff_for_view(
     view: TirView<'_>,
+    string_table: &StringTable,
 ) -> Result<crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateHandoff, CompilerError> {
     let prepared = prepared_runtime(&view);
-    owned_runtime_template_handoff_for_prepared_view(&prepared, view)
+    owned_runtime_template_handoff_for_prepared_view(&prepared, view, string_table, None)
 }
 
 /// Pushes a literal text node into the store and returns its ID.
@@ -208,12 +217,12 @@ fn view_for(
 fn materialize_parent_handoff_result(
     store: Rc<RefCell<TemplateIrStore>>,
     parent_template_id: TemplateIrId,
-    _string_table: &mut StringTable,
+    string_table: &mut StringTable,
     view_context: TemplateViewContext,
 ) -> Result<OwnedRuntimeTemplateBody, CompilerError> {
     let store_ref = store.borrow();
     let view = view_for(&store_ref, parent_template_id, view_context);
-    handoff_for_view(view).map(|handoff| handoff.body)
+    handoff_for_view(view, string_table).map(|handoff| handoff.body)
 }
 
 /// Convenience wrapper for success-path tests that expect materialization to
@@ -228,20 +237,21 @@ fn materialize_parent_handoff(
         .expect("handoff materialization should succeed")
 }
 
-fn assert_owned_text_node(
-    node: &OwnedRuntimeTemplateNode,
-    expected: &str,
-    string_table: &StringTable,
-) {
+/// Asserts an owned handoff node carries exactly the expected plain text.
+///
+/// WHAT: reads the owned string payload directly rather than resolving a handle.
+/// WHY: the handoff now owns its text, so no string table is needed here; a piece list
+///      containing a resource or site root returns `None` and fails this assertion.
+fn assert_owned_text_node(node: &OwnedRuntimeTemplateNode, expected: &str) {
     match node {
         OwnedRuntimeTemplateNode::Text { text, .. } => {
-            assert_eq!(string_table.resolve(*text), expected);
+            assert_eq!(text.clone().into_text().as_deref(), Some(expected));
         }
         OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
             let OwnedRuntimeTemplateBody::Render(child) = &template.body else {
                 panic!("expected rendered child handoff, got {:?}", template.body);
             };
-            assert_owned_text_node(child, expected, string_table);
+            assert_owned_text_node(child, expected);
         }
         _ => panic!("expected owned text or child node, got {:?}", node),
     }
@@ -599,7 +609,7 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, template_id, TemplateViewContext::default());
-        handoff_for_view(view).expect("text handoff should succeed")
+        handoff_for_view(view, &strings).expect("text handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
@@ -607,7 +617,7 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
     else {
         panic!("text template should materialize as an owned text node");
     };
-    assert_eq!(strings.resolve(text), "hello");
+    assert_eq!(text.clone().into_text().as_deref(), Some("hello"));
 }
 
 #[test]
@@ -622,7 +632,7 @@ fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, template_id, TemplateViewContext::default());
-        handoff_for_view(view).expect("text handoff should succeed")
+        handoff_for_view(view, &strings).expect("text handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
@@ -630,8 +640,84 @@ fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
     else {
         panic!("text template should materialize as an owned text node");
     };
-    assert_eq!(strings.resolve(text), source);
-    assert_eq!(strings.resolve(text).len(), source.len());
+    assert_eq!(text.clone().into_text().as_deref(), Some(source));
+    assert_eq!(
+        text.clone().into_text().map(|value| value.len()),
+        Some(source.len())
+    );
+}
+
+#[test]
+fn owned_handoff_preserves_structural_string_pieces() {
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let mut strings = StringTable::new();
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("site"),
+        String::new(),
+        ModuleRootRole::Normal,
+    );
+    let resource_path =
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("test resource path should be portable");
+    let resource_origin = StableResourceOriginId::module_owned(module_origin, resource_path);
+    let mut resources = ModuleResourceTable::new();
+    let resource_id = resources.intern_origin(resource_origin.clone(), SourceLocation::default());
+    let before = strings.intern("before");
+    let after = strings.intern("after");
+    let structural_expression = Expression::new(
+        ExpressionKind::StructuralString {
+            pieces: vec![
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(before),
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(
+                    resource_id,
+                ),
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::SiteRoot,
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(after),
+            ],
+        },
+        SourceLocation::default(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableOwned,
+    );
+    let site_id = store.borrow_mut().next_expression_site_id();
+    let dynamic_node = store.borrow_mut().push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::DynamicExpression {
+            expression: Box::new(structural_expression),
+            origin: TemplateSegmentOrigin::Body,
+            reactive_subscription: None,
+            site_id,
+        },
+        SourceLocation::default(),
+    ));
+    let template_id = finish_text_template(&mut store.borrow_mut(), dynamic_node);
+
+    let handoff = {
+        let store_ref = store.borrow();
+        let view = view_for(&store_ref, template_id, TemplateViewContext::default());
+        let prepared = prepared_runtime(&view);
+        owned_runtime_template_handoff_for_prepared_view(
+            &prepared,
+            view,
+            &strings,
+            Some(&resources),
+        )
+        .expect("structural string should materialize through the owned handoff")
+    };
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
+        handoff.body
+    else {
+        panic!("structural dynamic expression should become an owned string node");
+    };
+    assert_eq!(
+        text,
+        OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text("before".to_owned()),
+            OwnedFoldedStringPiece::Resource(resource_origin),
+            OwnedFoldedStringPiece::SiteRoot,
+            OwnedFoldedStringPiece::Text("after".to_owned()),
+        ])
+    );
 }
 
 #[test]
@@ -678,7 +764,7 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, view_context);
-        handoff_for_view(view).expect("slot handoff should succeed")
+        handoff_for_view(view, &strings).expect("slot handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
@@ -692,7 +778,7 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
     else {
         panic!("slot source should materialize as text");
     };
-    assert_eq!(strings.resolve(text), "filled");
+    assert_eq!(text.clone().into_text().as_deref(), Some("filled"));
 }
 
 #[test]
@@ -721,7 +807,7 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, view_context);
-        handoff_for_view(view).expect("handoff materialization should succeed")
+        handoff_for_view(view, &StringTable::new()).expect("handoff materialization should succeed")
     };
 
     assert!(
@@ -766,7 +852,7 @@ fn owned_handoff_preserves_child_boundary() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, TemplateViewContext::default());
-        handoff_for_view(view).expect("child handoff should succeed")
+        handoff_for_view(view, &strings).expect("child handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
@@ -781,7 +867,7 @@ fn owned_handoff_preserves_child_boundary() {
             template.body
         );
     };
-    assert_owned_text_node(child_node, "child", &strings);
+    assert_owned_text_node(child_node, "child");
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,7 +1147,7 @@ fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
         branches[0].body,
         OwnedRuntimeTemplateNode::Slot { .. }
     ));
-    assert_owned_text_node(&branches[1].body, "child", &strings);
+    assert_owned_text_node(&branches[1].body, "child");
 }
 
 #[test]
@@ -1101,9 +1187,9 @@ fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
         );
     };
     assert_eq!(children.len(), 3);
-    assert_owned_text_node(&children[0], "aggregate-before", &strings);
-    assert_owned_text_node(&children[1], "child", &strings);
-    assert_owned_text_node(&children[2], "aggregate-after", &strings);
+    assert_owned_text_node(&children[0], "aggregate-before");
+    assert_owned_text_node(&children[1], "child");
+    assert_owned_text_node(&children[2], "aggregate-after");
 }
 
 #[test]
@@ -1135,9 +1221,9 @@ fn inherited_wrapper_handoff_injects_through_child_template() {
     };
 
     assert_eq!(children.len(), 3);
-    assert_owned_text_node(&children[0], "nested-before", &strings);
-    assert_owned_text_node(&children[1], "child", &strings);
-    assert_owned_text_node(&children[2], "nested-after", &strings);
+    assert_owned_text_node(&children[0], "nested-before");
+    assert_owned_text_node(&children[1], "child");
+    assert_owned_text_node(&children[2], "nested-after");
 }
 
 #[test]
@@ -1189,7 +1275,7 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
     let OwnedRuntimeTemplateBody::Render(child_body) = &template.body else {
         panic!("expected rendered child handoff, got {:?}", template.body);
     };
-    assert_owned_text_node(child_body, "child", &strings);
+    assert_owned_text_node(child_body, "child");
 }
 
 #[test]
@@ -1228,8 +1314,8 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
         panic!("expected outer wrapper sequence, got {body:?}");
     };
     assert_eq!(children.len(), 3);
-    assert_owned_text_node(&children[0], "outer-before", &strings);
-    assert_owned_text_node(&children[2], "outer-after", &strings);
+    assert_owned_text_node(&children[0], "outer-before");
+    assert_owned_text_node(&children[2], "outer-after");
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
@@ -1238,9 +1324,9 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
         panic!("expected inner wrapper sequence, got {:?}", children[1]);
     };
     assert_eq!(inner_children.len(), 3);
-    assert_owned_text_node(&inner_children[0], "inner-before", &strings);
-    assert_owned_text_node(&inner_children[1], "child", &strings);
-    assert_owned_text_node(&inner_children[2], "inner-after", &strings);
+    assert_owned_text_node(&inner_children[0], "inner-before");
+    assert_owned_text_node(&inner_children[1], "child");
+    assert_owned_text_node(&inner_children[2], "inner-after");
 }
 
 #[test]
@@ -1287,14 +1373,14 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
     };
 
     // The original child is carried unwrapped beside the aggregate wrapper tree.
-    assert_owned_text_node(&child, "child", &strings);
+    assert_owned_text_node(&child, "child");
 
     let OwnedRuntimeTemplateNode::Sequence { children } = wrapper.as_ref() else {
         panic!("expected outer wrapper sequence, got {:?}", wrapper);
     };
     assert_eq!(children.len(), 3);
-    assert_owned_text_node(&children[0], "outer-before", &strings);
-    assert_owned_text_node(&children[2], "outer-after", &strings);
+    assert_owned_text_node(&children[0], "outer-before");
+    assert_owned_text_node(&children[2], "outer-after");
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
@@ -1303,12 +1389,12 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
         panic!("expected inner wrapper sequence, got {:?}", children[1]);
     };
     assert_eq!(inner_children.len(), 3);
-    assert_owned_text_node(&inner_children[0], "inner-before", &strings);
+    assert_owned_text_node(&inner_children[0], "inner-before");
     assert!(
         matches!(inner_children[1], OwnedRuntimeTemplateNode::AggregateOutput),
         "innermost slot should be the AggregateOutput splice marker"
     );
-    assert_owned_text_node(&inner_children[2], "inner-after", &strings);
+    assert_owned_text_node(&inner_children[2], "inner-after");
 }
 
 #[test]
@@ -1334,8 +1420,8 @@ fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
     };
 
     assert_eq!(children.len(), 2);
-    assert_owned_text_node(&children[0], "slotless-wrapper", &strings);
-    assert_owned_text_node(&children[1], "child", &strings);
+    assert_owned_text_node(&children[0], "slotless-wrapper");
+    assert_owned_text_node(&children[1], "child");
 }
 
 #[test]
@@ -1362,7 +1448,7 @@ fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child()
 
     assert_eq!(children.len(), 2);
     assert!(matches!(children[0], OwnedRuntimeTemplateNode::Slot { .. }));
-    assert_owned_text_node(&children[1], "child", &strings);
+    assert_owned_text_node(&children[1], "child");
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,7 +1603,8 @@ fn runtime_site_template(
 #[test]
 fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
     let mut store = TemplateIrStore::new();
-    let render_root = text_node_id(&mut store, &mut StringTable::new(), "site");
+    let mut strings = StringTable::new();
+    let render_root = text_node_id(&mut store, &mut strings, "site");
     let owner_plan = store.push_slot_plan(TemplateSlotPlan {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
@@ -1544,7 +1631,7 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
         .expect("owner plan should replace the forged plan");
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view).expect_err("wrong-plan site must fail at handoff");
+    let error = handoff_for_view(view, &strings).expect_err("wrong-plan site must fail at handoff");
     assert!(error.msg.contains("outside its owning slot application"));
 }
 
@@ -1559,14 +1646,16 @@ fn handoff_rejects_out_of_range_runtime_slot_site() {
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view).expect_err("out-of-range site must fail at handoff");
+    let error = handoff_for_view(view, &StringTable::new())
+        .expect_err("out-of-range site must fail at handoff");
     assert!(error.msg.contains("out-of-range runtime slot site"));
 }
 
 #[test]
 fn handoff_rejects_mismatched_runtime_slot_site_identity() {
     let mut store = TemplateIrStore::new();
-    let render_root = text_node_id(&mut store, &mut StringTable::new(), "site");
+    let mut strings = StringTable::new();
+    let render_root = text_node_id(&mut store, &mut strings, "site");
     let plan = store.push_slot_plan(TemplateSlotPlan {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
@@ -1589,7 +1678,7 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view).expect_err("mismatched site identity must fail");
+    let error = handoff_for_view(view, &strings).expect_err("mismatched site identity must fail");
     assert!(
         error
             .msg
@@ -1600,7 +1689,8 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
 #[test]
 fn handoff_rejects_mismatched_loop_header_shape() {
     let mut store = TemplateIrStore::new();
-    let body = text_node_id(&mut store, &mut StringTable::new(), "body");
+    let mut strings = StringTable::new();
+    let body = text_node_id(&mut store, &mut strings, "body");
     let loop_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Loop {
             header: TemplateLoopHeader::Conditional {
@@ -1621,7 +1711,8 @@ fn handoff_rejects_mismatched_loop_header_shape() {
     let template_id = finish_text_template(&mut store, loop_node);
     let view = view_for(&store, template_id, TemplateViewContext::default());
 
-    let error = handoff_for_view(view).expect_err("loop header shape mismatch must fail closed");
+    let error =
+        handoff_for_view(view, &strings).expect_err("loop header shape mismatch must fail closed");
     assert!(error.msg.contains("loop header shape mismatch"));
 }
 
@@ -1653,7 +1744,7 @@ fn handoff_rejects_exact_view_child_cycle() {
     )
     .expect("cyclic view should construct");
 
-    let error = handoff_for_view(view)
+    let error = handoff_for_view(view, &StringTable::new())
         .expect_err("exact-view child cycles must fail before handoff recursion");
     assert_eq!(
         error.error_type,

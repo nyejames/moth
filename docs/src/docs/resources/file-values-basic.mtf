@@ -1,0 +1,48 @@
+Write a file path where you would write any other value, and you get a `String` back.
+
+[codeblock, $code("moth"):
+    logo    #= @assets/logo.svg
+    intro   #= @docs/intro.mtf
+]
+
+`logo` is the link to your image. `intro` is the text of your Moth template file. Both are ordinary strings.
+
+### Putting a file in a template
+
+[codeblock, $code("moth"):
+    image #= [$html:
+        <img src="[@assets/logo.svg]" alt="Moth">
+    ]
+]
+
+`image` is a normal `String`. You can compose it, store it in a constant, pass it to a function and return it, exactly like any other string.
+
+### The compiler writes the URL
+
+You never write the output path yourself. The builder decides where the file is emitted, then writes the link from the page that contains it.
+
+The same logo becomes `./assets/logo.svg` on the home page and `../../assets/logo.svg` on a page two folders deep. That is why the compiler holds on to which file you meant instead of turning the path into text straight away.
+
+### Content files give you their content
+
+A `.mtf` or `.md` path gives you what the file says, not where it lives.
+
+[codeblock, $code("moth"):
+    license #= @legal/license.md
+
+    page #= [$html:
+        <footer>[license]</footer>
+    ]
+]
+
+A `.moth` path gives you nothing: source files hold declarations, and declarations are brought in with a dependency clause.
+
+[codeblock, $code("moth"):
+    @helpers build_value
+]
+
+### Unused files still count
+
+A file path is a build dependency wherever you write it, even in a constant nothing reads. The compiler checks it exists and watches it for changes.
+
+Reaching the output is separate. A file that no page ends up using is never copied into your site.

@@ -18,6 +18,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
@@ -192,6 +193,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     source_files: SourceFileTable,
     string_table: StringTable,
     prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
+    resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
     contains_moth_template: bool,
@@ -229,6 +231,7 @@ impl ModulePreparationContext<'_> {
             source_files,
             string_table,
             prepared_outputs: Vec::new(),
+            resolved_file_references: ResolvedFileReferenceTable::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
             contains_moth_template: false,
@@ -336,6 +339,7 @@ impl ModulePreparationContext<'_> {
                 active_root_file_id,
                 source_module_origins,
                 prepared_header_syntax,
+                resolved_file_references: ResolvedFileReferenceTable::new(),
                 string_table,
                 source_files,
                 warnings,
@@ -517,13 +521,18 @@ impl ModulePreparationContext<'_> {
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
         for input in module {
-            let PreparedSourceInput::MothPrepared {
-                source_path,
-                output,
-                ..
-            } = input
-            else {
-                continue;
+            let (source_path, output) = match input {
+                PreparedSourceInput::MothPrepared {
+                    source_path,
+                    output,
+                    ..
+                }
+                | PreparedSourceInput::MothTemplatePrepared {
+                    source_path,
+                    output,
+                    ..
+                } => (source_path, output),
+                _ => continue,
             };
 
             let identity = source_files
@@ -771,7 +780,8 @@ impl ModulePreparationContext<'_> {
 
         for (file_index, file) in module {
             let (string_domain, result) = match file {
-                PreparedSourceInput::MothPrepared { output, .. } => {
+                PreparedSourceInput::MothPrepared { output, .. }
+                | PreparedSourceInput::MothTemplatePrepared { output, .. } => {
                     (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
                 }
                 file => {
@@ -798,7 +808,8 @@ impl ModulePreparationContext<'_> {
                             source_code,
                             source_path,
                         },
-                        PreparedSourceInput::MothPrepared { .. } => {
+                        PreparedSourceInput::MothPrepared { .. }
+                        | PreparedSourceInput::MothTemplatePrepared { .. } => {
                             unreachable!(
                                 "prepared Moth output was handled before source conversion"
                             )
@@ -840,13 +851,48 @@ impl ModuleSyntaxDiscovery<'_> {
         &mut self.string_table
     }
 
+    /// Resolve one prepared file-reference row while keeping the source table and its string
+    /// table in their distinct owned lanes. The build resolver never receives an expression or
+    /// source text; it only joins the retained row to Stage 0 physical facts.
+    pub(super) fn resolve_file_reference(
+        &mut self,
+        resolver: &mut crate::build_system::create_project_modules::file_reference_resolution::FileReferenceResolver<'_>,
+        consumer_module_id: crate::build_system::create_project_modules::module_identity::ModuleId,
+        reference: &crate::compiler_frontend::paths::file_references::PreparedFileReference,
+        discovered_content_sources: &mut Vec<
+            crate::build_system::create_project_modules::source_tree_index::SourceId,
+        >,
+    ) -> Result<
+        crate::compiler_frontend::paths::file_references::ResolvedFileReference,
+        CompilerError,
+    > {
+        resolver.resolve(
+            consumer_module_id,
+            reference,
+            &self.source_files,
+            &mut self.string_table,
+            discovered_content_sources,
+        )
+    }
+
+    pub(super) fn record_resolved_file_reference(
+        &mut self,
+        reference: crate::compiler_frontend::paths::file_references::ResolvedFileReference,
+    ) -> Result<(), CompilerError> {
+        self.resolved_file_references.push(reference).map(|_| ())
+    }
+
     /// Prepare one selected source and return the retained provider dependencies parsed from the
     /// same retained header output.
     pub(super) fn prepare_source(
         &mut self,
         source: PreparedSourceInput,
     ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
-        if matches!(&source, PreparedSourceInput::MothPrepared { .. }) {
+        if matches!(
+            &source,
+            PreparedSourceInput::MothPrepared { .. }
+                | PreparedSourceInput::MothTemplatePrepared { .. }
+        ) {
             return Err(CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(
                     "indexed module syntax discovery received an already-prepared synthetic source",
@@ -894,7 +940,8 @@ impl ModuleSyntaxDiscovery<'_> {
                 source_code,
                 source_path,
             },
-            PreparedSourceInput::MothPrepared { .. } => {
+            PreparedSourceInput::MothPrepared { .. }
+            | PreparedSourceInput::MothTemplatePrepared { .. } => {
                 unreachable!("already-prepared synthetic source was rejected above")
             }
         };
@@ -987,6 +1034,7 @@ impl ModuleSyntaxDiscovery<'_> {
                 active_root_file_id,
                 source_module_origins: self.source_module_origins,
                 prepared_header_syntax,
+                resolved_file_references: self.resolved_file_references,
                 string_table: self.string_table,
                 source_files: self.source_files,
                 warnings: self.warnings,

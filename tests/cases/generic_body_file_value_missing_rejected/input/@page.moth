@@ -1,0 +1,5 @@
+draw type T |name T| -> String:
+    return [: generic body missing path [@vendor/missing.js] ]
+;
+
+[: generic body not called ]

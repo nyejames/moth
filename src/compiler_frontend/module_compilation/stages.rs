@@ -12,15 +12,18 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use std::{cell::RefCell, rc::Rc};
 
 pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
     compiler: &mut CompilerFrontend,
     module_ast: Ast,
     warnings: &[CompilerDiagnostic],
     function_origin_lookup: HirFunctionOriginLookup,
+    module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
 ) -> Result<HirLoweringResult, CompilerMessages> {
     compiler
-        .generate_hir(module_ast, function_origin_lookup)
+        .generate_hir(module_ast, function_origin_lookup, module_resources)
         .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
 }
 

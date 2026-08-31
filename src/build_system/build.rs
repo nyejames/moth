@@ -16,6 +16,7 @@ use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompiledModuleRef, CompletedSourcePackageRegistry, PackageBoundaryId,
     ProjectFrontendCompilation, compilation_module_views,
 };
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::create_project_modules::{
     compile_project_frontend, resolve_project_entry_root,
 };
@@ -102,6 +103,9 @@ pub struct ProjectCompilation {
     /// Builders reserve the complete name set once so boundary-local lookup maps can stay
     /// identity-keyed without risking JS identifier collisions between boundaries.
     all_generated_function_names: Arc<Vec<String>>,
+    /// Build-only physical resource inputs discovered by Stage 0.
+    #[allow(dead_code)] // retained for the later build-owned resource emission phase
+    pub(crate) resource_inputs: ResourceInputRegistry,
 }
 
 /// One shared empty generated-name map for boundaries that materialised no sidecars.
@@ -119,15 +123,18 @@ impl ProjectCompilation {
         let ProjectFrontendCompilation {
             project,
             source_packages,
+            resource_inputs,
         } = frontend;
-        Self::from_successful_boundaries(project, source_packages)
+        Self::from_successful_boundaries(project, source_packages, resource_inputs)
     }
 
     pub(crate) fn from_successful_boundaries(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
+        resource_inputs: ResourceInputRegistry,
     ) -> Result<Self, CompilerError> {
         project.require_all_successful()?;
+        resource_inputs.validate()?;
         for package in source_packages.iter() {
             package.boundary.require_all_successful()?;
         }
@@ -449,6 +456,7 @@ impl ProjectCompilation {
             generated_function_names,
             package_generated_function_names,
             all_generated_function_names,
+            resource_inputs,
         })
     }
 

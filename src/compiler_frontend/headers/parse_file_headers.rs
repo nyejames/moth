@@ -26,8 +26,8 @@ use crate::compiler_frontend::headers::types::HeaderParseContext;
 pub use crate::compiler_frontend::headers::types::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
     FileFrontendPrepareOutput, FileRole, Header, HeaderKind, HeaderParseOptions,
-    LocalDeclarationOrderingHint, PreparedHeaderSyntax, RetainedDependencyClause,
-    TopLevelConstFragment,
+    LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, PreparedHeaderSyntax,
+    RetainedDependencyClause, TopLevelConstFragment,
 };
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the

@@ -111,6 +111,7 @@ pub(crate) fn validate_completed_generated_record(
     record: &CompletedGeneratedFunction,
 ) -> Result<(), CompilerError> {
     let hir = &record.sidecar.module.executable.hir;
+
     let mut roots = hir.function_ids_by_generated.iter();
     let Some((root_identity, function_id)) = roots.next() else {
         return Err(CompilerError::compiler_error(format!(
@@ -160,3 +161,7 @@ pub(crate) fn validate_completed_generated_record(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/artefacts_tests.rs"]
+mod tests;

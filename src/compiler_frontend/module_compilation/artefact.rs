@@ -16,10 +16,12 @@ use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
@@ -29,12 +31,12 @@ use std::sync::Arc;
 
 /// Frontend output for one module root ready for backend lowering.
 ///
-/// WHAT: a lane container with exactly an executable lane (typed HIR, paired type environment
-///       and borrow facts), a link-facts lane (per-function runtime facts, external imports and
-///       the effective registry), and a compiler-metadata lane (entry path, warnings, fragments,
-///       root activity, docs and rendered paths).
-/// WHY: backends consume one stable module payload shape regardless of project type, with
-///      explicit ownership keeping HIR/type/borrow pairing obvious at call sites.
+/// WHAT: a lane container with exactly an executable lane (typed HIR, its paired resource table,
+///       type environment and borrow facts), a link-facts lane (per-function runtime facts,
+///       external imports and the effective registry), and a compiler-metadata lane (entry path,
+///       warnings, fragments, root activity, docs and rendered paths).
+/// WHY: backends consume one stable module payload shape regardless of project type, with explicit
+///      ownership keeping HIR/type/borrow/resource pairing obvious at call sites.
 pub(crate) struct Module {
     pub(crate) executable: ModuleExecutable,
     pub(crate) link_facts: ModuleLinkFacts,
@@ -68,8 +70,8 @@ impl Module {
 /// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
 /// interface published to later graph waves.
 /// WHY: provider publication must point at a complete success value. Keeping both lanes in one
-/// artefact prevents the scheduler from publishing a local draft or dropping the interface while
-/// retaining only backend state.
+///      artefact prevents the scheduler from publishing a local draft or dropping the interface
+///      while retaining only backend state.
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
     pub(crate) interface: PublicSemanticInterface,
@@ -78,13 +80,17 @@ pub(crate) struct CompiledModuleArtifact {
 /// Module-local executable semantic state: validated HIR, paired type environment and borrow
 /// facts.
 ///
-/// WHAT: the sole owner of the typed HIR, its paired `TypeEnvironment` and the
-///       `BorrowCheckReport` produced by borrow validation.
-/// WHY: keeping these together in one executable lane makes the HIR/type/borrow pairing obvious
-///      at every backend call site and lets string-ID remapping cover HIR, type identity and
-///      source locations retained by borrow facts exactly once.
+/// WHAT: the sole owner of the typed HIR, its paired `TypeEnvironment`, the resource table that
+///       issues every structural-string `ResourceId`, and the `BorrowCheckReport` produced by
+///       borrow validation.
+/// WHY: keeping the table here pairs every dense resource handle with the HIR that carries it,
+///      while keeping HIR/type/borrow/resource state together for backend lowering.
 pub(crate) struct ModuleExecutable {
     pub(crate) hir: HirModule,
+    /// The Phase 4 union planner and output integration consume this table when they resolve
+    /// executable resource uses into manifest records.
+    #[allow(dead_code)]
+    pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
 }
@@ -92,7 +98,8 @@ pub(crate) struct ModuleExecutable {
 impl ModuleExecutable {
     /// Remap interned string IDs after string-table merging.
     ///
-    /// WHY: HIR, type identity and borrow-fact source locations remap exactly once here.
+    /// WHY: HIR, type identity, retained resource provenance and borrow-fact source locations
+    ///      remap exactly once here.
     pub(crate) fn remap_string_ids_with_type_environment_cache(
         &mut self,
         remap: &StringIdRemap,
@@ -101,6 +108,7 @@ impl ModuleExecutable {
         self.hir.remap_string_ids(remap);
         self.type_environment
             .remap_string_ids_with_cache(remap, type_environment_cache);
+        self.resource_table.remap_string_ids(remap);
         self.borrow_analysis.remap_string_ids(remap);
     }
 }
@@ -172,11 +180,9 @@ impl ModuleCompilerMetadata {
         }
     }
 
-    /// Remap interned string IDs after string-table merging.
-    ///
     /// WHY: warnings, documentation locations, and rendered-path interned fields must all remap
-    ///      exactly once. Const fragment rendered text is already a resolved `String`, root
-    ///      activity carries no interned fields, and the entry path is a `PathBuf`.
+    ///      exactly once. Const fragment values are already owned folded strings with no interned
+    ///      IDs, root activity carries no interned fields, and the entry path is a `PathBuf`.
     ///
     /// Materialisation metadata owns self-contained strings and stable semantic identities, so
     /// this remap covers only executable presentation fields that retain local `StringId` values.
@@ -219,17 +225,18 @@ impl ModuleRootActivity {
     }
 }
 
-/// A resolved const top-level fragment: a static string and its runtime insertion index.
+/// A resolved const top-level fragment: an owned folded string and its runtime insertion index.
 ///
-/// WHAT: carries a fully resolved (not interned) const fragment string plus the count of
-/// runtime fragments that precede it in source order.
+/// WHAT: carries the fully resolved module-local structural string value plus the count of runtime
+/// fragments that precede it in source order.
 /// WHY: builders merge const strings with the runtime fragment list returned by entry start()
-/// using the insertion index to reconstruct source-order interleaving.
+/// using the insertion index to reconstruct source-order interleaving, resolving any structural
+/// pieces at their final output boundary.
 pub(crate) struct ResolvedConstFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
-    /// The rendered text content of this const fragment.
-    pub rendered_text: String,
+    /// The owned structural string value of this const fragment.
+    pub value: OwnedFoldedString,
 }
 
 /// Backend-facing identity for one external import used by a compiled module.

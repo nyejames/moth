@@ -130,6 +130,9 @@ pub(crate) fn lower_expression(
                 prefer_move: false,
             })
         }
+        HirExpressionKind::StructuralString { .. } => Err(lir_transformation_error(
+            "Structural string reached Wasm lowering before output-boundary rendering",
+        )),
         HirExpressionKind::Load(place) => {
             let local = lower_place_local(context, place)?;
             Ok(ExprLoweringOutput {

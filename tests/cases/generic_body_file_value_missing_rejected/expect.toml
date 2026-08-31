@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0063"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0063"
+reason = "invalid_compile_time_path.missing_target"
+count = 1

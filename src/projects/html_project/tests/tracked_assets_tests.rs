@@ -4,9 +4,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason, RuleDiagnosticKind,
 };
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::tests::test_support::{
     RenderedPathUsageInput, create_test_module, expect_bytes_output, rendered_path_usage,
@@ -34,7 +32,6 @@ fn relative_one_segment_underflow_returns_escapes_project_root() {
             public_path_components: &["..", "..", "..", "img", "logo.png"],
             filesystem_path: root.join("img/logo.png"),
             base: CompileTimePathBase::RelativeToFile,
-            kind: CompileTimePathKind::File,
             source_file_scope_components: &["src", "docs", "guide", "@page.moth"],
             line_number: 5,
         },
@@ -83,7 +80,6 @@ fn relative_repeated_underflow_returns_escapes_project_root() {
             public_path_components: &["..", "..", "..", "img", "logo.png"],
             filesystem_path: root.join("img/logo.png"),
             base: CompileTimePathBase::RelativeToFile,
-            kind: CompileTimePathKind::File,
             source_file_scope_components: &["src", "@page.moth"],
             line_number: 7,
         },
@@ -128,7 +124,6 @@ fn duplicate_same_source_and_output_dedupes_within_module() {
             public_path_components: &["assets", "logo.png"],
             filesystem_path: root.join("assets/logo.png"),
             base: CompileTimePathBase::EntryRoot,
-            kind: CompileTimePathKind::File,
             source_file_scope_components: &["@page.moth"],
             line_number: 1,
         },
@@ -140,72 +135,6 @@ fn duplicate_same_source_and_output_dedupes_within_module() {
         .expect("planning succeeds");
 
     assert_eq!(planned.assets.len(), 1);
-}
-
-#[test]
-fn public_root_directory_usage_is_ignored() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src")).expect("should create entry root");
-
-    let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/@page.moth"), &mut string_table);
-    module
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &[],
-                public_path_components: &[],
-                filesystem_path: root.join("src"),
-                base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::Directory,
-                source_file_scope_components: &["src", "@page.moth"],
-                line_number: 2,
-            },
-        ));
-
-    let planned = plan_module_tracked_assets(&module, Path::new("index.html"), &mut string_table)
-        .expect("planning succeeds");
-
-    assert!(planned.assets.is_empty());
-    assert!(planned.warnings.is_empty());
-}
-
-#[test]
-fn non_asset_directory_link_is_ignored() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src/docs/guide/subdir")).expect("should create nested dir");
-
-    let mut string_table = StringTable::new();
-    let mut module = create_test_module(root.join("src/docs/guide/@page.moth"), &mut string_table);
-    module
-        .metadata
-        .rendered_path_usages
-        .push(rendered_path_usage(
-            &mut string_table,
-            RenderedPathUsageInput {
-                source_path_components: &[".", "subdir"],
-                public_path_components: &[".", "subdir"],
-                filesystem_path: root.join("src/docs/guide/subdir"),
-                base: CompileTimePathBase::RelativeToFile,
-                kind: CompileTimePathKind::Directory,
-                source_file_scope_components: &["src", "docs", "guide", "@page.moth"],
-                line_number: 5,
-            },
-        ));
-
-    let planned = plan_module_tracked_assets(
-        &module,
-        Path::new("docs/guide/index.html"),
-        &mut string_table,
-    )
-    .expect("planning succeeds");
-
-    assert!(planned.assets.is_empty());
-    assert!(planned.warnings.is_empty());
 }
 
 #[test]
@@ -228,7 +157,6 @@ fn large_asset_warning_dedupes_to_first_render_location() {
             public_path_components: &["assets", "video.mp4"],
             filesystem_path: root.join("assets/video.mp4"),
             base: CompileTimePathBase::EntryRoot,
-            kind: CompileTimePathKind::File,
             source_file_scope_components: &["@page.moth"],
             line_number: 2,
         },
@@ -240,7 +168,6 @@ fn large_asset_warning_dedupes_to_first_render_location() {
             public_path_components: &["assets", "video.mp4"],
             filesystem_path: root.join("assets/video.mp4"),
             base: CompileTimePathBase::EntryRoot,
-            kind: CompileTimePathKind::File,
             source_file_scope_components: &["@page.moth"],
             line_number: 8,
         },
@@ -283,7 +210,6 @@ fn emit_tracked_assets_reads_source_bytes_into_binary_outputs() {
                 public_path_components: &["assets", "logo.png"],
                 filesystem_path: root.join("assets/logo.png"),
                 base: CompileTimePathBase::EntryRoot,
-                kind: CompileTimePathKind::File,
                 source_file_scope_components: &["@page.moth"],
                 line_number: 1,
             },

@@ -26,8 +26,8 @@ use super::model::{
     PublicDeclarationSemantics, PublicInterfaceDraft, PublicStructSemantics,
 };
 use super::receiver_projection::{
-    CallableSeed, CallableSeedKind, build_callable_seed_table, project_receiver_method_signatures,
-    receiver_method_semantics_from_seed,
+    CallableSeed, CallableSeedKind, ReceiverProjectionContext, build_callable_seed_table,
+    project_receiver_method_signatures, receiver_method_semantics_from_seed,
 };
 use super::trait_projection::DirectTraitProjection;
 use super::type_projection::{
@@ -42,11 +42,12 @@ use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionCo
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::FoldedValueGenericParameterResolver;
 use crate::compiler_frontend::folded_value::{
-    PublicFoldedValue, convert_const_value_to_folded_value,
+    FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
+    convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::hir::functions::FunctionOriginSeed;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginTypeCategory, OriginTypeId,
 };
@@ -98,6 +99,9 @@ pub(in crate::compiler_frontend) struct PublicInterfaceDraftBuilderInput<'a> {
     /// WHAT: each public constant root joins to a store row by its exact defining
     /// `InternedPath`, then converts the stored value to an owned [`PublicFoldedValue`].
     pub const_values: &'a ConstValueStore,
+    /// The module-local resource table that issued structural-string resource handles, when
+    /// available. Public projection never flattens a structural value when this is absent.
+    pub module_resources: Option<&'a ModuleResourceTable>,
 }
 
 /// Builds the one aggregate [`PublicInterfaceDraft`] from already-resolved pre-HIR facts.
@@ -153,6 +157,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             string_table,
             generic_function_templates,
             const_values,
+            module_resources,
         } = self.input;
 
         let AstPublicInterfaceProjectionInput {
@@ -217,15 +222,35 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             string_table,
         )?;
 
-        // Project the canonical signature for each receiver-method seed once, keyed by the
-        // seed's `method_index`. This transient map is consumed during record construction and
-        // dropped before the draft boundary.
+        // Build the folded-value projection context from the same shared nominal resolver and
+        // module-local resource table. Folded constants are concrete, so a generic parameter
+        // reaching this projection remains an invariant violation.
+        let folded_generic_resolver = FoldedValueGenericParameterResolver;
+        let folded_projection_context = CanonicalTypeProjectionContext::new(
+            &nominal_resolver,
+            &folded_generic_resolver,
+            external_registry,
+        );
+        let folded_value_projection_context = FoldedValueProjectionContext {
+            type_environment,
+            string_table,
+            projection_context: &folded_projection_context,
+            resources: module_resources,
+        };
+        let folded_value_context = FoldedValueJoinContext {
+            folded_value_projection_context: &folded_value_projection_context,
+            const_values,
+        };
+        let receiver_projection_context = ReceiverProjectionContext {
+            type_environment,
+            projection_context: &type_projection_context,
+            string_table,
+            folded_value_context: &folded_value_projection_context,
+        };
         let receiver_method_signatures = project_receiver_method_signatures(
             &callable_seeds,
             &root_table.receiver_methods,
-            type_environment,
-            &type_projection_context,
-            string_table,
+            &receiver_projection_context,
         )?;
 
         // Group receiver-method seeds by their stable receiver origin so each struct or choice
@@ -258,23 +283,6 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
         // exactly once. The store remains the sole folded-value owner.
         let mut consumed_const_values = FxHashSet::default();
 
-        // Build the folded-value projection context from the same shared nominal origin
-        // resolver and external registry. Folded constant values are concrete, so a generic
-        // parameter reaching this projection is an internal invariant violation rather than a
-        // legitimate exported shape.
-        let folded_generic_resolver = FoldedValueGenericParameterResolver;
-        let folded_projection_context = CanonicalTypeProjectionContext::new(
-            &nominal_resolver,
-            &folded_generic_resolver,
-            external_registry,
-        );
-        let folded_value_context = FoldedValueJoinContext {
-            type_environment,
-            string_table,
-            projection_context: &folded_projection_context,
-            const_values,
-        };
-
         // The direct trait projection holds the trait-root index and projects one final
         // PublicTraitSemantics per trait binding.
         let mut trait_projection =
@@ -293,6 +301,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             public_source_trait_origins,
             type_environment,
             string_table,
+            folded_value_context: &folded_value_projection_context,
         };
         let mut state = DeclarationRecordProjectionState {
             receiver_seeds_by_receiver: &mut receiver_seeds_by_receiver,
@@ -357,21 +366,14 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
         })
     }
 }
-
-// ===========================================================================
-//  Folded-value projection context
-// ===========================================================================
-
-/// Context for projecting folded constant values during the declaration-centric projection.
+/// Context for joining module-store folded values into public declaration records.
 ///
-/// WHAT: bundles the shared type environment, the string table and the canonical type
-/// projection context so the constant fold does not take a long positional parameter list.
-/// The projection context is built once in the builder from the shared nominal origin
-/// resolver and external registry.
+/// WHAT: bundles the shared public folded-value conversion context with the module value store,
+/// keeping resource-table lookup and canonical projection together at the declaration boundary.
+/// WHY: the converter must read structural strings through the table that issued their local
+/// handles and emit portable stable origins, never flattening them into text.
 pub(super) struct FoldedValueJoinContext<'a> {
-    pub(super) type_environment: &'a TypeEnvironment,
-    pub(super) string_table: &'a StringTable,
-    pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
+    pub(super) folded_value_projection_context: &'a FoldedValueProjectionContext<'a>,
     pub(super) const_values: &'a ConstValueStore,
 }
 
@@ -390,6 +392,7 @@ struct DeclarationTypeProjectionContext<'a> {
         &'a FxHashMap<InternedPath, crate::compiler_frontend::semantic_identity::OriginTraitId>,
     type_environment: &'a TypeEnvironment,
     string_table: &'a StringTable,
+    folded_value_context: &'a FoldedValueProjectionContext<'a>,
 }
 
 /// Mutable per-binding join state consumed while projecting declaration records.
@@ -470,6 +473,7 @@ fn project_declaration_records<'a>(
                     &root_table.trait_source_facts,
                     type_context.public_source_trait_origins,
                     type_context.string_table,
+                    type_context.folded_value_context,
                 )?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
@@ -497,6 +501,7 @@ fn project_declaration_records<'a>(
                         &root_table.trait_source_facts,
                         type_context.public_source_trait_origins,
                         type_context.string_table,
+                        type_context.folded_value_context,
                     )?;
                     let receiver_methods = receiver_methods_for_origin(
                         type_origin,
@@ -676,11 +681,12 @@ fn fold_constant_value(
     context: &FoldedValueJoinContext,
 ) -> Result<PublicFoldedValue, CompilerError> {
     let Some(value_id) = context.const_values.value_for_path(defining_path) else {
-        let defining_path = defining_path.to_path_buf(context.string_table);
+        let defining_path =
+            defining_path.to_path_buf(context.folded_value_projection_context.string_table);
         let mut available_paths = context
             .const_values
             .module_constant_paths()
-            .map(|path| path.to_path_buf(context.string_table))
+            .map(|path| path.to_path_buf(context.folded_value_projection_context.string_table))
             .collect::<Vec<_>>();
         available_paths.sort();
         return Err(CompilerError::compiler_error(format!(
@@ -700,8 +706,6 @@ fn fold_constant_value(
     convert_const_value_to_folded_value(
         context.const_values,
         value_id,
-        context.type_environment,
-        context.string_table,
-        context.projection_context,
+        context.folded_value_projection_context,
     )
 }

@@ -1,0 +1,3 @@
+page_favicon #= @static/favicon.png
+
+#[:<main>Structural metadata</main>]

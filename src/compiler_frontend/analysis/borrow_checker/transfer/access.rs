@@ -659,7 +659,8 @@ fn record_shared_reads_in_expression(
         | HirExpressionKind::Float(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_) => {}
+        | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. } => {}
 
         HirExpressionKind::VariantConstruct { fields, .. } => {
             for field in fields {
@@ -883,7 +884,8 @@ fn collect_expression_roots(
         | HirExpressionKind::Float(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_) => {}
+        | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. } => {}
 
         HirExpressionKind::VariantConstruct { fields, .. } => {
             for field in fields {
@@ -1106,6 +1108,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. }
         | HirExpressionKind::Copy(_)
         | HirExpressionKind::Load(_) => {}
     }

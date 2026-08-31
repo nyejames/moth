@@ -6,6 +6,7 @@
 //! semantics, and runtime slot source/site plans use that same append path after AST has finished
 //! routing and validation.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -23,6 +24,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
@@ -31,7 +33,6 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -108,28 +109,24 @@ impl<'a> HirBuilder<'a> {
                 location: text_location,
                 ..
             } => {
-                let text_value = self.string_table.resolve(*text).to_owned();
-                let region = self.current_region_or_error(text_location)?;
+                let chunk_region = self.current_region_or_error(text_location)?;
+                let chunk_kind = self.runtime_template_text_chunk(text, text_location)?;
                 let chunk = self.make_expression(
                     text_location,
-                    HirExpressionKind::StringLiteral(text_value),
+                    chunk_kind,
                     string_ty,
                     ValueKind::Const,
-                    region,
+                    chunk_region,
                 );
 
-                let region = self.current_region_or_error(location)?;
-                *rendered = self.make_expression(
+                let append_region = self.current_region_or_error(location)?;
+                self.append_chunk_to_rendered_expression(
+                    rendered,
+                    chunk,
                     location,
-                    HirExpressionKind::BinOp {
-                        left: Box::new(rendered.clone()),
-                        op: HirBinOp::StringAppend,
-                        right: Box::new(chunk),
-                    },
                     string_ty,
-                    ValueKind::RValue,
-                    region,
-                );
+                    append_region,
+                )?;
             }
 
             OwnedRuntimeTemplateNode::DynamicExpression {
@@ -143,34 +140,18 @@ impl<'a> HirBuilder<'a> {
                 )?;
 
                 let region = self.current_region_or_error(location)?;
-                *rendered = self.make_expression(
-                    location,
-                    HirExpressionKind::BinOp {
-                        left: Box::new(rendered.clone()),
-                        op: HirBinOp::StringAppend,
-                        right: Box::new(chunk),
-                    },
-                    string_ty,
-                    ValueKind::RValue,
-                    region,
-                );
+                self.append_chunk_to_rendered_expression(
+                    rendered, chunk, location, string_ty, region,
+                )?;
             }
 
             OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
                 let chunk = self.lower_reactive_linear_child_template_chunk(template)?;
 
                 let region = self.current_region_or_error(location)?;
-                *rendered = self.make_expression(
-                    location,
-                    HirExpressionKind::BinOp {
-                        left: Box::new(rendered.clone()),
-                        op: HirBinOp::StringAppend,
-                        right: Box::new(chunk),
-                    },
-                    string_ty,
-                    ValueKind::RValue,
-                    region,
-                );
+                self.append_chunk_to_rendered_expression(
+                    rendered, chunk, location, string_ty, region,
+                )?;
             }
 
             OwnedRuntimeTemplateNode::ConditionalWrapper { .. } => {
@@ -352,23 +333,70 @@ impl<'a> HirBuilder<'a> {
         self.append_template_chunk_to_accumulator(aggregate_value, accumulator, fallback_location)
     }
 
-    fn append_string_id_to_accumulator(
+    fn append_text_to_accumulator(
         &mut self,
-        text: StringId,
+        text: String,
         accumulator: LocalId,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
-        let text_value = self.string_table.resolve(text).to_owned();
         let region = self.current_region_or_error(location)?;
         let chunk = self.make_expression(
             location,
-            HirExpressionKind::StringLiteral(text_value),
+            HirExpressionKind::StringLiteral(text),
             builtin_type_ids::STRING,
             ValueKind::Const,
             region,
         );
 
         self.append_template_chunk_to_accumulator(chunk, accumulator, location)
+    }
+
+    /// Appends one piece-bearing owned text payload to an accumulator.
+    ///
+    /// WHAT: converts the payload's ordered pieces into one structural constant chunk and
+    ///       appends it with the ordinary chunk path, then marks the payload as structural
+    ///       output.
+    /// WHY: a payload reaching here carries at least one `Resource` or `SiteRoot` anchor, and
+    ///       every anchor is real output; appending the whole list at once keeps authored order
+    ///       and never fuses text across an anchor.
+    fn append_structural_text_node_to_accumulator(
+        &mut self,
+        text: &OwnedFoldedString,
+        append_context: RuntimeTemplateAppendContext<'_>,
+        location: &SourceLocation,
+    ) -> Result<TemplateBodyEmission, CompilerError> {
+        let OwnedFoldedString::Pieces(pieces) = text else {
+            return_hir_transformation_error!(
+                "Piece-bearing runtime-template text node carried neither plain text nor pieces.",
+                self.hir_error_location(location)
+            );
+        };
+
+        let region = self.current_region_or_error(location)?;
+        let chunk_kind = HirExpressionKind::StructuralString {
+            pieces: self.hir_pieces_from_owned_pieces(pieces, location)?,
+        };
+        let chunk = self.make_expression(
+            location,
+            chunk_kind,
+            builtin_type_ids::STRING,
+            ValueKind::Const,
+            region,
+        );
+
+        self.append_template_chunk_to_accumulator(
+            chunk,
+            append_context.target_accumulator,
+            location,
+        )?;
+
+        self.mark_owned_runtime_template_output_if_needed(
+            TemplateBodyEmission::Output,
+            append_context,
+            location,
+        )?;
+
+        Ok(TemplateBodyEmission::Output)
     }
 
     fn append_expression_to_accumulator(
@@ -462,12 +490,24 @@ impl<'a> HirBuilder<'a> {
             }
 
             OwnedRuntimeTemplateNode::Text { text, location, .. } => {
-                if self.string_table.resolve(*text).is_empty() {
+                // Piece-bearing payloads append as one structural constant chunk in authored
+                // order; every anchor inside the payload is a real output, so whitespace-only
+                // trimming questions only apply to plain-text payloads.
+                let Some(text_value) = text.clone().into_text() else {
+                    return self.append_structural_text_node_to_accumulator(
+                        text,
+                        append_context,
+                        location,
+                    );
+                };
+
+                if text_value.is_empty() {
                     return Ok(TemplateBodyEmission::NoOutput);
                 }
+                let whitespace_only = text_value.trim().is_empty();
 
-                self.append_string_id_to_accumulator(
-                    *text,
+                self.append_text_to_accumulator(
+                    text_value,
                     append_context.target_accumulator,
                     location,
                 )?;
@@ -481,8 +521,7 @@ impl<'a> HirBuilder<'a> {
                 // producing spurious wrapper tags (e.g. `<li>\n</li>`).
                 // Treating whitespace as non-output for the emitted flag keeps
                 // the wrapper conditional on meaningful content only.
-                let is_whitespace = self.string_table.resolve(*text).trim().is_empty();
-                if is_whitespace {
+                if whitespace_only {
                     return Ok(TemplateBodyEmission::NoOutput);
                 }
 
@@ -491,6 +530,7 @@ impl<'a> HirBuilder<'a> {
                     append_context,
                     location,
                 )?;
+
                 Ok(TemplateBodyEmission::Output)
             }
 
@@ -1434,6 +1474,196 @@ impl<'a> HirBuilder<'a> {
             region,
         ))
     }
+
+    // ------------------------
+    //  Structural string composition
+    // ------------------------
+
+    /// Materializes one owned runtime-template text payload as a constant chunk.
+    ///
+    /// WHAT: keeps owned plain text on the owned `StringLiteral` fast path through the shared
+    ///       `into_text` rule and converts a piece-bearing payload into one
+    ///       `StructuralString` constant whose ordered pieces re-intern through the issuing
+    ///       module resource table. Text pieces intern into the string table; `Resource` and
+    ///       `SiteRoot` anchors stay structural.
+    /// WHY: runtime-template appends must compose structural strings instead of rendering them;
+    ///       URL contexts are Phase 4's output boundary and an anchor is a hard text-coalescing
+    ///       boundary in every append below.
+    fn runtime_template_text_chunk(
+        &mut self,
+        text: &OwnedFoldedString,
+        location: &SourceLocation,
+    ) -> Result<HirExpressionKind, CompilerError> {
+        if let Some(plain_text) = text.clone().into_text() {
+            return Ok(HirExpressionKind::StringLiteral(plain_text));
+        }
+
+        let OwnedFoldedString::Pieces(pieces) = text else {
+            return_hir_transformation_error!(
+                "Runtime-template text payload carried neither plain text nor pieces.",
+                self.hir_error_location(location)
+            );
+        };
+
+        Ok(HirExpressionKind::StructuralString {
+            pieces: self.hir_pieces_from_owned_pieces(pieces, location)?,
+        })
+    }
+
+    /// Converts one ordered owned piece list into module-local HIR pieces.
+    fn hir_pieces_from_owned_pieces(
+        &mut self,
+        pieces: &[OwnedFoldedStringPiece],
+        location: &SourceLocation,
+    ) -> Result<Vec<ConstStringPiece>, CompilerError> {
+        let mut hir_pieces = Vec::with_capacity(pieces.len());
+
+        for piece in pieces {
+            let hir_piece = match piece {
+                OwnedFoldedStringPiece::Text(text) => {
+                    ConstStringPiece::Text(self.string_table.intern(text.as_str()))
+                }
+
+                OwnedFoldedStringPiece::Resource(origin) => ConstStringPiece::Resource(
+                    self.intern_handoff_resource_origin(origin, location)?,
+                ),
+
+                OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
+            };
+
+            hir_pieces.push(hir_piece);
+        }
+
+        Ok(hir_pieces)
+    }
+
+    /// Extracts the piece list of a known-constant string expression, if it is one.
+    fn const_string_pieces(&mut self, expression: &HirExpression) -> Option<Vec<ConstStringPiece>> {
+        match &expression.kind {
+            HirExpressionKind::StringLiteral(text) => Some(vec![ConstStringPiece::Text(
+                self.string_table.intern(text.as_str()),
+            )]),
+
+            HirExpressionKind::StructuralString { pieces } => Some(pieces.clone()),
+
+            _ => None,
+        }
+    }
+
+    /// Folds two constant piece lists into one compacted constant chunk.
+    ///
+    /// WHAT: joins `right` onto `left` in authored order, fusing only adjacent text runs; a
+    ///       `Resource` or `SiteRoot` anchor is a hard text-coalescing boundary, so text never
+    ///       fuses across one. An all-text result demotes to the plain `StringLiteral` fast
+    ///       path.
+    /// WHY: this is the compile-time half of runtime-template composition. The runtime append
+    ///      operator stays for dynamic operands, and URL rendering stays out until Phase 4's
+    ///      output boundary.
+    fn composed_const_string_chunk(
+        &mut self,
+        left: Vec<ConstStringPiece>,
+        right: &[ConstStringPiece],
+    ) -> Result<HirExpressionKind, CompilerError> {
+        let mut composed = left;
+
+        for piece in right {
+            match (composed.last_mut(), piece) {
+                (Some(ConstStringPiece::Text(tail)), ConstStringPiece::Text(head)) => {
+                    let fused = format!(
+                        "{}{}",
+                        self.string_table.resolve(*tail),
+                        self.string_table.resolve(*head)
+                    );
+                    *tail = self.string_table.intern(fused.as_str());
+                }
+
+                _ => composed.push(piece.clone()),
+            }
+        }
+
+        self.compact_const_string_chunk(composed)
+    }
+
+    /// Demotes an anchor-free piece list to plain text and keeps structural pieces otherwise.
+    ///
+    /// WHAT: concatenates the runs of a list already known to hold nothing but text, and
+    ///       otherwise hands back the structural list untouched.
+    /// WHY: a resource or site-root piece has no final text until Phase 4 assigns URL
+    ///      contexts, so the text branch must be reachable only when no anchor remains. An
+    ///      anchor arriving here would mean the scan above disagreed with this walk, so it
+    ///      fails loudly rather than dropping the anchor from the output.
+    fn compact_const_string_chunk(
+        &mut self,
+        pieces: Vec<ConstStringPiece>,
+    ) -> Result<HirExpressionKind, CompilerError> {
+        let carries_anchor = pieces.iter().any(|piece| {
+            matches!(
+                piece,
+                ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot
+            )
+        });
+
+        if !carries_anchor {
+            let mut text = String::new();
+            for piece in &pieces {
+                match piece {
+                    ConstStringPiece::Text(string_id) => {
+                        text.push_str(self.string_table.resolve(*string_id));
+                    }
+
+                    ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
+                        return Err(CompilerError::compiler_error(
+                            "HIR invariant: an anchor-free string append chunk carried a resource or site-root piece",
+                        ));
+                    }
+                }
+            }
+
+            return Ok(HirExpressionKind::StringLiteral(text));
+        }
+
+        Ok(HirExpressionKind::StructuralString { pieces })
+    }
+
+    /// Appends one chunk onto the reactive linear rendered expression.
+    ///
+    /// WHAT: joins two known constants by composing their piece lists and falls back to the
+    ///       runtime `StringAppend` operator when either side is dynamic. The right operand is
+    ///       lifted first, and the left only once the right is also a known constant, so a
+    ///       dynamic chunk never interns throwaway prefixes of the accumulated rendered text.
+    /// WHY: constant-side composition keeps structural pieces ordered and unfused while
+    ///       dynamic chunks keep the runtime concatenation shape backend lowering expects.
+    fn append_chunk_to_rendered_expression(
+        &mut self,
+        rendered: &mut HirExpression,
+        chunk: HirExpression,
+        location: &SourceLocation,
+        string_ty: TypeId,
+        region: RegionId,
+    ) -> Result<(), CompilerError> {
+        if let Some(right) = self.const_string_pieces(&chunk)
+            && let Some(left) = self.const_string_pieces(rendered)
+        {
+            let composed = self.composed_const_string_chunk(left, &right)?;
+            *rendered =
+                self.make_expression(location, composed, string_ty, ValueKind::Const, region);
+            return Ok(());
+        }
+
+        *rendered = self.make_expression(
+            location,
+            HirExpressionKind::BinOp {
+                left: Box::new(rendered.clone()),
+                op: HirBinOp::StringAppend,
+                right: Box::new(chunk),
+            },
+            string_ty,
+            ValueKind::RValue,
+            region,
+        );
+
+        Ok(())
+    }
 }
 
 enum RuntimeTemplateAppendCandidate<'a> {
@@ -1545,3 +1775,7 @@ fn owned_runtime_template_node_contains_runtime_slot_application(
         | OwnedRuntimeTemplateNode::Slot { .. } => false,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/structural_append_tests.rs"]
+mod structural_append_tests;

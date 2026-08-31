@@ -1,0 +1,7 @@
+draw type T |name T| -> String:
+    return [: generic body file value [@vendor/drawing.js] ]
+;
+
+value = draw("x")
+
+[: [value]]

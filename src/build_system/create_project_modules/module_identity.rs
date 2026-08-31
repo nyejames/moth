@@ -9,8 +9,9 @@
 //! the assignment and table owner while identity values remain build-independent.
 //! WHY: durable identity and topology are build-system-owned data. The directory frontend
 //! resolver consumes a derived normal-and-support root lookup table, while synthetic single-file
-//! compilation can request the narrower normal-root view. Later graph-construction phases consume
-//! the identity and ancestry directly from this table. The dense `ModuleId` is the build-local
+//! compilation keeps dependency resolution on the narrower normal-root view and passes the
+//! complete non-facade view only to physical ownership checks. Later graph-construction phases
+//! consume the identity and ancestry directly from this table. The dense `ModuleId` is the build-local
 //! handle for one build boundary; the owned `StableModuleOriginIdentity` is the cross-build
 //! semantic identity that later exported declaration identities embed.
 

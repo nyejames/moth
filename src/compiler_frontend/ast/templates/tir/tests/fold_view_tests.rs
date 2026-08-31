@@ -4,6 +4,7 @@
 // folding at the owning TIR boundary.
 // WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -121,7 +122,7 @@ fn fold_view_matches_direct_template_fold_for_simple_text() {
 
     assert_eq!(
         emission,
-        TemplateEmission::Output(string_table.intern("hello"))
+        TemplateEmission::Output(ConstStringValue::Text(string_table.intern("hello")))
     );
 }
 
@@ -289,7 +290,7 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
         .expect("resolved slot overlay fold should succeed");
     assert_eq!(
         resolved_emission,
-        TemplateEmission::Output(fill_text),
+        TemplateEmission::Output(ConstStringValue::Text(fill_text)),
         "resolved slot overlay must fold the fill template into output"
     );
 
@@ -511,7 +512,10 @@ fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
     let emission = fold_prepared_view(&view, &mut context)
         .expect("repeated composed child views should fold successfully");
 
-    assert_eq!(emission, TemplateEmission::Output(expected_output));
+    assert_eq!(
+        emission,
+        TemplateEmission::Output(ConstStringValue::Text(expected_output))
+    );
 }
 
 #[test]
@@ -642,8 +646,14 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     }
     .expect("second overlay fold should succeed");
 
-    assert_eq!(first, TemplateEmission::Output(first_text));
-    assert_eq!(second, TemplateEmission::Output(second_text));
+    assert_eq!(
+        first,
+        TemplateEmission::Output(ConstStringValue::Text(first_text))
+    );
+    assert_eq!(
+        second,
+        TemplateEmission::Output(ConstStringValue::Text(second_text))
+    );
 }
 
 #[test]
@@ -797,7 +807,10 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
     let emission = fold_prepared_view(&view, &mut context)
         .expect("a Parsed child's unconsumed overlay identity must not block folding");
 
-    assert_eq!(emission, TemplateEmission::Output(child_text));
+    assert_eq!(
+        emission,
+        TemplateEmission::Output(ConstStringValue::Text(child_text))
+    );
 }
 
 // -------------------------

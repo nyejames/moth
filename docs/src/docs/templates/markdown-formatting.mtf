@@ -16,8 +16,31 @@ It is intentionally not a full CommonMark implementation.
 - paragraphs separated by blank lines
 - unordered lists: `-` items
 - ordered lists: `1.` items
-- links: `@./relative-path (link text)` or `@https://... (link text)`
+- links: `@./relative-path (link text)`, `@/site-route (link text)` or `@https://... (link text)`
 - emphasis: `**bold**` and `*italic*`
+
+### Link targets
+
+A Moth-aware link target is a URL, never a file value. It is never resolved against the filesystem, copied, watched or tracked. Markdown link parsing is not file discovery. A file value inside `$md` is written as an ordinary nested Moth expression instead, not as a link target. See @../resources/#file-values (File values).
+
+A target beginning with a single `/` is a site route. It renders through the site root, so the project's configured `origin` is applied for you.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        Read the @/docs/packages (Packages) reference.
+    ]
+]
+
+Under `origin #= "/moth"` that renders `href="/moth/docs/packages"`, and `href="/docs/packages"` when no origin is configured. This is the same site-root piece that bare `@/` produces in expression position. See @../resources/#file-paths (File paths).
+
+Every other target renders literally:
+
+- `./` and `../` relative targets
+- `#` fragment and `?` query targets
+- `//` protocol-relative URLs
+- `scheme:` absolute URLs such as `https://`
+
+A relative target is already correct from the page that contains it, and an absolute or protocol-relative URL addresses another origin entirely, so neither takes the site root.
 
 ### Inline code
 

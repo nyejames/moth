@@ -384,6 +384,21 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 public_trait_roots: &resolved_public_trait_roots,
                 default_const_templates_by_path: projected_const_templates.by_path,
                 entry_dir: self.context.entry_dir.clone(),
+                module_origin: self
+                    .context
+                    .file_value_resolution
+                    .as_ref()
+                    .and_then(|services| services.module_origin.clone()),
+                stage0_resolution_facts: self
+                    .context
+                    .file_value_resolution
+                    .as_ref()
+                    .and_then(|services| services.stage0_resolution_facts.clone()),
+                module_resources: self
+                    .context
+                    .file_value_resolution
+                    .as_ref()
+                    .map(|services| Rc::clone(&services.module_resources)),
                 string_table,
                 template_const_loop_iteration_limit: self
                     .context
@@ -407,6 +422,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
         };
+        let module_resources = self
+            .context
+            .file_value_resolution
+            .as_ref()
+            .map(|services| Rc::clone(&services.module_resources));
         Ok(AstBuildResult {
             ast: Ast {
                 nodes: emitted.ast,
@@ -423,6 +443,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 const_facts,
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
             },
+            module_resources,
             public_interface_projection_input,
             materialisation_context,
             deferred_generic_requests: emitted.deferred_generic_requests,

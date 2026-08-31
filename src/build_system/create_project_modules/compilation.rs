@@ -18,6 +18,10 @@ use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagn
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
+    ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
@@ -25,13 +29,13 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
-use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
 use std::ffi::OsStr;
@@ -47,6 +51,7 @@ use super::compiled_boundary::{
 };
 use super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 
+use super::file_reference_resolution::{SingleFileReferenceOutcome, SingleFileResolvedReference};
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
@@ -56,6 +61,7 @@ use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_roots;
 use super::project_structure_diagnostics::non_utf8_filesystem_name_error;
+use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 use super::source_package_discovery::build_source_package_boundary_indexes;
@@ -148,6 +154,8 @@ pub(crate) fn compile_single_file_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    let mut resource_inputs = ResourceInputRegistry::new();
+
     // 1. Verify standard Moth file extension.
     //
     // A non-UTF-8 extension is an unrepresentable filesystem input. Reject it before
@@ -298,18 +306,22 @@ pub(crate) fn compile_single_file_frontend(
         crate::timing::TimingMetric::BoundaryInventory,
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
     );
-    let input_files = match source_discovery::collect_reachable_input_files(
+    let collected = match source_discovery::collect_reachable_input_files(
         &entry_path,
         &project_path_resolver,
         style_directives,
         &mut external_imports,
+        &builder_surface.source_file_kinds,
+        &mut resource_inputs,
         string_table,
     ) {
-        Ok(collected) => collected.input_files,
+        Ok(collected) => collected,
         Err(messages) => {
             return Err(messages);
         }
     };
+    let input_files = collected.input_files;
+    let resolved_file_references = collected.resolved_file_references;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
     // Share the effective external package registry immutably for the rest of the frontend
@@ -390,12 +402,13 @@ pub(crate) fn compile_single_file_frontend(
         local_table,
         source_byte_count,
     );
-    let prepared = match prepare_result {
+    let mut prepared = match prepare_result {
         Ok(prepared) => prepared,
         Err(messages) => {
             return Err(messages);
         }
     };
+    attach_single_file_resolved_references(&mut prepared, resolved_file_references, string_table)?;
 
     // Semantic compilation is one compiler service call. A synthetic single-file module has no
     // completed providers, so it binds against empty provider and materialisation views.
@@ -474,6 +487,7 @@ pub(crate) fn compile_single_file_frontend(
                     .finish()
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
                 CompletedSourcePackageRegistry::new(),
+                resource_inputs,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table));
         }
@@ -534,8 +548,110 @@ pub(crate) fn compile_single_file_frontend(
             .finish()
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
         CompletedSourcePackageRegistry::new(),
+        resource_inputs,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+}
+
+/// Rebind synthetic Stage 0 file-reference rows to the final module source identities.
+///
+/// Synthetic discovery must resolve paths before the complete source closure is known, so it
+/// retains canonical target paths until `prepare_module` builds the authoritative `SourceFileTable`.
+/// This helper performs that one identity join and publishes the same resolved table consumed by
+/// directory modules; it does not probe the filesystem or reinterpret any path syntax.
+fn attach_single_file_resolved_references(
+    prepared: &mut PreparedModule,
+    references: Vec<SingleFileResolvedReference>,
+    string_table: &StringTable,
+) -> Result<(), CompilerMessages> {
+    let mut resolved_table = ResolvedFileReferenceTable::new();
+
+    for reference in references {
+        let source_file = prepared
+            .semantic
+            .source_files
+            .get_by_canonical_path(&reference.source_path)
+            .map(|identity| identity.file_id)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "synthetic file-reference owner {:?} is absent from the module source table",
+                        reference.source_path
+                    )),
+                    string_table,
+                )
+            })?;
+
+        let outcome = match reference.outcome {
+            SingleFileReferenceOutcome::NoPhysicalTarget => {
+                ResolvedFileReferenceOutcome::NoPhysicalTarget
+            }
+            SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+                ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
+            }
+            SingleFileReferenceOutcome::Resource {
+                source,
+                owner_relative_path,
+            } => {
+                ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+                    source,
+                    owner_relative_path,
+                })
+            }
+            SingleFileReferenceOutcome::Source { canonical } => {
+                let target_file = prepared
+                    .semantic
+                    .source_files
+                    .get_by_canonical_path(&canonical)
+                    .map(|identity| identity.file_id)
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "synthetic file-reference target {:?} is absent from the module source table",
+                                canonical
+                            )),
+                            string_table,
+                        )
+                    })?;
+                if reference.class != PreparedFileReferenceClass::ContentSource {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "synthetic physical file-reference outcome has an incompatible class",
+                        ),
+                        string_table,
+                    ));
+                }
+                ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
+                    source: target_file,
+                })
+            }
+            SingleFileReferenceOutcome::IdentifiedSourceKind => {
+                if reference.class != PreparedFileReferenceClass::SourceKindNoFileValue {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "synthetic identified-source outcome has an incompatible class",
+                        ),
+                        string_table,
+                    ));
+                }
+                ResolvedFileReferenceOutcome::Target(
+                    ResolvedFileReferenceTarget::IdentifiedSourceKind,
+                )
+            }
+        };
+
+        resolved_table
+            .push(ResolvedFileReference {
+                source_file,
+                path_syntax: reference.path_syntax,
+                class: reference.class,
+                outcome,
+            })
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    }
+
+    prepared.semantic.resolved_file_references = resolved_table;
+    Ok(())
 }
 
 // -------------------------
@@ -1275,6 +1391,7 @@ pub(crate) fn compile_directory_frontend(
         cache: &mut builder_surface.external_import_cache,
         resolution_table: &mut builder_surface.external_dependency_resolution_table,
     };
+    let mut resource_inputs = ResourceInputRegistry::new();
 
     let mut source_package_inventories = Vec::new();
     for (dependency_prefix, package_index) in project_setup
@@ -1312,6 +1429,7 @@ pub(crate) fn compile_directory_frontend(
             style_directives,
             &mut external_imports,
             package_resolution,
+            &mut resource_inputs,
             string_table,
             #[cfg(feature = "timers")]
             timing_boundary,
@@ -1375,6 +1493,7 @@ pub(crate) fn compile_directory_frontend(
         style_directives,
         &mut external_imports,
         directory_dependency_resolution,
+        &mut resource_inputs,
         string_table,
         #[cfg(feature = "timers")]
         project_timing_boundary,
@@ -1496,6 +1615,6 @@ pub(crate) fn compile_directory_frontend(
     #[cfg(feature = "timers")]
     timing_guard_stage0_directory_compile.finish();
 
-    ProjectFrontendCompilation::new(project_boundary, completed_source_packages)
+    ProjectFrontendCompilation::new(project_boundary, completed_source_packages, resource_inputs)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }

@@ -19,7 +19,8 @@ pub(crate) fn rewrite_expression_bottom_up(
         | HirExpressionKind::Float(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_) => expression.kind.clone(),
+        | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. } => expression.kind.clone(),
 
         HirExpressionKind::Load(place) => {
             HirExpressionKind::Load(rewrite_place_expressions_bottom_up(place, rewrite))

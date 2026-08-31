@@ -38,6 +38,7 @@
 pub(crate) mod ast_nodes;
 pub(crate) mod const_eval;
 pub(crate) mod const_values;
+pub(crate) mod file_value_resolution;
 pub(crate) mod generic_bounds;
 pub(crate) mod generic_functions;
 mod module_ast;
@@ -137,6 +138,7 @@ pub(crate) use module_ast::environment::{
     ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
 };
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
+pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
 pub(crate) use receiver_methods::{ReceiverMethodCatalog, ReceiverMethodEntry};
 pub use templates::top_level_templates::AstDocFragment;
 pub use templates::top_level_templates::AstDocFragmentKind;
@@ -170,6 +172,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, TopLevelConstFragment,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -177,6 +180,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::timing_scope_attributed;
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
 ///
@@ -260,19 +265,16 @@ pub(crate) struct AstImportedFunctionContract {
     pub(crate) fallible_carrier_type_id: Option<TypeId>,
 }
 
-/// Closed typed AST construction result carrying executable `Ast` and the two semantic
+/// Closed typed AST construction result carrying executable `Ast` and the three semantic
 /// side results consumed before HIR lowering.
 ///
-/// WHAT: the single result of AST construction. `ast` holds executable state only.
-///       `public_interface_projection_input` feeds the public-interface draft projection and
-///       `materialisation_context` retains validated generic templates and their closed
-///       declaring-module semantic context, both before
-///       HIR receives the executable `Ast`. Config and direct Moth-template compilation discard
-///       the side results because they stop at folded AST data.
-/// WHY: separating the projection side results from executable `Ast` keeps HIR input
-///      executable only and removes the take-before-HIR extraction dance from semantic
-///      orchestration. The field list is closed: no `Rc`, `RefCell`, trait/evidence environment
-///      or generic-template map remains reachable from the `Ast` passed to HIR.
+/// WHAT: the single result of AST construction. `ast` holds executable state only;
+///       `public_interface_projection_input` feeds public-interface projection,
+///       `module_resources` retains the module-local resource table for the HIR executable lane,
+///       and `materialisation_context` retains validated generic templates with their closed
+///       declaring-module semantic context.
+/// WHY: these side results have distinct downstream owners and do not belong to executable `Ast`;
+///      direct Moth-template compilation discards them after folded AST data is produced.
 pub struct AstBuildResult {
     /// Executable AST state consumed by HIR lowering.
     pub ast: Ast,
@@ -282,6 +284,11 @@ pub struct AstBuildResult {
 
     /// Construction-only declaring-module context frozen before successful publication.
     pub(crate) materialisation_context: ModuleMaterialisationPreparationBuilder,
+    /// The same module-local resource table used while resolving file-valued expressions.
+    ///
+    /// Public projection borrows this handle to translate local `ResourceId`s into portable
+    /// origins. The table remains shared with AST services and is never copied into the draft.
+    pub(crate) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
 
     /// Imported generic requests inferred against provider contracts. The requester carries only
     /// stable declaration/type evidence into the compiler-owned generated-function transaction.
@@ -304,14 +311,16 @@ impl Ast {
     ///
     /// WHAT: Orchestrates all AST construction passes in sequence, consuming sorted headers
     /// and header-built visibility through finalization, then assembles the final
-    /// [`AstBuildResult`] carrying executable `Ast` and the two projection side results.
+    /// [`AstBuildResult`] carrying executable `Ast`, public-interface projection input,
+    /// module-local resources and generic materialisation context.
     ///
     /// WHY: Centralizes the pass sequence so the full compilation pipeline is readable in
     /// one place without implementation details. Symbol discovery and dependency visibility are
     /// owned by the header/dependency stages and passed in via `AstBuildInput`.
     // The entry point keeps the obvious `new` name while returning the closed build result that
-    // bundles executable `Ast` with its projection side results; renaming would lose the canonical
-    // AST construction entry point expected by callers.
+    // bundles executable `Ast` with public-interface projection input, module-local resources and
+    // generic materialisation context; renaming would lose the canonical AST construction entry
+    // point expected by callers.
     #[allow(clippy::new_ret_no_self)]
     pub(in crate::compiler_frontend) fn new(
         input: AstBuildInput,
@@ -487,3 +496,7 @@ mod parser_error_recovery_tests;
 #[cfg(test)]
 #[path = "tests/type_resolution_tests.rs"]
 mod type_resolution_tests;
+
+#[cfg(test)]
+#[path = "tests/file_value_resolution_tests.rs"]
+mod file_value_resolution_tests;

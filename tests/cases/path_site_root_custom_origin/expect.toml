@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+# A configured origin is applied to the site root exactly once, so pages served from a subfolder
+# keep working without repeating the setting at every link.
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["href=\"/moth/\"", "href=\"/moth/docs/\""]
+must_not_contain = ["/moth/moth/", "href=\"/docs/\""]

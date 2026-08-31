@@ -78,6 +78,9 @@ impl<'hir> JsEmitter<'hir> {
             HirExpressionKind::Bool(value) => Ok(value.to_string()),
             HirExpressionKind::Char(value) => Ok(escape_js_char(*value)),
             HirExpressionKind::StringLiteral(value) => Ok(escape_js_string(value)),
+            HirExpressionKind::StructuralString { .. } => Err(CompilerError::compiler_error(
+                "Structural string reached JavaScript expression lowering before output-boundary rendering",
+            )),
 
             HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {
                 self.lower_expression_for_use(expression, JsValueUse::PlainExpression)

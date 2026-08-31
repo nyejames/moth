@@ -53,16 +53,26 @@ use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
     ExternalPackageRegistry, ExternalSymbolId, ExternalTypeDef, ExternalTypeId,
 };
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
+    ResolvedFileReferenceTarget,
+};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -95,8 +105,264 @@ pub(super) static CONTROL_FLOW_SCOPE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static EMPTY_TRAIT_ENVIRONMENT: Rc<TraitEnvironment> = Rc::new(TraitEnvironment::new());
+
     static EMPTY_TRAIT_EVIDENCE_ENVIRONMENT: Rc<TraitEvidenceEnvironment> =
         Rc::new(TraitEvidenceEnvironment::new());
+}
+/// Immutable Stage 0 resolution facts shared by AST value semantics.
+///
+/// WHAT: exposes one lookup over either a prepared module's real Stage 0 tables or the compact
+///       rows captured by one persistent generic body.
+/// WHY: AST readers must interpret the same resolved target vocabulary after a generated body has
+///      left its declaring module. Keeping the backing choice here prevents readers from
+///      reopening source tables or learning which materialisation lane supplied a row.
+#[derive(Clone)]
+pub(crate) struct Stage0ResolutionFacts {
+    backing: Stage0ResolutionFactsBacking,
+}
+
+#[derive(Clone)]
+enum Stage0ResolutionFactsBacking {
+    Ordinary {
+        resolved_file_references: ResolvedFileReferenceTable,
+        source_files: SourceFileTable,
+    },
+    FrozenGeneric {
+        references: FxHashMap<PathSyntaxId, FrozenResolvedFileReference>,
+    },
+}
+
+/// The row has already crossed the materialisation boundary: it contains no donor file, path,
+/// resource-source or filesystem identity. Content targets retain their folded value in the owned
+/// portable vocabulary, and resource targets retain only their owner-relative portable path.
+#[derive(Clone)]
+pub(crate) struct FrozenResolvedFileReference {
+    pub(crate) path_syntax: PathSyntaxId,
+    pub(crate) class: PreparedFileReferenceClass,
+    pub(crate) outcome: FrozenResolvedFileReferenceOutcome,
+}
+
+#[derive(Clone)]
+pub(crate) enum FrozenResolvedFileReferenceOutcome {
+    NoPhysicalTarget,
+    Content {
+        value: OwnedFoldedString,
+    },
+    Resource {
+        owner_relative_path: PortableResourcePath,
+    },
+    IdentifiedSourceKind,
+}
+
+/// One reader-facing resolved file-reference view.
+///
+/// Ordinary and frozen generic backings both project into this vocabulary. Ordinary content rows
+/// expose their logical path for declaration lookup, while frozen rows expose the captured value
+/// and no longer retain a donor declaration path.
+pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
+    pub(crate) class: PreparedFileReferenceClass,
+    pub(crate) outcome: Stage0ResolvedFileReferenceOutcome<'a>,
+}
+
+pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
+    NoPhysicalTarget,
+    Content {
+        logical_path: Option<&'a InternedPath>,
+        value: Option<&'a OwnedFoldedString>,
+    },
+    Resource {
+        owner_relative_path: &'a PortableResourcePath,
+    },
+    IdentifiedSourceKind,
+    Diagnostic(&'a CompilerDiagnostic),
+}
+
+impl Stage0ResolutionFacts {
+    pub(crate) fn ordinary(
+        resolved_file_references: ResolvedFileReferenceTable,
+        source_files: SourceFileTable,
+    ) -> Self {
+        Self {
+            backing: Stage0ResolutionFactsBacking::Ordinary {
+                resolved_file_references,
+                source_files,
+            },
+        }
+    }
+
+    pub(crate) fn frozen_generic(
+        references: Vec<FrozenResolvedFileReference>,
+    ) -> Result<Self, CompilerError> {
+        let mut indexed = FxHashMap::with_capacity_and_hasher(references.len(), Default::default());
+        for reference in references {
+            if reference.path_syntax.is_none() {
+                return Err(CompilerError::compiler_error(
+                    "frozen generic resolved-reference row has an absent PathSyntaxId marker",
+                ));
+            }
+            validate_frozen_reference(&reference)?;
+            if indexed.insert(reference.path_syntax, reference).is_some() {
+                return Err(CompilerError::compiler_error(
+                    "frozen generic resolved-reference table contains duplicate path handles",
+                ));
+            }
+        }
+        Ok(Self {
+            backing: Stage0ResolutionFactsBacking::FrozenGeneric {
+                references: indexed,
+            },
+        })
+    }
+
+    pub(crate) fn lookup(
+        &self,
+        source_file: Option<FileId>,
+        path_syntax: PathSyntaxId,
+    ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
+        match &self.backing {
+            Stage0ResolutionFactsBacking::Ordinary {
+                resolved_file_references,
+                source_files,
+            } => {
+                let source_file = source_file.ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "ordinary Stage 0 file-reference lookup has no declaring FileId",
+                    )
+                })?;
+                let Some(reference) = resolved_file_references.get(source_file, path_syntax) else {
+                    return Ok(None);
+                };
+                ordinary_reference_view(reference, source_files).map(Some)
+            }
+            Stage0ResolutionFactsBacking::FrozenGeneric { references } => {
+                Ok(references.get(&path_syntax).map(frozen_reference_view))
+            }
+        }
+    }
+}
+
+fn ordinary_reference_view<'a>(
+    reference: &'a crate::compiler_frontend::paths::file_references::ResolvedFileReference,
+    source_files: &'a SourceFileTable,
+) -> Result<Stage0ResolvedFileReferenceView<'a>, CompilerError> {
+    let outcome = match &reference.outcome {
+        ResolvedFileReferenceOutcome::NoPhysicalTarget => {
+            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget
+        }
+        ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
+            source,
+        }) => {
+            let source_identity = source_files.get(*source).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "content file reference target was absent from the source identity table",
+                )
+            })?;
+            Stage0ResolvedFileReferenceOutcome::Content {
+                logical_path: Some(&source_identity.logical_path),
+                value: None,
+            }
+        }
+        ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+            owner_relative_path,
+            ..
+        }) => Stage0ResolvedFileReferenceOutcome::Resource {
+            owner_relative_path,
+        },
+        ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::IdentifiedSourceKind) => {
+            Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind
+        }
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+            Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
+        }
+    };
+    Ok(Stage0ResolvedFileReferenceView {
+        class: reference.class,
+        outcome,
+    })
+}
+
+fn frozen_reference_view(
+    reference: &FrozenResolvedFileReference,
+) -> Stage0ResolvedFileReferenceView<'_> {
+    let outcome = match &reference.outcome {
+        FrozenResolvedFileReferenceOutcome::NoPhysicalTarget => {
+            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget
+        }
+        FrozenResolvedFileReferenceOutcome::Content { value } => {
+            Stage0ResolvedFileReferenceOutcome::Content {
+                logical_path: None,
+                value: Some(value),
+            }
+        }
+        FrozenResolvedFileReferenceOutcome::Resource {
+            owner_relative_path,
+        } => Stage0ResolvedFileReferenceOutcome::Resource {
+            owner_relative_path,
+        },
+        FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind => {
+            Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind
+        }
+    };
+    Stage0ResolvedFileReferenceView {
+        class: reference.class,
+        outcome,
+    }
+}
+
+fn validate_frozen_reference(reference: &FrozenResolvedFileReference) -> Result<(), CompilerError> {
+    let valid = match reference.class {
+        PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
+            matches!(
+                reference.outcome,
+                FrozenResolvedFileReferenceOutcome::NoPhysicalTarget
+            )
+        }
+        PreparedFileReferenceClass::ContentSource => matches!(
+            reference.outcome,
+            FrozenResolvedFileReferenceOutcome::Content { .. }
+        ),
+        PreparedFileReferenceClass::ResourceFile => matches!(
+            reference.outcome,
+            FrozenResolvedFileReferenceOutcome::Resource { .. }
+        ),
+        PreparedFileReferenceClass::SourceKindNoFileValue => matches!(
+            reference.outcome,
+            FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(CompilerError::compiler_error(
+            "frozen generic resolved-reference class does not match its outcome",
+        ))
+    }
+}
+
+/// Shared Stage 0 and module-resource services used by AST value semantics.
+#[derive(Clone)]
+pub(crate) struct FileValueResolutionServices {
+    pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
+    pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
+    pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+}
+
+impl FileValueResolutionServices {
+    /// Fork these services for one materialised body without changing its resource authority.
+    ///
+    /// WHAT: pairs a body's compact Stage 0 facts with the shared generated-sidecar resource table.
+    /// WHY: compact path handles are body-local; recursive body parsing must switch facts while
+    /// preserving the one sidecar resource identity owner.
+    pub(crate) fn with_stage0_resolution_facts(
+        &self,
+        stage0_resolution_facts: Arc<Stage0ResolutionFacts>,
+    ) -> Rc<Self> {
+        Rc::new(Self {
+            stage0_resolution_facts: Some(stage0_resolution_facts),
+            module_resources: Rc::clone(&self.module_resources),
+            module_origin: self.module_origin.clone(),
+        })
+    }
 }
 
 /// Shared state common to a scope and all its cloned children.
@@ -137,6 +403,8 @@ pub struct ScopeShared {
     // Path resolution and source identity.
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) source_file_scope: Option<InternedPath>,
+    pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
+    pub(crate) declaring_file_id: Option<FileId>,
     pub(crate) path_format_config: PathStringFormatConfig,
     pub(crate) template_const_loop_iteration_limit: usize,
 
@@ -439,6 +707,8 @@ impl ScopeContext {
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             project_path_resolver: None,
             source_file_scope: None,
+            file_value_resolution: None,
+            declaring_file_id: None,
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),

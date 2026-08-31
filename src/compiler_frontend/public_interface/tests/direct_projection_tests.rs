@@ -27,7 +27,9 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionBody, GenericFunctionTemplate,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::{
     AstPublicInterfaceProjectionInput, ReceiverMethodCatalog, ResolvedPublicTypeRoot,
@@ -47,7 +49,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 };
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
@@ -281,6 +283,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &const_values,
+        module_resources: None,
     })
     .build()
     .expect("declaration-centric draft builds for all categories")
@@ -427,6 +430,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("draft with receiver method builds")
@@ -539,7 +543,10 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
         signature: method_signature,
-        body_tokens: Some(FileTokens::new(method_fn_path.clone(), vec![])),
+        body_tokens: Some(GenericFunctionBody::source(FileTokens::new(
+            method_fn_path.clone(),
+            vec![],
+        ))),
         declaration_location: SourceLocation::default(),
     };
     let template_map: FxHashMap<InternedPath, GenericFunctionTemplate> =
@@ -556,6 +563,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         string_table: &string_table,
         generic_function_templates: &template_map,
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("generic receiver path should build");
@@ -624,6 +632,7 @@ fn module_origin_survives_empty_public_surface() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("empty-surface draft builds")
@@ -747,6 +756,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("draft with function defaults should build")
@@ -763,7 +773,9 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     assert_eq!(semantics.parameters[0].name.as_deref(), Some("prefix"));
     assert_eq!(
         &semantics.parameters[0].folded_default,
-        &Some(PublicFoldedValue::String("default-prefix".to_owned()))
+        &Some(PublicFoldedValue::String(OwnedFoldedString::Text(
+            "default-prefix".to_owned(),
+        )))
     );
 
     assert_eq!(semantics.parameters[1].name.as_deref(), Some("count"));
@@ -846,6 +858,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("draft with struct field defaults should build")
@@ -943,6 +956,7 @@ fn choice_payload_fields_remain_default_free() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("draft with choice should build")
@@ -1041,6 +1055,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("draft with receiver method defaults should build")
@@ -1063,6 +1078,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
     assert_eq!(method.parameters[1].name.as_deref(), Some("label"));
     assert_eq!(
         &method.parameters[1].folded_default,
-        &Some(PublicFoldedValue::String("fallback".to_owned()))
+        &Some(PublicFoldedValue::String(OwnedFoldedString::Text(
+            "fallback".to_owned(),
+        )))
     );
 }

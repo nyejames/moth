@@ -1,0 +1,7 @@
+render type T |name T| -> String:
+    return [: generic body content [@docs/intro.mtf] ]
+;
+
+value = render("x")
+
+[: [value] ]

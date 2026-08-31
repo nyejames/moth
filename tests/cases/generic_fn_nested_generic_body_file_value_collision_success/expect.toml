@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_in_order = ["ROOT_FILE_VALUE", "NESTED_FILE_VALUE"]

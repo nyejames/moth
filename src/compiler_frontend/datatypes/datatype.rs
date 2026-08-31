@@ -26,7 +26,7 @@ use super::generic_identity_bridge::{
 use super::generic_parameters::TypeParameterId;
 use super::ids::{self, GenericParameterId, TypeId};
 
-use super::{BuiltinScalarReceiver, PathTypeKind, ReceiverKey};
+use super::{BuiltinScalarReceiver, ReceiverKey};
 #[derive(Debug, Clone)]
 pub enum DataType {
     // Meta-types used during earlier frontend stages.
@@ -71,9 +71,6 @@ pub enum DataType {
     Function(Box<Option<ReceiverKey>>, FunctionSignature), // Receiver, signature
 
     // Compile-time/frontend-specific composite values.
-    // Compile-time path value (file or directory).
-    #[allow(dead_code)] // Will be needed for path expressions in the future
-    Path(PathTypeKind),
     Template,
 
     // Scalar/runtime-leaf types.
@@ -345,8 +342,6 @@ impl DataType {
                 format!("Function({arg_str} -> {returns_string})")
             }
 
-            DataType::Path(PathTypeKind::File) => "Path(File)".to_string(),
-            DataType::Path(PathTypeKind::Directory) => "Path(Directory)".to_string(),
             DataType::Template => "Template".to_string(),
             DataType::None => "None".to_string(),
             DataType::True => "True".to_string(),
@@ -505,7 +500,6 @@ impl PartialEq for DataType {
                     error: error_b,
                 },
             ) => success_a == success_b && error_a == error_b,
-            (DataType::Path(a), DataType::Path(b)) => a == b,
             (DataType::Template, DataType::Template) => true,
             (DataType::Option(a), DataType::Option(b)) => a == b,
             // For Args, Struct, Function, and Choices, we compare by name/structure

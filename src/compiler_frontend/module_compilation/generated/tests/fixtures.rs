@@ -23,6 +23,7 @@ use crate::compiler_frontend::module_compilation::generated::artefacts::{
 };
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedRequestFacts;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -117,6 +118,7 @@ pub(crate) fn test_module() -> Module {
     Module {
         executable: ModuleExecutable {
             hir: HirModule::new(),
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },

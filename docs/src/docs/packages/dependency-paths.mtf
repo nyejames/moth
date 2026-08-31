@@ -1,5 +1,7 @@
 Dependency paths resolve declaration surfaces, not file bytes. Every source dependency clause resolves from the declaring file's owning module root, not the file's physical directory.
 
+A dependency clause and a file path in expression position are two different semantic roles for the same `@` spelling. A clause binds declarations or a namespace and produces no value. An explicit-extension path in expression position evaluates to a `String`. Neither owner reinterprets the other's paths: a clause never becomes a file value, and a file value never exposes a provider namespace. See @../resources/#file-paths (File paths).
+
 ### Path families
 
 - **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `src/internal/deep/renderer.moth`, `@accounts Account` resolves to `src/accounts.moth`, not `src/internal/deep/accounts.moth`.
@@ -13,7 +15,7 @@ Dependency paths resolve declaration surfaces, not file bytes. Every source depe
 ### Resolution rules
 
 - `@./...` has no supported meaning.
-- `@/...` absolute-root paths are invalid.
+- `@/...` absolute-root paths are invalid, and so is bare `@/`. Dependency resolution starts at the owning module root, so no absolute root is meaningful here. In expression position bare `@/` is instead the site-root URL. See @../resources/#file-paths (File paths).
 - Parent components and `..` are invalid.
 - Paths may traverse ordinary unrooted directories owned by the same module.
 - `.moth`, `.mtf` and `.md` source dependency paths are extensionless.
@@ -24,7 +26,7 @@ Dependency paths resolve declaration surfaces, not file bytes. Every source depe
 - Direct dependency clauses on `+*.moth` support root files and `config.moth` are rejected.
 - `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name. Normal module-root filenames such as `@page.moth` are not depended on directly.
 - A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
-- A recognised source extension used with an explicit extension gets an extensionless-source diagnostic.
+- A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is valid in expression position.
 - Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-dependencies (Moth template content dependencies) and @../markdown/#markdown-dependencies (Markdown dependencies).
 - The bound public surface of a module root comes from its `export:` block. See @#module-visibility (Module visibility).
 

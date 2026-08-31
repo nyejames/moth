@@ -13,7 +13,7 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind, SourceLocation};
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstValueId, ConstValueStore, ConstValueVisit,
+    ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -129,9 +129,19 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Float(value) => Ok(HirConstValue::Float(value)),
                 ConstValueVisit::Bool(value) => Ok(HirConstValue::Bool(value)),
                 ConstValueVisit::Char(value) => Ok(HirConstValue::Char(value)),
-                ConstValueVisit::String(value) => Ok(HirConstValue::String(
-                    self.string_table.resolve(value).to_owned(),
-                )),
+                ConstValueVisit::String(value) => match value {
+                    ConstStringValue::Text(text) => Ok(HirConstValue::String(
+                        self.string_table.resolve(*text).to_owned(),
+                    )),
+
+                    // Pieces stay structural in the pool exactly like structural HIR
+                    // expressions; physical variant planning owns final URL text.
+                    ConstStringValue::Pieces(pieces) => {
+                        Ok(HirConstValue::StructuralString {
+                            pieces: pieces.clone(),
+                        })
+                    }
+                },
                 ConstValueVisit::Collection(values) => Ok(HirConstValue::Collection(values)),
                 ConstValueVisit::Record(fields) => Ok(HirConstValue::Record(
                     fields
@@ -160,15 +170,22 @@ impl<'a> HirBuilder<'a> {
                     Ok(HirConstValue::OptionSome(Box::new(value)))
                 }
                 ConstValueVisit::OptionNone => Ok(HirConstValue::OptionNone),
-                ConstValueVisit::Template { folded, .. } => folded
-                    .map(|value| {
-                        HirConstValue::String(self.string_table.resolve(value).to_owned())
-                    })
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
-                        )
-                    }),
+                ConstValueVisit::Template { folded, .. } => match folded {
+                    Some(ConstStringValue::Text(value)) => Ok(HirConstValue::String(
+                        self.string_table.resolve(*value).to_owned(),
+                    )),
+
+                    // A piece-bearing template fold is the same structural string the
+                    // `String` arm above keeps, so it lowers with the same variant.
+                    Some(ConstStringValue::Pieces(pieces)) => {
+                        Ok(HirConstValue::StructuralString {
+                            pieces: pieces.clone(),
+                        })
+                    }
+                    None => Err(CompilerError::compiler_error(
+                        "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
+                    )),
+                },
             }
         })
     }
@@ -205,13 +222,30 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Char(value) => {
                     self.make_expression(location, HirExpressionKind::Char(value), ty, ValueKind::Const, region)
                 }
-                ConstValueVisit::String(value) => self.make_expression(
-                    location,
-                    HirExpressionKind::StringLiteral(self.string_table.resolve(value).to_owned()),
-                    ty,
-                    ValueKind::Const,
-                    region,
-                ),
+                ConstValueVisit::String(value) => match value {
+                    ConstStringValue::Text(text) => self.make_expression(
+                        location,
+                        HirExpressionKind::StringLiteral(
+                            self.string_table.resolve(*text).to_owned(),
+                        ),
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    ),
+
+                    // Pieces stay structural in constant expressions exactly like
+                    // `HirExpressionKind::StructuralString` values from template lowering;
+                    // physical variant planning owns final URL text.
+                    ConstStringValue::Pieces(pieces) => self.make_expression(
+                        location,
+                        HirExpressionKind::StructuralString {
+                            pieces: pieces.clone(),
+                        },
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    ),
+                },
                 ConstValueVisit::Collection(values) => self.make_expression(
                     location,
                     HirExpressionKind::Collection(values),
@@ -308,23 +342,34 @@ impl<'a> HirBuilder<'a> {
                     ValueKind::Const,
                     region,
                 ),
-                ConstValueVisit::Template { folded, .. } => {
-                    let Some(value) = folded else {
-                        return_hir_transformation_error!(
-                            "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
-                            self.hir_error_location(location)
-                        );
-                    };
-                    self.make_expression(
+                ConstValueVisit::Template { folded, .. } => match folded {
+                    Some(ConstStringValue::Text(value)) => self.make_expression(
                         location,
                         HirExpressionKind::StringLiteral(
-                            self.string_table.resolve(value).to_owned(),
+                            self.string_table.resolve(*value).to_owned(),
                         ),
                         ty,
                         ValueKind::Const,
                         region,
-                    )
-                }
+                    ),
+
+                    // A piece-bearing template fold is the same structural string the
+                    // `String` arm above keeps constant, so it lowers with the same
+                    // expression vocabulary as `HirExpressionKind::StructuralString`.
+                    Some(ConstStringValue::Pieces(pieces)) => self.make_expression(
+                        location,
+                        HirExpressionKind::StructuralString {
+                            pieces: pieces.clone(),
+                        },
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    ),
+                    None => return_hir_transformation_error!(
+                        "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
+                        self.hir_error_location(location)
+                    ),
+                },
             };
             Ok(expression)
         });

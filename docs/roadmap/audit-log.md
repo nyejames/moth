@@ -19,13 +19,14 @@ What has been audited, where, and when. This is a record, not a permission list.
 
 ## Entry format
 
-Each entry is `Kind YYYY-MM AUD-####`, optionally followed by a qualifier:
+Each entry is `Kind YYYY-MM AUD-####`, optionally followed by one or more qualifiers. `partial`
+and `stale` may be combined when the inspected subset has since changed materially:
 
 | Qualifier | Meaning |
 |---|---|
 | *(none)* | The whole area was inspected for that kind. |
 | `partial` | Only part of the area was inspected. The report says which part. |
-| `stale` | Was complete when recorded, but the area has changed materially since. |
+| `stale` | The recorded coverage has changed materially since that audit. |
 
 Coverage is not quality. An audited area may still have open findings.
 
@@ -36,7 +37,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `tests.harness` | `src/compiler_tests/integration_test_runner/**`, `src/compiler_tests/{test_support,test_fs,test_diagnostics}.rs`, `src/compiler_frontend/tests/frontend_pipeline_tests.rs`. Excludes the fixture directories, which `tests.cases` owns. | — |
 | `tests.support` | Test-only support and helper modules under `src/**/tests/` and `src/**/test_support.rs` | Redundancy 2026-08 AUD-0001 `partial` |
 | `tests.cases` | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture | — |
-| `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` |
+| `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` `stale` |
 | `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
 | `docs.audit_framework` | This file, `audit-guide.md`, `audit-kinds/**`, `open-audit-findings.md` and `audits/**` | Documentation 2026-08 AUD-0004 `partial` |
 

@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     AstDocFragment, AstDocFragmentKind,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
@@ -160,7 +161,17 @@ fn collect_doc_fragments(
         let TemplateFoldResult { emission, .. } =
             fold_prepared_template(&prepared, view, &mut fold_context)?;
         let rendered = match emission {
-            TemplateEmission::Output(value) => value,
+            TemplateEmission::Output(
+                crate::compiler_frontend::ast::const_values::store::ConstStringValue::Text(value),
+            ) => value,
+            TemplateEmission::Output(
+                crate::compiler_frontend::ast::const_values::store::ConstStringValue::Pieces(_),
+            ) => {
+                return Err(CompilerError::compiler_error(
+                    "Phase 4 owns structural string rendering at the documentation-fragment boundary.",
+                )
+                .into());
+            }
             TemplateEmission::NoOutput => fold_context.string_table.intern(""),
             TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
                 return Err(CompilerDiagnostic::invalid_template_structure(

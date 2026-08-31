@@ -129,11 +129,9 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
         ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_) => Ok(true),
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => Ok(true),
 
         ExpressionKind::Reference(path) => Ok(loop_binding_paths.iter().any(|known| known == path)),
 

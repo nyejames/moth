@@ -1,0 +1,7 @@
+Path = |
+    text String,
+|
+
+p #= Path(text = "ok")
+
+#[$html:<p>[p.text]</p>]

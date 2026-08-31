@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::templates::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
@@ -327,9 +328,13 @@ fn owned_runtime_template_node_guarantees_output(
             .iter()
             .any(|child| owned_runtime_template_node_guarantees_output(child, string_table)),
 
-        OwnedRuntimeTemplateNode::Text { text, .. } => {
-            !string_table.resolve(*text).trim().is_empty()
-        }
+        OwnedRuntimeTemplateNode::Text { text, .. } => match text {
+            OwnedFoldedString::Text(text) => !text.trim().is_empty(),
+            OwnedFoldedString::Pieces(pieces) => pieces.iter().any(|piece| match piece {
+                OwnedFoldedStringPiece::Text(text) => !text.trim().is_empty(),
+                OwnedFoldedStringPiece::Resource(_) | OwnedFoldedStringPiece::SiteRoot => true,
+            }),
+        },
 
         OwnedRuntimeTemplateNode::AggregateOutput => true,
 
@@ -400,3 +405,7 @@ fn runtime_template_handoff_guarantees_output(
         OwnedRuntimeTemplateBody::RuntimeSlotApplication(_) => false,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/slot_application_tests.rs"]
+mod slot_application_tests;

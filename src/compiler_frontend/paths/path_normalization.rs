@@ -143,8 +143,6 @@ pub(crate) fn build_public_path(
     base_kind: &CompileTimePathBase,
     string_table: &StringTable,
 ) -> InternedPath {
-    // An empty source/public path under a rooted base represents the Moth public-root
-    // literal (`@/`). This is site-root semantics, not OS-root semantics.
     match base_kind {
         // Relative paths keep their original form as the public path.
         CompileTimePathBase::RelativeToFile => source_path.clone(),

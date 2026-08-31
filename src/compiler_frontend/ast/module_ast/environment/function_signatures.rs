@@ -8,7 +8,9 @@
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use std::sync::Arc;
 
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionBody, GenericFunctionTemplate,
+};
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::receiver_methods::{
     BuildReceiverMethodCatalogInput, ReceiverMethodCatalogError, ReceiverMethodEntry,
@@ -141,7 +143,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .extend(signature_context.take_emitted_warnings());
                 signature
             };
-
             // -------------------------------
             //  Resolve and validate signature
             // -------------------------------
@@ -424,8 +425,8 @@ fn build_generic_function_template(
         generic_parameter_owner: None,
         generic_parameter_list_id,
         signature: signature.to_owned(),
-        body_tokens: Some(header.tokens.to_owned()),
         declaration_location: header.name_location.to_owned(),
+        body_tokens: Some(GenericFunctionBody::source(header.tokens.to_owned())),
     }
 }
 

@@ -9,7 +9,7 @@ use super::finalizer::AstFinalizer;
 use super::normalize_ast::TemplateNormalizationError;
 use super::template_helpers::make_fold_context;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstTemplateValue, ConstValueStoreError,
+    ConstStringPiece, ConstStringValue, ConstTemplateValue, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
@@ -27,11 +27,12 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::folded_value::{
-    PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
+    OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicConstTemplateSlot, PublicTemplateSlotKey,
 };
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -54,7 +55,7 @@ pub(super) struct ProjectedConstTemplates {
 pub(super) struct ProjectedConstTemplateValue {
     pub(super) kind: TemplateConstValueKind,
     pub(super) public: Option<PublicConstTemplate>,
-    pub(super) folded: Option<StringId>,
+    pub(super) folded: Option<ConstStringValue>,
     pub(super) provenance: SyntheticInterfaceProvenance,
 }
 
@@ -169,11 +170,17 @@ impl AstFinalizer<'_, '_> {
         store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
         string_table: &mut StringTable,
     ) -> Result<ProjectedConstTemplateValue, TemplateNormalizationError> {
+        let resources = self
+            .context
+            .file_value_resolution
+            .as_ref()
+            .map(|services| services.module_resources.borrow());
         project_const_template_value(
             template,
             store,
             string_table,
             self.context.template_const_loop_iteration_limit,
+            resources.as_deref(),
         )
     }
 
@@ -226,7 +233,7 @@ pub(super) fn const_template_value_from_projection(
                 )
             })?;
             Ok(ConstTemplateValue::Folded {
-                string,
+                value: string,
                 provenance: projected.provenance,
             })
         }
@@ -279,6 +286,7 @@ pub(super) fn project_const_template_value(
     store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<ProjectedConstTemplateValue, TemplateNormalizationError> {
     let reference = template.tir_reference;
     let view = TirView::with_minimum_phase(
@@ -307,14 +315,19 @@ pub(super) fn project_const_template_value(
     let (public, emission, provenance) = {
         let mut fold_context = make_fold_context(string_table, template_const_loop_iteration_limit);
         let mut visiting = FxHashSet::default();
-        let projected =
-            project_const_template_view(view, prepared, &mut fold_context, &mut visiting)?;
+        let projected = project_const_template_view(
+            view,
+            prepared,
+            &mut fold_context,
+            &mut visiting,
+            module_resources,
+        )?;
         (projected.template, projected.emission, projected.provenance)
     };
     let folded = match kind {
         TemplateConstValueKind::RenderableString | TemplateConstValueKind::WrapperTemplate => {
             Some(match emission {
-                TemplateEmission::NoOutput => string_table.intern(""),
+                TemplateEmission::NoOutput => ConstStringValue::Text(string_table.intern("")),
                 TemplateEmission::Output(value) => value,
                 TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
                     return Err(CompilerError::compiler_error(
@@ -344,6 +357,7 @@ fn project_const_template_view(
         '_,
     >,
     visiting: &mut FxHashSet<TirViewIdentity>,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<ProjectedTemplateView, TemplateNormalizationError> {
     if !visiting.insert(view.identity()) {
         return Err(CompilerError::compiler_error(
@@ -356,23 +370,52 @@ fn project_const_template_view(
     let kind = project_template_kind(&template.kind, fold_context.string_table)?;
     let pattern = fold_prepared_const_template_pattern(prepared, view.clone(), fold_context)?;
     let emission = pattern.emission;
-    let provenance = pattern.provenance.clone();
     let mut pieces = Vec::with_capacity(pattern.pieces.len());
-
+    let mut string_run = Vec::new();
+    let mut run_has_structural = false;
+    let provenance = pattern.provenance.clone();
     for piece in pattern.pieces {
         match piece {
             FoldedConstTemplatePiece::Text(text) => {
-                pieces.push(PublicConstTemplatePiece::Text(text));
+                string_run.push(ConstStringPiece::Text(
+                    fold_context.string_table.intern(&text),
+                ));
+            }
+            FoldedConstTemplatePiece::Resource(resource) => {
+                string_run.push(ConstStringPiece::Resource(resource));
+                run_has_structural = true;
+            }
+            FoldedConstTemplatePiece::SiteRoot => {
+                string_run.push(ConstStringPiece::SiteRoot);
+                run_has_structural = true;
             }
             FoldedConstTemplatePiece::Slot(occurrence) => {
+                if let Some(text) = project_owned_string_run(
+                    &mut string_run,
+                    run_has_structural,
+                    module_resources,
+                    fold_context.string_table,
+                )? {
+                    pieces.push(PublicConstTemplatePiece::Text(text));
+                }
+                run_has_structural = false;
                 pieces.push(PublicConstTemplatePiece::Slot(project_slot(
                     &view,
                     occurrence,
                     fold_context,
                     visiting,
+                    module_resources,
                 )?));
             }
         }
+    }
+    if let Some(text) = project_owned_string_run(
+        &mut string_run,
+        run_has_structural,
+        module_resources,
+        fold_context.string_table,
+    )? {
+        pieces.push(PublicConstTemplatePiece::Text(text));
     }
 
     let conditional_child_wrappers = project_wrapper_set(
@@ -380,6 +423,7 @@ fn project_const_template_view(
         template.conditional_child_wrapper_set,
         fold_context,
         visiting,
+        module_resources,
     )?;
     visiting.remove(&view.identity());
 
@@ -393,13 +437,73 @@ fn project_const_template_view(
         provenance,
     })
 }
-
+/// Intermediate owned projection of one exact template view.
+///
+/// WHAT: keeps the public composition tree, folded structural emission and provenance together
+///       until the caller stores the final module-constant projection.
+/// WHY: all three results come from one prepared/folded view and must not be recomputed through
+///      separate TIR traversals.
 struct ProjectedTemplateView {
     template: PublicConstTemplate,
     emission: TemplateEmission,
     provenance: SyntheticInterfaceProvenance,
 }
 
+/// Converts one contiguous non-slot projection run to the shared owned string vocabulary.
+///
+/// WHAT: resolves module-local text IDs and, for structural runs, delegates resource-origin
+///       conversion to [`crate::compiler_frontend::folded_value::owned_folded_string_from_const_string`].
+/// WHY: const-template projections outlive the donor TIR store, so only stable resource origins may
+///      cross the public boundary and text coalescing must stop at each structural anchor.
+fn project_owned_string_run(
+    string_run: &mut Vec<ConstStringPiece>,
+    has_structural: bool,
+    module_resources: Option<&ModuleResourceTable>,
+    string_table: &StringTable,
+) -> Result<Option<OwnedFoldedString>, TemplateNormalizationError> {
+    if string_run.is_empty() {
+        return Ok(None);
+    }
+
+    if has_structural {
+        let resources = module_resources.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Const-template projection reached a structural string without the issuing module resource table.",
+            )
+        })?;
+        let value = ConstStringValue::Pieces(std::mem::take(string_run));
+        return Ok(Some(
+            crate::compiler_frontend::folded_value::owned_folded_string_from_const_string(
+                &value,
+                resources,
+                string_table,
+            )?,
+        ));
+    }
+
+    let mut text = String::new();
+    for piece in string_run.drain(..) {
+        match piece {
+            ConstStringPiece::Text(text_id) => {
+                text.push_str(string_table.resolve(text_id));
+            }
+            ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
+                return Err(CompilerError::compiler_error(
+                    "Const-template projection string-run invariant violated: a structural piece reached text-only conversion.",
+                )
+                .into());
+            }
+        }
+    }
+    Ok(Some(OwnedFoldedString::Text(text)))
+}
+
+/// Projects one slot occurrence and its nested wrapper contexts.
+///
+/// WHAT: converts the module-local slot key and recursively projects both wrapper sets while
+///       retaining the slot's authored occurrence identity.
+/// WHY: public const-template consumers need composition structure after the donor TIR store is
+///      released, but no local TIR ID may cross the boundary.
 fn project_slot(
     view: &TirView<'_>,
     occurrence: SlotOccurrenceId,
@@ -407,6 +511,7 @@ fn project_slot(
         '_,
     >,
     visiting: &mut FxHashSet<TirViewIdentity>,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<PublicConstTemplateSlot, TemplateNormalizationError> {
     let placeholder = view.slot_placeholder(occurrence).ok_or_else(|| {
         CompilerError::compiler_error(
@@ -421,17 +526,23 @@ fn project_slot(
             placeholder.applied_child_wrapper_set,
             fold_context,
             visiting,
+            module_resources,
         )?,
         child_wrappers: project_wrapper_set(
             view,
             placeholder.child_wrapper_set,
             fold_context,
             visiting,
+            module_resources,
         )?,
         skip_parent_child_wrappers: placeholder.skip_parent_child_wrappers,
     })
 }
-
+/// Projects one wrapper-set reference list recursively.
+///
+/// WHAT: follows each module-local wrapper view and reuses the same structural string conversion
+///       and cycle guard as its parent template.
+/// WHY: nested wrappers are authored composition, not rendered text, and must remain portable.
 fn project_wrapper_set(
     parent_view: &TirView<'_>,
     wrapper_set_id: Option<crate::compiler_frontend::ast::templates::tir::TemplateWrapperSetId>,
@@ -439,6 +550,7 @@ fn project_wrapper_set(
         '_,
     >,
     visiting: &mut FxHashSet<TirViewIdentity>,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<Vec<PublicConstTemplate>, TemplateNormalizationError> {
     let Some(wrapper_set_id) = wrapper_set_id else {
         return Ok(Vec::new());
@@ -456,7 +568,14 @@ fn project_wrapper_set(
         let wrapper_view = parent_view.wrapper(reference)?;
         let prepared = prepare_tir_view(&wrapper_view, TemplatePreparationMode::ConstRequired)?;
         wrappers.push(
-            project_const_template_view(wrapper_view, prepared, fold_context, visiting)?.template,
+            project_const_template_view(
+                wrapper_view,
+                prepared,
+                fold_context,
+                visiting,
+                module_resources,
+            )?
+            .template,
         );
     }
 

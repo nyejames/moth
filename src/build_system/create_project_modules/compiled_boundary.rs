@@ -28,6 +28,7 @@ use super::module_artifact_store::MaterialisationContextLocation;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
+use super::resource_inputs::ResourceInputRegistry;
 
 /// One diagnosed module retained at the graph boundary.
 ///
@@ -828,15 +829,19 @@ pub(crate) fn compilation_module_views<'a>(
 pub(crate) struct ProjectFrontendCompilation {
     pub(crate) project: CompiledGraphBoundary,
     pub(crate) source_packages: CompletedSourcePackageRegistry,
+    /// Build-only physical resource inputs and missing-target watches discovered before AST.
+    pub(crate) resource_inputs: ResourceInputRegistry,
 }
 
 impl ProjectFrontendCompilation {
     pub(crate) fn new(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
+        resource_inputs: ResourceInputRegistry,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
+        resource_inputs.validate()?;
         for package in source_packages.iter() {
             package.validate()?;
         }
@@ -864,6 +869,7 @@ impl ProjectFrontendCompilation {
         Ok(Self {
             project,
             source_packages,
+            resource_inputs,
         })
     }
 

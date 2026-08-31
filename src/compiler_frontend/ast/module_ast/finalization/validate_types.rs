@@ -356,18 +356,15 @@ fn validate_expression(
             Ok(())
         }
 
-        // Terminal literals and references — types were resolved at construction.
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_) => Ok(()),
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => Ok(()),
     }
 }
 

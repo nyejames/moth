@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_eval::constant_fold;
+use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::facts::{
     AstConstDeclarationFact, AstConstFactValue, ConstBindingScope, ConstBindingSource,
     ConstFactValueKind,
@@ -329,8 +329,19 @@ impl<'a> ConstValueResolver<'a> {
             substituted.push(new_item);
         }
 
-        let mut stack = constant_fold(substituted, self.string_table)
-            .map_err(|_| ConstResolutionError::NonFoldableRuntimeExpression)?;
+        let mut stack = match constant_fold(substituted, self.string_table)
+            .map_err(|_| ConstResolutionError::NonFoldableRuntimeExpression)?
+        {
+            ConstantFoldOutcome::Folded(stack) => stack,
+            ConstantFoldOutcome::NotConstant(_) => {
+                return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+            }
+            // Const fact collection deliberately skips non-const resolution, so this refusal
+            // cannot reach a user-facing diagnostic at this advisory boundary.
+            ConstantFoldOutcome::TextUnavailable { .. } => {
+                return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+            }
+        };
 
         if stack.len() == 1
             && let Some(ExpressionRpnItem::Operand(expression)) = stack.pop()

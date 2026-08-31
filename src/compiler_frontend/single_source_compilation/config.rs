@@ -28,7 +28,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
+use crate::compiler_frontend::module_dependencies::{
+    ContentSourceTargets, resolve_module_dependencies,
+};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
@@ -136,9 +138,11 @@ pub(crate) fn compile_config_source(
         };
 
     // 3. Order local declarations.
-    let sorted = resolve_module_dependencies(bound_headers, string_table).map_err(|bag| {
-        CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-    })?;
+    let sorted =
+        resolve_module_dependencies(bound_headers, &ContentSourceTargets::empty(), string_table)
+            .map_err(|bag| {
+                CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
+            })?;
 
     // 4. Preserve key-name spans before AST consumes the headers. The full header path becomes the
     //    declaration ID, so validation can recover the exact span without rebuilding an identity.
@@ -175,6 +179,7 @@ pub(crate) fn compile_config_source(
             entry_dir: authored_scope.clone(),
             build_profile: FrontendBuildProfile::Dev,
             project_path_resolver: Some(path_resolver),
+            file_value_resolution: None,
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
@@ -261,6 +266,13 @@ fn prepare_config_file(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
             dependency_clause.location.clone(),
+        ));
+    }
+    for file_reference in output.structural_file_references.iter() {
+        errors.push(config_diagnostic(
+            None,
+            InvalidConfigReason::FileValuePathUnsupported,
+            file_reference.location.clone(),
         ));
     }
     errors.extend(validate_authored_config_surface(&output.headers));

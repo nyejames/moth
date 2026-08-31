@@ -40,6 +40,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashSet;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// The identity and diagnostic facts one generated request needs while materialising.
@@ -174,8 +175,17 @@ fn materialise_generated_request(
         ast: mut generated_ast,
         materialisation_context: generated_context_builder,
         deferred_generic_requests: nested_requests,
+        module_resources,
         ..
     } = build_result;
+    let module_resources = module_resources.ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "generated AST finalization did not retain its sidecar resource table",
+            ),
+            &compiler.string_table,
+        )
+    })?;
     let generated_context = generated_context_builder
         .finish_preparation()
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
@@ -234,6 +244,9 @@ fn materialise_generated_request(
             entry_file_path,
         )?;
     }
+    // The generated preparation retains a second handle only while nested requests are
+    // materialised; release it before lowering so the sidecar can own its table immutably.
+    drop(generated_context);
 
     let generated_warnings = generated_ast.warnings.clone();
     let generated_lowering = lower_hir(
@@ -241,12 +254,23 @@ fn materialise_generated_request(
         generated_ast,
         &generated_warnings,
         HirFunctionOriginLookup::default(),
+        Some(Rc::clone(&module_resources)),
     )?;
     let HirLoweringResult {
         mut hir_module,
         type_environment,
         metadata: lowering_metadata,
     } = generated_lowering;
+    let resource_table = Rc::try_unwrap(module_resources)
+        .map(|cell| cell.into_inner())
+        .map_err(|_| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "generated sidecar resource table still has a live shared handle after HIR lowering",
+                ),
+                &generated_compiler.string_table,
+            )
+        })?;
     let function_id = hir_module
         .functions
         .iter()
@@ -295,6 +319,7 @@ fn materialise_generated_request(
     let mut generated_module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table,
             type_environment,
             borrow_analysis,
         },

@@ -38,32 +38,7 @@ pub use environment::TypeEnvironment;
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-
-// -----------------------------------------------------------
-//  Compile-Time Paths
-// -----------------------------------------------------------
-
-/// Type-level distinction for compile-time path values.
-///
-/// WHAT: carries file vs directory classification inside the type system.
-/// WHY: future path operations (trailing-slash coercion, join semantics,
-///      metadata inspection) need this distinction at the type level.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PathTypeKind {
-    File,
-    Directory,
-}
-
-impl From<CompileTimePathKind> for PathTypeKind {
-    fn from(kind: CompileTimePathKind) -> Self {
-        match kind {
-            CompileTimePathKind::File => PathTypeKind::File,
-            CompileTimePathKind::Directory => PathTypeKind::Directory,
-        }
-    }
-}
 
 // -----------------------------------------------------------
 //  Method Receivers

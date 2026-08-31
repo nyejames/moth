@@ -509,9 +509,11 @@ pub fn parse_template_head(
                     .root
                     .clone();
                 push_template_head_path_expression(
+                    path_id,
                     &path_root,
                     token_stream,
                     context,
+                    type_interner,
                     construction_context,
                     string_table,
                 )?;

@@ -369,35 +369,28 @@ pub(super) fn fold_tir_loop(
         }
     };
 
-    output_state.provenance.merge(&aggregate_state.provenance);
-
     if !aggregate_state.emitted_output {
         return Ok(None);
     }
 
     let actual_aggregate_len = aggregate_state.output_buffer.len();
     record_tir_fold_output_estimate_miss(actual_aggregate_len, estimated_aggregate);
-    let aggregate_id = fold_context
-        .string_table
-        .intern(&aggregate_state.output_buffer);
-    record_tir_fold_output_intern(actual_aggregate_len);
     let aggregate_projection = aggregate_state.projection_pieces.take();
+    let aggregate_output = aggregate_state.into_const_string_value(fold_context.string_table);
+    record_tir_fold_output_intern(actual_aggregate_len);
 
     let Some(wrapper_node_id) = aggregate_wrapper else {
         if output_state.projection_pieces.is_some() {
             output_state.append_pieces(aggregate_projection.as_deref())?;
-        } else {
-            output_state
-                .output_buffer
-                .push_str(fold_context.string_table.resolve(aggregate_id));
         }
+        output_state.append_emission_value(&aggregate_output, fold_context.string_table);
         output_state.emitted_output = true;
         return Ok(None);
     };
 
     fold_tir_aggregate_wrapper(
         wrapper_node_id,
-        aggregate_id,
+        &aggregate_output,
         aggregate_projection.as_deref(),
         output_state,
         fold_context,
@@ -433,26 +426,20 @@ fn fold_tir_loop_iteration(
     match emission {
         TemplateEmission::NoOutput => Ok(None),
         TemplateEmission::Output(output) => {
-            aggregate_state
-                .output_buffer
-                .push_str(fold_context.string_table.resolve(output));
+            aggregate_state.append_emission_value(&output, fold_context.string_table);
             aggregate_state.emitted_output = true;
             Ok(None)
         }
         TemplateEmission::Break(output) => {
             if let Some(output) = output {
-                aggregate_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                aggregate_state.append_emission_value(&output, fold_context.string_table);
                 aggregate_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Break))
         }
         TemplateEmission::Continue(output) => {
             if let Some(output) = output {
-                aggregate_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                aggregate_state.append_emission_value(&output, fold_context.string_table);
                 aggregate_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Continue))

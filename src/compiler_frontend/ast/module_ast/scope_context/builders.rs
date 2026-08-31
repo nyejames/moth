@@ -229,6 +229,20 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self
     }
+    /// Attach Stage 0 file-value resolution facts and the module-local resource table.
+    pub(crate) fn with_file_value_resolution(
+        mut self,
+        services: Rc<FileValueResolutionServices>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).file_value_resolution = Some(services);
+        self
+    }
+
+    /// Identify the authored source file for path-syntax table joins.
+    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<FileId>) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).declaring_file_id = file_id;
+        self
+    }
 
     pub fn with_path_format_config(mut self, config: PathStringFormatConfig) -> ScopeContext {
         Rc::make_mut(&mut self.shared).path_format_config = config;

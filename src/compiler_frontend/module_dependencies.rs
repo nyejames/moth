@@ -19,11 +19,18 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, Source
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
+use crate::compiler_frontend::headers::parse_file_headers::LocalDeclarationOrderingHintOrigin;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, Header, HeaderKind, LocalDeclarationOrderingHint, TopLevelConstFragment,
 };
+use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::file_references::{
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
@@ -44,6 +51,65 @@ pub(crate) struct SortedHeaders {
     pub(crate) has_non_trivial_root_body: bool,
     pub(crate) module_symbols: ModuleSymbols,
     pub(crate) binding_environment: HeaderBindingEnvironment,
+}
+
+/// Stage 0 resolved content-source targets for declaration ordering.
+///
+/// WHAT: maps one prepared, non-dependency content-class path occurrence (the referencing `FileId`
+/// plus the row's `PathSyntaxId` handle) to the exact graph key of that occurrence's resolved
+/// content source's synthetic `content` constant. Occurrences whose Stage 0 outcome is not a
+/// settled content target (missing, invalid, or unsupported) are absent, so ordering defers them.
+/// WHY: an authored `@`-path is module-root-relative while header graph keys are logical
+/// (entry-root-relative) paths, so Stage 3 resolves content edges through the canonical resolved
+/// targets instead of re-deriving the authored spelling. The index is preparation and Stage 0
+/// owned data; it involves no expression parsing.
+pub(in crate::compiler_frontend) struct ContentSourceTargets {
+    targets: FxHashMap<(FileId, PathSyntaxId), InternedPath>,
+}
+
+impl ContentSourceTargets {
+    pub(in crate::compiler_frontend) fn empty() -> Self {
+        Self {
+            targets: FxHashMap::default(),
+        }
+    }
+
+    /// Build the index from Stage 0's resolved table and the module source identities.
+    pub(in crate::compiler_frontend) fn from_resolved_references(
+        resolved_references: &ResolvedFileReferenceTable,
+        source_files: &SourceFileTable,
+        string_table: &mut StringTable,
+    ) -> Self {
+        let mut targets = FxHashMap::default();
+
+        for reference in resolved_references.iter() {
+            let ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
+                source,
+            }) = &reference.outcome
+            else {
+                continue;
+            };
+            let Some(identity) = source_files.get(*source) else {
+                continue;
+            };
+
+            targets.insert(
+                (reference.source_file, reference.path_syntax),
+                content_constant_path(&identity.logical_path, string_table),
+            );
+        }
+
+        Self { targets }
+    }
+
+    /// The resolved content constant graph key for one content hint occurrence.
+    fn content_header_path(
+        &self,
+        hint: &LocalDeclarationOrderingHint,
+        referencing_file: Option<FileId>,
+    ) -> Option<&InternedPath> {
+        self.targets.get(&(referencing_file?, hint.occurrence()?))
+    }
 }
 
 /// Tracks which modules are temporarily marked (in the current DFS stack)
@@ -101,6 +167,7 @@ struct DependencyGraph<'a> {
     ordered_paths: Vec<InternedPath>,
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
     provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
+    content_source_targets: &'a ContentSourceTargets,
 }
 
 impl<'a> DependencyGraph<'a> {
@@ -108,6 +175,7 @@ impl<'a> DependencyGraph<'a> {
         headers: Vec<Header>,
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
         provider_interface_paths: &'a FxHashMap<InternedPath, OriginDeclarationId>,
+        content_source_targets: &'a ContentSourceTargets,
         _string_table: &StringTable,
     ) -> Self {
         let mut headers_by_path: FxHashMap<InternedPath, Header> =
@@ -131,6 +199,7 @@ impl<'a> DependencyGraph<'a> {
             ordered_paths,
             source_package_public_exports,
             provider_interface_paths,
+            content_source_targets,
         }
     }
 
@@ -191,11 +260,21 @@ impl<'a> DependencyGraph<'a> {
         header: &Header,
         string_table: &StringTable,
     ) -> Vec<ResolvedDependencyEdge> {
-        let mut edges = header
-            .local_ordering_hints
-            .iter()
-            .map(|hint| self.resolve_dependency_edge(header, hint, string_table))
-            .collect::<Vec<_>>();
+        // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
+        // traversal needs one edge per resolved target. In particular, repeated file-value paths
+        // can point at one synthetic `content` header even though their PathSyntaxIds differ.
+        let mut seen_targets = FxHashSet::default();
+        let mut edges = Vec::with_capacity(header.local_ordering_hints.len());
+        for hint in &header.local_ordering_hints {
+            let edge = self.resolve_dependency_edge(header, hint, string_table);
+            let keep = edge
+                .resolved_path
+                .as_ref()
+                .is_none_or(|resolved_path| seen_targets.insert(resolved_path.clone()));
+            if keep {
+                edges.push(edge);
+            }
+        }
 
         edges.sort_by(|left, right| {
             let left_order = self.source_order_for_edge(left);
@@ -219,9 +298,30 @@ impl<'a> DependencyGraph<'a> {
     ) -> ResolvedDependencyEdge {
         // Stage 3 turns a retained local declaration-ordering hint into a sortable graph edge.
         // It consumes the typed hint rather than reconstructing the requested path from
-        // RetainedDependencyClause or source syntax.
-        let requested_path = hint.path();
+        // RetainedDependencyClause or source syntax. Content hints resolve their exact graph key
+        // through the Stage 0 resolved-reference table instead of re-deriving the authored
+        // spelling, so a module-relative authored occurrence still targets the canonical
+        // content constant.
         let location = header.name_location.to_owned();
+        let requested_path = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
+            let Some(resolved_path) = self
+                .content_source_targets
+                .content_header_path(hint, header.tokens.file_id)
+            else {
+                return ResolvedDependencyEdge {
+                    requested_path: hint.path().to_owned(),
+                    resolved_path: None,
+                    location,
+                    source_order: None,
+                    kind: DependencyEdgeKind::MissingContentSource,
+                };
+            };
+
+            resolved_path
+        } else {
+            hint.path()
+        };
+
         let source_order = self.source_order_for_requested_path(requested_path, string_table);
 
         match self.resolve_requested_path(requested_path, string_table) {
@@ -255,6 +355,15 @@ impl<'a> DependencyGraph<'a> {
                     location,
                     source_order,
                     kind: DependencyEdgeKind::SameFileSymbolHint,
+                }
+            }
+            None if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource => {
+                ResolvedDependencyEdge {
+                    requested_path: requested_path.to_owned(),
+                    resolved_path: None,
+                    location,
+                    source_order,
+                    kind: DependencyEdgeKind::MissingContentSource,
                 }
             }
             None => ResolvedDependencyEdge {
@@ -315,6 +424,11 @@ enum DependencyEdgeKind {
     ProviderInterface,
     SourcePackagePublicExport,
     SameFileSymbolHint,
+    /// A content-source hint whose synthetic content constant never became a graph header.
+    ///
+    /// WHY: Stage 0 retains the user-facing diagnostic for a missing, invalid, or unsupported
+    /// content target; ordering must defer to that lane instead of raising a second error.
+    MissingContentSource,
     Missing,
 }
 
@@ -343,6 +457,7 @@ type VisitResult = Result<(), Box<CompilerDiagnostic>>;
 /// retained type-surface and constant-initializer hints so AST sees dependencies first.
 pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     parsed: BoundModuleHeaders,
+    content_source_targets: &ContentSourceTargets,
     string_table: &mut StringTable,
 ) -> Result<SortedHeaders, DiagnosticBag> {
     let BoundModuleHeaders {
@@ -383,6 +498,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
             top_level_headers,
             &module_symbols.source_package_public_exports,
             &binding_environment.imported_declarations_by_local_path,
+            content_source_targets,
             string_table,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
@@ -559,6 +675,13 @@ fn visit_dependency_edge(
             // Same-file named-type edges are only ordering hints while header parsing is still
             // discovering the file. If the target never materializes as a header, let later type
             // resolution emit the user-facing "Unknown type" diagnostic.
+            Ok(())
+        }
+
+        DependencyEdgeKind::MissingContentSource => {
+            // A content target that never materialized is diagnosed through the Stage 0
+            // resolved-reference lane (missing, invalid, or unsupported target), so ordering
+            // defers instead of raising a second error for the same occurrence.
             Ok(())
         }
 

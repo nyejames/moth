@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -14,6 +15,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_exp
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
@@ -103,6 +105,233 @@ fn cast_expression(
     Expression::cast(cast, result_type_id, type_environment)
 }
 
+fn expect_folded_operator(result: Result<OperatorFoldOutcome, ConstantFoldError>) -> Expression {
+    match result.expect("operator evaluation should succeed") {
+        OperatorFoldOutcome::Folded(expression) => expression,
+        OperatorFoldOutcome::NotConstant => panic!("operator should fold"),
+        OperatorFoldOutcome::TextUnavailable { .. } => {
+            panic!("operator text should be available")
+        }
+    }
+}
+
+fn expect_folded_stack(
+    result: Result<ConstantFoldOutcome, ConstantFoldError>,
+) -> Vec<ExpressionRpnItem> {
+    match result.expect("constant folding should succeed") {
+        ConstantFoldOutcome::Folded(stack) => stack,
+        ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
+        ConstantFoldOutcome::TextUnavailable { .. } => {
+            panic!("expected all folded text to be available")
+        }
+    }
+}
+
+fn expect_not_constant_stack(
+    result: Result<ConstantFoldOutcome, ConstantFoldError>,
+) -> Vec<ExpressionRpnItem> {
+    match result.expect("constant folding should succeed") {
+        ConstantFoldOutcome::NotConstant(stack) => stack,
+        ConstantFoldOutcome::Folded(_) => panic!("expected a runtime stack"),
+        ConstantFoldOutcome::TextUnavailable { .. } => {
+            panic!("expected a runtime-dependent stack")
+        }
+    }
+}
+
+#[test]
+fn structural_string_requirement_has_stable_rule_identity() {
+    let requirements = [
+        (
+            ConstStringRequirement::EqualityComparison,
+            "string equality comparison",
+        ),
+        (ConstStringRequirement::CastOrParse, "string cast or parse"),
+        (
+            ConstStringRequirement::CompileTimeMapKey,
+            "compile-time map key",
+        ),
+        (
+            ConstStringRequirement::DuplicateKeyValidation,
+            "duplicate map-key validation",
+        ),
+    ];
+
+    for (requirement, operation_name) in requirements {
+        let mut string_table = StringTable::new();
+        let value =
+            Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
+        let diagnostic = require_concrete_text(&value, requirement, &mut string_table)
+            .expect_err("structural strings should require a final-text diagnostic");
+
+        let identity = diagnostic.identity();
+        assert_eq!(identity.code, "MOTH-RULE-0053");
+        assert_eq!(
+            identity.reason_key,
+            Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        );
+        match &diagnostic.payload {
+            DiagnosticPayload::CompileTimeEvaluationError { operation, .. } => {
+                assert_eq!(
+                    operation.map(|id| string_table.resolve(id)),
+                    Some(operation_name)
+                );
+            }
+            payload => panic!("expected compile-time evaluation payload, found {payload:?}"),
+        }
+    }
+}
+
+#[test]
+fn all_text_structural_string_requirement_concatenates_in_order() {
+    // Test-only construction stands in for item 3's first structural text-piece producer.
+    let mut string_table = StringTable::new();
+    let first = string_table.intern("first/");
+    let second = string_table.intern("second");
+    let value = Expression::structural_string(
+        vec![
+            ConstStringPiece::Text(first),
+            ConstStringPiece::Text(second),
+        ],
+        Default::default(),
+    );
+
+    let text = require_concrete_text(
+        &value,
+        ConstStringRequirement::EqualityComparison,
+        &mut string_table,
+    )
+    .expect("all-text structural values have known final text")
+    .expect("string values should return text");
+
+    assert_eq!(string_table.resolve(text), "first/second");
+}
+
+#[test]
+fn structural_string_equality_reports_text_unavailable_outcome() {
+    let mut string_table = StringTable::new();
+    let lhs = Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
+    let rhs = Expression::string_slice(
+        string_table.intern("plain"),
+        Default::default(),
+        ValueMode::ImmutableOwned,
+    );
+
+    let outcome = lhs
+        .evaluate_operator(&rhs, &Operator::Equality, &mut string_table)
+        .expect("structural equality should be a typed fold refusal");
+
+    let OperatorFoldOutcome::TextUnavailable { diagnostic } = outcome else {
+        panic!("expected structural equality to report unavailable text");
+    };
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+    );
+    let render_context = DiagnosticRenderContext::new(&string_table);
+    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("string equality comparison")),
+        "the refusal must name the operation that needed final text: {guidance:?}"
+    );
+}
+
+#[test]
+fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
+    let mut string_table = StringTable::new();
+    let nodes = vec![
+        ExpressionRpnItem::Operand(Expression::structural_string(
+            vec![ConstStringPiece::SiteRoot],
+            Default::default(),
+        )),
+        ExpressionRpnItem::Operand(Expression::string_slice(
+            string_table.intern("plain"),
+            Default::default(),
+            ValueMode::ImmutableOwned,
+        )),
+        ExpressionRpnItem::Operator {
+            operator: Operator::Equality,
+            location: Default::default(),
+        },
+    ];
+
+    let outcome = constant_fold(nodes, &mut string_table)
+        .expect("structural equality should return a typed fold outcome");
+    let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
+        panic!("expected constant folding to preserve text-unavailable outcome");
+    };
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+    );
+    let render_context = DiagnosticRenderContext::new(&string_table);
+    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("string equality comparison")),
+        "the operation name must survive the operator-to-stack hop: {guidance:?}"
+    );
+}
+
+#[test]
+fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
+    let mut string_table = StringTable::new();
+    let flag = InternedPath::from_single_str("flag", &mut string_table);
+    let nodes = vec![
+        ExpressionRpnItem::Operand(Expression::structural_string(
+            vec![ConstStringPiece::SiteRoot],
+            Default::default(),
+        )),
+        ExpressionRpnItem::Operand(Expression::string_slice(
+            string_table.intern("plain"),
+            Default::default(),
+            ValueMode::ImmutableOwned,
+        )),
+        ExpressionRpnItem::Operator {
+            operator: Operator::Equality,
+            location: Default::default(),
+        },
+        ExpressionRpnItem::Operand(Expression::reference(
+            flag,
+            DataType::Bool,
+            SourceLocation::default(),
+            ValueMode::ImmutableReference,
+        )),
+        ExpressionRpnItem::Operator {
+            operator: Operator::And,
+            location: Default::default(),
+        },
+    ];
+    let authored_items = nodes.len();
+
+    let outcome = constant_fold(nodes, &mut string_table)
+        .expect("structural equality should return a typed fold outcome");
+    let ConstantFoldOutcome::TextUnavailable { items, .. } = outcome else {
+        panic!("expected constant folding to report unavailable text");
+    };
+
+    // Returning early on the refusal would drop `flag and` and silently miscompile
+    // `(@/ == "plain") and flag` into a comparison alone.
+    assert_eq!(
+        items.len(),
+        authored_items,
+        "every authored item must reach runtime lowering: {items:?}"
+    );
+    assert!(
+        matches!(
+            items.last(),
+            Some(ExpressionRpnItem::Operator {
+                operator: Operator::And,
+                ..
+            })
+        ),
+        "the trailing operator must survive the refusal: {items:?}"
+    );
+}
+
 #[test]
 fn evaluate_operator_rejects_string_concatenation() {
     let mut string_table = StringTable::new();
@@ -146,7 +375,7 @@ fn evaluate_operator_rejects_negative_integer_exponent() {
 }
 
 #[test]
-fn evaluate_operator_returns_none_for_mismatched_constant_types() {
+fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
     let mut string_table = StringTable::new();
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::bool(true, Default::default(), ValueMode::ImmutableOwned);
@@ -155,7 +384,7 @@ fn evaluate_operator_returns_none_for_mismatched_constant_types() {
         .evaluate_operator(&rhs, &Operator::Add, &mut string_table)
         .expect("mismatched types should not error");
 
-    assert!(result.is_none());
+    assert!(matches!(result, OperatorFoldOutcome::NotConstant));
 }
 
 #[test]
@@ -164,10 +393,8 @@ fn evaluate_operator_divides_ints_to_float() {
     let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
-    let result = lhs
-        .evaluate_operator(&rhs, &Operator::Divide, &mut string_table)
-        .expect("int division should fold")
-        .expect("int division should produce folded expression");
+    let result =
+        expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Divide, &mut string_table));
 
     assert!(matches!(
         result.kind,
@@ -186,10 +413,11 @@ fn evaluate_operator_integer_division_truncates_toward_zero() {
     let lhs = Expression::int(-5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
-    let result = lhs
-        .evaluate_operator(&rhs, &Operator::IntDivide, &mut string_table)
-        .expect("integer division should fold")
-        .expect("integer division should produce folded expression");
+    let result = expect_folded_operator(lhs.evaluate_operator(
+        &rhs,
+        &Operator::IntDivide,
+        &mut string_table,
+    ));
 
     assert!(matches!(result.kind, ExpressionKind::Int(-2)));
     assert_eq!(result.diagnostic_type, DataType::Int);
@@ -403,10 +631,8 @@ fn evaluate_operator_folds_mixed_int_float_addition() {
     let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(1.5, Default::default(), ValueMode::ImmutableOwned);
 
-    let result = lhs
-        .evaluate_operator(&rhs, &Operator::Add, &mut string_table)
-        .expect("mixed int/float addition should succeed")
-        .expect("mixed int/float addition should fold");
+    let result =
+        expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Add, &mut string_table));
 
     assert!(matches!(
         result.kind,
@@ -421,10 +647,8 @@ fn evaluate_operator_folds_mixed_int_float_division() {
     let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
     let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
 
-    let result = lhs
-        .evaluate_operator(&rhs, &Operator::Divide, &mut string_table)
-        .expect("mixed int/float division should succeed")
-        .expect("mixed int/float division should fold");
+    let result =
+        expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Divide, &mut string_table));
 
     assert!(matches!(
         result.kind,
@@ -483,7 +707,7 @@ fn constant_fold_partially_folds_runtime_expression() {
         operator_item(Operator::Multiply),
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table));
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -660,7 +884,7 @@ fn constant_fold_folds_comparison_then_boolean_chain() {
         operator_item(Operator::And),
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("folding should succeed");
+    let folded = expect_folded_stack(constant_fold(nodes, &mut string_table));
     assert_eq!(folded.len(), 1);
     assert!(matches!(
         folded[0],
@@ -683,7 +907,7 @@ fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
         operator_item(Operator::Not),
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("folding should not error");
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table));
     assert_eq!(folded.len(), 2);
     assert!(matches!(
         folded[0],
@@ -720,8 +944,7 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
         operator_item(Operator::And),
     ];
 
-    let folded =
-        constant_fold(nodes, &mut string_table).expect("runtime-dependent folding should succeed");
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table));
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -791,7 +1014,7 @@ fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
         },
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table));
 
     assert_eq!(folded.len(), 3);
 
@@ -844,7 +1067,7 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
         operator_item(Operator::Multiply),
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("partial folding should succeed");
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table));
 
     assert_eq!(folded.len(), 3);
 
@@ -883,7 +1106,7 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
         operator_item(Operator::Add),
     ];
 
-    let folded = constant_fold(nodes, &mut string_table).expect("folding should succeed");
+    let folded = expect_folded_stack(constant_fold(nodes, &mut string_table));
 
     assert_eq!(folded.len(), 1);
     let ExpressionRpnItem::Operand(result) = &folded[0] else {
@@ -923,6 +1146,37 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
     };
 
     assert_eq!(string_table.resolve(interned), "42");
+}
+
+#[test]
+fn fold_structural_string_cast_reports_text_unavailable_rule() {
+    let mut string_table = StringTable::new();
+    let template_ir_store = test_template_ir_store();
+    let mut type_environment = TypeEnvironment::new();
+    let source =
+        Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
+    let target_type_id = type_environment.builtins().int;
+
+    let cast = cast_expression(
+        source,
+        BuiltinCastTarget::Int,
+        target_type_id,
+        ResolvedCastEvidence::Builtin {
+            policy: BuiltinCastPolicyId::StringToInt,
+        },
+        CastHandling::Propagate,
+        false,
+        &mut type_environment,
+    );
+
+    let error = fold_compile_time_expression(&cast, &template_ir_store, &mut string_table, true)
+        .expect_err("structural string cast should require final text");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
+        Some("string cast or parse"),
+        &string_table,
+    );
 }
 
 #[test]

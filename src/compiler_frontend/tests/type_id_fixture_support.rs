@@ -33,7 +33,6 @@ use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -735,7 +734,6 @@ pub(crate) fn lower_ast_with_metadata(
     let type_environment = ast.type_environment.clone();
     HirBuilder::new(
         string_table,
-        PathStringFormatConfig::default(),
         type_environment,
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
     )

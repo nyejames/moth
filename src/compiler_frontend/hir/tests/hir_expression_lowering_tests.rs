@@ -40,6 +40,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
@@ -88,19 +89,19 @@ fn field_symbol(
 fn text_aggregate_wrapper_node(
     prefix: StringId,
     suffix: StringId,
-    _string_table: &StringTable,
+    string_table: &StringTable,
     location: &SourceLocation,
 ) -> OwnedRuntimeTemplateNode {
     OwnedRuntimeTemplateNode::Sequence {
         children: vec![
             OwnedRuntimeTemplateNode::Text {
-                text: prefix,
+                text: OwnedFoldedString::Text(string_table.resolve(prefix).to_owned()),
                 reactive_subscription: None,
                 location: location.to_owned(),
             },
             OwnedRuntimeTemplateNode::AggregateOutput,
             OwnedRuntimeTemplateNode::Text {
-                text: suffix,
+                text: OwnedFoldedString::Text(string_table.resolve(suffix).to_owned()),
                 reactive_subscription: None,
                 location: location.to_owned(),
             },
@@ -297,7 +298,7 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: vec![
                 OwnedRuntimeTemplateNode::Text {
-                    text: before,
+                    text: OwnedFoldedString::Text(string_table.resolve(before).to_owned()),
                     reactive_subscription: None,
                     location: location.clone(),
                 },
@@ -305,7 +306,7 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
                     location: location.clone(),
                 },
                 OwnedRuntimeTemplateNode::Text {
-                    text: after,
+                    text: OwnedFoldedString::Text(string_table.resolve(after).to_owned()),
                     reactive_subscription: None,
                     location: location.clone(),
                 },

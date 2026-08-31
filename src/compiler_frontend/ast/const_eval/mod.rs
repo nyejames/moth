@@ -25,6 +25,7 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 #[cfg(test)]
 use crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant;
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -46,13 +47,93 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {
     Diagnostic(Box<CompilerDiagnostic>),
     Infrastructure(Box<CompilerError>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConstStringRequirement {
+    EqualityComparison,
+    CastOrParse,
+    CompileTimeMapKey,
+    DuplicateKeyValidation,
+}
+
+#[derive(Debug)]
+pub(crate) enum ConstantFoldOutcome {
+    Folded(Vec<ExpressionRpnItem>),
+    NotConstant(Vec<ExpressionRpnItem>),
+    TextUnavailable {
+        items: Vec<ExpressionRpnItem>,
+        diagnostic: Box<CompilerDiagnostic>,
+    },
+}
+
+/// WHY: `Folded` carries an AST `Expression`, which is large next to the two refusal variants.
+/// Boxing it would allocate on the hot fold path that every constant expression takes, so this
+/// follows the existing `NodeKind` and `ExpressionRpnItem` convention of allowing the disparity.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Folded holds an AST Expression on the hot fold path; boxing would allocate per fold"
+)]
+#[derive(Debug)]
+pub(crate) enum OperatorFoldOutcome {
+    Folded(Expression),
+    NotConstant,
+    TextUnavailable { diagnostic: Box<CompilerDiagnostic> },
+}
+
+impl ConstStringRequirement {
+    fn operation_name(self) -> &'static str {
+        match self {
+            Self::EqualityComparison => "string equality comparison",
+            Self::CastOrParse => "string cast or parse",
+            Self::CompileTimeMapKey => "compile-time map key",
+            Self::DuplicateKeyValidation => "duplicate map-key validation",
+        }
+    }
+}
+
+/// Apply the one policy for operations that need concrete characters from a folded string.
+///
+/// WHAT: returns the interned text for plain strings and all-text structural values, while
+///       refusing structural values that still contain a resource or site-root URL piece.
+/// WHY: callers must not independently inspect `ExpressionKind` to decide whether a folded string
+///      can participate in a character-dependent operation.
+pub(crate) fn require_concrete_text(
+    value: &Expression,
+    requirement: ConstStringRequirement,
+    string_table: &mut StringTable,
+) -> Result<Option<StringId>, Box<CompilerDiagnostic>> {
+    match &value.kind {
+        ExpressionKind::StringSlice(string) => Ok(Some(*string)),
+        ExpressionKind::StructuralString { pieces } => {
+            let mut text = String::new();
+            for piece in pieces {
+                match piece {
+                    ConstStringPiece::Text(string) => {
+                        text.push_str(string_table.resolve(*string));
+                    }
+                    ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
+                        let operation =
+                            string_table.get_or_intern(requirement.operation_name().to_owned());
+                        return Err(Box::new(CompilerDiagnostic::compile_time_evaluation_error(
+                            CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
+                            Some(operation),
+                            value.location.clone(),
+                        )));
+                    }
+                }
+            }
+            Ok(Some(string_table.get_or_intern(text)))
+        }
+        _ => Ok(None),
+    }
 }
 
 impl From<CompilerDiagnostic> for ConstantFoldError {
@@ -78,33 +159,40 @@ impl From<TemplateError> for ConstantFoldError {
 
 /// Perform conservative constant folding on an expression in RPN order.
 ///
-/// Takes expression-owned RPN items and evaluates all constant sub-expressions at compile time.
-/// Returns a simplified expression stack with constant operations pre-computed.
-/// Runtime-dependent operands and operators remain in RPN order.
+/// Takes expression-owned RPN items and evaluates all constant sub-expressions during AST
+/// construction. The explicit outcome distinguishes a runtime-dependent expression from a
+/// folded string operation whose characters are unavailable until URL contexts are assigned.
 ///
 /// ## Algorithm
 ///
 /// 1. **Process RPN Stack**: Iterate through nodes in RPN order
 /// 2. **Accumulate Operands**: Push operands onto evaluation stack
-/// 3. **Evaluate Operators**: When encountering operators, attempt to fold with constant operands
-/// 4. **Preserve Runtime**: Non-foldable operations are preserved for runtime evaluation
+/// 3. **Evaluate Operators**: Attempt to fold operators with constant operands
+/// 4. **Preserve Runtime**: Return [`ConstantFoldOutcome::NotConstant`] when folding cannot decide
+/// 5. **Carry Structure**: Return [`ConstantFoldOutcome::TextUnavailable`] when a constant string
+///    needs final URL-dependent text
 ///
 /// ## Error Handling
 ///
 /// Returns [`ConstantFoldError`] so compile-time source failures stay as
 /// [`CompilerDiagnostic`] values while malformed internal RPN state remains an
-/// infrastructure [`CompilerError`]. This keeps constant-folding diagnostics on the
-/// AST-owned user-diagnostic path without hiding compiler invariants.
+/// infrastructure [`CompilerError`]. A text-unavailable outcome is not an error for speculative
+/// callers because runtime lowering resolves the structural pieces later.
 pub fn constant_fold(
     output_stack: Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
-) -> Result<Vec<ExpressionRpnItem>, ConstantFoldError> {
+) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
     // numeric failures that happen to sit inside a larger runtime expression.
     add_ast_counter(AstCounter::ExpressionFoldItems, output_stack.len());
 
     let mut stack: Vec<ExpressionRpnItem> = Vec::with_capacity(output_stack.len());
+
+    // A text-unavailable refusal must not stop the fold: the remaining items still belong to the
+    // runtime expression, and returning early would silently truncate legal code such as
+    // `(@/ == "x") and flag`. The first refusal is carried to the end alongside the complete stack.
+    let mut text_unavailable: Option<Box<CompilerDiagnostic>> = None;
 
     // The input vector is consumed: every item either moves onto the fold stack unchanged or is
     // replaced by the value it folded to. Nothing here copies an `Expression`.
@@ -169,18 +257,41 @@ pub fn constant_fold(
             }
         };
 
-        if let Some(result) = lhs_expr.evaluate_operator(rhs_expr, operator, string_table)? {
-            stack.push(ExpressionRpnItem::Operand(result));
-        } else {
-            // Keep the original operation for runtime lowering when AST cannot fold it.
-            stack.push(lhs);
-            stack.push(rhs);
-            stack.push(item);
-            continue;
+        match lhs_expr.evaluate_operator(rhs_expr, operator, string_table)? {
+            OperatorFoldOutcome::Folded(result) => {
+                stack.push(ExpressionRpnItem::Operand(result));
+            }
+
+            OperatorFoldOutcome::NotConstant => {
+                // Keep the original operation for runtime lowering when AST cannot fold it.
+                stack.push(lhs);
+                stack.push(rhs);
+                stack.push(item);
+                continue;
+            }
+
+            OperatorFoldOutcome::TextUnavailable { diagnostic } => {
+                // Runtime lowering still receives the original operation. Const-required
+                // callers inspect this typed refusal and preserve its precise diagnostic.
+                stack.push(lhs);
+                stack.push(rhs);
+                stack.push(item);
+                text_unavailable.get_or_insert(diagnostic);
+                continue;
+            }
         }
     }
 
-    Ok(stack)
+    if let Some(diagnostic) = text_unavailable {
+        Ok(ConstantFoldOutcome::TextUnavailable {
+            items: stack,
+            diagnostic,
+        })
+    } else if stack.len() == 1 && matches!(&stack[0], ExpressionRpnItem::Operand(_)) {
+        Ok(ConstantFoldOutcome::Folded(stack))
+    } else {
+        Ok(ConstantFoldOutcome::NotConstant(stack))
+    }
 }
 
 fn fold_unary_operator(
@@ -367,8 +478,14 @@ fn fold_resolved_cast(
 
             let source_literal =
                 match builtin_cast_literal_from_expression(folded_source, string_table) {
-                    Some(literal) => literal,
-                    None => return Ok(original_expression.to_owned()),
+                    Ok(Some(literal)) => literal,
+                    Ok(None) => return Ok(original_expression.to_owned()),
+                    Err(_diagnostic) if !constant_context => {
+                        // Runtime casts remain legal because the selected URL context materialises
+                        // structural pieces before execution.
+                        return Ok(original_expression.to_owned());
+                    }
+                    Err(diagnostic) => return Err(ConstantFoldError::Diagnostic(diagnostic)),
                 };
 
             match apply_builtin_cast_policy(*policy, &source_literal) {
@@ -545,24 +662,30 @@ fn extract_single_produced_value(body: &[AstNode]) -> Option<&Expression> {
 
 /// Converts an AST `Expression` into a `BuiltinCastLiteral` for policy lookup.
 ///
-/// WHAT: extracts the literal scalar value from supported `ExpressionKind`
-///      variants so the policy owner can answer in policy space.
-/// WHY: explicit casts and direct policy tests share the same policy table, so this
-/// narrow converter is reused for any folded scalar source that the builtin
-/// evidence catalogue accepts.
+/// WHAT: extracts literal scalar values while routing string values through the single
+///       concrete-text requirement owner.
+/// WHY: explicit casts share the builtin policy table, but structural strings cannot be
+///      materialized until URL contexts are assigned.
 fn builtin_cast_literal_from_expression(
     value: &Expression,
-    string_table: &StringTable,
-) -> Option<BuiltinCastLiteral> {
+    string_table: &mut StringTable,
+) -> Result<Option<BuiltinCastLiteral>, Box<CompilerDiagnostic>> {
     match &value.kind {
-        ExpressionKind::Bool(value) => Some(BuiltinCastLiteral::Bool(*value)),
-        ExpressionKind::Int(int) => Some(BuiltinCastLiteral::Int(*int)),
-        ExpressionKind::Float(float) => Some(BuiltinCastLiteral::Float(*float)),
-        ExpressionKind::StringSlice(string) => Some(BuiltinCastLiteral::String(
-            string_table.resolve(*string).to_owned(),
-        )),
-        ExpressionKind::Char(value) => Some(BuiltinCastLiteral::Char(*value)),
-        _ => None,
+        ExpressionKind::Bool(value) => Ok(Some(BuiltinCastLiteral::Bool(*value))),
+        ExpressionKind::Int(int) => Ok(Some(BuiltinCastLiteral::Int(*int))),
+        ExpressionKind::Float(float) => Ok(Some(BuiltinCastLiteral::Float(*float))),
+        ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
+            let Some(string) =
+                require_concrete_text(value, ConstStringRequirement::CastOrParse, string_table)?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(BuiltinCastLiteral::String(
+                string_table.resolve(string).to_owned(),
+            )))
+        }
+        ExpressionKind::Char(value) => Ok(Some(BuiltinCastLiteral::Char(*value))),
+        _ => Ok(None),
     }
 }
 
@@ -727,7 +850,7 @@ impl Expression {
         rhs: &Expression,
         op: &Operator,
         string_table: &mut StringTable,
-    ) -> Result<Option<Expression>, ConstantFoldError> {
+    ) -> Result<OperatorFoldOutcome, ConstantFoldError> {
         let kind: ExpressionKind = match (&self.kind, &rhs.kind) {
             // Float operations: Moth `Float` is finite f64. Require finite results and
             // report divide/modulo-by-zero explicitly instead of relying on NaN/Inf classification.
@@ -961,16 +1084,40 @@ impl Expression {
                 _ => invalid_operator_for_compile_time_type(op, string_table, &self.location)?,
             },
 
-            // String operations
-            (ExpressionKind::StringSlice(lhs_val), ExpressionKind::StringSlice(rhs_val)) => {
+            // String equality requires concrete characters; all other string operators retain
+            // their existing compile-time operator diagnostics.
+            (
+                ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
+                ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
+            ) => {
+                if !matches!(op, Operator::Equality | Operator::NotEqual) {
+                    invalid_operator_for_compile_time_type(op, string_table, &self.location)?;
+                }
+
+                let requirement = ConstStringRequirement::EqualityComparison;
+                let lhs_text = match require_concrete_text(self, requirement, string_table) {
+                    Ok(Some(text)) => text,
+                    Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
+                    Err(diagnostic) => {
+                        return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
+                    }
+                };
+                let rhs_text = match require_concrete_text(rhs, requirement, string_table) {
+                    Ok(Some(text)) => text,
+                    Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
+                    Err(diagnostic) => {
+                        return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
+                    }
+                };
+
                 match op {
-                    Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
-                    Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
-                    _ => invalid_operator_for_compile_time_type(op, string_table, &self.location)?,
+                    Operator::Equality => ExpressionKind::Bool(lhs_text == rhs_text),
+                    Operator::NotEqual => ExpressionKind::Bool(lhs_text != rhs_text),
+                    _ => unreachable!("string operator was checked above"),
                 }
             }
             // Any other combination of types
-            _ => return Ok(None),
+            _ => return Ok(OperatorFoldOutcome::NotConstant),
         };
 
         let value_mode = if self.value_mode.is_mutable() || rhs.value_mode.is_mutable() {
@@ -1006,7 +1153,7 @@ impl Expression {
         .with_regular_division_provenance(contains_regular_division);
         result_expression.synthetic_interface_provenance = folded_provenance;
 
-        Ok(Some(result_expression))
+        Ok(OperatorFoldOutcome::Folded(result_expression))
     }
 }
 

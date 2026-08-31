@@ -17,6 +17,7 @@ use crate::compiler_frontend::headers::file_dependency_clauses::{
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::hash_items::handle_hash_item;
 use crate::compiler_frontend::headers::header_dispatch::create_header;
+use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::start_capture::push_runtime_template_tokens_to_start_function;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
@@ -30,6 +31,7 @@ use crate::compiler_frontend::headers::types::{
     RetainedDependencyClause,
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
+use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use rustc_hash::FxHashSet;
@@ -475,8 +477,8 @@ fn legacy_dependency_replacement(
         .root
         .to_owned();
     if path.is_empty() {
-        // Exact `@/` is represented by the empty canonical path. Its retained row cannot
-        // distinguish that valid spelling from the invalid bare introducer `@`.
+        // Exact `@/` is represented by the empty canonical path, and so is the bare introducer
+        // `@`. The retained row cannot tell the two spellings apart, so it suggests neither.
         return Ok(None);
     }
     if path
@@ -762,15 +764,45 @@ fn finish_file_output(
         )));
     }
 
-    if context.file_role == FileRole::ActiveModuleRoot {
+    let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
             .into_entry_output(token_stream, context.file_role)
-            .map_err(FileFrontendPrepareFailure::Infrastructure)
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
             .into_non_entry_output(token_stream, context.file_role)
-            .map_err(FileFrontendPrepareFailure::Infrastructure)
-    }
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?
+    };
+    attach_structural_file_facts(&mut output, context.string_table);
+    Ok(output)
+}
+
+/// Classify this file's graph-active file-value paths and derive shell ordering facts from them.
+///
+/// WHAT: classifies every non-dependency path row once, then records content-source ordering
+///       hints from the classified rows into each declaration shell that folds before body
+///       emission.
+/// WHY: classification is the single graph-activity fact source, and the content ordering edges
+///       must come from the same prepared rows at token level rather than an expression parse.
+fn attach_structural_file_facts(
+    output: &mut FileFrontendPrepareOutput,
+    string_table: &mut StringTable,
+) {
+    output.structural_file_references = classify_prepared_file_references(
+        output.path_syntax.table(),
+        output
+            .file_dependency_clauses
+            .iter()
+            .map(|clause| clause.dependency.path_syntax),
+        output.file_id,
+        string_table,
+    );
+
+    collect_content_source_ordering_hints(
+        &mut output.headers,
+        &output.structural_file_references,
+        string_table,
+    );
 }
 
 /// Validate generic parameter names against every dependency binding retained by this file.
@@ -845,3 +877,7 @@ fn dependency_generic_parameter_forbidden_names(
 
     forbidden_names
 }
+
+#[cfg(test)]
+#[path = "tests/structural_file_reference_tests.rs"]
+mod structural_file_reference_tests;

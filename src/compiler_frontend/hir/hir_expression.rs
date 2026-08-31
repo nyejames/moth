@@ -18,13 +18,13 @@
 //! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
 
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
-#[cfg(test)]
-use crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant as AstFallibleCarrierVariant;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+#[cfg(test)]
+use crate::compiler_frontend::ast::expressions::expression_types::FallibleCarrierVariant as AstFallibleCarrierVariant;
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
@@ -49,8 +49,6 @@ use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-#[cfg(test)]
-use crate::compiler_frontend::paths::path_format::format_compile_time_path;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::hir_log;
 use crate::return_hir_transformation_error;
@@ -185,23 +183,13 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::StringLiteral(self.string_table.resolve(*value).to_owned()),
             ),
 
-            #[cfg(test)]
-            ExpressionKind::Path(compile_time_path) => {
-                // Compile-time path values lower to string literals in HIR.
-                // Formatting applies the origin prefix for root-based paths and trailing
-                // slash for directories through the shared path formatter.
-                let path_string = format_compile_time_path(
-                    compile_time_path,
-                    &self.path_format_config,
-                    self.string_table,
-                );
-
-                self.lower_literal_expression(
-                    &expr.location,
-                    expr.type_id,
-                    HirExpressionKind::StringLiteral(path_string),
-                )
-            }
+            ExpressionKind::StructuralString { pieces } => self.lower_literal_expression(
+                &expr.location,
+                expr.type_id,
+                HirExpressionKind::StructuralString {
+                    pieces: pieces.clone(),
+                },
+            ),
 
             ExpressionKind::Cast(cast) => {
                 self.lower_cast_expression(cast, expr.type_id, &expr.location)
@@ -767,13 +755,12 @@ impl<'a> HirBuilder<'a> {
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_)
             | ExpressionKind::StringSlice(_)
+            | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Reference(_)
             | ExpressionKind::Function(_)
             | ExpressionKind::StructDefinition(_)
             | ExpressionKind::NoValue
             | ExpressionKind::OptionNone => false,
-            #[cfg(test)]
-            ExpressionKind::Path(_) => false,
         }
     }
 

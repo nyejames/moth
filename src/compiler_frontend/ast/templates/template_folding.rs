@@ -1,13 +1,14 @@
 //! Compile-time template folding.
 //!
 //! WHAT: Converts finalized TIR-backed template trees and const control-flow
-//! bodies into interned string IDs.
+//! bodies into compact or piece-bearing [`ConstStringValue`] emissions.
 //!
 //! WHY: Keeps compile-time folding inside AST template preparation and shares
 //! the same finalized template semantics that later runtime handoff consumes,
 //! without entangling parser or HIR code.
 
-use crate::compiler_frontend::ast::const_eval::constant_fold;
+use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -27,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -46,15 +47,19 @@ pub(crate) struct TirFoldContext<'a> {
     pub(crate) bindings: Vec<TemplateFoldBinding>,
 }
 
-/// Compile-time template folding must keep structural no-output distinct from
-/// output that happens to be an empty string, because parent wrappers apply only
-/// to structurally emitted children.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Compile-time template folding must keep structural no-output distinct from output that happens
+/// to be an empty string, because parent wrappers apply only to structurally emitted children.
+///
+/// WHAT: carries the module-local compact or piece-bearing folded string through every recursive
+/// fold result, including loop-control signals.
+/// WHY: one emission shape keeps text fast while preserving `Resource` and `SiteRoot` anchors until
+/// the owning public or HIR boundary can handle them.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateEmission {
     NoOutput,
-    Output(StringId),
-    Break(Option<StringId>),
-    Continue(Option<StringId>),
+    Output(ConstStringValue),
+    Break(Option<ConstStringValue>),
+    Continue(Option<ConstStringValue>),
 }
 
 /// Exact fold output paired with the semantic provenance consumed to produce it.
@@ -319,8 +324,14 @@ fn fold_resolved_bool_condition(
     }
 }
 
+/// Wrap one module-local folded string in the appropriate loop-control emission.
+///
+/// WHAT: preserves the compact or structural [`ConstStringValue`] unchanged while attaching an
+/// optional `break` or `continue` signal.
+/// WHY: loop reducers and wrapper reducers must forward structural anchors without converting them
+/// into rendered text.
 pub(crate) fn template_emission_from_output_and_signal(
-    output: StringId,
+    output: ConstStringValue,
     signal_kind: Option<TemplateLoopControlKind>,
 ) -> TemplateEmission {
     match signal_kind {
@@ -450,7 +461,7 @@ fn fold_runtime_expression_with_bindings<'a>(
     add_ast_counter(AstCounter::ExpressionOperandClones, substituted.len());
 
     match constant_fold(substituted.clone(), fold_context.string_table) {
-        Ok(mut stack) => {
+        Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()
             {
@@ -468,9 +479,11 @@ fn fold_runtime_expression_with_bindings<'a>(
             })))
         }
 
-        Err(_) => {
-            // Constant folding failed; build a new Runtime expression from the
-            // substituted RPN so downstream sees the substituted operands.
+        Ok(ConstantFoldOutcome::NotConstant(_))
+        | Ok(ConstantFoldOutcome::TextUnavailable { .. })
+        | Err(_) => {
+            // Both non-constant outcomes stay speculative here. Runtime lowering resolves
+            // structural pieces after URL contexts are assigned.
             add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
             add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
             Ok(FoldResolvedExpression::Owned(Box::new(Expression {

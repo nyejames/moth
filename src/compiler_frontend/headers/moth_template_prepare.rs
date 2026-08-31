@@ -8,12 +8,14 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
+use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
 };
+use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -35,8 +37,20 @@ pub(crate) fn prepare_moth_template_file(
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
+    let structural_file_references = classify_prepared_file_references(
+        path_syntax.table(),
+        [],
+        file_tokens.file_id,
+        string_table,
+    );
     let context = MothTemplatePrepareContext::new(file_tokens, string_table);
     let content_header = context.content_header(string_table);
+
+    let mut headers = vec![content_header];
+
+    // Content sources can reference other content sources, so the synthetic constant's template
+    // body takes the same token-level content ordering facts as authored shells.
+    collect_content_source_ordering_hints(&mut headers, &structural_file_references, string_table);
 
     Ok(FileFrontendPrepareOutput {
         source_file: context.source_file,
@@ -46,9 +60,10 @@ pub(crate) fn prepare_moth_template_file(
         token_stats,
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
+        structural_file_references,
         dependency_selections: Vec::new(),
         canonical_os_path: context.canonical_os_path,
-        headers: vec![content_header],
+        headers,
         top_level_const_fragments: Vec::new(),
         const_template_count: 0,
         runtime_fragment_count: 0,

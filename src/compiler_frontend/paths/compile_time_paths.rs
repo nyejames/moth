@@ -1,8 +1,12 @@
 //! Compile-time path literal value contracts and resolution errors.
 //!
 //! Moth path literals are source-level values, not plain strings. These types carry the
-//! resolved filesystem target, public rendering path, source spelling, and file/directory kind so
-//! AST folding and backend rendering can share one representation.
+//! resolved filesystem target, public rendering path and source spelling so AST folding
+//! and backend rendering can share one representation.
+//!
+//! A path literal names one regular file. Directories are not path values, and neither is the
+//! bare site-root spelling `@/`: site-root and external URLs are ordinary strings. Expression
+//! classification owns the site root, so it never reaches this resolver.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
@@ -13,13 +17,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::{Path, PathBuf};
-
-/// Whether a resolved compile-time path points at a file or a directory.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CompileTimePathKind {
-    File,
-    Directory,
-}
 
 /// How the path was resolved relative to the project layout.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,9 +34,8 @@ pub enum CompileTimePathBase {
 /// WHAT: carries all semantic metadata the compiler needs for validation, typed representation,
 /// and later string coercion of Moth path literals.
 ///
-/// WHY: path literals must be first-class compile-time values so that origin prefix application,
-/// file/directory distinction, and public-path formatting can be handled consistently in one
-/// place.
+/// WHY: path literals must be first-class compile-time values so that origin prefix application
+/// and public-path formatting can be handled consistently in one place.
 #[derive(Clone, Debug)]
 pub struct CompileTimePath {
     /// The original syntactic path as written in source, normalized to Moth components.
@@ -57,9 +53,6 @@ pub struct CompileTimePath {
     /// How the path resolved semantically. This determines whether the origin prefix is applied during
     /// string coercion.
     pub base: CompileTimePathBase,
-
-    /// Whether the target is a file or a directory.
-    pub kind: CompileTimePathKind,
 }
 
 /// Failure while resolving a general compile-time path literal.
@@ -101,30 +94,41 @@ impl From<CompileTimePathResolutionError> for CompilerDiagnostic {
     }
 }
 
-/// WHAT: checks that the resolved filesystem target exists and classifies it.
-/// WHY: compile-time path validation requires the target to exist.
+/// WHAT: rejects a resolved path literal whose target is not an existing regular file.
+/// WHY: a path value names one emittable resource, so directories and missing targets are
+/// authoring mistakes that need distinct diagnostics.
 ///
 /// NOTE: `string_table` is only used to intern the declaring file path for diagnostics.
-pub(crate) fn classify_existing_target(
+pub(crate) fn validate_path_literal_target(
     filesystem_path: &Path,
     source_path: &InternedPath,
     declaring_file: &Path,
     string_table: &mut StringTable,
-) -> Result<CompileTimePathKind, CompileTimePathResolutionError> {
-    if filesystem_path.is_file() {
-        Ok(CompileTimePathKind::File)
-    } else if filesystem_path.is_dir() {
-        Ok(CompileTimePathKind::Directory)
-    } else {
-        let location = SourceLocation::from_path(declaring_file, string_table);
-        let diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-            source_path.clone(),
-            InvalidCompileTimePathReason::MissingTarget,
-            location,
-        );
-
-        Err(CompileTimePathResolutionError::Diagnostic(Box::new(
-            diagnostic,
-        )))
+) -> Result<(), CompileTimePathResolutionError> {
+    // `@/` interns as an empty path. Expression classification renders it as the site-root URL and
+    // dependency clauses reject it, so an empty row arriving here is compiler corruption rather
+    // than an authoring mistake.
+    if source_path.is_empty() {
+        return Err(CompilerError::compiler_error(String::from(
+            "the bare site-root spelling reached compile-time path resolution; the site root is \
+             a URL rather than a path value and is owned by its authoring context",
+        ))
+        .into());
     }
+
+    let reason = if filesystem_path.is_file() {
+        return Ok(());
+    } else if filesystem_path.is_dir() {
+        InvalidCompileTimePathReason::TargetIsDirectory
+    } else {
+        InvalidCompileTimePathReason::MissingTarget
+    };
+
+    let location = SourceLocation::from_path(declaring_file, string_table);
+    let diagnostic =
+        CompilerDiagnostic::invalid_compile_time_path(source_path.clone(), reason, location);
+
+    Err(CompileTimePathResolutionError::Diagnostic(Box::new(
+        diagnostic,
+    )))
 }

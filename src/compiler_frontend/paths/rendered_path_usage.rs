@@ -7,7 +7,7 @@
 //! text, but output placement policy must stay builder-owned rather than frontend-owned.
 
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
+    CompileTimePath, CompileTimePathBase, CompileTimePathResolutionError,
 };
 use crate::compiler_frontend::paths::path_format::{
     PathStringFormatConfig, format_compile_time_path,
@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 /// Builder-visible semantic fact for one compile-time path rendered into output text.
 ///
-/// WHAT: preserves the authored path, resolved filesystem target, public path, resolution base,
-/// target kind, and precise render site.
+/// WHAT: preserves the authored path, resolved filesystem target, public path, resolution base
+/// and precise render site.
 ///
 /// WHY: builders need stable semantic inputs for tracked-asset planning after the frontend has
 /// already rendered human/browser-visible path strings.
@@ -35,8 +35,6 @@ pub struct RenderedPathUsage {
     pub public_path: InternedPath,
     /// Resolution base (`RelativeToFile`, `SourcePackageRoot`, or `EntryRoot`).
     pub base: CompileTimePathBase,
-    /// Whether the resolved target is a file or directory.
-    pub kind: CompileTimePathKind,
     /// Real source file that rendered this path.
     pub source_file_scope: InternedPath,
     /// Render location used for builder diagnostics and warnings.
@@ -103,18 +101,19 @@ pub(crate) fn record_compile_time_path_for_rendered_output(
     path_format_config: &PathStringFormatConfig,
     string_table: &StringTable,
 ) -> RecordedRenderedPaths {
+    let rendered_text = format_compile_time_path(path, path_format_config, string_table);
+
     let usage = RenderedPathUsage {
         source_path: path.source_path.clone(),
         filesystem_path: path.filesystem_path.clone(),
         public_path: path.public_path.clone(),
         base: path.base.clone(),
-        kind: path.kind.clone(),
         source_file_scope: source_file_scope.clone(),
         render_location: render_location.clone(),
     };
 
     RecordedRenderedPaths {
-        rendered_text: format_compile_time_path(path, path_format_config, string_table),
+        rendered_text,
         usages: vec![usage],
     }
 }

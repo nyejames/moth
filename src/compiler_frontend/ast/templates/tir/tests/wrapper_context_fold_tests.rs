@@ -7,6 +7,7 @@
 //! fold and handoff paths.
 //! WHY: wrapper context is a TIR view dimension and must not require a second
 //! store or a structural fallback.
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -808,7 +809,7 @@ fn prepared_fold_fixture_result(
 
 fn handoff_fixture_result(
     fixture: &WrapperContextFixture,
-    _string_table: &mut StringTable,
+    string_table: &mut StringTable,
 ) -> Result<OwnedRuntimeTemplateHandoff, TemplateError> {
     let (phase, store) = fixture_parent_view(fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
@@ -828,7 +829,8 @@ fn handoff_fixture_result(
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
     };
-    owned_runtime_template_handoff_for_prepared_view(&prepared, view).map_err(Into::into)
+    owned_runtime_template_handoff_for_prepared_view(&prepared, view, string_table, None)
+        .map_err(Into::into)
 }
 
 fn handoff_fixture(
@@ -838,11 +840,11 @@ fn handoff_fixture(
     handoff_fixture_result(fixture, string_table).expect("handoff should succeed")
 }
 
-fn assert_text_node(node: &OwnedRuntimeTemplateNode, expected: &str, string_table: &StringTable) {
+fn assert_text_node(node: &OwnedRuntimeTemplateNode, expected: &str, _string_table: &StringTable) {
     let OwnedRuntimeTemplateNode::Text { text, .. } = node else {
         panic!("expected Text node, got {:?}", node);
     };
-    assert_eq!(string_table.resolve(*text), expected);
+    assert_eq!(text.clone().into_text().as_deref(), Some(expected));
 }
 
 fn assert_text_body(body: &OwnedRuntimeTemplateBody, expected: &str, string_table: &StringTable) {
@@ -851,7 +853,7 @@ fn assert_text_body(body: &OwnedRuntimeTemplateBody, expected: &str, string_tabl
     };
     match node {
         OwnedRuntimeTemplateNode::Text { text, .. } => {
-            assert_eq!(string_table.resolve(*text), expected);
+            assert_eq!(text.clone().into_text().as_deref(), Some(expected));
         }
         OwnedRuntimeTemplateNode::Sequence { children } if children.len() == 1 => {
             assert_text_node(&children[0], expected, string_table);
@@ -867,7 +869,7 @@ fn assert_child_or_text_node(
 ) {
     match node {
         OwnedRuntimeTemplateNode::Text { text, .. } => {
-            assert_eq!(string_table.resolve(*text), expected);
+            assert_eq!(text.clone().into_text().as_deref(), Some(expected));
         }
         OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
             assert_text_body(&template.body, expected, string_table);
@@ -890,6 +892,17 @@ fn expect_single_render_child(body: &OwnedRuntimeTemplateBody) -> &OwnedRuntimeT
             &children[0]
         }
         other => panic!("expected Render(Sequence) body, got {:?}", other),
+    }
+}
+
+/// Resolves only the text fast path used by these fold assertions.
+///
+/// WHAT: keeps legacy text assertions readable after emissions become structural values.
+/// WHY: a structural value must never be flattened merely to inspect a test result.
+fn emission_text(value: ConstStringValue, string_table: &StringTable) -> String {
+    match value {
+        ConstStringValue::Text(text) => string_table.resolve(text).to_owned(),
+        ConstStringValue::Pieces(_) => panic!("structural emission reached a text-only assertion"),
     }
 }
 
@@ -917,7 +930,7 @@ fn wrapper_context_overlay_folds_inherited_wrapper() {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "beforechildafter",
         "inherited wrapper should wrap child output"
     );
@@ -991,7 +1004,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
         panic!("expected Output emission, got {emission:?}");
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "outer-beforeinner-beforechildinner-afterouter-after",
         "a single innermost-to-outermost wrapper set must fold to outer(inner(child))"
     );
@@ -1008,7 +1021,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
         panic!("expected Output emission, got {emission:?}");
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "outer-structuralinner-beforenestedinner-afterparentouter-after",
         "nested structural wrappers must retain the parent expression authority"
     );
@@ -1059,7 +1072,7 @@ fn wrapper_context_overlay_honors_fresh_suppression() {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "child",
         "$fresh suppression should prevent wrapper application"
     );
@@ -1086,7 +1099,7 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
         );
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "beforechildafter",
         "IfChildEmits should wrap a child that structurally outputs"
     );
@@ -1131,7 +1144,7 @@ fn prepared_fold_applies_wrapper_expression_overlay() {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "wrapper-overlaychild",
         "inherited wrappers must fold through their exact expression overlay"
     );
@@ -1160,7 +1173,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "outer-constchild",
         "the const outer override must replace the runtime wrapper-local expression"
     );
@@ -1314,7 +1327,7 @@ fn prepared_fold_injects_child_before_resolving_other_wrapper_slots() {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(
-        string_table.resolve(output_id),
+        emission_text(output_id, &string_table),
         "beforeinjectedresolvedafter",
         "the injected target must win while other slots preserve overlay-resolved sources"
     );
@@ -1400,7 +1413,7 @@ fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup(
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
-    assert_eq!(string_table.resolve(output_id), "beforechildafter");
+    assert_eq!(emission_text(output_id, &string_table), "beforechildafter");
 
     let handoff = handoff_fixture(&fixture, &mut string_table);
     let wrapped = expect_single_render_child(&handoff.body);

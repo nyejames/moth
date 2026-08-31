@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0023"]
+message_contains = ["A file value needs an explicit extension"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0023"
+reason = "invalid_expression.extensionless_file_value"
+count = 1

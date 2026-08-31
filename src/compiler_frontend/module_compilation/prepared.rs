@@ -13,6 +13,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -42,6 +43,11 @@ pub(crate) struct PreparedModuleInput {
     pub(crate) source_module_origins: SourceModuleOriginTable,
     /// Provider-independent retained header syntax, produced before provider interfaces exist.
     pub(crate) prepared_header_syntax: PreparedHeaderSyntax,
+    /// Stage 0 resolved file-value targets, keyed with the preparing file and path-syntax handle.
+    ///
+    /// Binding passes this through uninterpreted. AST consumes it and is given no filesystem
+    /// resolver of its own.
+    pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     /// Local module string table forked for this module during file preparation.
     pub(crate) string_table: StringTable,
     /// Source identities built from the prepared source paths.

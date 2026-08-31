@@ -8,6 +8,7 @@
 //!      the module rather than an end-to-end case.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_eval::ConstantFoldOutcome;
 use crate::compiler_frontend::ast::expressions::expression::{
     ChoiceConstructInput, CollectionExpressionType, Expression, MapLiteralEntry,
     MapLiteralExpressionType,
@@ -318,7 +319,14 @@ fn provenance_unioned_through_constant_folding() {
     };
 
     let mut string_table = StringTable::new();
-    let folded = constant_fold(rpn.items, &mut string_table).expect("folding should succeed");
+    let folded = match constant_fold(rpn.items, &mut string_table).expect("folding should succeed")
+    {
+        ConstantFoldOutcome::Folded(stack) => stack,
+        ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
+        ConstantFoldOutcome::TextUnavailable { .. } => {
+            panic!("expected folded text to remain available")
+        }
+    };
 
     assert_eq!(folded.len(), 1);
     let ExpressionRpnItem::Operand(result) = &folded[0] else {

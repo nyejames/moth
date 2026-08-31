@@ -114,6 +114,11 @@ pub(crate) fn compile_time_evaluation_error_message(
         CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable => {
             format!("Struct field default value {operation_text} is not compile-time resolvable.")
         }
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => {
+            format!(
+                "Cannot use a resource-bearing or site-root string for {operation_text}. Those pieces have no final text until the build assigns URL contexts. Keep the operation at runtime or use plain text without structural pieces."
+            )
+        }
     }
 }
 
@@ -169,6 +174,9 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         }
         CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable => {
             "Struct field defaults may only contain compile-time values and constant references."
+        }
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => {
+            "Use a plain text string for compile-time character operations, or perform the operation at runtime"
         }
     }
 }

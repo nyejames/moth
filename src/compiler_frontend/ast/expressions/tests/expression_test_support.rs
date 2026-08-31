@@ -6,16 +6,16 @@
 //! directly; these helpers preserve that ergonomic surface while production
 //! callers use constructors that require canonical `TypeId`s.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleCarrierVariant, FallibleExpressionHandling,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::{DataType, PathTypeKind};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::paths::compile_time_paths::CompileTimePath;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -42,14 +42,12 @@ impl Expression {
         .with_regular_division_provenance(contains_regular_division)
     }
 
-    pub fn path(compile_time_path: CompileTimePath, location: SourceLocation) -> Self {
-        let path_type_kind = PathTypeKind::from(compile_time_path.kind.clone());
-
+    pub fn structural_string(pieces: Vec<ConstStringPiece>, location: SourceLocation) -> Self {
         Self::new(
-            ExpressionKind::Path(Box::new(compile_time_path)),
+            ExpressionKind::StructuralString { pieces },
             location,
             builtin_type_ids::STRING,
-            DataType::Path(path_type_kind),
+            DataType::StringSlice,
             ValueMode::ImmutableOwned,
         )
     }
@@ -181,7 +179,7 @@ fn test_builtin_type_id_for_data_type(data_type: &DataType) -> TypeId {
         DataType::Int => builtin_type_ids::INT,
         DataType::Float => builtin_type_ids::FLOAT,
         DataType::Decimal => builtin_type_ids::DECIMAL,
-        DataType::StringSlice | DataType::Template | DataType::Path(_) => builtin_type_ids::STRING,
+        DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
         DataType::Range => builtin_type_ids::RANGE,
         DataType::None => builtin_type_ids::NONE,

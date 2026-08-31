@@ -22,8 +22,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 use crate::compiler_frontend::headers::dependency_target::decode_dependency_target;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, FileId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -233,19 +234,28 @@ impl HeaderExportMode {
 
 /// Provenance for one conservative declaration-ordering hint.
 ///
-/// WHAT: distinguishes a same-file path from an intentionally independent provider spelling.
-/// WHY: final source rebinding must reject missing prefixes for the former while preserving the
-///      latter exactly for provider binding and later canonicalization.
+/// WHAT: distinguishes a same-file path from an intentionally independent provider spelling and
+/// from another file's generated content constant.
+/// WHY: final source rebinding must reject missing prefixes for same-file paths while preserving
+/// provider spellings and content-constant targets exactly for later canonicalization and Stage 3.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LocalDeclarationOrderingHintOrigin {
     SourceOwned,
     ProviderSpelling,
+    /// A content source's synthetic `content` constant.
+    ///
+    /// WHAT: the path targets `<content source>/content` of another prepared file, recorded from a
+    ///       content-class file-value path in a declaration shell.
+    /// WHY: the target is not prefixed by the referencing file, so source-identity rebinding must
+    ///       leave it unchanged and canonicalization must not classify it through dependency
+    ///       clauses, which never spell content paths.
+    ContentSource,
 }
 
 /// A conservative declaration-shell ordering fact retained before provider binding.
 ///
-/// WHAT: one referenced path captured from a declaration shell's type surface or constant
-/// initializer, recorded in the provider spelling or same-file spelling seen during syntax
+/// WHAT: one referenced path captured from a declaration shell's type surface, constant
+/// initializer, or shell value expression, recorded in the spelling seen during syntax
 /// preparation. It is not an already-proven graph edge.
 /// WHY: Stage 2 retains these hints without knowing which providers are source graph participants
 /// versus virtual or provider bindings. Stage 3 alone resolves retained local hints into
@@ -254,9 +264,18 @@ pub enum LocalDeclarationOrderingHintOrigin {
 /// `RetainedDependencyClause` and `RetainedDependencyPath`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LocalDeclarationOrderingHint {
-    /// The conservative referenced path: a provider spelling or a same-file spelling.
+    /// The conservative referenced path: a provider spelling, a same-file spelling, or a content
+    /// source's `content` constant path.
     path: InternedPath,
     origin: LocalDeclarationOrderingHintOrigin,
+    /// The authored occurrence's path-row handle for content-source hints.
+    ///
+    /// WHAT: the dense `PathSyntaxId` of the shell occurrence that produced the hint, valid inside
+    ///       the referencing file's prepared path table.
+    ///       (referencing `FileId`, this handle) instead of re-deriving the authored spelling, so
+    ///       a module-relative authored spelling still orders against the canonical content
+    ///       constant of a nested module.
+    occurrence: Option<PathSyntaxId>,
 }
 
 impl LocalDeclarationOrderingHint {
@@ -265,6 +284,7 @@ impl LocalDeclarationOrderingHint {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::SourceOwned,
+            occurrence: None,
         }
     }
 
@@ -273,7 +293,25 @@ impl LocalDeclarationOrderingHint {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ProviderSpelling,
+            occurrence: None,
         }
+    }
+
+    /// Record an ordering fact against a content source's synthetic `content` constant.
+    ///
+    /// `occurrence` is the authored shell occurrence's path-row handle; Stage 3 resolves the
+    /// exact graph key through the Stage 0 resolved-reference table.
+    pub fn content_source(path: InternedPath, occurrence: PathSyntaxId) -> Self {
+        Self {
+            path,
+            origin: LocalDeclarationOrderingHintOrigin::ContentSource,
+            occurrence: Some(occurrence),
+        }
+    }
+
+    /// The authored occurrence handle for content-source hints; absent for other origins.
+    pub fn occurrence(&self) -> Option<PathSyntaxId> {
+        self.occurrence
     }
 
     /// The conservative referenced path this hint records.
@@ -315,11 +353,16 @@ impl LocalDeclarationOrderingHint {
             LocalDeclarationOrderingHintOrigin::SourceOwned => self
                 .path
                 .try_rebind_required_prefix(provisional_source_file, logical_path)?,
-            LocalDeclarationOrderingHintOrigin::ProviderSpelling => self.path,
+
+            // Provider spellings and content-constant targets never carry the referencing file's
+            // prefix, so final source identity does not rewrite them.
+            LocalDeclarationOrderingHintOrigin::ProviderSpelling
+            | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
         };
         Ok(Self {
             path,
             origin: self.origin,
+            occurrence: self.occurrence,
         })
     }
 }
@@ -342,9 +385,10 @@ pub struct Header {
     pub export_mode: HeaderExportMode,
     /// Conservative local declaration-ordering hints retained before provider binding.
     ///
-    /// WHAT: referenced paths from this declaration shell's type surface and constant initializer,
-    /// recorded in the provider or same-file spelling seen during syntax preparation. These are
-    /// ordering hints, not already-proven graph edges.
+    /// WHAT: referenced paths from this declaration shell's type surface, constant initializer,
+    /// and shell value expressions, recorded in the provider, same-file, or content-constant
+    /// spelling seen during syntax preparation. These are ordering hints, not already-proven
+    /// graph edges.
     /// WHY: binding canonicalizes or drops provider-spelled hints using bound visibility, then
     /// Stage 3 resolves the retained local hints into sortable graph edges.
     pub local_ordering_hints: HashSet<LocalDeclarationOrderingHint>,
@@ -1014,6 +1058,8 @@ pub struct FileFrontendPrepareOutput {
     /// WHY: dependency-only root files may produce no declaration headers but still contribute
     /// clauses to the module symbol package.
     pub file_dependency_clauses: Vec<RetainedDependencyClause>,
+    /// Graph-active file-value paths authored by this file, excluding dependency-clause rows.
+    pub structural_file_references: PreparedFileReferenceTable,
     /// One flat selection store for all dependency clauses authored by this file.
     pub dependency_selections: Vec<DependencySelection>,
     /// Canonical OS filesystem path for this source file, if available.
@@ -1194,6 +1240,8 @@ impl FileFrontendPrepareOutput {
             clause.remap_string_ids(remap);
         }
 
+        self.structural_file_references.remap_string_ids(remap);
+
         for selection in &mut self.dependency_selections {
             selection.source_name = remap.get(selection.source_name);
             selection.source_location.remap_string_ids(remap);
@@ -1247,6 +1295,8 @@ impl FileFrontendPrepareOutput {
         for clause in &mut self.file_dependency_clauses {
             clause.commit_source_rebinding(final_file_id, &final_logical_path);
         }
+        self.structural_file_references
+            .rebind_source_identity(final_file_id, &final_logical_path);
         for selection in &mut self.dependency_selections {
             selection.rebind_source_identity(&final_logical_path);
         }

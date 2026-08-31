@@ -1091,6 +1091,13 @@ contract = "language.generics.function_body_validation"
 role = "primary"
 
 [[case]]
+id = "generic_fn_nested_generic_body_file_value_collision_success"
+path = "generic_fn_nested_generic_body_file_value_collision_success"
+tags = ["integration", "paths", "file-values", "generics", "functions"]
+contract = "language.paths.generic_fn_nested_generic_body_file_value_collision"
+role = "primary"
+
+[[case]]
 id = "generic_fn_nested_generic_body_call_success"
 path = "generic_fn_nested_generic_body_call_success"
 tags = ["integration","generics","functions","dependencies"]
@@ -2743,6 +2750,13 @@ contract = "language.config.non_constant_declaration_rejected"
 role = "primary"
 
 [[case]]
+id = "config_file_value_path_rejected"
+path = "config_file_value_path_rejected"
+tags = ["integration", "config", "diagnostics", "paths"]
+contract = "language.config.file_value_path_rejected"
+role = "primary"
+
+[[case]]
 id = "config_trait_declaration_rejected"
 path = "config_trait_declaration_rejected"
 tags = ["integration", "config", "traits", "diagnostics"]
@@ -3419,6 +3433,13 @@ id = "html_builder_page_title"
 path = "html_builder_page_title"
 tags = ["integration", "html"]
 contract = "backend.html.builder_page_title"
+role = "primary"
+
+[[case]]
+id = "html_builder_structural_page_metadata"
+path = "html_builder_structural_page_metadata"
+tags = ["integration", "html", "diagnostics"]
+contract = "backend.html.builder_structural_page_metadata_rejected"
 role = "primary"
 
 [[case]]
@@ -4647,13 +4668,6 @@ contract = "language.bindings.branch_alias_final_use_allows_mutable_rebinding"
 role = "boundary"
 
 [[case]]
-id = "path_directory_trailing_slash"
-path = "path_directory_trailing_slash"
-tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_directory_path_expansion"
-role = "primary"
-
-[[case]]
 id = "path_escape_project_root_error"
 path = "path_escape_project_root_error"
 tags = ["integration", "paths", "diagnostics"]
@@ -4661,11 +4675,11 @@ contract = "language.templates.path_escape_project_root_rejected"
 role = "primary"
 
 [[case]]
-id = "path_exists_directory"
-path = "path_exists_directory"
-tags = ["integration", "paths"]
-contract = "backend.html.tracked_asset_directory_path_expansion"
-role = "boundary"
+id = "path_directory_target_rejected"
+path = "path_directory_target_rejected"
+tags = ["integration", "paths", "diagnostics"]
+contract = "language.templates.path_directory_target_rejected"
+role = "primary"
 
 [[case]]
 id = "path_exists_file"
@@ -4710,25 +4724,32 @@ contract = "backend.html.tracked_asset_origin_prefixed"
 role = "boundary"
 
 [[case]]
-id = "path_public_root_custom_origin"
-path = "path_public_root_custom_origin"
-tags = ["integration", "paths"]
-contract = "backend.html.public_root_reference_acceptance"
-role = "boundary"
-
-[[case]]
-id = "path_public_root_default_origin"
-path = "path_public_root_default_origin"
-tags = ["integration", "paths"]
-contract = "backend.html.public_root_reference_acceptance"
-role = "primary"
-
-[[case]]
 id = "path_root_folder_preserved"
 path = "path_root_folder_preserved"
 tags = ["integration", "paths"]
 contract = "backend.html.tracked_asset_root_folder"
 role = "boundary"
+
+[[case]]
+id = "path_site_root_custom_origin"
+path = "path_site_root_custom_origin"
+tags = ["integration", "paths"]
+contract = "backend.html.site_root_reference_acceptance"
+role = "boundary"
+
+[[case]]
+id = "path_site_root_default_origin"
+path = "path_site_root_default_origin"
+tags = ["integration", "paths"]
+contract = "backend.html.site_root_reference_acceptance"
+role = "primary"
+
+[[case]]
+id = "path_as_user_type"
+path = "path_as_user_type"
+tags = ["integration", "paths", "language"]
+contract = "language.resources.path_is_ordinary_identifier"
+role = "primary"
 
 [[case]]
 id = "print_special_chars"
@@ -12186,3 +12207,94 @@ path = "trait_requirement_alias_type_success"
 tags = ["integration","language","traits"]
 contract = "language.traits.requirement_signature_alias_type"
 role = "boundary"
+[[case]]
+id = "file_value_content_dependency_pair"
+path = "file_value_content_dependency_pair"
+tags = ["integration", "paths", "file-values"]
+contract = "language.paths.file_value_content_dependency_pair"
+role = "smoke"
+
+[[case]]
+id = "file_value_dependency_extension_rejected"
+path = "file_value_dependency_extension_rejected"
+tags = ["integration", "paths", "diagnostics", "file-values"]
+contract = "language.paths.file_value_dependency_extension_rejected"
+role = "boundary"
+
+[[case]]
+id = "file_value_extensionless_value_rejected"
+path = "file_value_extensionless_value_rejected"
+tags = ["integration", "paths", "diagnostics", "file-values"]
+contract = "language.paths.file_value_extensionless_value_rejected"
+role = "boundary"
+
+[[case]]
+id = "file_value_resource_dependency_pair"
+path = "file_value_resource_dependency_pair"
+tags = ["integration", "paths", "file-values"]
+contract = "language.paths.file_value_resource_dependency_pair"
+role = "smoke"
+
+[[case]]
+id = "file_value_moth_rejected"
+path = "file_value_moth_rejected"
+tags = ["integration", "paths", "diagnostics", "file-values"]
+contract = "language.paths.file_value_moth_rejected"
+role = "boundary"
+
+[[case]]
+id = "generic_body_file_value_success"
+path = "generic_body_file_value_success"
+tags = ["integration", "paths", "file-values", "generics"]
+contract = "language.paths.generic_body_file_value"
+role = "primary"
+
+[[case]]
+id = "generic_body_file_value_uninstantiated_success"
+path = "generic_body_file_value_uninstantiated_success"
+tags = ["integration", "paths", "file-values", "generics"]
+contract = "language.paths.generic_body_file_value_uninstantiated_capture"
+role = "boundary"
+
+[[case]]
+id = "generic_body_file_value_missing_rejected"
+path = "generic_body_file_value_missing_rejected"
+tags = ["integration", "paths", "diagnostics", "file-values", "generics"]
+contract = "language.paths.generic_body_file_value_missing_target"
+role = "boundary"
+
+[[case]]
+id = "generic_body_content_file_value_success"
+path = "generic_body_content_file_value_success"
+tags = ["integration", "paths", "file-values", "generics", "templates"]
+contract = "language.paths.generic_body_content_file_value"
+role = "primary"
+
+[[case]]
+id = "exported_generic_private_content_success"
+path = "exported_generic_private_content_success"
+tags = ["integration", "paths", "file-values", "generics", "dependencies"]
+contract = "language.paths.exported_generic_private_content"
+role = "boundary"
+
+[[case]]
+id = "generic_body_template_head_path_success"
+path = "generic_body_template_head_path_success"
+tags = ["integration", "paths", "file-values", "generics", "templates"]
+contract = "language.paths.generic_body_template_head_path"
+role = "primary"
+
+[[case]]
+id = "generic_parameter_default_file_value_success"
+path = "generic_parameter_default_file_value_success"
+tags = ["integration", "paths", "file-values", "generics"]
+contract = "language.paths.generic_parameter_default_file_value_declaration_and_freezing"
+role = "smoke"
+
+[[case]]
+id = "map_compile_time_resource_key_rejected"
+path = "map_compile_time_resource_key_rejected"
+tags = ["integration", "paths", "diagnostics", "file-values"]
+contract = "language.paths.compile_time_map_resource_key_rejected"
+role = "boundary"
+

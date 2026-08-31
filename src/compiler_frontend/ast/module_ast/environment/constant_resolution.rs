@@ -15,8 +15,10 @@
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
@@ -65,6 +67,9 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     pub style_directives: StyleDirectiveRegistry,
     pub project_path_resolver: Option<ProjectPathResolver>,
+    pub file_value_resolution: Option<
+        Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
+    >,
     pub path_format_config: PathStringFormatConfig,
     pub template_const_loop_iteration_limit: usize,
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
@@ -167,8 +172,14 @@ impl ConstantResolutionSession {
             })
             .map(|kind| kind.is_compile_time_value())
             .map_err(ExpressionParseError::from)?;
-
         if !initializer_is_compile_time_constant {
+            if let ExpressionKind::Runtime(rpn) = &declaration.value.kind
+                && let Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) =
+                    constant_fold(rpn.items.clone(), string_table)
+            {
+                return Err(ExpressionParseError::from(diagnostic));
+            }
+
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 declaration.id.name(),
@@ -204,7 +215,7 @@ impl ConstantResolutionSession {
             .entry(header.source_file.to_owned())
             .or_insert_with(|| header.canonical_source_file(string_table));
 
-        ScopeContext::new(
+        let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
             header.tokens.src_path.to_owned(),
             top_level_declarations,
@@ -224,12 +235,17 @@ impl ConstantResolutionSession {
         // exactly like they do in function/start body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
         .with_source_file_scope(source_file_scope.to_owned())
+        .with_declaring_file_id(header.tokens.file_id)
         .with_resolved_type_aliases(Rc::clone(&module_view.resolved_type_aliases))
         .with_resolved_module_constants(resolved_constants)
         .with_generic_declarations(Rc::clone(&module_view.generic_declarations_by_path))
         .with_resolved_struct_fields_by_path(Rc::clone(&module_view.resolved_struct_fields_by_path))
         .with_choice_variant_shells_by_path(Rc::clone(&module_view.choice_variant_shells_by_path))
         .with_nominal_type_ids_by_path(Rc::clone(&module_view.nominal_type_ids_by_path))
-        .with_trait_environment(Rc::clone(&module_view.trait_environment))
+        .with_trait_environment(Rc::clone(&module_view.trait_environment));
+        if let Some(services) = &module_view.file_value_resolution {
+            context = context.with_file_value_resolution(Rc::clone(services));
+        }
+        context
     }
 }

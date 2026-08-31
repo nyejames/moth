@@ -115,6 +115,8 @@ Explicit-extension paths select a registered provider:
 A bare explicit-extension clause requires `as` or at least one same-line direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
 A namespace has one provider origin. Consumer-created mixed-origin namespace aggregation is outside scope.
 
+The same spelling in expression position is a file value, not a provider. `@drawing.js as drawing` binds the provider's namespace; `url = @drawing.js` is the file itself, as a resource `String`. A clause never becomes a file value, and a file value never exposes a provider namespace. See @../resources/#file-paths (File paths).
+
 ### Related concepts
 
 - For dependency alias rules see @../aliases/#dependency-aliases (Dependency aliases).

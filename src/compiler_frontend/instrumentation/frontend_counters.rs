@@ -87,6 +87,10 @@ pub(crate) enum FrontendCounter {
     TemplateCount,
     ConstTemplateCount,
     RuntimeTemplateCount,
+    // Defined with the module-local resource table. It starts counting when AST resource
+    // classification interns its first origin.
+    #[allow(dead_code)]
+    ResourceOriginCount,
 
     // HIR and borrow-validation volume.
     PublicFoldedValueConversions,
@@ -291,6 +295,7 @@ mod detailed {
     static TEMPLATE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static CONST_TEMPLATE_COUNT: AtomicUsize = AtomicUsize::new(0);
     static RUNTIME_TEMPLATE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static RESOURCE_ORIGIN_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HIR_BLOCK_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HIR_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HIR_FUNCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -462,6 +467,7 @@ mod detailed {
             FrontendCounter::TemplateCount,
             FrontendCounter::ConstTemplateCount,
             FrontendCounter::RuntimeTemplateCount,
+            FrontendCounter::ResourceOriginCount,
             FrontendCounter::PublicFoldedValueConversions,
             FrontendCounter::HirConstValueConversions,
             FrontendCounter::HirStaticBoolIfNodes,
@@ -689,6 +695,8 @@ mod detailed {
             FrontendCounter::ConstTemplateCount => &CONST_TEMPLATE_COUNT,
 
             FrontendCounter::RuntimeTemplateCount => &RUNTIME_TEMPLATE_COUNT,
+
+            FrontendCounter::ResourceOriginCount => &RESOURCE_ORIGIN_COUNT,
 
             FrontendCounter::PublicFoldedValueConversions => &PUBLIC_FOLDED_VALUE_CONVERSIONS,
 
@@ -1033,6 +1041,8 @@ mod detailed {
             FrontendCounter::ConstTemplateCount => "const_template_count",
 
             FrontendCounter::RuntimeTemplateCount => "runtime_template_count",
+
+            FrontendCounter::ResourceOriginCount => "resource_origin_count",
 
             FrontendCounter::PublicFoldedValueConversions => "public_folded_value_conversions",
 

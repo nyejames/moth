@@ -2231,7 +2231,8 @@ fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut im
         | HirExpressionKind::Float(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_) => {}
+        | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. } => {}
 
         HirExpressionKind::VariantPayloadGet { source, .. } => {
             collect_expression_loaded_locals(source, visitor);

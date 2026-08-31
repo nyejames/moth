@@ -24,7 +24,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
-    ReceiverMethodCatalog, ReceiverMethodEntry,
+    FileValueResolutionServices, FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
+    ReceiverMethodCatalog, ReceiverMethodEntry, Stage0ResolutionFacts,
+    Stage0ResolvedFileReferenceOutcome,
 };
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
@@ -59,8 +61,9 @@ use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::folded_value::{
-    FoldedValueGenericParameterResolver, PublicConstTemplate, PublicFoldedValue,
-    convert_const_value_to_folded_value, convert_expression_to_folded_value,
+    FoldedValueGenericParameterResolver, FoldedValueProjectionContext, OwnedFoldedString,
+    PublicConstTemplate, PublicFoldedValue, convert_const_value_to_folded_value,
+    convert_expression_to_folded_value,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, ImportedFunctionContract, NamespaceRecord,
@@ -70,9 +73,12 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols,
 };
+use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
@@ -85,7 +91,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
     ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory,
-    OriginTypeId,
+    OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -113,7 +119,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use super::{
-    GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
+    GenericFunctionBody, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
+    GenericFunctionTemplate,
 };
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 
@@ -141,6 +148,24 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,
 }
+/// Every handle is issued by the compact path-syntax table in the same capture operation. Target
+/// payloads carry owned folded strings for content and owner-relative portable spelling for
+/// resources. No donor-local identity crosses publication.
+/// Owned content text needs no frozen-pool entry or remap pass.
+#[derive(Clone)]
+struct StableResolvedFileReference {
+    path_syntax: PathSyntaxId,
+    class: PreparedFileReferenceClass,
+    outcome: StableResolvedFileReferenceOutcome,
+}
+
+#[derive(Clone)]
+enum StableResolvedFileReferenceOutcome {
+    NoPhysicalTarget,
+    Content { value: OwnedFoldedString },
+    Resource { owner_relative_path: StringId },
+    IdentifiedSourceKind,
+}
 
 /// Owned frozen token buffer retained by one generic declaration artefact.
 ///
@@ -164,6 +189,7 @@ struct StableBodySyntax {
     /// Canonical table vocabulary retained only for the path rows referenced by this body.
     /// Its StringIds index `pool` until materialisation remaps the whole table in place.
     path_syntax: PathSyntaxTable,
+    resolved_file_references: Box<[StableResolvedFileReference]>,
 }
 
 fn pool_remap(id: StringId, remap: &[StringId]) -> Result<StringId, CompilerError> {
@@ -202,11 +228,41 @@ impl FrozenStringPool {
     }
 }
 
-#[derive(Clone)]
+struct MaterialisedBody {
+    file_tokens: FileTokens,
+    resolution_facts: Arc<Stage0ResolutionFacts>,
+}
+
+impl MaterialisedBody {
+    fn into_generic_body(self) -> GenericFunctionBody {
+        GenericFunctionBody::materialised(self.file_tokens, self.resolution_facts)
+    }
+}
+
+impl std::fmt::Debug for MaterialisedBody {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MaterialisedBody")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 struct StableSourceLocation {
     scope: Box<[String]>,
     start: crate::compiler_frontend::tokenizer::tokens::CharPosition,
     end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
+}
+
+fn capture_public_content_value(
+    value: PublicFoldedValue,
+) -> Result<OwnedFoldedString, CompilerError> {
+    let PublicFoldedValue::String(value) = value else {
+        return Err(CompilerError::compiler_error(
+            "synthetic content constant did not fold to a String value",
+        ));
+    };
+    Ok(value)
 }
 
 impl StableBodySyntax {
@@ -214,6 +270,8 @@ impl StableBodySyntax {
         tokens: &FileTokens,
         source_file: &InternedPath,
         string_table: &StringTable,
+        stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
+        content_value_at_path: &impl Fn(&InternedPath) -> Result<PublicFoldedValue, CompilerError>,
     ) -> Result<Self, CompilerError> {
         if !tokens.src_path.starts_with(source_file) {
             return Err(CompilerError::compiler_error(
@@ -231,8 +289,67 @@ impl StableBodySyntax {
 
         let mut pool = FrozenStringPool::default();
         let mut frozen_tokens = tokens.tokens.clone();
-        let mut path_syntax =
+        let (mut path_syntax, path_syntax_map) =
             source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
+        let mut path_syntax_map = path_syntax_map.into_iter().collect::<Vec<_>>();
+        path_syntax_map.sort_by_key(|(_, compact_id)| *compact_id);
+
+        let mut resolved_file_references = Vec::with_capacity(path_syntax_map.len());
+        for (source_path_id, compact_path_id) in path_syntax_map {
+            let facts = stage0_resolution_facts.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "persistent generic body has path syntax but no Stage 0 resolution facts",
+                )
+            })?;
+            let resolved = facts
+                .lookup(tokens.file_id, source_path_id)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "persistent generic body path handle {:?} had no matching Stage 0 resolved-reference row",
+                        source_path_id
+                    ))
+                })?;
+            let outcome = match resolved.outcome {
+                Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {
+                    StableResolvedFileReferenceOutcome::NoPhysicalTarget
+                }
+                Stage0ResolvedFileReferenceOutcome::Content {
+                    logical_path,
+                    value,
+                } => {
+                    let value = match value {
+                        Some(value) => value.clone(),
+                        None => {
+                            let logical_path = logical_path.ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "ordinary content reference had no logical source path before capture",
+                                )
+                            })?;
+                            capture_public_content_value(content_value_at_path(logical_path)?)?
+                        }
+                    };
+                    StableResolvedFileReferenceOutcome::Content { value }
+                }
+                Stage0ResolvedFileReferenceOutcome::Resource {
+                    owner_relative_path,
+                } => StableResolvedFileReferenceOutcome::Resource {
+                    owner_relative_path: pool.index(owner_relative_path.as_str()),
+                },
+                Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind => {
+                    StableResolvedFileReferenceOutcome::IdentifiedSourceKind
+                }
+                Stage0ResolvedFileReferenceOutcome::Diagnostic(_) => {
+                    return Err(CompilerError::compiler_error(
+                        "persistent generic body retained a diagnosed file reference; generic body validation must report it before capture",
+                    ));
+                }
+            };
+            resolved_file_references.push(StableResolvedFileReference {
+                path_syntax: compact_path_id,
+                class: resolved.class,
+                outcome,
+            });
+        }
 
         // The source stream owns the complete table. A persistent generic retains only the
         // referenced canonical subset, then token and table payloads enter the same frozen pool.
@@ -250,6 +367,7 @@ impl StableBodySyntax {
             pool: pool.finish(),
             tokens: frozen_tokens.into_boxed_slice(),
             path_syntax,
+            resolved_file_references: resolved_file_references.into_boxed_slice(),
         })
     }
 
@@ -257,7 +375,7 @@ impl StableBodySyntax {
         &self,
         source_file: &InternedPath,
         string_table: &mut StringTable,
-    ) -> Result<FileTokens, CompilerError> {
+    ) -> Result<MaterialisedBody, CompilerError> {
         let declaration_path = materialise_path(&self.declaration_path, string_table);
         if !declaration_path.starts_with(source_file) {
             return Err(CompilerError::compiler_error(
@@ -286,13 +404,55 @@ impl StableBodySyntax {
         path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
         path_syntax.validate_file_owned_locations(source_file)?;
         path_syntax.validate_file_tokens(&tokens, source_file, "frozen generic body")?;
-        Ok(FileTokens::new_frozen_with_identity(
-            declaration_path,
-            None,
-            None,
-            tokens,
-            path_syntax,
-        ))
+
+        let resolved_file_references = self
+            .resolved_file_references
+            .iter()
+            .map(|reference| {
+                let outcome = match &reference.outcome {
+                    StableResolvedFileReferenceOutcome::NoPhysicalTarget => {
+                        FrozenResolvedFileReferenceOutcome::NoPhysicalTarget
+                    }
+                    StableResolvedFileReferenceOutcome::Content { value } => {
+                        FrozenResolvedFileReferenceOutcome::Content {
+                            value: value.clone(),
+                        }
+                    }
+                    StableResolvedFileReferenceOutcome::Resource {
+                        owner_relative_path,
+                    } => {
+                        let owner_relative_path = pool_remap(*owner_relative_path, &remap)?;
+                        FrozenResolvedFileReferenceOutcome::Resource {
+                            owner_relative_path: PortableResourcePath::from_portable_spelling(
+                                string_table.resolve(owner_relative_path).to_owned(),
+                            )?,
+                        }
+                    }
+                    StableResolvedFileReferenceOutcome::IdentifiedSourceKind => {
+                        FrozenResolvedFileReferenceOutcome::IdentifiedSourceKind
+                    }
+                };
+                Ok::<FrozenResolvedFileReference, CompilerError>(FrozenResolvedFileReference {
+                    path_syntax: reference.path_syntax,
+                    class: reference.class,
+                    outcome,
+                })
+            })
+            .collect::<Result<Vec<_>, CompilerError>>()?;
+        let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
+            resolved_file_references,
+        )?);
+
+        Ok(MaterialisedBody {
+            file_tokens: FileTokens::new_frozen_with_identity(
+                declaration_path,
+                None,
+                None,
+                tokens,
+                path_syntax,
+            ),
+            resolution_facts,
+        })
     }
 }
 
@@ -311,6 +471,36 @@ impl StableSourceLocation {
             self.start,
             self.end,
         )
+    }
+
+    fn is_default(&self) -> bool {
+        self.scope.is_empty() && self.start == Default::default() && self.end == Default::default()
+    }
+
+    /// Select a stable diagnostic location while combining semantically equal blueprints.
+    ///
+    /// WHY: imported public projections have no authored range, so their default must not erase
+    /// source provenance; when both ranges exist, lexical ordering makes lane order irrelevant.
+    fn preferred_with(&self, other: &Self) -> Self {
+        match (self.is_default(), other.is_default()) {
+            (true, false) => other.clone(),
+            (false, true) => self.clone(),
+            _ => {
+                let ordering = self
+                    .scope
+                    .as_ref()
+                    .cmp(other.scope.as_ref())
+                    .then_with(|| self.start.line_number.cmp(&other.start.line_number))
+                    .then_with(|| self.start.char_column.cmp(&other.start.char_column))
+                    .then_with(|| self.end.line_number.cmp(&other.end.line_number))
+                    .then_with(|| self.end.char_column.cmp(&other.end.char_column));
+                if ordering == std::cmp::Ordering::Greater {
+                    other.clone()
+                } else {
+                    self.clone()
+                }
+            }
+        }
     }
 }
 
@@ -333,7 +523,8 @@ fn materialise_path(path: &[String], string_table: &mut StringTable) -> Interned
 /// type environment.
 ///
 /// The blueprint carries owned names, stable type identities and declaration-local generic
-/// parameter slots only. It contains no requester `TypeId`, `NominalTypeId`, `GenericParameterId`,
+/// parameter slots, plus stable source locations used only for diagnostic and resource-origin
+/// provenance. It contains no requester `TypeId`, `NominalTypeId`, `GenericParameterId`,
 /// `InternedPath` or `StringId`. Registering every shell before populating members makes mutually
 /// referential definitions safe without reopening the requester environment during materialisation.
 #[derive(Clone, PartialEq, Eq)]
@@ -360,11 +551,34 @@ enum NominalMaterialisationDefinition {
     },
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 struct NominalFieldBlueprint {
     name: String,
     field_type: MaterialisationTypeBlueprint,
     folded_default: Option<PublicFoldedValue>,
+    /// Stable authored range used when materialising diagnostics and resource origins.
+    ///
+    /// WHY: provenance is diagnostic data, not nominal semantic identity, so `PartialEq` excludes
+    /// this field when checking blueprint agreement.
+    location: StableSourceLocation,
+}
+
+impl PartialEq for NominalFieldBlueprint {
+    fn eq(&self, other: &Self) -> bool {
+        // WHY: `location` is diagnostic provenance only; it never decides semantic agreement,
+        // because imported projections legitimately carry the default range.
+        self.name == other.name
+            && self.field_type == other.field_type
+            && self.folded_default == other.folded_default
+    }
+}
+
+impl Eq for NominalFieldBlueprint {}
+
+impl NominalFieldBlueprint {
+    fn merge_provenance_from(&mut self, other: &Self) {
+        self.location = self.location.preferred_with(&other.location);
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -403,6 +617,41 @@ enum MaterialisationTypeBlueprint {
     },
 }
 
+impl NominalMaterialisationBlueprint {
+    fn merge_provenance_from(&mut self, other: &Self) {
+        match (&mut self.definition, &other.definition) {
+            (
+                NominalMaterialisationDefinition::Struct { fields, .. },
+                NominalMaterialisationDefinition::Struct {
+                    fields: other_fields,
+                    ..
+                },
+            ) => {
+                for (field, other_field) in fields.iter_mut().zip(other_fields) {
+                    field.merge_provenance_from(other_field);
+                }
+            }
+            (
+                NominalMaterialisationDefinition::Choice { variants },
+                NominalMaterialisationDefinition::Choice {
+                    variants: other_variants,
+                },
+            ) => {
+                for (variant, other_variant) in variants.iter_mut().zip(other_variants) {
+                    for (field, other_field) in variant
+                        .payload_fields
+                        .iter_mut()
+                        .zip(&other_variant.payload_fields)
+                    {
+                        field.merge_provenance_from(other_field);
+                    }
+                }
+            }
+            _ => unreachable!("semantic equality guarantees matching nominal blueprint kinds"),
+        }
+    }
+}
+
 /// Published generated-function metadata for one successful declaring module.
 ///
 /// The context is deliberately a compact list rather than a donor-module snapshot. It owns one
@@ -414,6 +663,7 @@ pub(crate) struct ModuleMaterialisationContext {
     evidence: Box<[PublicEvidenceRecord]>,
     semantic_closure: StableSemanticClosure,
     artefacts: Box<[GenericTemplateArtefact]>,
+    module_origin: Option<StableModuleOriginIdentity>,
 }
 
 /// Module-owned facts needed to reconstruct private declarations referenced by retained bodies.
@@ -434,6 +684,7 @@ struct StableLocalConstant {
     local_path: Box<[String]>,
     type_identity: CanonicalTypeIdentity,
     value: PublicFoldedValue,
+    location: StableSourceLocation,
 }
 
 #[derive(Clone)]
@@ -707,11 +958,26 @@ struct GeneratedFoldedValueMaterialiser<'a, 'b, N: MaterialisationNominalSource>
     external_registry: &'b ExternalPackageRegistry,
     nominal_source: &'b N,
     template_ir_store: Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
+    module_resources: Rc<RefCell<ModuleResourceTable>>,
 }
 
 impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
     for GeneratedFoldedValueMaterialiser<'_, '_, N>
 {
+    fn intern_resource_origin(
+        &mut self,
+        origin: &crate::compiler_frontend::paths::resource_identity::StableResourceOriginId,
+        location: &SourceLocation,
+    ) -> Result<crate::compiler_frontend::paths::module_resources::ResourceId, CompilerError> {
+        // WHY: `intern_origin` is idempotent within one sidecar table, so repeated projections
+        // during one materialisation reuse one local handle and one row. A handle is valid only in
+        // the table that issued it.
+        Ok(self
+            .module_resources
+            .borrow_mut()
+            .intern_origin(origin.clone(), location.clone()))
+    }
+
     fn intern_canonical_type(
         &mut self,
         identity: &CanonicalTypeIdentity,
@@ -735,6 +1001,30 @@ impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
     ) -> Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>> {
         Rc::clone(&self.template_ir_store)
     }
+}
+/// Shared services for projecting stable values into one generated AST environment.
+///
+/// WHAT: keeps the authorities needed by nominal field-default projection together while the
+///       generated environment owns its mutable type table.
+/// WHY: one service bundle prevents the helper's resource-table handoff from becoming an
+///       unreviewable argument list as generated value projection grows.
+struct GeneratedValueMaterialisationServices<'a> {
+    external_registry: &'a ExternalPackageRegistry,
+    template_ir_store:
+        &'a Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
+    module_resources: Rc<RefCell<ModuleResourceTable>>,
+}
+
+fn generated_file_value_resolution_services(
+    module_resources: Rc<RefCell<ModuleResourceTable>>,
+    module_origin: Option<StableModuleOriginIdentity>,
+    stage0_resolution_facts: Arc<Stage0ResolutionFacts>,
+) -> Rc<FileValueResolutionServices> {
+    Rc::new(FileValueResolutionServices {
+        stage0_resolution_facts: Some(stage0_resolution_facts),
+        module_resources,
+        module_origin,
+    })
 }
 
 impl NominalOriginResolver for MaterialisationNominalOriginResolver<'_> {
@@ -902,6 +1192,7 @@ impl ModuleMaterialisationContext {
                     pool: Box::new([]),
                     tokens: Box::new([]),
                     path_syntax: PathSyntaxTable::default(),
+                    resolved_file_references: Box::new([]),
                 },
                 signature: StableFunctionSignature {
                     parameters: Box::new([]),
@@ -921,6 +1212,7 @@ impl ModuleMaterialisationContext {
             evidence: Box::new([]),
             semantic_closure: StableSemanticClosure::default(),
             artefacts,
+            module_origin: None,
         }
     }
 
@@ -1021,6 +1313,16 @@ impl GenericTemplateArtefact {
         let source_file = materialise_path(&self.source_file, &mut string_table);
         let function_path = materialise_path(&self.function_path, &mut string_table);
         let entry_dir = source_file.parent().unwrap_or_default();
+        let materialised_body = self
+            .body
+            .materialise(&source_file, &mut string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+        let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
+        let file_value_resolution = generated_file_value_resolution_services(
+            Rc::clone(&module_resources),
+            context.module_origin.clone(),
+            Arc::clone(&materialised_body.resolution_facts),
+        );
         let build_context = AstBuildContext {
             external_package_registry: Arc::new(external_package_registry.clone()),
             style_directives,
@@ -1029,6 +1331,7 @@ impl GenericTemplateArtefact {
             root_role: ModuleRootRole::Support,
             build_profile,
             project_path_resolver: Some(project_path_resolver),
+            file_value_resolution: Some(file_value_resolution),
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
@@ -1083,12 +1386,17 @@ impl GenericTemplateArtefact {
             },
             string_table_ref,
         )?;
+        let value_services = GeneratedValueMaterialisationServices {
+            external_registry: external_package_registry,
+            template_ir_store: &phase_context.template_ir_store,
+            module_resources: Rc::clone(&module_resources),
+        };
         self.install_closed_environment(
             context,
             &mut environment,
-            external_package_registry,
-            &phase_context.template_ir_store,
+            &value_services,
             string_table_ref,
+            Some(materialised_body),
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
 
@@ -1211,17 +1519,18 @@ impl GenericTemplateArtefact {
         }
         Ok(environment)
     }
-
     fn install_closed_environment(
         &self,
         context: &ModuleMaterialisationContext,
         environment: &mut AstModuleEnvironment,
-        external_package_registry: &ExternalPackageRegistry,
-        template_ir_store: &Rc<
-            RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>,
-        >,
+        services: &GeneratedValueMaterialisationServices<'_>,
         string_table: &mut StringTable,
+        mut materialised_self_body: Option<MaterialisedBody>,
     ) -> Result<(), CompilerError> {
+        let external_package_registry = services.external_registry;
+        let template_ir_store = services.template_ir_store;
+        let module_resources = Rc::clone(&services.module_resources);
+        let value_services = services;
         for nominal in &self.nominals {
             let type_id = intern_generated_canonical_type(
                 &nominal.identity,
@@ -1266,8 +1575,7 @@ impl GenericTemplateArtefact {
                     &mut environment.type_environment,
                     blueprint,
                     self,
-                    external_package_registry,
-                    template_ir_store,
+                    value_services,
                     string_table,
                 )?
             {
@@ -1316,6 +1624,7 @@ impl GenericTemplateArtefact {
                         type_environment: &mut environment.type_environment,
                         external_package_registry,
                         template_ir_store,
+                        module_resources: Rc::clone(&module_resources),
                         string_table,
                     },
                 )?;
@@ -1370,12 +1679,15 @@ impl GenericTemplateArtefact {
                     external_registry: external_package_registry,
                     nominal_source: self,
                     template_ir_store: Rc::clone(template_ir_store),
+                    module_resources: Rc::clone(&module_resources),
                 };
+                let location = constant.location.materialise(string_table);
                 let mut value = materialize_public_folded_value(
                     &mut materialiser,
                     &constant.value,
                     type_id,
                     string_table,
+                    &location,
                 )?;
                 value.value_mode = ValueMode::ImmutableReference;
                 let declaration = Declaration {
@@ -1469,6 +1781,7 @@ impl GenericTemplateArtefact {
                         type_environment: &mut environment.type_environment,
                         external_package_registry,
                         template_ir_store,
+                        module_resources: Rc::clone(&module_resources),
                         string_table,
                     },
                 )?;
@@ -1767,6 +2080,7 @@ impl GenericTemplateArtefact {
                     type_environment: &mut environment.type_environment,
                     external_package_registry,
                     template_ir_store,
+                    module_resources: Rc::clone(&module_resources),
                     string_table,
                 },
             )?;
@@ -1779,7 +2093,19 @@ impl GenericTemplateArtefact {
                 None
             };
             let source_file = materialise_path(&nested.source_file, string_table);
-            let body_tokens = nested.body.materialise(&source_file, string_table)?;
+            let body = if nested.declaration_identity == self.declaration_identity {
+                materialised_self_body.take().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "generated materialisation consumed its root generic body more than once",
+                    )
+                })?
+                .into_generic_body()
+            } else {
+                nested
+                    .body
+                    .materialise(&source_file, string_table)?
+                    .into_generic_body()
+            };
             let template = GenericFunctionTemplate {
                 function_path: nested_path.clone(),
                 source_file,
@@ -1787,7 +2113,7 @@ impl GenericTemplateArtefact {
                 generic_parameter_owner: nested.generic_parameter_owner.clone(),
                 generic_parameter_list_id,
                 signature: signature.clone(),
-                body_tokens: Some(body_tokens),
+                body_tokens: Some(body),
                 declaration_location: nested.declaration_location.materialise(string_table),
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
@@ -1830,6 +2156,11 @@ impl GenericTemplateArtefact {
             }
             Rc::make_mut(&mut lookups.declaration_semantics)
                 .register_materialised_function(nested_path);
+        }
+        if materialised_self_body.is_some() {
+            return Err(CompilerError::compiler_error(
+                "generated materialisation did not install its root generic body",
+            ));
         }
         Ok(())
     }
@@ -2273,15 +2604,13 @@ fn materialised_generic_nominal_metadata(
             ));
         }
     };
-    Ok(
-        (!environment_parameters.is_empty()).then_some(GenericDeclarationMetadata {
-            kind,
-            parameters: GenericParameterList {
-                parameters: environment_parameters,
-            },
-            declaration_location: Default::default(),
-        }),
-    )
+    Ok(Some(GenericDeclarationMetadata {
+        kind,
+        parameters: GenericParameterList {
+            parameters: environment_parameters,
+        },
+        declaration_location: Default::default(),
+    }))
 }
 
 fn materialised_struct_fields(
@@ -2289,8 +2618,7 @@ fn materialised_struct_fields(
     type_environment: &mut TypeEnvironment,
     blueprint: &NominalMaterialisationBlueprint,
     nominal_source: &impl MaterialisationNominalSource,
-    external_package_registry: &ExternalPackageRegistry,
-    template_ir_store: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
+    services: &GeneratedValueMaterialisationServices<'_>,
     string_table: &mut StringTable,
 ) -> Result<Option<Vec<Declaration>>, CompilerError> {
     if !matches!(
@@ -2323,18 +2651,21 @@ fn materialised_struct_fields(
                 "Materialised struct field name disagrees with its stable blueprint",
             ));
         }
+        let field_location = blueprint_field.location.materialise(string_table);
         let mut value = if let Some(default) = blueprint_field.folded_default.as_ref() {
             let mut materialiser = GeneratedFoldedValueMaterialiser {
                 type_environment,
-                external_registry: external_package_registry,
+                external_registry: services.external_registry,
                 nominal_source,
-                template_ir_store: Rc::clone(template_ir_store),
+                template_ir_store: Rc::clone(services.template_ir_store),
+                module_resources: Rc::clone(&services.module_resources),
             };
             materialize_public_folded_value(
                 &mut materialiser,
                 default,
                 field.type_id,
                 string_table,
+                &field_location,
             )?
         } else {
             Expression::new(
@@ -2700,6 +3031,7 @@ struct StableFunctionMaterialisationContext<'a, N: MaterialisationNominalSource>
     external_package_registry: &'a ExternalPackageRegistry,
     template_ir_store:
         &'a Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
+    module_resources: Rc<RefCell<ModuleResourceTable>>,
     string_table: &'a mut StringTable,
 }
 
@@ -2729,12 +3061,14 @@ impl StableFunctionSignature {
                     external_registry: context.external_package_registry,
                     nominal_source: context.nominal_source,
                     template_ir_store: Rc::clone(context.template_ir_store),
+                    module_resources: Rc::clone(&context.module_resources),
                 };
                 materialize_public_folded_value(
                     &mut materialiser,
                     default,
                     type_id,
                     context.string_table,
+                    &parameter_location,
                 )?
             } else {
                 Expression::new(
@@ -2815,6 +3149,11 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
     string_table_fork_source: OnceCell<StringTableForkSource>,
     pub(crate) entry_dir: InternedPath,
+    pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
+    /// The module-local resource authority used when a generated preparation captures a nested
+    /// body before its own materialisation context is published.
+    module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) binding_environment: HeaderBindingEnvironment,
@@ -2871,6 +3210,9 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) public_trait_roots: &'a [ResolvedPublicTraitRoot],
     pub(crate) default_const_templates_by_path: FxHashMap<InternedPath, PublicConstTemplate>,
     pub(crate) entry_dir: InternedPath,
+    pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
+    pub(crate) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) string_table: &'a StringTable,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
@@ -2945,8 +3287,9 @@ impl ModuleMaterialisationPreparationBuilder {
     pub(crate) fn freeze(
         self,
         public_interface: &PublicSemanticInterface,
+        resources: &ModuleResourceTable,
     ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
-        self.context.freeze(public_interface)
+        self.context.freeze(public_interface, resources)
     }
 
     pub(crate) fn install_concrete_executable_contracts(
@@ -2954,11 +3297,13 @@ impl ModuleMaterialisationPreparationBuilder {
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
         public_origins_by_path: &FxHashMap<InternedPath, OriginFunctionId>,
         public_nominal_origins_by_path: &FxHashMap<InternedPath, OriginTypeId>,
+        resources: &ModuleResourceTable,
     ) -> Result<Vec<(InternedPath, ModulePrivateExecutableIdentity)>, CompilerError> {
         self.context.install_concrete_executable_contracts(
             module_origin,
             public_origins_by_path,
             public_nominal_origins_by_path,
+            resources,
         )
     }
 
@@ -2979,16 +3324,18 @@ impl ModuleMaterialisationPreparationBuilder {
         source: &ModuleMaterialisationPreparation,
     ) -> Result<(), CompilerError> {
         for (identity, blueprint) in &source.nominal_blueprints {
-            if let Some(existing) = self.context.nominal_blueprints.get(identity)
-                && existing != blueprint
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated materialisation contexts disagree on nominal blueprint {identity:?}",
-                )));
+            if let Some(existing) = self.context.nominal_blueprints.get_mut(identity) {
+                if existing != blueprint {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated materialisation contexts disagree on nominal blueprint {identity:?}",
+                    )));
+                }
+                existing.merge_provenance_from(blueprint);
+            } else {
+                self.context
+                    .nominal_blueprints
+                    .insert(identity.clone(), blueprint.clone());
             }
-            self.context
-                .nominal_blueprints
-                .insert(identity.clone(), blueprint.clone());
         }
         Ok(())
     }
@@ -2998,16 +3345,18 @@ impl ModuleMaterialisationPreparationBuilder {
         source: &GenericTemplateArtefact,
     ) -> Result<(), CompilerError> {
         for (identity, blueprint) in &source.nominal_blueprints {
-            if let Some(existing) = self.context.nominal_blueprints.get(identity)
-                && existing != blueprint
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated materialisation artefact disagrees on nominal blueprint {identity:?}",
-                )));
+            if let Some(existing) = self.context.nominal_blueprints.get_mut(identity) {
+                if existing != blueprint {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Generated materialisation artefact disagrees on nominal blueprint {identity:?}",
+                    )));
+                }
+                existing.merge_provenance_from(blueprint);
+            } else {
+                self.context
+                    .nominal_blueprints
+                    .insert(identity.clone(), blueprint.clone());
             }
-            self.context
-                .nominal_blueprints
-                .insert(identity.clone(), blueprint.clone());
         }
         Ok(())
     }
@@ -3047,6 +3396,7 @@ impl ModuleMaterialisationPreparation {
     fn freeze(
         mut self,
         public_interface: &PublicSemanticInterface,
+        resources: &ModuleResourceTable,
     ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
         self.rebuild_generic_template_identity_index()?;
         let mut templates = self
@@ -3079,17 +3429,20 @@ impl ModuleMaterialisationPreparation {
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
 
-        let semantic_closure = self.stable_semantic_closure()?;
+        let semantic_closure = self.stable_semantic_closure(resources)?;
 
         let artefacts = templates
             .into_iter()
-            .map(|template| self.freeze_template(template, public_interface, &semantic_closure))
+            .map(|template| {
+                self.freeze_template(template, public_interface, &semantic_closure, resources)
+            })
             .collect::<Result<Box<[_]>, CompilerError>>()?;
         Ok(Some(ModuleMaterialisationContext {
             declaration_closure: declaration_closure.into_boxed_slice(),
             evidence: evidence.into_boxed_slice(),
             semantic_closure,
             artefacts,
+            module_origin: self.module_origin.clone(),
         }))
     }
 
@@ -3098,13 +3451,14 @@ impl ModuleMaterialisationPreparation {
         template: &GenericFunctionTemplate,
         public_interface: &PublicSemanticInterface,
         semantic_closure: &StableSemanticClosure,
+        resources: &ModuleResourceTable,
     ) -> Result<GenericTemplateArtefact, CompilerError> {
         let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
             CompilerError::compiler_error(
                 "Retained generic template has no stable declaration identity",
             )
         })?;
-        let body_tokens = template.body_tokens.as_ref().ok_or_else(|| {
+        let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerError::compiler_error("Retained generic template has no body syntax")
         })?;
         let generic_parameters = self.stable_generic_parameters(template)?;
@@ -3117,8 +3471,9 @@ impl ModuleMaterialisationPreparation {
             .transpose()?;
         let receiver_nominal_identity = self.receiver_nominal_identity(&template.function_path)?;
         let parameter_slots = self.generic_parameter_slots(template)?;
-        let signature = self.stable_function_signature(&template.signature, &parameter_slots)?;
-        let mut referenced_names = stable_body_symbol_names(body_tokens, &self.string_table);
+        let signature =
+            self.stable_function_signature(&template.signature, &parameter_slots, resources)?;
+        let mut referenced_names = stable_body_symbol_names(body.tokens(), &self.string_table);
         self.retain_generic_bound_trait_names(
             &template.source_file,
             &generic_parameters,
@@ -3126,13 +3481,28 @@ impl ModuleMaterialisationPreparation {
         )?;
         let selected_paths =
             self.selected_visible_paths(&template.source_file, &referenced_names)?;
-        let visibility = self.stable_file_visibility(&template.source_file, &referenced_names)?;
+        let visibility =
+            self.stable_file_visibility(&template.source_file, &referenced_names, resources)?;
         let declarations = self.stable_declaration_bindings(&selected_paths, public_interface)?;
         let local_declarations = self.stable_local_declaration_bindings(&selected_paths);
-        let callables = self.stable_callable_bindings(&selected_paths)?;
+        let callables = self.stable_callable_bindings(&selected_paths, resources)?;
         let nominals = self.stable_nominal_bindings(&selected_paths);
-        let nominal_blueprints =
-            self.stable_nominal_blueprints(&selected_paths, &signature, semantic_closure)?;
+        let nominal_blueprints = self.stable_nominal_blueprints(
+            &selected_paths,
+            &signature,
+            semantic_closure,
+            resources,
+        )?;
+        let content_value_at_path = |logical_path: &InternedPath| {
+            let content_path = self.content_constant_path_for_capture(logical_path)?;
+            self.stable_folded_value_at_path(&content_path, resources)
+        };
+        let stage0_resolution_facts = match body {
+            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+            GenericFunctionBody::Materialised {
+                resolution_facts, ..
+            } => Some(resolution_facts.as_ref()),
+        };
 
         Ok(GenericTemplateArtefact {
             declaration_identity,
@@ -3146,9 +3516,11 @@ impl ModuleMaterialisationPreparation {
                 &self.string_table,
             ),
             body: StableBodySyntax::capture(
-                body_tokens,
+                body.tokens(),
                 &template.source_file,
                 &self.string_table,
+                stage0_resolution_facts,
+                &content_value_at_path,
             )?,
             signature,
             generic_parameters,
@@ -3228,7 +3600,10 @@ impl ModuleMaterialisationPreparation {
     ///
     /// These declarations have no provider origin, so retaining only their visible paths would
     /// leave a generated sidecar with a visibility entry but no declaration fact to resolve.
-    fn stable_semantic_closure(&self) -> Result<StableSemanticClosure, CompilerError> {
+    fn stable_semantic_closure(
+        &self,
+        resources: &ModuleResourceTable,
+    ) -> Result<StableSemanticClosure, CompilerError> {
         let mut constants = Vec::new();
         for row in self.const_values.iter_module_constant_views() {
             let (path, metadata) = (row.path, row.metadata);
@@ -3240,11 +3615,12 @@ impl ModuleMaterialisationPreparation {
                 continue;
             }
             let type_identity = self.stable_type_identity(metadata.type_id)?;
-            let value = self.stable_folded_value_at_path(path)?;
+            let value = self.stable_folded_value_at_path(path, resources)?;
             constants.push(StableLocalConstant {
                 local_path: stable_path(path, &self.string_table),
                 type_identity,
                 value,
+                location: StableSourceLocation::capture(&metadata.location, &self.string_table),
             });
         }
         constants.sort_by(|left, right| left.local_path.cmp(&right.local_path));
@@ -3511,6 +3887,7 @@ impl ModuleMaterialisationPreparation {
     fn stable_folded_value(
         &self,
         expression: &Expression,
+        resources: &ModuleResourceTable,
     ) -> Result<PublicFoldedValue, CompilerError> {
         let nominal_origins = MaterialisationNominalOriginResolver {
             type_environment: &self.type_environment,
@@ -3521,28 +3898,49 @@ impl ModuleMaterialisationPreparation {
             &generic_parameter_origins,
             &self.external_package_registry,
         );
-        convert_expression_to_folded_value(
-            expression,
-            &self.type_environment,
-            &self.string_table,
-            &projection_context,
+        let folded_value_context = FoldedValueProjectionContext {
+            type_environment: &self.type_environment,
+            string_table: &self.string_table,
+            projection_context: &projection_context,
+            resources: Some(resources),
+        };
+        convert_expression_to_folded_value(expression, &folded_value_context).map_err(
+            |mut error| {
+                error.msg = format!(
+                    "{} (while freezing value at {}:{}:{})",
+                    error.msg,
+                    expression.location.scope.to_string(&self.string_table),
+                    expression.location.start_pos.line_number,
+                    expression.location.start_pos.char_column,
+                );
+                error
+            },
         )
-        .map_err(|mut error| {
-            error.msg = format!(
-                "{} (while freezing value at {}:{}:{})",
-                error.msg,
-                expression.location.scope.to_string(&self.string_table),
-                expression.location.start_pos.line_number,
-                expression.location.start_pos.char_column,
-            );
-            error
-        })
+    }
+    fn content_constant_path_for_capture(
+        &self,
+        logical_path: &InternedPath,
+    ) -> Result<InternedPath, CompilerError> {
+        self.const_values
+            .module_constant_paths()
+            .find(|path| {
+                path.parent().as_ref() == Some(logical_path)
+                    && path.name_str(&self.string_table) == Some("content")
+            })
+            .cloned()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "synthetic content constant for {} was not present before generic capture",
+                    logical_path.to_string(&self.string_table)
+                ))
+            })
     }
 
     fn stable_folded_value_at_expression_path(
         &self,
         path: &InternedPath,
         expression: &Expression,
+        resources: &ModuleResourceTable,
     ) -> Result<PublicFoldedValue, CompilerError> {
         if matches!(expression.kind, ExpressionKind::Template(_)) {
             return self
@@ -3557,12 +3955,13 @@ impl ModuleMaterialisationPreparation {
                     ))
                 });
         }
-        self.stable_folded_value(expression)
+        self.stable_folded_value(expression, resources)
     }
 
     fn stable_folded_value_at_path(
         &self,
         path: &InternedPath,
+        resources: &ModuleResourceTable,
     ) -> Result<PublicFoldedValue, CompilerError> {
         let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
             CompilerError::compiler_error(format!(
@@ -3582,23 +3981,23 @@ impl ModuleMaterialisationPreparation {
             &generic_parameter_origins,
             &self.external_package_registry,
         );
-        convert_const_value_to_folded_value(
-            &self.const_values,
-            value_id,
-            &self.type_environment,
-            &self.string_table,
-            &projection_context,
-        )
-        .map_err(|mut error| {
-            error.msg = format!(
-                "{} (while freezing value at {}:{}:{})",
-                error.msg,
-                metadata.location.scope.to_string(&self.string_table),
-                metadata.location.start_pos.line_number,
-                metadata.location.start_pos.char_column,
-            );
-            error
-        })
+        let folded_value_context = FoldedValueProjectionContext {
+            type_environment: &self.type_environment,
+            string_table: &self.string_table,
+            projection_context: &projection_context,
+            resources: Some(resources),
+        };
+        convert_const_value_to_folded_value(&self.const_values, value_id, &folded_value_context)
+            .map_err(|mut error| {
+                error.msg = format!(
+                    "{} (while freezing value at {}:{}:{})",
+                    error.msg,
+                    metadata.location.scope.to_string(&self.string_table),
+                    metadata.location.start_pos.line_number,
+                    metadata.location.start_pos.char_column,
+                );
+                error
+            })
     }
 
     /// Retains the declaration-file spellings that make non-core generic bounds visible.
@@ -3677,6 +4076,7 @@ impl ModuleMaterialisationPreparation {
         &self,
         signature: &FunctionSignature,
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
+        resources: &ModuleResourceTable,
     ) -> Result<StableFunctionSignature, CompilerError> {
         let parameters = signature
             .parameters
@@ -3696,6 +4096,7 @@ impl ModuleMaterialisationPreparation {
                             self.stable_folded_value_at_expression_path(
                                 &parameter.id,
                                 &parameter.value,
+                                resources,
                             )
                         })
                         .transpose()?,
@@ -3733,6 +4134,7 @@ impl ModuleMaterialisationPreparation {
         &self,
         source_file: &InternedPath,
         referenced_names: &FxHashSet<String>,
+        resources: &ModuleResourceTable,
     ) -> Result<StableFileVisibility, CompilerError> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let capture_declarations = |bindings: &FxHashMap<StringId, SourceDeclarationTarget>| {
@@ -3818,8 +4220,11 @@ impl ModuleMaterialisationPreparation {
                     local_path: stable_path(local_path, &self.string_table),
                     target,
                     receiver,
-                    signature: self
-                        .stable_function_signature(&resolved.signature, &parameter_slots)?,
+                    signature: self.stable_function_signature(
+                        &resolved.signature,
+                        &parameter_slots,
+                        resources,
+                    )?,
                     summary: self
                         .imported_functions_by_local_path
                         .get(local_path)
@@ -3979,6 +4384,7 @@ impl ModuleMaterialisationPreparation {
     fn stable_callable_bindings(
         &self,
         selected_paths: &FxHashSet<InternedPath>,
+        resources: &ModuleResourceTable,
     ) -> Result<Box<[StableCallableBinding]>, CompilerError> {
         let mut callables = Vec::new();
         for path in selected_paths {
@@ -3997,8 +4403,11 @@ impl ModuleMaterialisationPreparation {
             callables.push(StableCallableBinding {
                 local_path: stable_path(path, &self.string_table),
                 target,
-                signature: self
-                    .stable_function_signature(&resolved.signature, &FxHashMap::default())?,
+                signature: self.stable_function_signature(
+                    &resolved.signature,
+                    &FxHashMap::default(),
+                    resources,
+                )?,
                 summary: contract.summary.clone(),
             });
         }
@@ -4011,6 +4420,7 @@ impl ModuleMaterialisationPreparation {
         selected_paths: &FxHashSet<InternedPath>,
         signature: &StableFunctionSignature,
         semantic_closure: &StableSemanticClosure,
+        resources: &ModuleResourceTable,
     ) -> Result<FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>, CompilerError>
     {
         let mut identities = FxHashSet::default();
@@ -4029,7 +4439,7 @@ impl ModuleMaterialisationPreparation {
                 {
                     identities.insert(identity);
                 }
-                if let Ok(value) = self.stable_folded_value_at_path(path) {
+                if let Ok(value) = self.stable_folded_value_at_path(path, resources) {
                     value.visit_type_identities(&mut |identity| {
                         identities.insert(identity.clone());
                     });
@@ -4148,9 +4558,10 @@ impl ModuleMaterialisationPreparation {
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
         public_origins_by_path: &FxHashMap<InternedPath, OriginFunctionId>,
         public_nominal_origins_by_path: &FxHashMap<InternedPath, OriginTypeId>,
+        resources: &ModuleResourceTable,
     ) -> Result<Vec<(InternedPath, ModulePrivateExecutableIdentity)>, CompilerError> {
         self.install_private_semantic_identities(module_origin, public_nominal_origins_by_path)?;
-        self.install_nominal_blueprints()?;
+        self.install_nominal_blueprints(resources)?;
 
         let generic_paths = self
             .generic_function_templates_by_path
@@ -4515,7 +4926,10 @@ impl ModuleMaterialisationPreparation {
     /// Imported and local aliases can add several lookup paths for the same nominal. The
     /// canonical identity is the sole blueprint key, so each definition is captured once in
     /// deterministic identity order.
-    fn install_nominal_blueprints(&mut self) -> Result<(), CompilerError> {
+    fn install_nominal_blueprints(
+        &mut self,
+        resources: &ModuleResourceTable,
+    ) -> Result<(), CompilerError> {
         let mut nominal_type_ids = FxHashMap::default();
         for (identity, type_id) in self.type_environment.canonical_type_identities() {
             if matches!(
@@ -4532,7 +4946,7 @@ impl ModuleMaterialisationPreparation {
 
         let mut blueprints = FxHashMap::default();
         for (identity, type_id) in nominal_type_ids {
-            let blueprint = self.nominal_blueprint(&identity, type_id)?;
+            let blueprint = self.nominal_blueprint(&identity, type_id, resources)?;
             blueprints.insert(identity, blueprint);
         }
         self.nominal_blueprints = blueprints;
@@ -4543,6 +4957,7 @@ impl ModuleMaterialisationPreparation {
         &self,
         identity: &CanonicalTypeIdentity,
         type_id: TypeId,
+        resources: &ModuleResourceTable,
     ) -> Result<NominalMaterialisationBlueprint, CompilerError> {
         let generic_parameter_list_id = match self.type_environment.get(type_id) {
             Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
@@ -4651,6 +5066,7 @@ impl ModuleMaterialisationPreparation {
                     &definition.fields,
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
+                    resources,
                 )?,
                 const_record: definition.const_record,
             },
@@ -4659,6 +5075,7 @@ impl ModuleMaterialisationPreparation {
                     &definition.variants,
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
+                    resources,
                 )?,
             },
             _ => unreachable!("nominal kind was validated before generic blueprint extraction"),
@@ -4716,6 +5133,7 @@ impl ModuleMaterialisationPreparation {
         fields: &[FieldDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
         nominal_path: Option<&InternedPath>,
+        resources: &ModuleResourceTable,
     ) -> Result<Box<[NominalFieldBlueprint]>, CompilerError> {
         fields
             .iter()
@@ -4725,22 +5143,29 @@ impl ModuleMaterialisationPreparation {
                         "Materialisation nominal field path has no defining name",
                     )
                 })?;
+                let field_declaration =
+                    nominal_path.and_then(|path| self.field_declaration(path, name));
+                let folded_default = match field_declaration {
+                    Some(declaration)
+                        if !matches!(declaration.value.kind, ExpressionKind::NoValue) =>
+                    {
+                        Some(self.stable_folded_value_at_expression_path(
+                            &declaration.id,
+                            &declaration.value,
+                            resources,
+                        )?)
+                    }
+                    _ => None,
+                };
+                let authored_location = field_declaration
+                    .map(|declaration| &declaration.value.location)
+                    .unwrap_or(&field.location);
                 Ok(NominalFieldBlueprint {
                     name: self.string_table.resolve(name).to_owned(),
                     field_type: self
                         .materialisation_type_blueprint(field.type_id, parameter_slots)?,
-                    folded_default: nominal_path
-                        .and_then(|path| self.field_declaration(path, name))
-                        .filter(|declaration| {
-                            !matches!(declaration.value.kind, ExpressionKind::NoValue)
-                        })
-                        .map(|declaration| {
-                            self.stable_folded_value_at_expression_path(
-                                &declaration.id,
-                                &declaration.value,
-                            )
-                        })
-                        .transpose()?,
+                    folded_default,
+                    location: StableSourceLocation::capture(authored_location, &self.string_table),
                 })
             })
             .collect::<Result<Box<[_]>, CompilerError>>()
@@ -4751,15 +5176,20 @@ impl ModuleMaterialisationPreparation {
         variants: &[ChoiceVariantDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
         nominal_path: Option<&InternedPath>,
+        resources: &ModuleResourceTable,
     ) -> Result<Box<[NominalChoiceVariantBlueprint]>, CompilerError> {
         variants
             .iter()
             .map(|variant| {
                 let payload_fields = match &variant.payload {
                     ChoiceVariantPayloadDefinition::Unit => Box::new([]),
-                    ChoiceVariantPayloadDefinition::Record { fields } => {
-                        self.nominal_field_blueprints(fields, parameter_slots, nominal_path)?
-                    }
+                    ChoiceVariantPayloadDefinition::Record { fields } => self
+                        .nominal_field_blueprints(
+                            fields,
+                            parameter_slots,
+                            nominal_path,
+                            resources,
+                        )?,
                 };
                 Ok(NominalChoiceVariantBlueprint {
                     name: self.string_table.resolve(variant.name).to_owned(),
@@ -4981,6 +5411,9 @@ impl ModuleMaterialisationPreparation {
             public_trait_roots,
             default_const_templates_by_path,
             entry_dir,
+            module_origin,
+            stage0_resolution_facts,
+            module_resources,
             string_table,
             template_const_loop_iteration_limit,
             capacity_estimate,
@@ -4990,6 +5423,9 @@ impl ModuleMaterialisationPreparation {
             string_table: string_table.clone_preserving_inherited_prefix(),
             string_table_fork_source: OnceCell::new(),
             entry_dir,
+            module_origin,
+            module_resources,
+            stage0_resolution_facts,
             type_environment: type_environment.fork_for_generated(),
             declaration_table: declaration_table_without_module_values(
                 &lookups.declaration_table,
@@ -5034,11 +5470,20 @@ impl ModuleMaterialisationPreparation {
     pub(crate) fn build_environment(
         &self,
         phase_context: &AstPhaseContext<'_>,
+        module_resources: Rc<RefCell<ModuleResourceTable>>,
         string_table: &mut StringTable,
     ) -> Result<AstModuleEnvironment, CompilerError> {
         let mut declaration_table =
             TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
         let mut resolved_module_constants = ResolvedConstantSet::default();
+        let mut generated_type_environment = self.type_environment.clone();
+        let mut template_materialiser = GeneratedFoldedValueMaterialiser {
+            type_environment: &mut generated_type_environment,
+            external_registry: &self.external_package_registry,
+            nominal_source: self,
+            template_ir_store: Rc::clone(&phase_context.template_ir_store),
+            module_resources: Rc::clone(&module_resources),
+        };
         for path in self.const_values.module_constant_paths() {
             let value_id = self.const_values.value_for_path(path).ok_or_else(|| {
                 CompilerError::compiler_error(
@@ -5058,6 +5503,7 @@ impl ModuleMaterialisationPreparation {
             let mut template_builder =
                 |projected: &PublicConstTemplate, metadata: &ConstValueMetadata| {
                     let template = materialize_public_const_template(
+                        &mut template_materialiser,
                         projected,
                         &phase_context.template_ir_store,
                         string_table,
@@ -5141,7 +5587,6 @@ impl ModuleMaterialisationPreparation {
             Self::generic_template_identity_index(&self.generic_function_templates_by_path)?;
         Ok(())
     }
-
     fn generic_template_identity_index(
         templates: &FxHashMap<InternedPath, GenericFunctionTemplate>,
     ) -> Result<FxHashMap<GeneratedDeclarationIdentity, InternedPath>, CompilerError> {
@@ -5180,10 +5625,81 @@ impl ModuleMaterialisationPreparation {
                     &self.string_table,
                 )
             })?;
+        let content_value_at_path = |logical_path: &InternedPath| {
+            let content_path = self.content_constant_path_for_capture(logical_path)?;
+            let resources = self.module_resources.as_ref().ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "nested generic content capture has no module resource table",
+                )
+            })?;
+            let resources = resources.borrow();
+            self.stable_folded_value_at_path(&content_path, &resources)
+        };
+        let body = template.body_tokens.as_ref().ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "Generated request's retained generic template has no body syntax",
+                ),
+                &self.string_table,
+            )
+        })?;
+        let stage0_resolution_facts = match body {
+            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+            GenericFunctionBody::Materialised {
+                resolution_facts, ..
+            } => Some(resolution_facts.as_ref()),
+        };
+        let stable_body = StableBodySyntax::capture(
+            body.tokens(),
+            &template.source_file,
+            &self.string_table,
+            stage0_resolution_facts,
+            &content_value_at_path,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+        let mut stable_nested_bodies = Vec::new();
+        for (path, nested_template) in &self.generic_function_templates_by_path {
+            if path == &template.function_path {
+                continue;
+            }
+            let Some(nested_body) = nested_template.body_tokens.as_ref() else {
+                continue;
+            };
+            let nested_stage0_resolution_facts = match nested_body {
+                GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
+                GenericFunctionBody::Materialised {
+                    resolution_facts, ..
+                } => Some(resolution_facts.as_ref()),
+            };
+            let stable_nested_body = StableBodySyntax::capture(
+                nested_body.tokens(),
+                &nested_template.source_file,
+                &self.string_table,
+                nested_stage0_resolution_facts,
+                &content_value_at_path,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+            stable_nested_bodies.push((
+                path.clone(),
+                nested_template.source_file.clone(),
+                stable_nested_body,
+            ));
+        }
+
         let (mut string_table, requester_string_remap) =
             requester_context.fork_materialisation_string_table();
         let mut call_location = requester_call_location.clone();
         call_location.remap_string_ids(&requester_string_remap);
+        let source_file = template.source_file.clone();
+        let materialised_body = stable_body
+            .materialise(&source_file, &mut string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+        let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
+        let file_value_resolution = generated_file_value_resolution_services(
+            Rc::clone(&module_resources),
+            self.module_origin.clone(),
+            Arc::clone(&materialised_body.resolution_facts),
+        );
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: &self.style_directives,
@@ -5192,6 +5708,7 @@ impl ModuleMaterialisationPreparation {
             root_role: ModuleRootRole::Support,
             build_profile: self.build_profile,
             project_path_resolver: self.project_path_resolver.clone().or(project_path_resolver),
+            file_value_resolution: Some(file_value_resolution),
             path_format_config: self.path_format_config.clone(),
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             capacity_estimate: self.capacity_estimate,
@@ -5207,8 +5724,40 @@ impl ModuleMaterialisationPreparation {
             timing_context
         );
         let mut environment = self
-            .build_environment(&phase_context, string_table_ref)
+            .build_environment(
+                &phase_context,
+                Rc::clone(&module_resources),
+                string_table_ref,
+            )
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+        {
+            let lookups = Rc::make_mut(&mut environment.lookups);
+            let generated_template = lookups
+                .generic_function_templates_by_path
+                .get_mut(&template.function_path)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated materialisation lost its selected generic template",
+                    )
+                })
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+            generated_template.body_tokens = Some(materialised_body.into_generic_body());
+            for (path, source_file, stable_nested_body) in stable_nested_bodies {
+                let materialised_nested_body = stable_nested_body
+                    .materialise(&source_file, string_table_ref)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+                let nested_template = lookups
+                    .generic_function_templates_by_path
+                    .get_mut(&path)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated materialisation lost a nested generic template",
+                        )
+                    })
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+                nested_template.body_tokens = Some(materialised_nested_body.into_generic_body());
+            }
+        }
         let mut type_arguments = Vec::with_capacity(identity.type_arguments().len());
         for canonical_identity in identity.type_arguments() {
             let type_id = intern_generated_canonical_type(
@@ -6180,6 +6729,10 @@ fn requester_type_id_for_canonical_identity(
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/blueprint_tests.rs"]
+mod blueprint_tests;
 
 #[cfg(test)]
 #[path = "tests/frozen_body_tests.rs"]

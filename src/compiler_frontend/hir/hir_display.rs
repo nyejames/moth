@@ -560,6 +560,7 @@ impl<'a> HirDisplayContext<'a> {
             HirExpressionKind::StringLiteral(value) => {
                 format!("\"{}\"", value.escape_debug())
             }
+            HirExpressionKind::StructuralString { pieces } => format!("structural {pieces:?}"),
             HirExpressionKind::Load(place) => self.render_place(place),
             HirExpressionKind::Copy(place) => format!("copy {}", self.render_place(place)),
             HirExpressionKind::BinOp { left, op, right } => format!(

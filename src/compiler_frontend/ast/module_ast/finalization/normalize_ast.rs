@@ -13,7 +13,7 @@
 //! ## Normalization Strategy
 //!
 //! 1. **Constant Folding**: Templates with `RenderableString` const value kinds
-//!    are folded into `StringSlice` expressions immediately.
+//!    are folded into compact `StringSlice` or structural-string expressions.
 //!
 //! 2. **Runtime Handoff Construction**: Runtime templates receive owned runtime
 //!    handoffs so HIR does not need to reconstruct template structure.
@@ -32,7 +32,7 @@
 //! - Runtime template handoff materialization
 //!
 //! HIR receives:
-//! - Folded constant templates as `StringSlice` expressions
+//! - Folded constant templates as `StringSlice` or structural-string expressions
 //! - Runtime templates with owned runtime handoffs
 //! - No escaped helper artifacts (`TemplateType::SlotInsert`)
 //! - No templates requiring formatting
@@ -43,6 +43,7 @@ use super::template_helpers::{
 };
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     assert_message_escape_diagnostic, assertion_condition_is_statically_true,
 };
@@ -85,7 +86,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -96,6 +97,8 @@ struct TemplateNormalizationContext<'strings> {
     template_const_loop_iteration_limit: usize,
     string_table: &'strings mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
+    module_resources:
+        Option<Rc<RefCell<crate::compiler_frontend::paths::module_resources::ModuleResourceTable>>>,
 }
 
 impl AstFinalizer<'_, '_> {
@@ -118,6 +121,11 @@ impl AstFinalizer<'_, '_> {
                     .template_const_loop_iteration_limit,
                 string_table,
                 template_ir_store: Rc::clone(&self.context.template_ir_store),
+                module_resources: self
+                    .context
+                    .file_value_resolution
+                    .as_ref()
+                    .map(|services| Rc::clone(&services.module_resources)),
             };
             normalize_ast_node_templates(node, &mut normalization_context)?;
         }
@@ -356,6 +364,7 @@ fn normalize_retained_signature_defaults(
         template_const_loop_iteration_limit,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
+        module_resources: None,
     };
 
     for parameter in &mut signature.parameters {
@@ -379,6 +388,7 @@ fn normalize_retained_field_defaults(
         template_const_loop_iteration_limit,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
+        module_resources: None,
     };
 
     for field in fields {
@@ -1198,12 +1208,10 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_) => {}
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => {}
     }
 }
 
@@ -1604,13 +1612,11 @@ fn normalize_expression_templates_with_context(
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Function(_)
         | ExpressionKind::Reference(_) => None,
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => None,
 
         ExpressionKind::ChoiceConstruct { fields, .. } => {
             for field in fields {
@@ -1638,7 +1644,10 @@ fn normalize_expression_templates_with_context(
     match template_replacement {
         Some(NormalizedTemplateExpression::Folded(folded_template, fold_provenance)) => {
             let outer_provenance = expression.synthetic_interface_provenance.clone();
-            expression.kind = ExpressionKind::StringSlice(folded_template);
+            expression.kind = match folded_template {
+                ConstStringValue::Text(value) => ExpressionKind::StringSlice(value),
+                ConstStringValue::Pieces(pieces) => ExpressionKind::StructuralString { pieces },
+            };
             expression.diagnostic_type = DataType::StringSlice;
             expression.value_mode = ValueMode::ImmutableOwned;
             expression.reactive_template = None;
@@ -1671,9 +1680,8 @@ fn normalize_expression_templates_with_context(
 
     Ok(())
 }
-
 enum NormalizedTemplateExpression {
-    Folded(StringId, SyntheticInterfaceProvenance),
+    Folded(ConstStringValue, SyntheticInterfaceProvenance),
     RuntimeTemplate(
         OwnedRuntimeTemplateHandoff,
         Option<ReactiveTemplateMetadata>,
@@ -1813,6 +1821,11 @@ fn normalize_runtime_slot_template_expression_for_hir(
 }
 
 /// Materializes the neutral AST-to-HIR payload from one prepared runtime view.
+///
+/// WHAT: passes the module string and resource authorities into the TIR handoff so owned nodes
+///       carry stable structural string pieces beyond donor-store lifetime.
+/// WHY: runtime handoff is a carry boundary; it must preserve resources and site roots until HIR's
+///      owning output policy decides how to render or reject them.
 fn materialize_runtime_template_handoff_for_hir(
     template: &Template,
     context: &mut TemplateNormalizationContext<'_>,
@@ -1822,6 +1835,10 @@ fn materialize_runtime_template_handoff_for_hir(
     let store_handle = Rc::clone(&context.template_ir_store);
     let store = store_handle.borrow();
     let view = finalized_tir_view_for_template(template, &store)?;
+    let module_resources = context
+        .module_resources
+        .as_ref()
+        .map(|resources| resources.borrow());
 
     if matches!(
         prepared.outcome,
@@ -1835,7 +1852,12 @@ fn materialize_runtime_template_handoff_for_hir(
         .into());
     }
 
-    if let Some(handoff) = owned_runtime_slot_handoff_for_prepared_view(prepared, view.clone())? {
+    if let Some(handoff) = owned_runtime_slot_handoff_for_prepared_view(
+        prepared,
+        view.clone(),
+        context.string_table,
+        module_resources.as_deref(),
+    )? {
         increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
         return Ok(Some(NormalizedTemplateExpression::RuntimeSlotApplication(
             handoff,
@@ -1843,7 +1865,12 @@ fn materialize_runtime_template_handoff_for_hir(
         )));
     }
 
-    let handoff = owned_runtime_template_handoff_for_prepared_view(prepared, view)?;
+    let handoff = owned_runtime_template_handoff_for_prepared_view(
+        prepared,
+        view,
+        context.string_table,
+        module_resources.as_deref(),
+    )?;
 
     increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
     Ok(Some(NormalizedTemplateExpression::RuntimeTemplate(

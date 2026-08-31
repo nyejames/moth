@@ -1,0 +1,2 @@
+bad #= { @assets/logo.png = 1 }
+[: constant map path key]

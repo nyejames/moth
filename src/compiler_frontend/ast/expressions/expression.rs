@@ -365,7 +365,7 @@ pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
         // Decimal is intentionally inactive in the Alpha surface. The hint is
         // preserved only for diagnostic round-tripping of the inactive builtin.
         DataType::Decimal => builtin_type_ids::DECIMAL,
-        DataType::StringSlice | DataType::Template | DataType::Path(_) => builtin_type_ids::STRING,
+        DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
         DataType::Range => builtin_type_ids::RANGE,
         DataType::None | DataType::Inferred => builtin_type_ids::NONE,
@@ -1286,10 +1286,10 @@ impl Expression {
         classify_template: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
     ) -> Result<ConstValueKind, TemplateError> {
         let kind = match &self.kind {
-            // Literal scalars are always compile-time constants.
             ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::StringSlice(_)
+            | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_) => ConstValueKind::Literal,
 
@@ -1300,9 +1300,6 @@ impl Expression {
             // non-const rejected the documented `maybe_name #String? = none` binding form and
             // left that machinery unreachable.
             ExpressionKind::OptionNone => ConstValueKind::Literal,
-
-            #[cfg(test)]
-            ExpressionKind::Path(_) => ConstValueKind::Literal,
 
             // Composite values are constant only when every sub-field is constant.
             ExpressionKind::ChoiceConstruct { fields, .. } => {

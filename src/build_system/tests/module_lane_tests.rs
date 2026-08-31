@@ -9,6 +9,7 @@ use crate::build_system::create_project_modules::generated_store::BoundaryGenera
 use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::{
@@ -49,6 +50,7 @@ use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionSidecar, Module,
     ModuleExternalImport, ModuleRootActivity,
 };
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -221,6 +223,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
     let mut module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis,
         },
@@ -320,6 +323,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
     let module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },
@@ -463,8 +467,12 @@ fn test_package_registry(packages: Vec<CompiledSourcePackage>) -> CompletedSourc
 
 fn test_frontend_from_project_modules(modules: Vec<Module>) -> ProjectFrontendCompilation {
     let project = test_graph_boundary(modules, "test", "");
-    ProjectFrontendCompilation::new(project, CompletedSourcePackageRegistry::new())
-        .expect("test project boundary should validate")
+    ProjectFrontendCompilation::new(
+        project,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+    )
+    .expect("test project boundary should validate")
 }
 
 fn test_frontend_with_source_package(
@@ -482,6 +490,7 @@ fn test_frontend_with_source_package(
             root_module_id: ModuleId::from_index(0),
             boundary: package,
         }]),
+        ResourceInputRegistry::new(),
     )
     .expect("test frontend should validate")
 }
@@ -720,10 +729,11 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
         boundary: package,
     }]);
 
-    let error = match ProjectFrontendCompilation::new(project, registry) {
-        Ok(_) => panic!("one declaration identity must not cross boundaries"),
-        Err(error) => error,
-    };
+    let error =
+        match ProjectFrontendCompilation::new(project, registry, ResourceInputRegistry::new()) {
+            Ok(_) => panic!("one declaration identity must not cross boundaries"),
+            Err(error) => error,
+        };
     assert!(error.msg.contains("both project"));
 }
 
@@ -770,6 +780,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
                 boundary: package_b,
             },
         ]),
+        ResourceInputRegistry::new(),
     )
     .expect("overlapping package module ids should stay isolated");
 
@@ -1000,6 +1011,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
             root_module_id: ModuleId::from_index(0),
             boundary: package,
         }]),
+        ResourceInputRegistry::new(),
     )
     .expect("equal generated identities across boundaries should validate");
 
@@ -1119,6 +1131,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
                 boundary: package_b,
             },
         ]),
+        ResourceInputRegistry::new(),
     )
     .expect("frontend boundaries should validate");
 
@@ -1209,6 +1222,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
         ProjectFrontendCompilation::new(
             test_graph_boundary(vec![project_module], "test", "page"),
             test_package_registry(packages),
+            ResourceInputRegistry::new(),
         )
         .expect("frontend should validate")
     };
@@ -1300,6 +1314,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
                 root_module_id: ModuleId::from_index(0),
                 boundary,
             }]),
+            ResourceInputRegistry::new(),
         )
         .expect("single-package frontend should validate");
         let compilation = ProjectCompilation::from_frontend(frontend)
@@ -1351,6 +1366,7 @@ fn lane_module_with_generated_and_cross_module_calls(
     Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },
@@ -1432,11 +1448,14 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         diagnosed: Vec::new(),
         blocked: Vec::new(),
     };
-    let error =
-        match ProjectFrontendCompilation::new(boundary, CompletedSourcePackageRegistry::new()) {
-            Ok(_) => panic!("an unfinished module slot must reject the frontend boundary"),
-            Err(error) => error,
-        };
+    let error = match ProjectFrontendCompilation::new(
+        boundary,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+    ) {
+        Ok(_) => panic!("an unfinished module slot must reject the frontend boundary"),
+        Err(error) => error,
+    };
     assert!(
         error.msg.contains("never reached a completed outcome"),
         "unexpected frontend-boundary rejection: {error:?}"
@@ -1506,8 +1525,12 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         }],
     };
 
-    let frontend = ProjectFrontendCompilation::new(boundary, CompletedSourcePackageRegistry::new())
-        .expect("mixed outcomes are a valid retained frontend result for check");
+    let frontend = ProjectFrontendCompilation::new(
+        boundary,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+    )
+    .expect("mixed outcomes are a valid retained frontend result for check");
     assert!(frontend.has_diagnosed_or_blocked());
 
     let error = match ProjectCompilation::from_frontend(frontend) {
@@ -1584,6 +1607,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
             root_module_id: ModuleId::from_index(0),
             boundary: package,
         }]),
+        ResourceInputRegistry::new(),
     )
     .expect("warning package frontend should validate")
 }
@@ -1650,6 +1674,7 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
     Module {
         executable: ModuleExecutable {
             hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
         },
@@ -2136,8 +2161,12 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
         });
         project.generated = store;
         ProjectCompilation::from_frontend(
-            ProjectFrontendCompilation::new(project, CompletedSourcePackageRegistry::new())
-                .expect("frontend should validate"),
+            ProjectFrontendCompilation::new(
+                project,
+                CompletedSourcePackageRegistry::new(),
+                ResourceInputRegistry::new(),
+            )
+            .expect("frontend should validate"),
         )
         .expect("sidecar boundaries should assemble")
     };

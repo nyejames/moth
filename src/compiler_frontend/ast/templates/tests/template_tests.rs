@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -19,6 +20,13 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
@@ -325,7 +333,10 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
     let value = string_table.intern("const html");
 
     let mut results = FxHashMap::default();
-    results.insert(path.clone(), FoldedConstTemplateResult::new(value));
+    results.insert(
+        path.clone(),
+        FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
+    );
 
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
@@ -338,7 +349,7 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].runtime_insertion_index, 0);
-    assert_eq!(string_table.resolve(collected[0].value), "const html");
+    assert_eq!(collected[0].value, ConstStringValue::Text(value));
 }
 
 #[test]
@@ -348,7 +359,10 @@ fn collects_const_top_level_fragments_from_folded_value() {
     let value = string_table.intern("folded html");
 
     let mut results = FxHashMap::default();
-    results.insert(path.clone(), FoldedConstTemplateResult::new(value));
+    results.insert(
+        path.clone(),
+        FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
+    );
 
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 2,
@@ -361,7 +375,7 @@ fn collects_const_top_level_fragments_from_folded_value() {
 
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].runtime_insertion_index, 2);
-    assert_eq!(string_table.resolve(collected[0].value), "folded html");
+    assert_eq!(collected[0].value, ConstStringValue::Text(value));
 }
 
 #[test]
@@ -376,11 +390,11 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
     let mut results = FxHashMap::default();
     results.insert(
         first_path.clone(),
-        FoldedConstTemplateResult::new(first_value),
+        FoldedConstTemplateResult::new(ConstStringValue::Text(first_value)),
     );
     results.insert(
         second_path.clone(),
-        FoldedConstTemplateResult::new(second_value),
+        FoldedConstTemplateResult::new(ConstStringValue::Text(second_value)),
     );
 
     let fragments = vec![
@@ -401,9 +415,103 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
 
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0].runtime_insertion_index, 1);
-    assert_eq!(string_table.resolve(collected[0].value), "first");
+    assert_eq!(collected[0].value, ConstStringValue::Text(first_value));
     assert_eq!(collected[1].runtime_insertion_index, 3);
-    assert_eq!(string_table.resolve(collected[1].value), "second");
+    assert_eq!(collected[1].value, ConstStringValue::Text(second_value));
+}
+
+/// Interns one fixture resource origin for a piece-bearing collection test.
+fn fixture_resource_id() -> ResourceId {
+    let origin = StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("top-level-template-tests"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_relative_logical_path(std::path::Path::new("assets/logo.svg"))
+            .expect("fixture resource path should be portable"),
+    );
+
+    let mut resources = ModuleResourceTable::new();
+    resources.intern_origin(origin, SourceLocation::default())
+}
+
+#[test]
+fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
+    // WHAT: collection carries text, resource, and site-root pieces, alongside ordinary text
+    //      and all-text structural fragments, without flattening either structural value.
+    // WHY: structural const values must remain in the AST-local vocabulary until service conversion
+    //      and the builder's final-text boundary.
+    let mut string_table = StringTable::new();
+    let piece_path = InternedPath::from_single_str("piece.moth", &mut string_table);
+    let all_text_path = InternedPath::from_single_str("all-text.moth", &mut string_table);
+    let text_path = InternedPath::from_single_str("text.moth", &mut string_table);
+    let prefix = string_table.intern("before");
+    let suffix = string_table.intern("after");
+    let all_text_prefix = string_table.intern("all-text-before");
+    let all_text_suffix = string_table.intern("all-text-after");
+    let plain_text = string_table.intern("plain");
+    let resource = fixture_resource_id();
+    let piece_value = ConstStringValue::Pieces(vec![
+        ConstStringPiece::Text(prefix),
+        ConstStringPiece::Resource(resource),
+        ConstStringPiece::SiteRoot,
+        ConstStringPiece::Text(suffix),
+    ]);
+    let all_text_value = ConstStringValue::Pieces(vec![
+        ConstStringPiece::Text(all_text_prefix),
+        ConstStringPiece::Text(all_text_suffix),
+    ]);
+
+    let mut results = FxHashMap::default();
+    results.insert(
+        piece_path.clone(),
+        FoldedConstTemplateResult::new(piece_value.clone()),
+    );
+    results.insert(
+        all_text_path.clone(),
+        FoldedConstTemplateResult::new(all_text_value.clone()),
+    );
+    results.insert(
+        text_path.clone(),
+        FoldedConstTemplateResult::new(ConstStringValue::Text(plain_text)),
+    );
+
+    let fragments = vec![
+        TopLevelConstFragment {
+            runtime_insertion_index: 1,
+            header_path: piece_path,
+            location: test_source_location(2),
+        },
+        TopLevelConstFragment {
+            runtime_insertion_index: 2,
+            header_path: all_text_path,
+            location: test_source_location(3),
+        },
+        TopLevelConstFragment {
+            runtime_insertion_index: 3,
+            header_path: text_path,
+            location: test_source_location(4),
+        },
+    ];
+
+    let collected =
+        collect_const_top_level_fragments(&fragments, &results).expect("collection should succeed");
+
+    assert_eq!(collected.len(), 3);
+    assert_eq!(collected[0].runtime_insertion_index, 1);
+    assert_eq!(collected[0].value, piece_value);
+    assert_eq!(collected[1].runtime_insertion_index, 2);
+    assert_eq!(
+        collected[1].value, all_text_value,
+        "all-text structural fragments must remain Pieces with their exact ordered text runs"
+    );
+    assert_eq!(collected[2].runtime_insertion_index, 3);
+    assert_eq!(
+        collected[2].value,
+        ConstStringValue::Text(plain_text),
+        "ordinary text fragments must remain text values"
+    );
 }
 
 #[test]

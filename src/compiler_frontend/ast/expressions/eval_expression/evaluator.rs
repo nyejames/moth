@@ -5,7 +5,9 @@
 //!      whether an expression can stay compile-time or must survive as runtime RPN.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::const_eval::{constant_fold, fold_compile_time_expression};
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldOutcome, constant_fold, fold_compile_time_expression,
+};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -106,9 +108,21 @@ pub fn evaluate_expression(
     eval_log!("Attempting to Fold: ", Pretty rpn_items);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
 
-    let stack = constant_fold(rpn_items, string_table)?;
+    let fold_outcome = constant_fold(rpn_items, string_table)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
-    eval_log!("Stack after folding: ", Pretty stack);
+    eval_log!("Stack after folding: ", Pretty fold_outcome);
+
+    let stack = match fold_outcome {
+        ConstantFoldOutcome::Folded(stack) | ConstantFoldOutcome::NotConstant(stack) => stack,
+        ConstantFoldOutcome::TextUnavailable {
+            items: _,
+            diagnostic,
+            ..
+        } if context.kind.is_constant_context() => {
+            return Err(ExpressionTypingError::Diagnostic(diagnostic));
+        }
+        ConstantFoldOutcome::TextUnavailable { items, .. } => items,
+    };
 
     // Fully folded to a single compile-time value: hand the folded operand back by move.
     if stack.len() == 1 {

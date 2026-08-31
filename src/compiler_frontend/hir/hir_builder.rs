@@ -35,7 +35,8 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, HirLoweringResult};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
+use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
@@ -43,6 +44,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
+use std::{cell::RefCell, rc::Rc};
 
 mod metadata;
 mod reactivity;
@@ -53,16 +55,13 @@ mod reactivity;
 pub(in crate::compiler_frontend) fn lower_module(
     ast: Ast,
     string_table: &mut StringTable,
-    path_format_config: PathStringFormatConfig,
     function_origin_lookup: HirFunctionOriginLookup,
+    module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
 ) -> Result<HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
-    let ctx = HirBuilder::new(
-        string_table,
-        path_format_config,
-        type_environment,
-        function_origin_lookup,
-    );
+    let mut ctx = HirBuilder::new(string_table, type_environment, function_origin_lookup);
+
+    ctx.set_module_resources(module_resources);
     ctx.build_hir_module(ast)
 }
 
@@ -78,7 +77,8 @@ mod hir_builder_test_support;
 #[cfg(test)]
 pub(crate) use hir_builder_test_support::{
     HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
-    build_ast_with_registered_types, expressions_to_owned_render_node, lower_ast,
+    build_ast_with_registered_types, expressions_to_owned_render_node,
+    expressions_to_owned_render_node_with_resources, fixture_resource, lower_ast,
     lower_ast_with_metadata, register_local, runtime_template_expression, setup_builder,
     validate_module_for_tests,
 };
@@ -111,10 +111,6 @@ pub struct HirBuilder<'a> {
     // === For variable name resolution ===
     pub(super) string_table: &'a mut StringTable,
 
-    // === Path formatting config (origin, output style) ===
-    #[cfg(test)]
-    pub(super) path_format_config: PathStringFormatConfig,
-
     // === ID Counters ===
     next_block_id: u32,
     next_local_id: u32,
@@ -132,6 +128,15 @@ pub struct HirBuilder<'a> {
     /// WHAT: carries the AST-built type environment while lowering one module.
     /// WHY: HIR stores frontend `TypeId`s directly and queries this table for type facts.
     pub(super) type_environment: TypeEnvironment,
+
+    /// Shared module resource table for re-interning handoff resource origins.
+    ///
+    /// WHAT: the same `Rc` table AST file-value resolution interned origins into, captured so
+    ///       owned runtime-template handoff pieces can regain module-local handles.
+    /// WHY: the handoff carries `StableResourceOriginId` values, but HIR pieces use module-local
+    ///       `ResourceId`s; `intern_origin` is idempotent per origin, so re-interning against
+    ///       the issuing table returns the handle AST already minted instead of a duplicate.
+    pub(super) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
 
     /// Transient exact-path lookup for public stable function origins.
     ///
@@ -231,13 +236,9 @@ impl<'a> HirBuilder<'a> {
 
     pub fn new(
         string_table: &'a mut StringTable,
-        path_format_config: PathStringFormatConfig,
         type_environment: TypeEnvironment,
         function_origin_lookup: HirFunctionOriginLookup,
     ) -> HirBuilder<'a> {
-        #[cfg(not(test))]
-        let _ = path_format_config;
-
         HirBuilder {
             module: HirModule::new(),
 
@@ -245,9 +246,8 @@ impl<'a> HirBuilder<'a> {
             ast_warnings: Vec::new(),
 
             string_table,
-            #[cfg(test)]
-            path_format_config,
             type_environment,
+            module_resources: None,
             function_origin_lookup,
 
             next_block_id: 0,
@@ -304,6 +304,39 @@ impl<'a> HirBuilder<'a> {
         .with_type_context_for_all_diagnostics(self.type_environment.clone())
     }
 
+    /// Installs the shared module resource table captured by the lowering entry point.
+    pub(super) fn set_module_resources(
+        &mut self,
+        module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+    ) {
+        self.module_resources = module_resources;
+    }
+
+    /// Re-intern one handoff resource origin into the issuing module resource table.
+    ///
+    /// WHAT: returns the module-local handle for a `StableResourceOriginId` carried by an owned
+    ///       runtime-template handoff piece, failing the transform when the table is absent.
+    /// WHY: handoff pieces cross the AST/HIR boundary with stable origins while HIR string
+    ///       pieces carry `ResourceId`s; `intern_origin` is idempotent per origin, so
+    ///       re-interning against the table that issued the handle mints nothing new. An absent
+    ///       table mirrors the handoff's own absent-table rule, which already refuses to
+    ///       materialize a structural string without the issuing table.
+    pub(super) fn intern_handoff_resource_origin(
+        &mut self,
+        origin: &StableResourceOriginId,
+        location: &SourceLocation,
+    ) -> Result<ResourceId, CompilerError> {
+        let module_resources = self.module_resources.as_ref().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "HIR lowering reached a structural string piece without the issuing module resource table.",
+            )
+        })?;
+
+        Ok(module_resources
+            .borrow_mut()
+            .intern_origin(origin.clone(), location.clone()))
+    }
+
     /// Runs a lowering closure with `active_value_block_target` set to `target`.
     ///
     /// WHAT: scoped installation of the target consumed by `ThenValue` statements inside the
@@ -333,6 +366,7 @@ impl<'a> HirBuilder<'a> {
     /// This is the main entry point for HIR generation.
     pub fn build_hir_module(mut self, mut ast: Ast) -> Result<HirLoweringResult, CompilerMessages> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
+
         // Keep the AST warnings privately for error-context rendering only. They are not exposed
         // on the successful lowering result; frontend orchestration owns the merged warning vector.
         self.ast_warnings = ast.warnings.to_owned();

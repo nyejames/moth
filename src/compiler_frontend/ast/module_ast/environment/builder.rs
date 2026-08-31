@@ -808,7 +808,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> ScopeContext {
         let source_file_scope = header.canonical_source_file(string_table);
 
-        ScopeContext::new(
+        let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
             header.tokens.src_path.to_owned(),
             Rc::clone(&self.declaration_table),
@@ -828,6 +828,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         .with_resolved_struct_fields_by_path(Rc::clone(&self.resolved_struct_fields_by_path))
         .with_nominal_type_ids_by_path(Rc::clone(&self.nominal_type_ids_by_path))
         .with_source_file_scope(source_file_scope)
+        .with_declaring_file_id(header.tokens.file_id);
+        if let Some(services) = &self.context.file_value_resolution {
+            context = context.with_file_value_resolution(Rc::clone(services));
+        }
+        context
     }
 
     pub(crate) fn replace_declaration(

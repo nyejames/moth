@@ -1105,6 +1105,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .expect("a trait record with one public incompatibility builds a draft")

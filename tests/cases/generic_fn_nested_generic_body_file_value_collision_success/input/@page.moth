@@ -1,0 +1,5 @@
+@helpers forward
+
+value = forward("x")
+
+[: [value] ]

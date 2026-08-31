@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::{
     RuleDiagnosticKind,
 };
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
+    CompileTimePathBase, CompileTimePathResolutionError,
 };
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
@@ -181,27 +181,7 @@ fn relative_file_resolves_from_declaring_directory() {
         .expect("relative file should resolve");
 
     assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
-    assert_eq!(result.kind, CompileTimePathKind::File);
     assert!(result.filesystem_path.ends_with("src/pages/about.moth"));
-}
-
-// -----------------------------------------------------------------------
-// Relative directory resolution
-// -----------------------------------------------------------------------
-
-#[test]
-fn relative_directory_resolves_and_classifies_as_directory() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&[".", "pages"]);
-    let declaring_source = h.declaring_source();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("relative directory should resolve");
-
-    assert_eq!(result.base, CompileTimePathBase::RelativeToFile);
-    assert_eq!(result.kind, CompileTimePathKind::Directory);
 }
 
 // -----------------------------------------------------------------------
@@ -220,11 +200,10 @@ fn entry_root_file_resolves_through_fallback() {
         .expect("entry root file should resolve");
 
     assert_eq!(result.base, CompileTimePathBase::EntryRoot);
-    assert_eq!(result.kind, CompileTimePathKind::File);
 }
 
 // -----------------------------------------------------------------------
-// Non-existent target rejection
+// Target rejection
 // -----------------------------------------------------------------------
 
 #[test]
@@ -242,6 +221,28 @@ fn non_existent_target_is_rejected() {
         compile_time_path_diagnostic_payload(&err),
         DiagnosticPayload::InvalidCompileTimePath {
             reason: InvalidCompileTimePathReason::MissingTarget,
+            ..
+        }
+    ));
+}
+
+/// A path value names one file, so an existing directory is a distinct authoring
+/// mistake from a target that is not there at all.
+#[test]
+fn existing_directory_target_is_rejected_as_a_directory() {
+    let mut h = TestHarness::new();
+    let path = h.make_path(&["assets", "images"]);
+    let declaring_source = h.declaring_source();
+
+    let err = h
+        .resolver
+        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
+        .expect_err("directory should produce error");
+
+    assert!(matches!(
+        compile_time_path_diagnostic_payload(&err),
+        DiagnosticPayload::InvalidCompileTimePath {
+            reason: InvalidCompileTimePathReason::TargetIsDirectory,
             ..
         }
     ));
@@ -273,24 +274,6 @@ fn path_escaping_project_root_is_rejected() {
 }
 
 // -----------------------------------------------------------------------
-// File vs directory classification
-// -----------------------------------------------------------------------
-
-#[test]
-fn entry_root_directory_classifies_correctly() {
-    let mut h = TestHarness::new();
-    let path = h.make_path(&["assets", "images"]);
-    let declaring_source = h.declaring_source();
-
-    let result = h
-        .resolver
-        .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("directory should resolve");
-
-    assert_eq!(result.kind, CompileTimePathKind::Directory);
-}
-
-// -----------------------------------------------------------------------
 // Public path segment preservation
 // -----------------------------------------------------------------------
 
@@ -309,21 +292,24 @@ fn relative_path_public_path_keeps_dot_prefix() {
     assert!(public.starts_with("./"));
 }
 
+/// `@/` interns as an empty path. Expression classification renders it as the site-root URL and
+/// dependency clauses reject it, so the resolver never sees one from valid source. An empty row
+/// arriving here is compiler corruption, not an authoring mistake with a user-facing reason.
 #[test]
-fn empty_path_resolves_as_entry_root_public_directory() {
+fn the_site_root_never_resolves_as_a_compile_time_path() {
     let mut h = TestHarness::new();
     let path = InternedPath::new();
     let declaring_source = h.declaring_source();
 
-    let result = h
+    let error = h
         .resolver
         .resolve_compile_time_path(&path, &declaring_source, &mut h.string_table)
-        .expect("empty path should resolve to entry root");
+        .expect_err("the site root is not a path value");
 
-    assert_eq!(result.base, CompileTimePathBase::EntryRoot);
-    assert_eq!(result.kind, CompileTimePathKind::Directory);
-    assert_eq!(result.filesystem_path, h.project_root.join("src"));
-    assert!(result.public_path.as_components().is_empty());
+    assert!(matches!(
+        error,
+        CompileTimePathResolutionError::Infrastructure(_)
+    ));
 }
 
 #[test]

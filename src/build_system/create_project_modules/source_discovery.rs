@@ -7,7 +7,6 @@
 // Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
 // so dependency discovery does not erase source locations or downgrade filesystem failures.
 
-use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
 use crate::builder_surface::external_import_providers::provider::{
@@ -15,6 +14,7 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -24,6 +24,7 @@ use crate::compiler_frontend::headers::dependency_target::{
     DependencyTargetKind, decode_dependency_target,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
@@ -46,12 +47,18 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::file_reference_resolution::{
+    SingleFileReferenceOutcome, SingleFileReferenceResolver, SingleFileResolvedReference,
+};
 use super::module_identity::ModuleId;
 use super::module_namespace::DirectoryDependencyResolution;
 use super::prepared_source::PreparedSourceInput;
+use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::{extract_source_code, read_source_code, source_read_error};
-use super::source_preparation::{PreparedDiscoverySource, prepare_discovery_source};
+use super::source_preparation::{
+    PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
+};
 use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
@@ -128,14 +135,15 @@ pub(super) struct ReachableSourceFile {
 /// Stage 0 inventory for synthetic single-file compilation.
 ///
 /// WHAT: owns the deterministic source closure and the complete retained file output for each
-///       reachable `.moth` file when no directory-project `SourceTreeIndex` ownership inventory
-///       is used.
+///       reachable tokenized source when no directory-project `SourceTreeIndex` ownership
+///       inventory is used.
 /// WHY: synthetic discovery prepares each Moth file before resolving its dependencies, then moves that
 ///      complete output into the module input lane after final identities are known. Directory
 ///      projects prepare their owned `SourceId`s directly in the module-inventory queue instead.
 pub(super) struct ReachableSourceInventory {
     pub(super) files: Vec<ReachableSourceFile>,
     local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
+    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
 
 /// One resolved dependency edge ready for direct insertion into the project module graph.
@@ -178,13 +186,14 @@ pub(super) struct ReachableDiscoveryResult {
 
 /// Collected reachable inputs for one entry plus the retained dependency edges.
 ///
-/// WHAT: `assemble_input_files_from_inventory` turns the inventory into `PreparedSourceInput`
+/// WHAT: inventory assembly turns the inventory into `PreparedSourceInput`
 ///       values; direct edges travel alongside so the directory-project graph can record them
 ///       after discovery.
 /// WHY: the single-file flow produces no edges because it has no project module graph, while the
 ///      directory-project flow retains them for graph insertion.
 pub(super) struct CollectedReachableInputs {
     pub(super) input_files: Vec<PreparedSourceInput>,
+    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
 
 struct MissingSourceFile {
@@ -251,6 +260,8 @@ pub(super) fn collect_reachable_input_files(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    source_file_kinds: &SourceFileKindRegistry,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
     // 1. Traverse the dependency graph to find all paths and retained resolved edges.
@@ -259,6 +270,8 @@ pub(super) fn collect_reachable_input_files(
         project_path_resolver,
         style_directives,
         external_imports,
+        source_file_kinds,
+        resource_inputs,
         string_table,
     ) {
         Ok(discovery) => discovery,
@@ -267,26 +280,16 @@ pub(super) fn collect_reachable_input_files(
         }
     };
 
-    let input_files = assemble_input_files_from_inventory(discovery.inventory, string_table)?;
-    Ok(CollectedReachableInputs { input_files })
-}
-
-/// Assemble `PreparedSourceInput` values from a deterministic Stage 0 inventory.
-///
-/// WHAT: for single-file synthetic compilation, moves the retained local source cache entries and
-///       loads remaining Moth template/PlainMarkdown files through the serial/parallel
-///       cache-miss path. Directory projects do not enter this assembly path.
-/// WHY: inventory assembly is the same whether discovery was provider-capable or provider-free,
-///      so it is shared between both paths to keep ordering and loading policy in one place.
-pub(super) fn assemble_input_files_from_inventory(
-    inventory: ReachableSourceInventory,
-    string_table: &mut StringTable,
-) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
     let ReachableSourceInventory {
         files,
         local_source_cache,
-    } = inventory;
-    assemble_reachable_files(files, local_source_cache, string_table)
+        resolved_file_references,
+    } = discovery.inventory;
+    let input_files = assemble_reachable_files(files, local_source_cache, string_table)?;
+    Ok(CollectedReachableInputs {
+        input_files,
+        resolved_file_references,
+    })
 }
 
 /// Prepare one owned compiler-semantic `SourceId` directly into the module's input lane.
@@ -525,12 +528,23 @@ fn fill_input_slot(
         let PreparedDiscoverySource {
             prepared_output,
             source_byte_len,
+            source_kind,
         } = scanned_source;
 
-        input_slots[input_index] = Some(PreparedSourceInput::MothPrepared {
-            source_byte_len,
-            source_path: canonical_path.to_path_buf(),
-            output: Box::new(prepared_output),
+        input_slots[input_index] = Some(match source_kind {
+            SourceFileKind::Moth => PreparedSourceInput::MothPrepared {
+                source_byte_len,
+                source_path: canonical_path.to_path_buf(),
+                output: Box::new(prepared_output),
+            },
+            SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplatePrepared {
+                source_byte_len,
+                source_path: canonical_path.to_path_buf(),
+                output: Box::new(prepared_output),
+            },
+            SourceFileKind::PlainMarkdown => {
+                unreachable!("plain Markdown cannot enter the prepared source cache")
+            }
         });
     } else {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
@@ -679,6 +693,39 @@ fn scan_and_cache_local_moth_source(
     })
 }
 
+fn scan_and_cache_local_moth_template_source(
+    canonical_file: &Path,
+    style_directives: &StyleDirectiveRegistry,
+    project_path_resolver: &ProjectPathResolver,
+    entry_file_path: &Path,
+    source_files: &mut SourceFileTable,
+    local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
+    string_table: &mut StringTable,
+) -> Result<ScannedMothSource, SourceDiscoveryError> {
+    if local_source_cache.contains_key(canonical_file) {
+        return Ok(ScannedMothSource {
+            fresh_read: false,
+            source_byte_count: 0,
+        });
+    }
+
+    let scanned = prepare_discovery_template_source(
+        canonical_file,
+        style_directives,
+        &Some(project_path_resolver.clone()),
+        entry_file_path,
+        source_files,
+        string_table,
+    )?;
+    let source_byte_count = scanned.source_byte_len;
+    local_source_cache.insert(canonical_file.to_path_buf(), scanned);
+
+    Ok(ScannedMothSource {
+        fresh_read: true,
+        source_byte_count,
+    })
+}
+
 /// BFS over the synthetic single-file compilation's dependency clauses.
 ///
 /// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
@@ -696,6 +743,8 @@ fn traverse_reachable_source_files(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     policy: &mut DependencyPolicy<'_, '_>,
+    source_file_kinds: &SourceFileKindRegistry,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let mut reachable = BTreeSet::new();
@@ -717,6 +766,17 @@ fn traverse_reachable_source_files(
             string_table,
         )
     })?;
+    let root_directory = canonical_entry_path.parent().ok_or_else(|| {
+        SourceDiscoveryError::from(CompilerError::compiler_error(
+            "canonical synthetic entry path has no containing module root",
+        ))
+    })?;
+    let mut file_reference_resolver = SingleFileReferenceResolver::new(
+        root_directory.to_path_buf(),
+        source_file_kinds,
+        resource_inputs,
+    );
+    let mut resolved_file_references = Vec::new();
 
     // Seed with entry points in deterministic order.
     for entry_path in entry_paths {
@@ -743,37 +803,45 @@ fn traverse_reachable_source_files(
             continue;
         }
 
-        match next_file.kind {
-            SourceFileKind::MothTemplate => {
-                // Moth template is a Moth template body with a small compile-time scope, so the
-                // same-directory root may supply visible constants. Plain Markdown is raw
-                // content and has no Moth scope; the root still re-exports it normally
-                // because the root file itself is scanned as ordinary Moth source.
-                queue_same_directory_root_for_moth_template(
-                    &canonical_file,
-                    project_path_resolver,
-                    &reachable,
-                    &mut queue,
-                );
-                continue;
-            }
-            SourceFileKind::PlainMarkdown => {
-                // Markdown files are importless content assets. They are carried forward for
-                // header-stage preparation but are never scanned for dependencies.
-                continue;
-            }
-            SourceFileKind::Moth => {}
+        if next_file.kind == SourceFileKind::MothTemplate {
+            // Moth template is a Moth template body with a small compile-time scope, so the
+            // same-directory root may supply visible constants. Its retained output is scanned
+            // here as well, allowing content references to reach a fixed point without a second
+            // parse during module preparation.
+            queue_same_directory_root_for_moth_template(
+                &canonical_file,
+                project_path_resolver,
+                &reachable,
+                &mut queue,
+            );
+        } else if next_file.kind == SourceFileKind::PlainMarkdown {
+            // Markdown files are importless content assets. They are carried forward for
+            // header-stage preparation but are never scanned for dependencies.
+            continue;
         }
 
-        let scanned = match scan_and_cache_local_moth_source(
-            &canonical_file,
-            style_directives,
-            project_path_resolver,
-            &canonical_entry_path,
-            &mut traversal_source_files,
-            &mut local_source_cache,
-            string_table,
-        ) {
+        let scan_result = match next_file.kind {
+            SourceFileKind::Moth => scan_and_cache_local_moth_source(
+                &canonical_file,
+                style_directives,
+                project_path_resolver,
+                &canonical_entry_path,
+                &mut traversal_source_files,
+                &mut local_source_cache,
+                string_table,
+            ),
+            SourceFileKind::MothTemplate => scan_and_cache_local_moth_template_source(
+                &canonical_file,
+                style_directives,
+                project_path_resolver,
+                &canonical_entry_path,
+                &mut traversal_source_files,
+                &mut local_source_cache,
+                string_table,
+            ),
+            SourceFileKind::PlainMarkdown => unreachable!(),
+        };
+        let scanned = match scan_result {
             Ok(scanned) => scanned,
             Err(error) => {
                 return Err(error);
@@ -831,6 +899,43 @@ fn traverse_reachable_source_files(
                 }
             }
         }
+
+        // Structural file references are already classified by preparation. Resolve every
+        // occurrence through the same physical resolver used by directory modules, then queue
+        // supported content targets so discovery reaches the complete content closure.
+        let structural_file_references = local_source_cache
+            .get(&canonical_file)
+            .expect("fresh or cached Moth source must remain in the complete source cache")
+            .prepared_output
+            .structural_file_references
+            .references()
+            .to_vec();
+        for reference in structural_file_references {
+            let resolved = file_reference_resolver
+                .resolve(&canonical_file, &reference, string_table)
+                .map_err(SourceDiscoveryError::from)?;
+            if let SingleFileReferenceOutcome::Source { canonical } = &resolved.outcome
+                && resolved.class == PreparedFileReferenceClass::ContentSource
+            {
+                let extension = canonical
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or_default();
+                let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
+                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                        "resolved supported content target has no registered source kind",
+                    )));
+                };
+                let content_file = ReachableSourceFile {
+                    path: canonical.clone(),
+                    kind,
+                };
+                if !reachable.contains(&content_file) {
+                    queue.push_back(content_file);
+                }
+            }
+            resolved_file_references.push(resolved);
+        }
     }
 
     // Record concise counters for the completed traversal. Counters are only
@@ -849,6 +954,7 @@ fn traverse_reachable_source_files(
         inventory: ReachableSourceInventory {
             files: reachable.into_iter().collect(),
             local_source_cache,
+            resolved_file_references,
         },
     })
 }
@@ -864,6 +970,8 @@ pub(super) fn discover_reachable_source_files(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    source_file_kinds: &SourceFileKindRegistry,
+    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<ReachableDiscoveryResult, SourceDiscoveryError> {
     let mut policy = DependencyPolicy::Capable { external_imports };
@@ -873,6 +981,8 @@ pub(super) fn discover_reachable_source_files(
         project_path_resolver,
         style_directives,
         &mut policy,
+        source_file_kinds,
+        resource_inputs,
         string_table,
     )?;
 

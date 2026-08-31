@@ -29,6 +29,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::folded_value::FoldedValueProjectionContext;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
     StableModuleOriginIdentity,
@@ -250,6 +251,17 @@ fn push_seed(
     });
     Ok(())
 }
+/// Inputs shared by receiver-method type and folded-default projection.
+///
+/// WHAT: keeps the canonical type environment, projection context, string table and structural
+/// folded-string resources together so receiver signatures do not grow raw resource parameters.
+/// WHY: receiver defaults use the same public folded-value owner as direct constants and fields.
+pub(super) struct ReceiverProjectionContext<'a> {
+    pub(super) type_environment: &'a TypeEnvironment,
+    pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
+    pub(super) string_table: &'a StringTable,
+    pub(super) folded_value_context: &'a FoldedValueProjectionContext<'a>,
+}
 
 /// Project the canonical signature for each receiver-method callable seed.
 ///
@@ -263,10 +275,11 @@ fn push_seed(
 pub(crate) fn project_receiver_method_signatures(
     callable_seeds: &[CallableSeed],
     receiver_method_entries: &[ReceiverMethodEntry],
-    type_environment: &TypeEnvironment,
-    context: &CanonicalTypeProjectionContext,
-    string_table: &StringTable,
+    context: &ReceiverProjectionContext<'_>,
 ) -> Result<FxHashMap<usize, ProjectedReceiverMethodSignature>, CompilerError> {
+    let type_environment = context.type_environment;
+    let canonical_context = context.projection_context;
+    let string_table = context.string_table;
     let mut signatures: FxHashMap<usize, ProjectedReceiverMethodSignature> = FxHashMap::default();
 
     for seed in callable_seeds {
@@ -295,14 +308,10 @@ pub(crate) fn project_receiver_method_signatures(
                 let type_identity = project_type_id_to_canonical_identity(
                     declaration.value.type_id,
                     type_environment,
-                    context,
+                    canonical_context,
                 )?;
-                let folded_default = project_folded_default(
-                    &declaration.value,
-                    type_environment,
-                    context,
-                    string_table,
-                )?;
+                let folded_default =
+                    project_folded_default(&declaration.value, context.folded_value_context)?;
                 let access = project_parameter_access(declaration)?;
                 Ok(PublicParameterTypeSlot {
                     name,
@@ -313,8 +322,11 @@ pub(crate) fn project_receiver_method_signatures(
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
 
-        let (returns, error_return) =
-            project_return_slots(&entry.signature.returns, type_environment, context)?;
+        let (returns, error_return) = project_return_slots(
+            &entry.signature.returns,
+            type_environment,
+            canonical_context,
+        )?;
 
         if signatures
             .insert(

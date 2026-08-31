@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Owned runtime slot-application plan prepared for HIR lowering.
@@ -71,8 +71,14 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         children: Vec<OwnedRuntimeTemplateNode>,
     },
 
+    /// Owned literal or structural string payload.
+    ///
+    /// WHAT: keeps plain text compact while carrying `Resource` and `SiteRoot`
+    /// pieces as owned data across the AST/HIR handoff.
+    /// WHY: runtime handoff crosses the donor TIR view, so it must preserve
+    /// structural string identity without exposing TIR IDs or flattening URLs.
     Text {
-        text: StringId,
+        text: OwnedFoldedString,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
     },

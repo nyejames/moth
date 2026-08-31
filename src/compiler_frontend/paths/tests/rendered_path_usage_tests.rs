@@ -1,8 +1,6 @@
 //! Unit tests for semantic rendered-path capture helpers.
 
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_path_for_rendered_output;
@@ -108,7 +106,6 @@ fn entry_root_render_capture_records_semantics_and_origin_aware_text() {
     assert_eq!(recorded.usages.len(), 1);
     let usage = &recorded.usages[0];
     assert_eq!(usage.base, CompileTimePathBase::EntryRoot);
-    assert_eq!(usage.kind, CompileTimePathKind::File);
     assert_eq!(
         usage.source_path.to_portable_string(&harness.string_table),
         "assets/images/logo.png"

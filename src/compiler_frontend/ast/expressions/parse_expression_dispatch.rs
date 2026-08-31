@@ -23,6 +23,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::field_access::{
     PostfixChainAccess, parse_postfix_chain_expression,
 };
+use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     CastCatchSite, fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
     parse_fallible_handling_suffix_for_expression, wrap_catch_expression,
@@ -94,11 +95,11 @@ fn reject_adjacent_operand(
     Ok(())
 }
 
-/// `TemplateHead` stays separate because comment templates produce no value.
 fn is_value_operand_start_token(token: &TokenKind) -> bool {
     matches!(
         token,
-        TokenKind::NumericLiteral(_)
+        TokenKind::Path(_)
+            | TokenKind::NumericLiteral(_)
             | TokenKind::StringSliceLiteral(_)
             | TokenKind::BoolLiteral(_)
             | TokenKind::CharLiteral(_)
@@ -553,6 +554,31 @@ pub(super) fn dispatch_expression_token(
                 type_interner,
                 &mut literal_state,
                 string_table,
+            )?;
+            Ok(ExpressionTokenStep::Continue)
+        }
+        TokenKind::Path(path_syntax) => {
+            let path_location = token_stream.current_location();
+            let operand = resolve_file_value(
+                path_syntax,
+                token_stream,
+                context,
+                type_interner,
+                state.value_mode,
+                string_table,
+            )?;
+            token_stream.advance();
+            push_expression_operand_at_location(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                state.expression,
+                state.allow_boundary_catch,
+                ExpressionOperandInput {
+                    operand,
+                    wrapper_location: path_location,
+                },
             )?;
             Ok(ExpressionTokenStep::Continue)
         }

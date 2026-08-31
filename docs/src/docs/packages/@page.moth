@@ -133,6 +133,6 @@ page_head #= language_theme_head
         [$insert("previous_path"):../project-structure/]
         [$insert("previous_title"):Project structure]
         [$insert("next_path"):../resources/]
-        [$insert("next_title"):Resources and Path values]
+        [$insert("next_title"):Resources and file values]
     ]
 ]

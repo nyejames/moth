@@ -80,9 +80,11 @@ fn merge_owned_runtime_template_node_metadata(
         }
 
         OwnedRuntimeTemplateNode::Text {
+            text: _,
             reactive_subscription,
             ..
         } => {
+            // Owned structural pieces are opaque to metadata; only subscriptions affect reactivity.
             if let Some(subscription) = reactive_subscription {
                 metadata.push_subscription(subscription.clone());
             }

@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::const_values::store::ConstValuePayload;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstValuePayload};
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -20,9 +20,6 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind,
-};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -73,15 +70,6 @@ fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperat
 fn ordinary_expression_rejects_path_string_concatenation() {
     let mut string_table = StringTable::new();
     let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let asset_path = InternedPath::from_single_str("assets", &mut string_table)
-        .join_str("logo.png", &mut string_table);
-    let compile_time_path = CompileTimePath {
-        source_path: asset_path.clone(),
-        filesystem_path: std::env::temp_dir().join("moth_eval_expression_logo.png"),
-        public_path: asset_path.clone(),
-        base: CompileTimePathBase::EntryRoot,
-        kind: CompileTimePathKind::File,
-    };
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
         source_scope.clone(),
@@ -97,8 +85,8 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     });
 
     let nodes = vec![
-        ExpressionRpnItem::Operand(Expression::path(
-            compile_time_path,
+        ExpressionRpnItem::Operand(Expression::structural_string(
+            vec![ConstStringPiece::SiteRoot],
             SourceLocation::default(),
         )),
         ExpressionRpnItem::Operator {
@@ -144,6 +132,105 @@ fn ordinary_expression_rejects_path_string_concatenation() {
 
     let recorded = context.take_rendered_path_usages();
     assert!(recorded.is_empty());
+}
+
+#[test]
+fn structural_string_equality_is_refused_only_in_a_constant_context() {
+    // WHY: the refusal belongs only to const-required positions; rejecting runtime
+    // positions would remove legal expressive power.
+    let mut string_table = StringTable::new();
+    let source_scope = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let context = |kind| {
+        ScopeContext::new_for_tests(
+            kind,
+            source_scope.clone(),
+            Rc::new(TopLevelDeclarationTable::new(vec![])),
+            Arc::new(ExternalPackageRegistry::new()),
+            vec![],
+            0,
+        )
+    };
+    let nodes = |string_table: &mut StringTable| {
+        vec![
+            ExpressionRpnItem::Operand(Expression::structural_string(
+                vec![ConstStringPiece::SiteRoot],
+                SourceLocation::default(),
+            )),
+            ExpressionRpnItem::Operand(Expression::string_slice(
+                string_table.intern("plain"),
+                SourceLocation::default(),
+                ValueMode::ImmutableOwned,
+            )),
+            ExpressionRpnItem::Operator {
+                operator: Operator::Equality,
+                location: SourceLocation::default(),
+            },
+        ]
+    };
+
+    let mut constant_type_environment = TypeEnvironment::new();
+    let mut constant_compatibility_cache = TypeCompatibilityCache::new();
+    let mut constant_type_interner = AstTypeInterner::new(
+        &mut constant_type_environment,
+        &mut constant_compatibility_cache,
+    );
+    let mut constant_expected_type = ExpectedType::Infer;
+    let constant_error = evaluate_expression(
+        &context(ContextKind::Constant),
+        nodes(&mut string_table),
+        &mut constant_type_interner,
+        &mut constant_expected_type,
+        &ValueMode::ImmutableOwned,
+        &mut string_table,
+    )
+    .expect_err("constant equality must require final structural-string text");
+    let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(
+        diagnostic,
+    ) = constant_error
+    else {
+        panic!("expected a typed structural-string diagnostic");
+    };
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+    );
+
+    let mut runtime_type_environment = TypeEnvironment::new();
+    let mut runtime_compatibility_cache = TypeCompatibilityCache::new();
+    let mut runtime_type_interner = AstTypeInterner::new(
+        &mut runtime_type_environment,
+        &mut runtime_compatibility_cache,
+    );
+    let mut runtime_expected_type = ExpectedType::Infer;
+    let runtime_expression = match evaluate_expression(
+        &context(ContextKind::Function),
+        nodes(&mut string_table),
+        &mut runtime_type_interner,
+        &mut runtime_expected_type,
+        &ValueMode::ImmutableOwned,
+        &mut string_table,
+    ) {
+        Ok(expression) => expression,
+        Err(_) => {
+            panic!("runtime equality must preserve the structural operation without a diagnostic")
+        }
+    };
+
+    let ExpressionKind::Runtime(runtime_items) = runtime_expression.kind else {
+        panic!("runtime equality should remain a complete runtime RPN expression");
+    };
+    assert_eq!(
+        runtime_items.items.len(),
+        3,
+        "runtime context must preserve both operands and the equality operator"
+    );
+    assert!(matches!(
+        runtime_items.items.last(),
+        Some(ExpressionRpnItem::Operator {
+            operator: Operator::Equality,
+            ..
+        })
+    ));
 }
 
 #[test]

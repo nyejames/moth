@@ -188,11 +188,16 @@ impl<'a> HirValidator<'a> {
                     self.validate_module_const_value(&field.value)?;
                 }
             }
+            // A structural string is a string-typed constant: `Text` and `Resource` handles
+            // and the site-root mark carry nothing this validation inspects (no empty-name,
+            // type or location check reads final characters), so no check needs the resolved
+            // text and pieces must not be flattened to provide one.
             HirConstValue::Int(_)
             | HirConstValue::Float(_)
             | HirConstValue::Bool(_)
             | HirConstValue::Char(_)
-            | HirConstValue::String(_) => {}
+            | HirConstValue::String(_)
+            | HirConstValue::StructuralString { .. } => {}
         }
 
         Ok(())

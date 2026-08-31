@@ -1,0 +1,5 @@
+draw type T |name T, suffix String = @assets/logo.svg| -> String:
+    return "parameter default accepted"
+;
+
+[: parameter default accepted]

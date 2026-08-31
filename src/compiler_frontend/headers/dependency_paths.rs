@@ -15,8 +15,8 @@ pub(super) fn validate_dependency_path(
     path_location: &SourceLocation,
     string_table: &StringTable,
 ) -> Result<(), Box<CompilerDiagnostic>> {
-    // Exact `@/` is represented by an empty canonical path row. It remains valid for compile-time
-    // path expressions, but a dependency must name a provider beneath the owning module root.
+    // Exact `@/` is represented by an empty canonical path row. A dependency must name a provider
+    // beneath the owning module root, so the site root is rejected under its own reason.
     if dependency_path.is_empty() {
         return Err(Box::new(CompilerDiagnostic::invalid_import_path(
             dependency_path.to_owned(),

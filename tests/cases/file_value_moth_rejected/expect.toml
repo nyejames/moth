@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0023"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0023"
+reason = "invalid_expression.moth_file_has_no_value"
+count = 1

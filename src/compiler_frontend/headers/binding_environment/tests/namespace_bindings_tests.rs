@@ -19,7 +19,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
     external_success_returns,
 };
-use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::binding_environment::{
     BindingEnvironmentInput, prepare_binding_environment,
 };
@@ -88,6 +88,7 @@ fn test_dependency(
 ) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
         path: header_path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location_for(&["src", "@page.moth"], string_table),
         dependency_shell_id: DependencyShellId::new(FileId(0), 0),
@@ -639,6 +640,7 @@ fn explicit_external_symbol_binding_retains_authored_location() {
     let dependency_location = location_for(&["src", "@page.moth"], &mut string_table);
     let provider = RetainedDependencyPath {
         path: intern_path(&["test", "explicit_symbols"], &mut string_table),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: dependency_location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(0), 1),
@@ -808,6 +810,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
 
     let provider = RetainedDependencyPath {
         path: dependency_path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location_for(&["src", "@page.moth"], &mut string_table),
         dependency_shell_id: DependencyShellId::new(FileId(0), 2),
@@ -1116,7 +1119,9 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
             origin: alpha_value,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String("alpha".to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    "alpha".to_owned(),
+                )),
             }),
         }],
         reusable_evidence: vec![PublicEvidenceRecord {
@@ -1148,7 +1153,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
             origin: beta_value,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String("beta".to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text("beta".to_owned())),
             }),
         }],
         reusable_evidence: vec![PublicEvidenceRecord {
@@ -1266,7 +1271,9 @@ fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
             origin,
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String((*name).to_owned()),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    (*name).to_owned(),
+                )),
             }),
         });
     }
@@ -2036,14 +2043,15 @@ fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
         origin: origin.clone(),
         semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
             type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-            folded_value: PublicFoldedValue::String("first".to_owned()),
+            folded_value: PublicFoldedValue::String(OwnedFoldedString::Text("first".to_owned())),
         }),
     };
     let mut second = first.clone();
     let PublicDeclarationSemantics::Constant(second_constant) = &mut second.semantics else {
         unreachable!("declaration semantics is constant");
     };
-    second_constant.folded_value = PublicFoldedValue::String("second".to_owned());
+    second_constant.folded_value =
+        PublicFoldedValue::String(OwnedFoldedString::Text("second".to_owned()));
 
     let mut table = FxHashMap::default();
     super::super::builder::insert_agreed(&mut table, origin.clone(), &first, "declaration origin")

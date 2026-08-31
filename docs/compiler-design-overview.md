@@ -39,6 +39,7 @@ or thorough reviews.
 | Concrete generic materialisation or generated sidecars | `Generated concrete functions`; `Frontend stages > Stage 4: AST semantics > Generics` | `docs/build-system-design.md` > `Generated-function boundary` |
 | Tokenization, header syntax, interface binding, source-kind preparation or local declaration ordering | The relevant section under `Frontend stages > Stage 1: tokenization`, `Stage 2: header syntax and interface binding` or `Stage 3: local declaration ordering` | `docs/build-system-design.md` > `Prepared-source orchestration` when Stage 0 consumes or schedules the result |
 | AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
+| File-value path expressions, graph-active file references, resource identity or structural resource-bearing strings | `Frontend stages > Stage 4: AST semantics > File values and resources` | `docs/src/docs/resources/file-paths.mtf`, `docs/src/docs/resources/file-values.mtf` and `docs/build-system-design.md` > `Resource linking and output placement` |
 | HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
 | Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/developer-docs/memory-management/overview.mtf` |
 | Lifetime regions, escapes, retention, cleanup frontiers or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
@@ -58,6 +59,10 @@ or thorough reviews.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
+- Every authored file-value path is graph-active before AST reachability, folding or static specialisation. Filesystem resolution happens once, before AST, and no later stage rediscovers files by scanning strings, rendered output or body tokens.
+- Graph and input validity is separate from executable and output liveness. Graph activity is conservative and follows the authored path occurrence; emission is exact and follows entry or package reachability.
+- A file value has language type `String`. There is no source-visible `Path` type. Resource and site-root anchors stay structural inside the string until a builder assigns output placement and a URL context.
+- Resource origin, resource use and byte source are three separate facts. Semantic resource identity carries no absolute path, output path, route, URL or content hash.
 - AST resolves constants, generic call inference, traits, casts and template semantics, then emits concrete generic requests. Generated functions are materialised, HIR-validated, borrow-validated and lifetime-analysed before backend handoff.
 - Stage 4 validates both branches of an ordinary `if` before static selection. A known compile-time Bool selects one branch before HIR, and the selected branch retains its lexical scope.
 - Terminality and durable generated requests are derived from the specialised active AST. An inactive static branch contributes no HIR or downstream executable facts.
@@ -114,7 +119,7 @@ Rules:
 
 These rules are enforced, not only stated. Every stage owner named above is `pub(in crate::compiler_frontend)` or narrower, so a build-side caller does not compile. `xtask/src/architecture_boundary.rs` guards the edit that would widen one of them back, and guards the reverse direction — `compiler_frontend` importing the build system or the project tool's config container — which the module tree cannot express.
 
-Stage 0 keeps one narrow exception. It asks the compiler to prepare provider-independent source before any provider interface exists, because it needs the retained structural provider references to finish the graph. That exception ends at prepared syntax: Stage 0 decides which source candidate to prepare and when, and reads structural provider references from the result. It does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
+Stage 0 keeps one narrow exception. It asks the compiler to prepare provider-independent source before any provider interface exists, because it needs the retained structural provider and file references to finish the graph. That exception ends at prepared syntax: Stage 0 decides which source candidate to prepare and when, and reads structural provider and file references from the result. It does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
 
 ### Module compilation input
 
@@ -123,6 +128,7 @@ A canonical module compilation receives:
 - a stable module identity and root role
 - the module's semantic source set selected by Stage 0
 - retained token and header-syntax preparation for every semantic source
+- the Stage 0 resolved file-reference table paired with that prepared syntax
 - graph-resolved provider identities and dependency-ordered provider interfaces
 - the namespace and capability surface selected for the project or package build
 - resolved build-configuration values and synthetic compile-time interfaces visible to the module
@@ -136,6 +142,7 @@ Source preparation and provider binding are deliberately separate.
 - declaration shells
 - dependency clause shells and aliases
 - structural provider references
+- structural file references
 - local declaration-ordering hints
 - root-activity and fragment-placement metadata
 - source `#Config` contract shells
@@ -150,7 +157,7 @@ Source preparation and provider binding are deliberately separate.
 - receiver-surface visibility
 - completed collision results
 
-Binding does not retokenize source or reparse declaration syntax.
+Binding does not retokenize source or reparse declaration syntax. It passes the resolved file-reference table through without interpreting it.
 
 Provider-created binding interfaces are available before source-module compilation and may be bound as soon as provider discovery has produced them. A source-module dependency cannot become a stable dependency symbol binding until the source provider's public interface exists.
 
@@ -180,6 +187,8 @@ Contracts:
 - Independent graph branches may continue under build-system orchestration.
 - An internal `CompilerError` aborts the owning project or package compilation because later results cannot be trusted.
 - Structured warnings may be retained only on a successful artefact.
+- A successful result also carries a build-facing resource source delta. The build system merges it into the boundary-wide registry only when the semantic result is publishable.
+- A `Diagnosed` module exposes no semantic resource table. It may retain build-only watch interests for missing resource targets so creating the file triggers a later rebuild. Those observations carry no public semantic value and cannot be read by another module.
 - A shared module produces one canonical diagnostic set rather than one repeated failure per blocked dependant.
 
 The build system may collect successful independent branches for `check` or future LSP use. A backend never receives a partial linkable project.
@@ -242,7 +251,7 @@ Donor-local region IDs do not cross module interfaces. Exported lifetime summari
 - reactive features
 - numeric and cast operations
 - map and other target-gated features
-- runtime path and asset requirements
+- per-function resource uses in deterministic source order
 - per-function project-context provenance
 - generated-function requests
 
@@ -252,7 +261,7 @@ Donor-local region IDs do not cross module interfaces. Exported lifetime summari
 - folded top-level fragment values and runtime insertion indexes
 - resolved root-local entry metadata
 - documentation fragments and API-index metadata
-- rendered path usages
+- module-local resource origins and the non-executable resource uses carried by fragments and metadata
 - structured warnings
 
 Compile-time page fragments never live in HIR. HIR validation checks executable fragment operations only. An artefact-level validator checks compile-time fragment values, insertion indexes and their relationship to dormant root metadata.
@@ -424,7 +433,7 @@ A public interface contains only facts a semantic consumer may observe:
 
 - exported origin identities and export bindings
 - canonical exported type shapes
-- folded exported constants and const-template values
+- folded exported constants and const-template values, including stable resource origins and site-root pieces inside exported resource-bearing strings
 - generic templates, bounds and required evidence
 - exported traits and reusable conformance evidence
 - receiver surfaces and visible methods
@@ -439,7 +448,9 @@ A public interface contains only facts a semantic consumer may observe:
 - relevant reactive effect summaries
 - project-context provenance for every exported fact
 
-Backend planning facts do not belong in this interface. Per-function calls, helper requirements, runtime assets and target-gated features live in `ModuleLinkFacts`.
+Backend planning facts do not belong in this interface. Per-function calls, helper requirements, resource uses and target-gated features live in `ModuleLinkFacts`.
+
+Exported resource facts use stable origins only. A donor-local resource ID, an output path, a route or a rendered URL never crosses a public interface.
 
 Aliases affect source spelling. They do not replace semantic origin identity.
 
@@ -502,7 +513,7 @@ Covers the canonical semantic contents of `PublicSemanticInterface`:
 
 - exported origin identities and export bindings
 - canonical exported type shapes
-- folded exported values
+- folded exported values, including stable resource origins and the ordered pieces of resource-bearing strings
 - generic template semantics and bounds
 - trait and conformance evidence
 - receiver surfaces
@@ -537,7 +548,7 @@ Covers backend-neutral link facts derived from callable functions and dormant ro
 - source and binding-backed calls
 - target-gated features
 - runtime glue requirements
-- rendered runtime path and asset facts
+- exact reachable resource uses
 
 Generated-function requests are materialisation dependencies carried with module link data, but they are not runtime-dependency fingerprint contents. A change to the emitted request set is covered by implementation invalidation, updates generated sidecars and relinks affected assemblies.
 
@@ -550,7 +561,8 @@ Covers public documentation, editor metadata and API-index data.
 - A private or exported body change does not recompile semantic consumers unless a public semantic fact or exported effect changes.
 - An implementation change may require relinking or code regeneration without semantic consumer recompilation.
 - A root-activity change relinks entries that activate the module.
-- A runtime-dependency change updates capability, glue and asset planning.
+- A runtime-dependency change updates capability, glue and resource planning.
+- A resource byte change without a stable-origin change invalidates content and output fingerprints only. It does not change type identity or public semantic identity, and it does not recompile semantic consumers.
 - A documentation-only change regenerates documentation or editor indexes without invalidating semantic consumers or executable instances.
 
 The build system owns invalidation, relinking and persistent cache compatibility over these compiler-defined facts.
@@ -665,14 +677,15 @@ It owns:
 - compile-time fragment placement metadata
 - source-kind adapters that synthesise ordinary declarations
 - structural provider references
+- structural file references, classified from the dense path rows tokenization already produced
 - conservative local declaration-ordering hints
 - source `#Config` contract shells
 
 Support roots and project package facades reject root runtime activity before executable HIR can be produced. Normal roots retain dormant start and fragment metadata.
 
-Syntax preparation does not type-check executable bodies, fold expressions or open source provider interfaces.
+Syntax preparation does not type-check executable bodies, fold expressions or open source provider interfaces. File-reference classification is shallow for the same reason: it reads path rows and their spelling, and never parses the surrounding expression.
 
-`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges.
+`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
 
 #### Interface binding
 
@@ -693,15 +706,18 @@ Binding-backed provider interfaces may already exist before source graph compila
 
 Interface binding never copies provider declarations into the consumer. It never bypasses a facade to inspect private source.
 
-#### Three reference classes
+#### Four reference classes
 
-Header processing keeps three classes distinct:
+Header processing keeps four classes distinct:
 
 - Structural provider references belong to Stage 0 graph construction.
+- Structural file references belong to Stage 0 graph and physical input resolution.
 - Dependency symbol bindings belong to visibility and AST semantics.
 - Local declaration-ordering edges belong to Stage 3.
 
 A dependency-bound declaration is never a node in the consumer's local declaration graph.
+
+One authored path row carries exactly one of these roles. A row a dependency clause consumed is never also published as a structural file reference.
 
 Local ordering edges include same-module facts needed before AST can consume declarations linearly:
 
@@ -794,6 +810,7 @@ AST owns:
 - trait, conformance and generic-bound evidence validation
 - explicit cast evidence resolution and builtin folding
 - constant, anonymous const-record and const-template folding
+- file-value expression semantics over already-resolved file references, and module-local resource identity
 - template composition, slot routing, folding and runtime handoff preparation
 - reactive source and subscription metadata
 - module-local TIR from direct parser emission through finalisation
@@ -1031,6 +1048,90 @@ Missing roots, phases, overlays or exact-view authority are internal errors. Tem
 
 Number formatting uses the common value-to-string path. It does not add Number-specific TIR nodes.
 
+#### File values and resources
+
+A `@` path spelling has two semantic roles. A top-level dependency clause binds declarations or a
+namespace and produces no value. An explicit-extension path in expression position is a file value
+whose language type is `String`. Neither owner reinterprets the other's path family.
+
+File references are discovered before AST, not by it:
+
+- tokenization owns authored path syntax and dense path rows
+- compiler-owned source preparation classifies non-dependency path rows into structural file
+  references, without a second tokenization, a second expression parser or a source-text scan
+- Stage 0 resolves each reference against the filesystem exactly once
+- AST interprets the already-resolved target as a value and never probes the filesystem
+
+Preparation excludes the path rows a dependency clause consumed, so one authored path occurrence
+keeps one semantic role. Classification is shallow: bare `@/` is a site root and creates no file
+edge, explicit `.mtf` or `.md` is a content-source reference, explicit `.moth` is retained so AST
+can issue its precise diagnostic, another explicit extension is a resource-file reference, and an
+extensionless non-dependency path is left for AST to diagnose. No type checking, folding or
+surrounding-expression parsing happens during that scan.
+
+Because the scan never reads the surrounding expression, two consequences are stated rather than
+left to an implementation. Every retained path token outside a dependency-clause-owned range is
+classified, and a later AST syntax failure in the containing expression does not retract that graph
+fact; diagnostic ordering keeps a speculative missing-file error from displacing the primary syntax
+error. And a `.moth` value path is identified only so AST can issue its diagnostic: it never enters
+the semantic source set, and its declarations never affect collisions or visibility. The same holds
+for any future recognised source kind with no file-value semantics.
+
+Graph membership is settled before AST runs, so AST never decides it. A path AST later finds in an
+unreachable position was already resolved and validated, and errors inside a referenced content file
+are reported whether or not the consuming code survives specialisation. The canonical list of
+positions this covers is in `docs/src/docs/resources/file-paths.mtf`.
+
+What Stage 0 validates, registers and deliberately does not do with a file reference is owned by
+`docs/build-system-design.md` > `Prepared-source orchestration`. AST consumes its published result.
+
+AST owns value meaning through one focused file-value resolver. It is reached with the authored
+path's file-owned identity and the matching resolved-reference entry, and it is not given a
+filesystem resolver, so rediscovery is unavailable rather than merely discouraged:
+
+- `.mtf` and `.md` resolve to the existing compiler-owned synthetic `content` string, prepared once
+  through its normal source-kind adapter; no second parser, renderer or content constant exists, and
+  the source filename is not observable
+- an ordinary resource interns its stable origin into the module-local resource table, records the
+  authored use location and produces a `String` carrying one Resource anchor
+- bare `@/` produces a `String` carrying one SiteRoot piece and creates no resource identity
+- `.moth` has no file value and gets a typed diagnostic pointing at dependency clauses
+
+A direct content-file value reuses a synthetic `content` constant, so header preparation's retained
+local dependency facts create the ordering relationship a constant initializer or const-template
+body needs. A real content dependency cycle is diagnosed by the existing local declaration and
+source ordering authority rather than an AST recursion guard.
+
+A resource-bearing or site-root-bearing string is an ordinary `String`. It may be mutable, a
+parameter, a return, an optional, a collection element, an exported constant or a runtime value, and
+nothing is rejected merely because the string carries an anchor. The module-local folded-value
+authority owns both the plain-text fast path and the ordered piece form; its postorder visitor is
+the only recursive conversion route into public projection, HIR constant projection and direct
+`.mtf` extraction. No consumer reconstructs a structural string from AST expressions or TIR.
+
+Whether an operation may keep a string structural or needs its final characters is one owned
+question, answered in one place rather than decided again by each folding consumer. Composition
+preserves structure: assignment, storage, concatenation, interpolation, slot and wrapper
+composition, copying, collection and record storage, export and re-export, and passing or returning
+the value. Observation requires concrete text: equality, length, containment, prefix and suffix
+tests, parsing and casts from `String`, compile-time hashing, use as a compile-time map key,
+duplicate-key validation, a compiler or host call needing real characters, and any formatter that
+inspects characters instead of preserving an opaque anchor. While any Resource or SiteRoot piece
+remains unresolved, every observing operation is diagnosed rather than folded against a guessed URL.
+Partial symbolic equality and partial hashing are not attempted. Runtime string semantics are
+unaffected, because each selected physical variant lowers its structural map before the running
+program observes the value.
+
+A direct file value in a template emits a TIR Resource or SiteRoot node without first becoming text.
+Both are output-producing and non-reactive, formatters see opaque anchors with no filesystem or
+output detail, and every exact-view TIR owner handles them. Subtree copy and identity remap preserve
+stable resource identity while allocating any required local ID. A missing case in an exhaustive TIR
+or runtime-handoff walk is an internal error.
+
+The direct `.mtf` compiler service has no route and no containing output artefact. It returns owned
+structural folded content with its resource source facts, permits plain-text extraction only when no
+unresolved anchors remain, and never renders builder URLs inside the frontend.
+
 #### Reactivity boundary
 
 Reactivity is a constrained template and UI source-and-sink model rather than a general closure or function-value system.
@@ -1060,6 +1161,7 @@ HIR owns:
 - concrete generated-function targets
 - expression side-effect linearisation
 - runtime template string construction
+- structural resource and site-root append operations for anchor-bearing strings
 - template control flow as ordinary CFG
 - runtime slot accumulators and appends
 - map operations
@@ -1083,6 +1185,7 @@ HIR does not:
 - reconstruct slot or render plans
 - carry TIR
 - carry compile-time page fragments
+- carry absolute source paths, output paths, routes, URLs, content hashes or builder names
 - receive a statically decided ordinary `if`
 - evaluate `#Config`
 - choose target- or platform-specific source branches
@@ -1095,6 +1198,15 @@ HIR does not:
 
 Every `if` remaining in HIR has a runtime condition. Static Bool branch selection is complete before
 HIR and is never redone by HIR or a backend.
+
+HIR String constants retain the ordered Text, Resource and SiteRoot shape rather than flattening to
+text, and top-level compile-time fragments retain the same structural content with their runtime
+insertion indexes. A site-root piece carries no `ResourceId`, so it is not reached through the
+resource union. Selected functions and metadata therefore record whether they use the site root as
+their own fact, and the structural walk that collects resource uses collects that fact in the same
+pass. Both are lowered to final text only when the containing output artefact and its URL context
+are known, which happens after the physical variant is selected. A known-Bool inactive branch
+contributes no resource use to HIR or link facts.
 
 Plain binary operations remain valid for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
 
@@ -1313,7 +1425,7 @@ Facts include:
 - reactive features
 - numeric and cast operations
 - maps and other target-gated features
-- runtime path and asset usages
+- resource uses in deterministic source order
 
 These facts are the compiler's linking authority. Module-wide summaries may exist as derived indexes but do not replace per-function facts.
 
@@ -1398,7 +1510,7 @@ A lowerer may implement a language-owned HIR operation with a target-native inst
 
 Numeric checks, cast failure, finite-Float validation, map behaviour, error propagation and reactive semantics are not weakened because a target provides a more permissive primitive.
 
-Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, tracked assets, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
+Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, resource output placement, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
 
 ## Compiler implementation map
 

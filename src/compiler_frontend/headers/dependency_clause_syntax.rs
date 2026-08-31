@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -81,6 +81,7 @@ impl DependencyAlias {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScannedDependencyProvider {
     pub path: InternedPath,
+    pub path_syntax: PathSyntaxId,
     pub path_location: SourceLocation,
 }
 
@@ -92,6 +93,7 @@ pub struct ScannedDependencyProvider {
 pub struct RetainedDependencyPath {
     pub dependency_shell_id: DependencyShellId,
     pub path: InternedPath,
+    pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
     pub location: SourceLocation,
 }
@@ -166,6 +168,7 @@ pub(crate) fn parse_dependency_clause(
 
     let provider = ScannedDependencyProvider {
         path: path_syntax_row.root.clone(),
+        path_syntax: *path_id,
         path_location: path_syntax_row.location.clone(),
     };
 

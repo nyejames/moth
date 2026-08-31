@@ -1,0 +1,155 @@
+A file path written in expression position evaluates to a `String`. There is no `Path` type. The file kind decides how that string is built, and the compiler keeps enough structure inside it to write correct links later.
+
+### The file kind decides the value
+
+[codeblock, $code("moth"):
+    intro   #= @docs/intro.mtf
+    license #= @legal/license.md
+    logo    #= @assets/logo.svg
+]
+
+- a `.mtf` path evaluates to that file's compiler-owned `content` string
+- a `.md` path evaluates to that file's rendered `content` string
+- any other accepted file evaluates to a resource-bearing string
+- a `.moth` path has no file value at all
+
+Every accepted file value above has language type `String`. Nothing exposes a file object, a filesystem handle or an output path to the program.
+
+### Content files reuse their `content` constant
+
+A direct `.mtf` or `.md` value is the same folded `content` constant a dependency clause binds. The file is compiled once, by its normal owner.
+
+[codeblock, $code("moth"):
+    @docs/intro content as intro
+
+    same #= @docs/intro.mtf
+]
+
+Both forms name one compiled file and one `content` value. The direct form is convenient when a page needs the content once and does not need a bound name. The dependency clause is the form to use when the name matters or when the file is used repeatedly.
+
+Whichever form is used, plain Markdown links and images inside a `.md` file stay literal and untracked.
+
+### `.moth` files have no file value
+
+[codeblock, $code("moth"):
+    source = @helpers.moth
+]
+
+That is rejected. A `.moth` file exposes declarations, and declarations are consumed through dependency clauses:
+
+[codeblock, $code("moth"):
+    @helpers build_value
+]
+
+Source text is never exposed as a string. A source kind may be a file value only where the language defines one canonical content string for it, which is true for `.mtf` and `.md` and nothing else.
+
+### Resource strings are ordinary strings
+
+A resource file value is a normal `String`, so ordinary string rules apply.
+
+[codeblock, $code("moth"):
+    logo = @assets/logo.svg
+
+    logo_for |name String| -> String:
+        if name is "main":
+            return @assets/main.svg
+        else
+            return @assets/fallback.svg
+        ;
+    ;
+
+    logos {String} = { @assets/main.svg, @assets/fallback.svg }
+]
+
+It may be mutable, a parameter, a return, an optional, a collection element, a map value, an exported constant or a runtime value. Nothing is rejected merely because a string names a resource.
+
+### The URL is not decided yet
+
+Internally a resource file value is not the text `"./assets/logo.svg"`. It carries a resource anchor, and the string stays structural until a builder knows which artefact will contain the text.
+
+[codeblock, $code("moth"):
+    image #= [$html:
+        <img src="[@assets/logo.svg]" alt="Moth">
+    ]
+]
+
+`image` is a fully folded compile-time constant even though its final characters are unknown. Composition, storage, export and template insertion all work on it.
+
+The consequences are:
+
+- output paths and URLs are never observable through a cast, formatter or public interface
+- a compile-time operation that needs the final characters is rejected while placement is unresolved
+- runtime text operations happen only after the containing artefact has resolved each anchor
+
+There is no second source-visible string type. A resource-bearing string is a `String`.
+
+### URLs are rendered by the builder
+
+Resource identity, byte source, emitted output path and rendered URL are four separate facts. The builder chooses the output path, then chooses the artefact whose URL rules observe the rendered text, and renders a relative URL from there.
+
+[codeblock, $code("text"):
+    resource: assets/logo.svg
+    context:  index.html
+    URL:      ./assets/logo.svg
+
+    resource: assets/logo.svg
+    context:  docs/getting-started/index.html
+    URL:      ../../assets/logo.svg
+
+    resource: styles/fonts/site.woff2
+    context:  styles/site.css
+    URL:      ./fonts/site.woff2
+]
+
+The URL context is the artefact whose URL resolution rules observe the string, not necessarily the file that contains the generated code. Page runtime code uses the active page document, standalone CSS uses the stylesheet, and inline CSS uses the page document.
+
+Project HTML origin configuration is never prepended to a resource URL. Resource URLs are relative to their context artefact.
+
+Site navigation is the separate case. A route is not a file the build emits, so it cannot be written relative to a context artefact and does need the origin. `@/` is the origin-aware site-root string. See @#file-paths (File paths).
+
+### Crossing a module boundary
+
+A file value obeys filesystem ownership, so it cannot reach into a child module's or support package's private files. Content and resources cross a boundary as ordinary exported strings instead:
+
+[codeblock, $code("moth"):
+    export:
+        logo  #= @assets/logo.svg
+        intro #= @docs/intro.mtf
+    ;
+]
+
+A consumer binds those as ordinary exported `String` constants. Aliases and re-exports preserve the resource behind the string, so the link still renders correctly from the consumer's own pages.
+
+### Moth templates and Markdown
+
+`.mtf` files remain declarationless and dependency-clause-free. A file value is used through a nested Moth template inside the implicit Markdown body.
+
+[codeblock, $code("moth"):
+    [$html:
+        <img src="[@images/ownership.webp]" alt="Ownership graph">
+    ]
+]
+
+- plain `@images/ownership.webp` Markdown text remains ordinary text
+- a nested file path resolves from the `.mtf` file's owning module root
+- `.mtf` gains no frontmatter and no general declarations
+- plain `.md` link and image targets remain literal and untracked
+
+Rendered Markdown and HTML are never scanned to discover files.
+
+### Direct Moth-template compilation
+
+The direct `.mtf` compiler service has no route and no containing output artefact, so it cannot render final resource URLs.
+
+It returns structural folded content with its resource facts. Extracting plain text succeeds only when the folded content contains no unresolved anchors; otherwise the request reports unsupported content rather than guessing a path. A project builder consumes the structural result and applies its normal resource link plan.
+
+### Static branch specialisation
+
+Both branches of an ordinary `if` complete normal validation, and a path in a branch removed by known-`Bool` specialisation is still resolved and validated. That inactive branch contributes no output. A runtime branch retains ordinary reachability, so any reachable branch contributes its uses. See @#file-paths (File paths) for why being a build input is separate from reaching an output.
+
+### Related concepts
+
+- For file path syntax and resolution see @#file-paths (File paths).
+- For binding `.mtf` content with a dependency clause see @../moth-templates/#content-dependencies (Content dependencies).
+- For constant folding and const templates see @../constants/#constant-folding (Constant folding).
+- For template composition and directives see @../templates/#template-basics (Template basics).

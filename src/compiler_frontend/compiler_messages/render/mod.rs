@@ -606,6 +606,13 @@ pub(crate) fn invalid_page_metadata_message(
         InvalidPageMetadataReason::NotAString => {
             format!("Reserved HTML page metadata constant '{key_str}' must fold to a string.")
         }
+        InvalidPageMetadataReason::NotYetRenderable => {
+            format!(
+                "Reserved HTML page metadata constant '{key_str}' is a string, but a resource \
+                 or site-root piece in its value has no final text until the build assigns URL \
+                 contexts, so it cannot be used as page metadata yet."
+            )
+        }
         InvalidPageMetadataReason::DuplicateDeclaration => {
             format!(
                 "Reserved HTML page metadata constant '{key_str}' is declared more than once for this entry page."
@@ -621,6 +628,12 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
         }
         InvalidExpressionReason::UnresolvedStackShape => {
             "This expression does not resolve to exactly one value.".to_owned()
+        }
+        InvalidExpressionReason::MothFileHasNoValue => {
+            "A `.moth` file has no file value. Bind its declarations through a dependency clause.".to_owned()
+        }
+        InvalidExpressionReason::ExtensionlessFileValue => {
+            "A file value needs an explicit extension. Write the path with a file extension, or use a dependency clause to bind declarations.".to_owned()
         }
     }
 }

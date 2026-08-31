@@ -24,6 +24,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::{
@@ -37,7 +38,7 @@ use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, TemplateBodyMode, TokenizerEntryMode,
 };
-use crate::compiler_frontend::{CompilerFrontend, FrontendBuildProfile};
+use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::PathBuf;
@@ -215,7 +216,7 @@ impl FrontendProject {
     fn sorted_headers(&mut self) -> crate::compiler_frontend::module_dependencies::SortedHeaders {
         let headers = self.headers();
         self.frontend
-            .sort_headers(headers)
+            .sort_headers(headers, &ResolvedFileReferenceTable::default())
             .expect("header sorting should succeed")
     }
 
@@ -223,11 +224,15 @@ impl FrontendProject {
         let sorted = self.sorted_headers();
         self.frontend
             .headers_to_ast(
-                sorted,
-                &self.entry_file,
-                ModuleRootRole::Normal,
-                FrontendBuildProfile::Dev,
-                Default::default(),
+                AstBuildRequest {
+                    sorted,
+                    entry_file_path: &self.entry_file,
+                    root_role: ModuleRootRole::Normal,
+                    build_profile: FrontendBuildProfile::Dev,
+                    capacity_estimate: Default::default(),
+                    resolved_file_references: ResolvedFileReferenceTable::default(),
+                    module_origin: None,
+                },
                 #[cfg(feature = "timers")]
                 None,
             )
@@ -238,7 +243,7 @@ impl FrontendProject {
     fn hir(&mut self) -> crate::compiler_frontend::hir::module::HirModule {
         let ast = self.ast();
         self.frontend
-            .generate_hir(ast, HirFunctionOriginLookup::default())
+            .generate_hir(ast, HirFunctionOriginLookup::default(), None)
             .expect("HIR lowering should succeed")
             .hir_module
     }
@@ -420,11 +425,15 @@ fn frontend_diagnostics_preserve_string_table_context() {
 
     let sorted = project.sorted_headers();
     let Err(messages) = project.frontend.headers_to_ast(
-        sorted,
-        &project.entry_file,
-        ModuleRootRole::Normal,
-        FrontendBuildProfile::Dev,
-        Default::default(),
+        AstBuildRequest {
+            sorted,
+            entry_file_path: &project.entry_file,
+            root_role: ModuleRootRole::Normal,
+            build_profile: FrontendBuildProfile::Dev,
+            capacity_estimate: Default::default(),
+            resolved_file_references: ResolvedFileReferenceTable::default(),
+            module_origin: None,
+        },
         #[cfg(feature = "timers")]
         None,
     ) else {

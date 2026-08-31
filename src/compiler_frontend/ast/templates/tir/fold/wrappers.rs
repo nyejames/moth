@@ -1,5 +1,6 @@
 //! Wrapper-context application and virtual wrapper insertion for TIR folds.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopControlKind;
 use crate::compiler_frontend::ast::templates::template_folding::{
@@ -14,7 +15,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use super::estimate::{
@@ -114,9 +115,7 @@ pub(super) fn append_template_result_to_buffer(
             if output_state.projection_pieces.is_some() {
                 output_state.append_pieces(projection_pieces.as_deref())?;
             }
-            output_state
-                .output_buffer
-                .push_str(fold_context.string_table.resolve(output));
+            output_state.append_emission_value(&output, fold_context.string_table);
             output_state.emitted_output = true;
             Ok(None)
         }
@@ -125,9 +124,7 @@ pub(super) fn append_template_result_to_buffer(
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection_pieces.as_deref())?;
                 }
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                output_state.append_emission_value(&output, fold_context.string_table);
                 output_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Break))
@@ -137,9 +134,7 @@ pub(super) fn append_template_result_to_buffer(
                 if output_state.projection_pieces.is_some() {
                     output_state.append_pieces(projection_pieces.as_deref())?;
                 }
-                output_state
-                    .output_buffer
-                    .push_str(fold_context.string_table.resolve(output));
+                output_state.append_emission_value(&output, fold_context.string_table);
                 output_state.emitted_output = true;
             }
             Ok(Some(TemplateLoopControlKind::Continue))
@@ -151,7 +146,7 @@ pub(super) fn append_template_result_to_buffer(
 /// a virtual wrapper fold that does not push synthetic nodes into the store.
 ///
 /// WHAT: folds each inherited wrapper template around the already-folded child
-///       output string, injecting the child output at the slot that the fill
+///       `ConstStringValue`, injecting the child output at the slot that the fill
 ///       content would route to (or appending it after slot-less wrapper
 ///       content). No-output and empty-signal cases pass through unchanged so
 ///       skipped branches or zero-iteration loops do not receive wrappers.
@@ -181,7 +176,10 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
                 ));
             }
 
-            (fold_context.string_table.intern(""), None)
+            (
+                ConstStringValue::Text(fold_context.string_table.intern("")),
+                None,
+            )
         }
         TemplateEmission::Output(output) => (output, None),
         TemplateEmission::Break(Some(output)) => (output, Some(TemplateLoopControlKind::Break)),
@@ -200,7 +198,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
             }
 
             (
-                fold_context.string_table.intern(""),
+                ConstStringValue::Text(fold_context.string_table.intern("")),
                 Some(TemplateLoopControlKind::Break),
             )
         }
@@ -216,7 +214,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
             }
 
             (
-                fold_context.string_table.intern(""),
+                ConstStringValue::Text(fold_context.string_table.intern("")),
                 Some(TemplateLoopControlKind::Continue),
             )
         }
@@ -280,8 +278,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
         current_projection,
     ))
 }
-
-/// Folds a single wrapper template around an already-folded child output string
+/// Folds a single wrapper template around an already-folded child `ConstStringValue`
 /// without pushing synthetic nodes into the store.
 ///
 /// WHAT: folds the wrapper template's root, injecting the child output at the
@@ -294,7 +291,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
 ///      wrappers append the child after their own content.
 fn fold_tir_wrapper_around_child_output(
     wrapper_reference: &TemplateWrapperReference,
-    child_output: StringId,
+    child_output: ConstStringValue,
     child_provenance: SyntheticInterfaceProvenance,
     child_projection: Option<&[FoldedConstTemplatePiece]>,
     fold_context: &mut TirFoldContext<'_>,
@@ -317,25 +314,24 @@ fn fold_tir_wrapper_around_child_output(
     fold_tir_wrapper_with_input(
         wrapper_reference.root,
         wrapper_template,
-        child_output,
+        &child_output,
         child_provenance,
         child_projection,
         fold_context,
         &wrapper_fold_input,
     )
 }
-
-/// Folds one resolved wrapper template around an already-folded child output.
+/// Folds one resolved wrapper template around an already-folded child.
 ///
-/// WHAT: applies the wrapper's effective slot routing and preserves injected
-///      child precedence at the loose-fill target.
-/// WHY: the same wrapper identity is shared across entry paths, so the
-///      output walk must not discard its exact view.
+/// WHAT: applies the wrapper's effective slot routing while carrying the child's
+///       owned structural string value and projection through the shared reducer.
+/// WHY: wrapper output must preserve resource and site-root boundaries instead of
+///      flattening the child value back to ordinary text.
 #[allow(clippy::too_many_arguments)]
 fn fold_tir_wrapper_with_input(
     wrapper_template_id: TemplateIrId,
     wrapper_template: &TemplateIr,
-    child_output: StringId,
+    child_output: &ConstStringValue,
     child_provenance: SyntheticInterfaceProvenance,
     child_projection: Option<&[FoldedConstTemplatePiece]>,
     fold_context: &mut TirFoldContext<'_>,
@@ -351,7 +347,7 @@ fn fold_tir_wrapper_with_input(
         .into());
     }
 
-    let child_output_len = fold_context.string_table.resolve(child_output).len();
+    let child_output_len = const_string_value_text_len(child_output, fold_context.string_table);
     let estimated_bytes = wrapper_template.summary.estimated_output_bytes + child_output_len;
     let mut output_state = FoldOutputState::with_provenance(
         reserve_tir_fold_output_buffer(estimated_bytes),
@@ -376,9 +372,7 @@ fn fold_tir_wrapper_with_input(
         if wrapper_fold_input.projection_enabled {
             output_state.append_pieces(child_projection)?;
         }
-        output_state
-            .output_buffer
-            .push_str(fold_context.string_table.resolve(child_output));
+        output_state.append_emission_value(child_output, fold_context.string_table);
         output_state.emitted_output = true;
     } else {
         // Slot-bearing wrappers inject at the loose-fill target first. Named-
@@ -405,45 +399,45 @@ fn fold_tir_wrapper_with_input(
             if wrapper_fold_input.projection_enabled {
                 output_state.append_pieces(child_projection)?;
             }
-            output_state
-                .output_buffer
-                .push_str(fold_context.string_table.resolve(child_output));
+            output_state.append_emission_value(child_output, fold_context.string_table);
             output_state.emitted_output = true;
         }
     }
 
     let actual_len = output_state.output_buffer.len();
     record_tir_fold_output_estimate_miss(actual_len, estimated_bytes);
-    let output_id = fold_context
-        .string_table
-        .intern(&output_state.output_buffer);
+    let provenance = std::mem::replace(
+        &mut output_state.provenance,
+        SyntheticInterfaceProvenance::empty(),
+    );
+    let projection_pieces = output_state.projection_pieces.take();
+    let output = output_state.into_const_string_value(fold_context.string_table);
     record_tir_fold_output_intern(actual_len);
 
     Ok(TemplateFoldResult::with_projection(
-        TemplateEmission::Output(output_id),
-        output_state.provenance,
-        output_state.projection_pieces,
+        TemplateEmission::Output(output),
+        provenance,
+        projection_pieces,
     ))
 }
-
 /// Folds a TIR aggregate wrapper subtree, replacing the `AggregateOutput` marker
-/// with the already-folded aggregate string.
+/// with the already-folded aggregate string value.
 ///
-/// WHAT: walks the TIR subtree that the converter built from the AST aggregate
-///       render plan, replacing the `AggregateOutput` marker with the already-folded
-///       aggregate string.
-/// WHY: aggregate output is a normal TIR marker, so the shared reducer can fold
-///      the wrapper without a separate render-plan representation.
+/// WHAT: walks the TIR subtree that the converter built from the AST aggregate,
+///       replacing its marker with the borrowed module-local structural value.
+/// WHY: aggregate output is a normal TIR marker, so the shared reducer carries
+///      its ordered pieces without a second render-plan representation.
 pub(super) fn fold_tir_aggregate_wrapper(
     wrapper_node_id: TemplateIrNodeId,
-    aggregate_output: StringId,
+    aggregate_output: &ConstStringValue,
     aggregate_projection: Option<&[FoldedConstTemplatePiece]>,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
 ) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
     let store = fold_input.view.store();
-    let aggregate_output_len = fold_context.string_table.resolve(aggregate_output).len();
+    let aggregate_output_len =
+        const_string_value_text_len(aggregate_output, fold_context.string_table);
     let estimated_bytes = estimate_tir_node_output_bytes(
         store,
         wrapper_node_id,
@@ -483,19 +477,36 @@ pub(super) fn fold_tir_aggregate_wrapper(
 
     let actual_len = wrapper_state.output_buffer.len();
     record_tir_fold_output_estimate_miss(actual_len, estimated_bytes);
-    let wrapper_id = fold_context
-        .string_table
-        .intern(&wrapper_state.output_buffer);
-    record_tir_fold_output_intern(actual_len);
     let wrapper_projection = wrapper_state.projection_pieces.take();
+    let wrapper_output = wrapper_state.into_const_string_value(fold_context.string_table);
+    record_tir_fold_output_intern(actual_len);
 
     if output_state.projection_pieces.is_some() {
         output_state.append_pieces(wrapper_projection.as_deref())?;
     }
-    output_state
-        .output_buffer
-        .push_str(fold_context.string_table.resolve(wrapper_id));
+    output_state.append_emission_value(&wrapper_output, fold_context.string_table);
     output_state.emitted_output = true;
 
     Ok(None)
+}
+
+/// Estimates rendered bytes without pretending structural anchors have text output.
+///
+/// WHAT: counts only interned text pieces in a folded value for capacity and instrumentation
+///       estimates.
+/// WHY: resources and site roots remain structural and must not be flattened into placeholder text.
+fn const_string_value_text_len(value: &ConstStringValue, string_table: &StringTable) -> usize {
+    match value {
+        ConstStringValue::Text(text) => string_table.resolve(*text).len(),
+        ConstStringValue::Pieces(pieces) => pieces
+            .iter()
+            .map(|piece| match piece {
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(text) => {
+                    string_table.resolve(*text).len()
+                }
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(_)
+                | crate::compiler_frontend::ast::const_values::store::ConstStringPiece::SiteRoot => 0,
+            })
+            .sum(),
+    }
 }

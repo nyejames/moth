@@ -149,6 +149,7 @@ fn make_prepared_output(
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path: Some(canonical_os_path),
         headers,
@@ -196,6 +197,7 @@ fn file_dependency_clause_remaps_all_fields_without_alias() {
 
     let provider = RetainedDependencyPath {
         path: header_path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: path_location,
         dependency_shell_id: DependencyShellId::new(FileId(0), 0),
@@ -236,6 +238,7 @@ fn file_dependency_clause_remaps_all_fields_with_alias() {
 
     let provider = RetainedDependencyPath {
         path: header_path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: path_location,
         dependency_shell_id: DependencyShellId::new(FileId(0), 1),
@@ -290,6 +293,7 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
 
     let provider = RetainedDependencyPath {
         path: header_path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: path_location,
         dependency_shell_id: original_shell,
@@ -741,6 +745,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
 
     let provider = RetainedDependencyPath {
         path: InternedPath::from_single_str("@html/head", &mut local),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: make_location("test.moth", &mut local),
         dependency_shell_id: DependencyShellId::new(FileId(0), 0),
@@ -765,6 +770,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
         file_dependency_clauses: vec![dependency],
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path: None,
         headers: vec![header],
@@ -869,6 +875,7 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path: None,
         headers: Vec::new(),
@@ -996,6 +1003,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let provider_path = InternedPath::from_components(vec![provider_name]);
     let provider = RetainedDependencyPath {
         path: provider_path.clone(),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: provisional_location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(7), 0),
@@ -1015,6 +1023,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             location: clause_location,
             export_mode: HeaderExportMode::Private,
         }],
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path: Some(PathBuf::from("/provisional/src/main.moth")),
         headers: vec![
@@ -1244,6 +1253,7 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
     let location = make_location("src/main.moth", &mut string_table);
     let provider = RetainedDependencyPath {
         path: InternedPath::from_single_str("provider", &mut string_table),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(3), 0),
@@ -1261,6 +1271,7 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
             location,
             export_mode: HeaderExportMode::Private,
         }],
+        structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
         canonical_os_path: Some(PathBuf::from("/provisional/src/main.moth")),
         headers: Vec::new(),
@@ -1324,6 +1335,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
     let dependency_location = make_location("src/main.moth", &mut local);
     let provider = RetainedDependencyPath {
         path: InternedPath::from_single_str("provider", &mut local),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: dependency_location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(0), 0),
@@ -1344,6 +1356,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,
         file_dependency_clauses: vec![dependency],
+        structural_file_references: Default::default(),
         dependency_selections: vec![DependencySelection {
             source_name: local.intern("source"),
             source_location: dependency_location.clone(),
@@ -1425,6 +1438,7 @@ fn prepared_file_invariant_anchors_clause_shell_identity_to_file_id() {
     );
     let provider = RetainedDependencyPath {
         path: InternedPath::from_single_str("@core/math", &mut string_table),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(7), 0),
@@ -1467,6 +1481,7 @@ fn prepared_file_invariant_rejects_duplicate_clause_shell_ordinals() {
     let provider_path = InternedPath::from_single_str("@core/math", &mut string_table);
     let provider = |ordinal| RetainedDependencyPath {
         path: provider_path.clone(),
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
         dependency_shell_id: DependencyShellId::new(FileId(6), ordinal),
@@ -1571,6 +1586,7 @@ fn prepared_file_invariant_rejects_malformed_provider_prefix_count() {
     output.file_dependency_clauses.push(RetainedDependencyClause {
         dependency: RetainedDependencyPath {
             path: InternedPath::from_single_str("drawing.js", &mut string_table),
+            path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
             target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
                 prefix_component_count: 4,
                 extension: string_table.intern("js"),
@@ -1612,6 +1628,7 @@ fn prepared_file_invariant_rejects_empty_retained_dependency_path() {
         .push(RetainedDependencyClause {
         dependency: RetainedDependencyPath {
             path: InternedPath::new(),
+            path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
             target:
                 crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
             location: location.clone(),

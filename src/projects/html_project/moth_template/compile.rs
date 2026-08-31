@@ -6,7 +6,7 @@
 //! The stage sequence that folds template source into a `content` string is compiler-owned, so this
 //! module composes no frontend stage itself.
 
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::single_source_compilation::{
     MothTemplateCompilationRequest, compile_moth_template_source,
 };
@@ -50,11 +50,33 @@ pub(crate) fn compile_moth_template(
             string_table,
         ) {
             Ok(folded) => {
-                warnings.extend(folded.warnings);
+                let folded_warnings = folded.warnings;
+                let content = match folded.content.into_text() {
+                    Some(content) => content,
+                    None => {
+                        // WHY: Phase 5's direct `.mtf` service parity consumer will replace this
+                        //      text-only accessor with structural rendering through the normal
+                        //      link plan. The current direct lane provides no file-value
+                        //      resolution services, so its content cannot carry pieces yet.
+                        let mut messages = CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "Moth template content did not fold to a string.",
+                            ),
+                            string_table,
+                        );
+                        // Every warning gathered so far belongs to the report, in source order:
+                        // earlier documents first, then this one's.
+                        messages.prepend_diagnostics_preserving_context(
+                            warnings.iter().cloned().chain(folded_warnings),
+                        );
+                        return Err(messages);
+                    }
+                };
+                warnings.extend(folded_warnings);
                 documents.push(CompiledMothTemplateDocument {
                     source_path,
                     relative_path,
-                    content: folded.content,
+                    content,
                 });
             }
             Err(mut messages) => {

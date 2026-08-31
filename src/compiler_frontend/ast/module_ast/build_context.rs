@@ -155,6 +155,10 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
 
     /// Optional project-relative path resolver for source-backed package and dependency resolution.
     pub project_path_resolver: Option<ProjectPathResolver>,
+    /// Stage 0 file-reference outcomes and module-local structural resource identity.
+    pub file_value_resolution: Option<
+        Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
+    >,
 
     /// Formatting rules for rendering interned paths in diagnostics and output.
     pub path_format_config: PathStringFormatConfig,
@@ -188,6 +192,9 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_dir: InternedPath,
+    pub(crate) file_value_resolution: Option<
+        Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
+    >,
     pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
@@ -225,6 +232,7 @@ impl<'a> AstPhaseContext<'a> {
             root_role,
             build_profile,
             project_path_resolver,
+            file_value_resolution,
             path_format_config,
             template_const_loop_iteration_limit,
             capacity_estimate,
@@ -246,6 +254,7 @@ impl<'a> AstPhaseContext<'a> {
                 root_role,
                 build_profile,
                 project_path_resolver,
+                file_value_resolution,
                 path_format_config,
                 template_const_loop_iteration_limit,
                 capacity_estimate,

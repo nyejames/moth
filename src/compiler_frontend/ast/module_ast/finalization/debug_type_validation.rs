@@ -511,18 +511,15 @@ fn debug_validate_expression_type_id_with_context(
             }
         },
 
-        // Leaf expressions that carry no nested type identities.
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_) => {}
-
-        #[cfg(test)]
-        ExpressionKind::Path(_) => {}
     }
 }
 

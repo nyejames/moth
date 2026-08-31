@@ -10,7 +10,6 @@
 //!      happens to the result; it never invokes these stages individually.
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
@@ -18,6 +17,7 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, merge_stage_messages,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ModuleDiagnostics};
+use crate::compiler_frontend::folded_value::owned_folded_string_from_const_string;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderKind, PreparedHeaderSyntax, bind_module_headers,
 };
@@ -51,6 +51,7 @@ use crate::compiler_frontend::module_compilation::prepared::PreparedModuleInput;
 use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
 use crate::compiler_frontend::module_dependencies::SortedHeaders;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
     SourceProviderDependencySet, build_direct_export_seed,
@@ -61,10 +62,12 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
+use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use crate::{borrow_log, timed_stage_attributed};
 
 use rustc_hash::FxHashMap;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// Compile one ready module through the canonical local semantic sequence.
@@ -94,12 +97,14 @@ pub(crate) fn compile_module(
         active_root_file_id,
         source_module_origins,
         prepared_header_syntax,
+        resolved_file_references,
         string_table,
         source_files,
         warnings,
         source_file_count,
         source_byte_count,
     } = prepared;
+    resolved_file_references.validate()?;
 
     // The active module origin is resolved from the per-file source-origin table using the
     // retained active root FileId, not from a loose origin argument. Preparation already
@@ -138,6 +143,7 @@ pub(crate) fn compile_module(
             entry_file_path,
             source_file_count,
             source_byte_count,
+            resolved_file_references,
         },
         #[cfg(feature = "timers")]
         timing_context,
@@ -187,6 +193,8 @@ struct SemanticStageInputs<'a> {
     entry_file_path: &'a Path,
     source_file_count: usize,
     source_byte_count: usize,
+    /// Stage 0's settled file-reference targets, consumed by dependency sorting for content edges.
+    resolved_file_references: ResolvedFileReferenceTable,
 }
 
 /// Run the local semantic sequence for one module, from bound headers to a complete result.
@@ -213,6 +221,7 @@ fn run_semantic_stages(
         entry_file_path,
         source_file_count,
         source_byte_count,
+        resolved_file_references,
     } = inputs;
     let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
     let active_root_role = active_module_origin.role();
@@ -240,7 +249,12 @@ fn run_semantic_stages(
     let sorted = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendOrderDeclarations,
         timing_context,
-        sort_headers(compiler, module_headers, &warnings)
+        sort_headers(
+            compiler,
+            module_headers,
+            &resolved_file_references,
+            &warnings
+        )
     )?;
 
     let root_activity = ModuleRootActivity {
@@ -320,6 +334,8 @@ fn run_semantic_stages(
         active_root_role,
         capacity_estimate,
         &mut warnings,
+        resolved_file_references,
+        Some(active_module_origin.clone()),
         #[cfg(feature = "timers")]
         timing_context,
     )?;
@@ -329,10 +345,19 @@ fn run_semantic_stages(
     let AstBuildResult {
         ast: mut module_ast,
         public_interface_projection_input,
+        module_resources,
         materialisation_context: mut materialisation_context_builder,
         deferred_generic_requests,
     } = module_ast_build;
 
+    let module_resources = module_resources.ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "module AST finalization did not retain its module resource table",
+            ),
+            &compiler.string_table,
+        )
+    })?;
     // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
     //    draft is the sole pre-HIR public-semantic handoff: the export-origin
     //    finalization, the canonical type-surface projection and the corrected
@@ -352,6 +377,7 @@ fn run_semantic_stages(
     //    borrow validation, while provenance, re-export interfaces, cross-module call
     //    lowering and future generated-generic summaries remain for later phases.
     //    Folded constant values are owned by the AST module store and projected by value ID.
+    let module_resource_table = module_resources.borrow();
     let public_interface_build = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendPublicInterfaceProject,
         timing_context,
@@ -367,12 +393,16 @@ fn run_semantic_stages(
                 .context()
                 .generic_function_templates(),
             const_values: &module_ast.const_values,
+            module_resources: Some(&module_resource_table),
         })
         .build(),
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
     let public_interface_draft = public_interface_build.draft;
 
+    // Release the shared-table borrow before HIR: lowering re-interns handoff origins with
+    // `borrow_mut` against the same module resource table.
+    drop(module_resource_table);
     let public_origins_by_path = public_interface_build
         .callable_seeds
         .iter()
@@ -383,6 +413,7 @@ fn run_semantic_stages(
             &active_module_origin,
             &public_origins_by_path,
             &public_source_nominal_type_origins,
+            &module_resources.borrow(),
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
         .into_iter()
@@ -435,21 +466,38 @@ fn run_semantic_stages(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
-    // 5. Resolve const fragment StringIds to strings before AST is consumed by HIR.
-    let const_top_level_fragments = module_ast
-        .const_top_level_fragments
-        .iter()
-        .map(|fragment| ResolvedConstFragment {
-            runtime_insertion_index: fragment.runtime_insertion_index,
-            rendered_text: compiler.string_table.resolve(fragment.value).to_owned(),
-        })
-        .collect::<Vec<_>>();
+    // 5. Convert const fragment structural strings to owned values before AST is consumed by HIR.
+    let const_top_level_fragments = {
+        let module_resources = module_resources.borrow();
+        module_ast
+            .const_top_level_fragments
+            .iter()
+            .map(|fragment| {
+                owned_folded_string_from_const_string(
+                    &fragment.value,
+                    &module_resources,
+                    &compiler.string_table,
+                )
+                .map(|value| ResolvedConstFragment {
+                    runtime_insertion_index: fragment.runtime_insertion_index,
+                    value,
+                })
+            })
+            .collect::<Result<Vec<_>, CompilerError>>()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+    };
 
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
     let hir_lowering = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendHir,
         timing_context,
-        lower_hir(compiler, module_ast, &warnings, function_origin_lookup)
+        lower_hir(
+            compiler,
+            module_ast,
+            &warnings,
+            function_origin_lookup,
+            Some(Rc::clone(&module_resources)),
+        )
     )?;
     let HirLoweringResult {
         mut hir_module,
@@ -546,9 +594,19 @@ fn run_semantic_stages(
         }
     )?;
     let materialisation_context = materialisation_context_builder
-        .freeze(&public_interface)
+        .freeze(&public_interface, &module_resources.borrow())
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
         .map(Arc::new);
+    let resource_table = Rc::try_unwrap(module_resources)
+        .map(|cell| cell.into_inner())
+        .map_err(|_| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "ordinary module resource table still has a live shared handle after HIR lowering",
+                ),
+                &compiler.string_table,
+            )
+        })?;
 
     // -------------------------
     //  Finalize Module Build
@@ -587,6 +645,7 @@ fn run_semantic_stages(
         Module {
             executable: ModuleExecutable {
                 hir: hir_module,
+                resource_table,
                 type_environment,
                 borrow_analysis,
             },
@@ -647,16 +706,19 @@ fn bind_retained_headers(
 fn sort_headers(
     compiler: &mut CompilerFrontend,
     module_headers: BoundModuleHeaders,
+    resolved_file_references: &ResolvedFileReferenceTable,
     warnings: &[CompilerDiagnostic],
 ) -> Result<SortedHeaders, CompilerMessages> {
-    compiler.sort_headers(module_headers).map_err(|bag| {
-        let mut messages = CompilerMessages::from_diagnostics(
-            bag.into_diagnostics(),
-            compiler.string_table.clone(),
-        );
-        messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-        messages
-    })
+    compiler
+        .sort_headers(module_headers, resolved_file_references)
+        .map_err(|bag| {
+            let mut messages = CompilerMessages::from_diagnostics(
+                bag.into_diagnostics(),
+                compiler.string_table.clone(),
+            );
+            messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
+            messages
+        })
 }
 
 // The timing context is a cfg-gated parameter that disappears from
@@ -670,14 +732,20 @@ fn build_ast_with_registered_types(
     root_role: ModuleRootRole,
     capacity_estimate: FrontendArenaCapacityEstimate,
     warnings: &mut Vec<CompilerDiagnostic>,
+    resolved_file_references: ResolvedFileReferenceTable,
+    module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<AstBuildResult, CompilerMessages> {
     match compiler.headers_to_ast(
-        sorted,
-        entry_file_path,
-        root_role,
-        context.build_profile,
-        capacity_estimate,
+        AstBuildRequest {
+            sorted,
+            entry_file_path,
+            root_role,
+            build_profile: context.build_profile,
+            capacity_estimate,
+            resolved_file_references,
+            module_origin,
+        },
         #[cfg(feature = "timers")]
         timing_context,
     ) {

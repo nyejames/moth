@@ -28,6 +28,8 @@ In `$md`, backticks delimit inline code, not raw strings. Empty spans, repeated 
 
 Use `@/docs/packages (Packages)` for internal routes or `@https://example.com (Example)` for external links. Ordinary ["[label](path)"] Markdown links belong to Plain Markdown and aren't parsed as links by a moth template's `$md` formatter.
 
+A target beginning with a single `/` is a site route and renders through the site root, so the configured `origin` is applied for you. Relative, fragment, protocol-relative and absolute targets render literally. See @../templates/#markdown-formatting (Markdown formatting).
+
 ### `--` is content
 
 Because the file body is a template body, `--` is body text, not a Moth comment. It renders as literal `--` in the output.

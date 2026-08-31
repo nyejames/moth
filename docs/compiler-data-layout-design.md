@@ -524,6 +524,18 @@ Domain-specific wrappers may be used where source paths, semantic namespace path
 must not be mixed, but those wrappers remain four-byte IDs over the same table when their component
 semantics are compatible.
 
+An owner-relative logical resource path has two representations, and which one applies depends on
+whether the path stays inside one build context:
+
+- A build-local resource path is one such wrapper: a `PathId` over the same table, never an owned
+  component vector and never a `PathBuf`.
+- A stable cross-boundary resource origin is self-contained instead. `PathId` is a build-lifetime
+  table-local identity, so it cannot carry meaning across an independent compilation context,
+  a persisted artefact or a sidecar boundary. The owner-relative path inside a stable resource
+  origin therefore uses a portable owned spelling, exactly as stable module and package identities
+  already do. This changes only if a frozen cross-boundary path context is designed, at which point
+  the owned spelling becomes an ID into that frozen context rather than into a build-lifetime one.
+
 ### Dense path table
 
 The baseline representation is a parent-linked path trie:
@@ -689,9 +701,17 @@ Rules:
 - the table is owned by the source-owned token store and freezes with it
 - string-table remapping visits the table once for path roots
 - source identity rebinding updates table locations once
-- frozen generic bodies retain only the referenced path rows
+- frozen generic bodies retain only the referenced path rows, and capture the matching resolved
+  file-reference entries in the same pass so a materialised body reaches its content or resource
+  target through generic-local handles instead of stale donor handles or a second filesystem lookup
 - no path row owns a vector-backed path or a global source span when the enclosing source is
   already known
+- path syntax rows stay syntax-only. Semantic resource identity, filesystem resolution, output
+  placement and content state belong to their own owners and never widen a `PathSyntax` row
+- structural file references are classified from these dense rows during source preparation. That
+  classification reads the row and its spelling only: it adds no second tokenization, no second
+  expression parse and no arbitrary source-text scan, and it stores its result beside the table
+  rather than inside a row
 
 ### Numeric token side store
 

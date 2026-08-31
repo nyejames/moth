@@ -200,6 +200,7 @@ fn retain_scanned_clause(
     let dependency = RetainedDependencyPath {
         dependency_shell_id: clause_shell_id,
         path: scanned.provider.path,
+        path_syntax: scanned.provider.path_syntax,
         target,
         location: scanned.provider.path_location,
     };

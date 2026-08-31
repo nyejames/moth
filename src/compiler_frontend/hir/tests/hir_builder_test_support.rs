@@ -4,6 +4,7 @@
 //! WHY: tests need direct access to internal builder state without widening the production API.
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, SourceLocation};
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -15,6 +16,9 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, TypeId as FrontendTypeId};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayload;
+use crate::compiler_frontend::folded_value::{
+    OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
+};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -25,10 +29,18 @@ use crate::compiler_frontend::hir::ids::{
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
+use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableResourceOriginId,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::value_mode::ValueMode;
+use std::path::Path;
 
 // Re-export TypeId-first AST construction helpers from the bridge module so existing
 // HIR test imports continue to work without mentioning parse-era type syntax.
@@ -346,7 +358,6 @@ pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_>
     let test_function_name = InternedPath::from_single_str("__expr_test_fn", string_table);
     let mut builder = HirBuilder::new(
         string_table,
-        PathStringFormatConfig::default(),
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
     );
@@ -393,16 +404,37 @@ pub(crate) fn register_local(
 
 /// Builds the neutral render node used by HIR expression fixtures.
 ///
-/// WHAT: maps literal strings to `Text`, maps other expressions to
-///       `DynamicExpression`, and preserves their source locations.
-/// WHY: HIR tests should construct the owned AST/HIR boundary they consume.
+/// WHAT: delegates to the resource-capable mapper with an empty resource table.
+/// WHY: fixture content built through this lane carries no resource-bearing piece; a
+///      `Resource` piece against the empty table fails the fixture loudly instead of
+///      silently rerouting the structural string, mirroring the handoff's absent-table rule.
 pub(crate) fn expressions_to_owned_render_node(
     expressions: &[Expression],
     string_table: &StringTable,
 ) -> OwnedRuntimeTemplateNode {
+    expressions_to_owned_render_node_with_resources(
+        expressions,
+        string_table,
+        &ModuleResourceTable::new(),
+    )
+}
+
+/// Builds the neutral render node used by HIR expression fixtures against one resource table.
+///
+/// WHAT: maps literal strings to `Text`, maps runtime `StructuralString` expressions to
+///       piece-bearing `Text` nodes through the single shared owned folded-string converter,
+///       and maps every other expression to `DynamicExpression`, preserving source locations.
+/// WHY: the runtime handoff materializes a structural string as
+///      `Text { text: OwnedFoldedString::Pieces(..) }` (see `handoff_materialization`), so HIR
+///      fixtures must construct exactly that shape instead of a rerouted dynamic expression.
+pub(crate) fn expressions_to_owned_render_node_with_resources(
+    expressions: &[Expression],
+    string_table: &StringTable,
+    resources: &ModuleResourceTable,
+) -> OwnedRuntimeTemplateNode {
     let children: Vec<OwnedRuntimeTemplateNode> = expressions
         .iter()
-        .map(|expression| expression_to_owned_node(expression, string_table))
+        .map(|expression| expression_to_owned_node(expression, string_table, resources))
         .collect();
 
     OwnedRuntimeTemplateNode::Sequence { children }
@@ -410,14 +442,33 @@ pub(crate) fn expressions_to_owned_render_node(
 
 fn expression_to_owned_node(
     expression: &Expression,
-    _string_table: &StringTable,
+    string_table: &StringTable,
+    resources: &ModuleResourceTable,
 ) -> OwnedRuntimeTemplateNode {
     match &expression.kind {
         ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
-            text: *text,
+            text: OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
             reactive_subscription: None,
             location: expression.location.to_owned(),
         },
+
+        // WHAT: mirrors the runtime handoff: a structural string converts to a piece-bearing
+        //       text node through the one shared owned folded-string helper.
+        // WHY: a fixture must not flatten resource or site-root pieces into rendered text, and
+        //      must not reroute the node into `DynamicExpression`.
+        ExpressionKind::StructuralString { pieces } => {
+            let value = ConstStringValue::Pieces(pieces.clone());
+
+            let text = owned_folded_string_from_const_string(&value, resources, string_table)
+                .expect("fixture structural string must convert against the resource table that issued its resource handles");
+
+            OwnedRuntimeTemplateNode::Text {
+                text,
+                reactive_subscription: None,
+                location: expression.location.to_owned(),
+            }
+        }
+
         _ => OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression.clone()),
             reactive_subscription: None,
@@ -437,4 +488,139 @@ pub(crate) fn runtime_template_expression(
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
+}
+
+// ---------------------------------------------------------------------------
+//  Fixture mapper regression tests
+//
+//  These pin the mapper itself so its output cannot silently drift away from the node
+//  shapes the runtime handoff materializes.
+// ---------------------------------------------------------------------------
+
+pub(crate) fn fixture_resource(
+    resources: &mut ModuleResourceTable,
+    relative_path: &str,
+) -> (ResourceId, StableResourceOriginId) {
+    let origin = StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("hir-fixture-tests"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_relative_logical_path(Path::new(relative_path))
+            .expect("fixture resource path should be portable"),
+    );
+
+    let resource_id = resources.intern_origin(
+        origin.clone(),
+        crate::compiler_frontend::tokenizer::tokens::SourceLocation::default(),
+    );
+
+    (resource_id, origin)
+}
+
+#[test]
+fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
+    let mut string_table = StringTable::new();
+    let mut resources = ModuleResourceTable::new();
+    let (resource_id, resource_origin) = fixture_resource(&mut resources, "assets/logo.svg");
+
+    let before = string_table.intern("before");
+    let after = string_table.intern("after");
+    let location = test_source_location(7);
+    let structural = Expression::structural_string(
+        vec![
+            ConstStringPiece::Text(before),
+            ConstStringPiece::Resource(resource_id),
+            ConstStringPiece::SiteRoot,
+            ConstStringPiece::Text(after),
+        ],
+        location.clone(),
+    );
+
+    let node =
+        expressions_to_owned_render_node_with_resources(&[structural], &string_table, &resources);
+
+    let OwnedRuntimeTemplateNode::Sequence { children } = node else {
+        panic!("fixture content should map to a sequence node");
+    };
+    let [single] = children.as_slice() else {
+        panic!("one fixture expression should map to one owned node");
+    };
+    let OwnedRuntimeTemplateNode::Text {
+        text,
+        reactive_subscription: None,
+        location: node_location,
+    } = single
+    else {
+        panic!("structural string fixture should map to a piece-bearing text node, got {single:?}");
+    };
+
+    assert_eq!(
+        text,
+        &OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text("before".to_owned()),
+            OwnedFoldedStringPiece::Resource(resource_origin),
+            OwnedFoldedStringPiece::SiteRoot,
+            OwnedFoldedStringPiece::Text("after".to_owned()),
+        ])
+    );
+    assert_eq!(node_location, &location);
+}
+
+#[test]
+fn all_text_structural_fixture_keeps_pieces_without_a_resource_table() {
+    let mut string_table = StringTable::new();
+    let head = string_table.intern("docs/");
+    let structural = Expression::structural_string(
+        vec![ConstStringPiece::Text(head), ConstStringPiece::SiteRoot],
+        test_source_location(8),
+    );
+
+    let node = expressions_to_owned_render_node(&[structural], &string_table);
+
+    let OwnedRuntimeTemplateNode::Sequence { children } = node else {
+        panic!("fixture content should map to a sequence node");
+    };
+    let [single] = children.as_slice() else {
+        panic!("one fixture expression should map to one owned node");
+    };
+    let OwnedRuntimeTemplateNode::Text {
+        text,
+        reactive_subscription: None,
+        ..
+    } = single
+    else {
+        panic!("site-root fixture should map to a piece-bearing text node, got {single:?}");
+    };
+
+    assert_eq!(
+        text,
+        &OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Text("docs/".to_owned()),
+            OwnedFoldedStringPiece::SiteRoot,
+        ])
+    );
+}
+
+#[should_panic(expected = "resource handle 0 is outside a module resource table of 0 origins")]
+#[test]
+fn resource_piece_without_its_table_fails_instead_of_rerouting() {
+    let mut string_table = StringTable::new();
+    let mut issuing_resources = ModuleResourceTable::new();
+    let (phantom_resource, _) = fixture_resource(&mut issuing_resources, "assets/logo.svg");
+
+    let head = string_table.intern("docs/");
+    let structural = Expression::structural_string(
+        vec![
+            ConstStringPiece::Text(head),
+            ConstStringPiece::Resource(phantom_resource),
+        ],
+        test_source_location(9),
+    );
+
+    // The mapper receives a table that issued none of the expression's handles, so the exact
+    // try-origin error proves the structural string reached the conversion boundary instead of
+    // being silently rerouted to a dynamic expression.
+    let _ = expressions_to_owned_render_node(&[structural], &string_table);
 }

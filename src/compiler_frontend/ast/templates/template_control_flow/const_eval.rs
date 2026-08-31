@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::LoopBindings;
-use crate::compiler_frontend::ast::const_eval::constant_fold;
+use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -179,7 +179,7 @@ fn fold_substituted_runtime_condition(
     add_ast_counter(AstCounter::ExpressionOperandClones, rpn.items.len());
 
     match constant_fold(rpn.items.clone(), string_table) {
-        Ok(mut stack) => {
+        Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()
                 && expression_is_compile_time_constant_from_effective_tir(&folded, context)
@@ -191,7 +191,11 @@ fn fold_substituted_runtime_condition(
             expression
         }
 
-        Err(_) => expression,
+        Ok(ConstantFoldOutcome::NotConstant(_)) => expression,
+
+        // This helper still returns an expression. Sub-phase 3c owns the template surface and
+        // will thread the precise diagnostic through its const-required parser boundary.
+        Ok(ConstantFoldOutcome::TextUnavailable { .. }) | Err(_) => expression,
     }
 }
 

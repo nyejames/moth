@@ -9,17 +9,25 @@
 
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     collect_capacity_references_in_parsed_ref, for_each_named_type_in_parsed_ref,
 };
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
+use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
-    DependencySelection, HeaderBuildContext, LocalDeclarationOrderingHint,
+    DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
 };
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, PreparedFileReferenceTable,
+};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
+use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
 /// Collect local declaration-ordering hints from a constant's declared type annotation.
@@ -127,3 +135,143 @@ pub(super) fn dependency_path_for_local_name(
 
     Ok(None)
 }
+
+// ------------------------
+//  Content-source shell ordering
+// ------------------------
+
+/// Record content-source ordering hints for every pre-body declaration shell in one file.
+///
+/// WHAT: scans each declaration shell's value-token range for path tokens whose prepared row
+/// classified as a content source, and records one hint per occurrence targeting that source's
+/// synthetic `content` constant. Runtime function and start bodies are never scanned.
+/// WHY: a direct `.mtf` or `.md` value path reuses the synthetic content constant, so every shell
+/// that folds before ordinary body emission depends on it. The scan stays token-level: it reads
+/// path handles and their prepared classification without parsing any expression.
+pub(super) fn collect_content_source_ordering_hints(
+    headers: &mut [Header],
+    file_references: &PreparedFileReferenceTable,
+    string_table: &mut StringTable,
+) {
+    let content_targets = content_source_targets(file_references, string_table);
+    if content_targets.is_empty() {
+        return;
+    }
+
+    for header in headers {
+        let Header {
+            kind,
+            tokens,
+            local_ordering_hints,
+            ..
+        } = header;
+
+        match kind {
+            HeaderKind::Constant { declaration } => {
+                scan_tokens_for_content_sources(
+                    &declaration.initializer_tokens,
+                    &content_targets,
+                    local_ordering_hints,
+                );
+            }
+
+            // Const-template tokens cover both the template head and body, including the
+            // top-level compile-time fragments folded before body emission.
+            HeaderKind::ConstTemplate { .. } => {
+                scan_tokens_for_content_sources(
+                    &tokens.tokens,
+                    &content_targets,
+                    local_ordering_hints,
+                );
+            }
+
+            HeaderKind::Function { signature, .. } => {
+                for parameter in &signature.parameters {
+                    scan_tokens_for_content_sources(
+                        &parameter.default_tokens,
+                        &content_targets,
+                        local_ordering_hints,
+                    );
+                }
+            }
+
+            HeaderKind::Struct { fields, .. } => {
+                for field in fields {
+                    scan_tokens_for_content_sources(
+                        &field.default_tokens,
+                        &content_targets,
+                        local_ordering_hints,
+                    );
+                }
+            }
+
+            HeaderKind::Choice { variants, .. } => {
+                for variant in variants {
+                    let ChoiceVariantPayloadSyntax::Record { fields } = &variant.payload else {
+                        continue;
+                    };
+                    for field in fields {
+                        scan_tokens_for_content_sources(
+                            &field.default_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        );
+                    }
+                }
+            }
+
+            // Runtime bodies fold after the synthetic content constants are complete, and the
+            // remaining shells hold no pre-body value expressions.
+            _ => {}
+        }
+    }
+}
+
+/// Map every content-class path row to its synthetic content constant hint target.
+///
+/// WHY: one lookup keyed by the authored path token's handle keeps the per-shell scan allocation
+/// free; rows consumed by dependency clauses never reach the table, so a clause-consumed
+/// occurrence records no content edge.
+fn content_source_targets(
+    file_references: &PreparedFileReferenceTable,
+    string_table: &mut StringTable,
+) -> FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint> {
+    let mut targets = FxHashMap::default();
+
+    for reference in file_references.iter() {
+        if reference.class != PreparedFileReferenceClass::ContentSource {
+            continue;
+        }
+
+        targets.insert(
+            reference.path_syntax,
+            LocalDeclarationOrderingHint::content_source(
+                content_constant_path(&reference.authored_path, string_table),
+                reference.path_syntax,
+            ),
+        );
+    }
+
+    targets
+}
+
+/// Insert one content hint for every path token in the slice whose row is a content source.
+fn scan_tokens_for_content_sources(
+    tokens: &[Token],
+    content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
+    hints: &mut HashSet<LocalDeclarationOrderingHint>,
+) {
+    for token in tokens {
+        let TokenKind::Path(path_id) = token.kind else {
+            continue;
+        };
+
+        if let Some(target) = content_targets.get(&path_id) {
+            hints.insert(target.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/ordering_hints_tests.rs"]
+mod ordering_hints_tests;

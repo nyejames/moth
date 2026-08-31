@@ -41,10 +41,11 @@ pub fn parse_file_path(
     // @path/to/file
     // @docs/"my file.md"
 
-    // WHAT: Accept exact `@/` as the singleton public-root path literal.
-    // WHY: Site templates commonly need the public root itself, and the existing
-    // empty `InternedPath` representation models that case cleanly without
-    // expanding path grammar into a generic slash-prefixed family.
+    // WHAT: Tokenize exact `@/` as the empty canonical path.
+    // WHY: in dependency position `@/` stays a rejected spelling whose owner reports its own
+    //      diagnostic, while expression position now accepts bare `@/` as the structural
+    //      site-root value. Tokenizing the spelling here lets each owner act on it instead of
+    //      failing as an unrecognised path introducer.
     if stream.peek() == Some(&'/') {
         stream.next();
 

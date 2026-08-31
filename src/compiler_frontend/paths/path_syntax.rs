@@ -18,8 +18,7 @@ use rustc_hash::FxHashMap;
 /// Dense file-local handle into a `PathSyntaxTable`.
 ///
 /// `PathSyntaxId::NONE` is the absent marker (zero) and is never a valid row.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PathSyntaxId(u32);
 
 impl PathSyntaxId {
@@ -63,6 +62,17 @@ impl PathSyntaxTable {
     #[cfg(test)]
     pub(crate) fn paths(&self) -> &[PathSyntax] {
         &self.paths
+    }
+
+    /// Walk every authored path row with its dense handle.
+    ///
+    /// File-reference classification uses this instead of scanning source text or parsing
+    /// expressions, so graph activity stays a syntax-table fact.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSyntaxId, &PathSyntax)> {
+        self.paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| (PathSyntaxId::from_index(index), path))
     }
 
     /// Read one path row through a fallible boundary.
@@ -219,7 +229,7 @@ impl PathSyntaxTable {
     pub(crate) fn capture_persistent_generic_subset(
         &self,
         tokens: &mut [Token],
-    ) -> Result<PathSyntaxTable, CompilerError> {
+    ) -> Result<(PathSyntaxTable, FxHashMap<PathSyntaxId, PathSyntaxId>), CompilerError> {
         // Validate every token against this table before copying. Persistent capture must not
         // depend on the caller having already proved handle ownership.
         self.validate_token_handles(tokens)?;
@@ -259,7 +269,7 @@ impl PathSyntaxTable {
                 subset.paths.len(),
             );
         }
-        Ok(subset)
+        Ok((subset, old_to_new))
     }
 
     fn copy_persistent_path_from(

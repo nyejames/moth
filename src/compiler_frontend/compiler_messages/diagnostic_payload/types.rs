@@ -204,6 +204,7 @@ pub enum InvalidConfigReason {
         candidates: Vec<StringId>,
     },
     ConfigImportUnsupported,
+    FileValuePathUnsupported,
     SourceFileFolderCollision {
         file_name: StringId,
         folder_name: StringId,
@@ -403,7 +404,8 @@ impl InvalidConfigReason {
             | Self::ValueCouldNotFold
             | Self::UnsupportedPackageFoldersValue
             | Self::EmptyProjectSetting
-            | Self::ConfigImportUnsupported => {}
+            | Self::ConfigImportUnsupported
+            | Self::FileValuePathUnsupported => {}
         }
     }
 }
@@ -540,7 +542,26 @@ impl InvalidImportPathReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidCompileTimePathReason {
     MissingTarget,
+    TargetIsDirectory,
+    TargetNotRegular,
+    CurrentDirectorySegment,
+    ParentDirectorySegment,
+    CaseMismatch {
+        provided: StringId,
+        expected: StringId,
+    },
+    EscapesModuleBoundary,
+    EscapesSymlink,
     EscapesProjectRoot,
+}
+
+impl InvalidCompileTimePathReason {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::CaseMismatch { provided, expected } = self {
+            *provided = remap.get(*provided);
+            *expected = remap.get(*expected);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1343,6 +1364,7 @@ pub enum CompileTimeEvaluationErrorReason {
     NoneLiteralRequiresOptionalTypeContext,
     ExternalTypeConstructionNotSupported,
     StructFieldDefaultNotFoldable,
+    StructuralStringRequiresFinalText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1562,6 +1584,13 @@ impl DeferredFeatureReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidPageMetadataReason {
     NotAString,
+
+    /// Sanctioned page-metadata refusal for the Phase 3 path-values changeset: extraction runs
+    /// before the build assigns URL contexts, so a structural string's resource or site-root
+    /// pieces have no final text to publish. The value is a legitimate string, so this must
+    /// never be reported as `NotAString`. Phase 4 carries piece-bearing forms through page
+    /// metadata (docs/roadmap/plans/path-values-and-resource-linking-plan.md).
+    NotYetRenderable,
     DuplicateDeclaration,
 }
 
@@ -1586,6 +1615,10 @@ pub enum InvalidExpressionReason {
     ExpectedOperatorBeforeExpression,
     /// Defensive evaluator fallback after structural parser checks.
     UnresolvedStackShape,
+    /// A `.moth` path in expression position has no file value.
+    MothFileHasNoValue,
+    /// A value-position path is missing the explicit file extension the language requires.
+    ExtensionlessFileValue,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

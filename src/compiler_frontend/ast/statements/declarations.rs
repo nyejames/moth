@@ -316,6 +316,8 @@ fn function_signature_receiver(
 /// This is the main lowering path for body-local value and struct declarations.
 /// It resolves the declared type annotation, parses the initializer expression,
 /// validates type compatibility, and applies contextual coercion.
+/// Names the runtime storage position a declaration creates, or `None` when it is a constant.
+///
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: InternedPath,

@@ -774,7 +774,8 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
 #[test]
 fn parser_tir_records_rendered_path_head_as_tir_only() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[@/: body]", &mut string_table);
+    let resource = test_resource_file("parser_tir_rendered_path_head.txt");
+    let (template, store) = parse_template(&format!("[@{resource}: body]"), &mut string_table);
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);

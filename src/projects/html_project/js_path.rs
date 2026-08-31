@@ -359,20 +359,33 @@ fn html_module_uses_reactive_runtime_fragments(
 /// WHAT: merges const fragments (with runtime insertion indices) and runtime slot placeholders
 /// into source-order HTML. Returns slot IDs so the bootstrap script can hydrate them in order.
 /// WHY: source order requires interleaving const strings at their indexed positions
-///      relative to runtime slots. Slot count is supplied by the caller from HIR.
+///      relative to runtime slots. Structural const values remain unresolved until URL assignment,
+///      so this builder boundary reports an internal error when final text is unavailable.
 pub(crate) fn render_entry_fragments(
     const_fragments: &[ResolvedConstFragment],
     slot_count: usize,
-) -> (String, Vec<String>) {
+) -> Result<(String, Vec<String>), CompilerError> {
     let mut html = String::new();
     let mut slot_ids: Vec<String> = Vec::new();
     let mut runtime_index = 0usize;
 
-    // Sort const fragments by runtime_insertion_index to handle them in order.
-    let mut sorted_const: Vec<(usize, &str)> = const_fragments
+    // Sort const fragments by runtime_insertion_index to handle them in order. A builder needs
+    // final text here; URL assignment will replace this internal wall in the next phase.
+    let mut sorted_const: Vec<(usize, String)> = const_fragments
         .iter()
-        .map(|f| (f.runtime_insertion_index, f.rendered_text.as_str()))
-        .collect();
+        .map(|fragment| {
+            fragment
+                .value
+                .clone()
+                .into_text()
+                .map(|text| (fragment.runtime_insertion_index, text))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "HTML builder boundary cannot render a structural const fragment until URL assignment lands.",
+                    )
+                })
+        })
+        .collect::<Result<_, _>>()?;
     sorted_const.sort_by_key(|(idx, _)| *idx);
 
     let mut const_iter = sorted_const.iter().peekable();
@@ -403,14 +416,15 @@ pub(crate) fn render_entry_fragments(
         html.push('\n');
     }
 
-    (html, slot_ids)
+    Ok((html, slot_ids))
 }
 
 pub(crate) fn render_html_document(
     input: &mut HtmlDocumentRenderInput<'_>,
 ) -> Result<String, CompilerMessages> {
     let (body_html, slot_ids) =
-        render_entry_fragments(input.const_fragments, input.entry_runtime_fragment_count);
+        render_entry_fragments(input.const_fragments, input.entry_runtime_fragment_count)
+            .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
     let start_function = input
         .hir_module
         .require_start_function("HTML document rendering")

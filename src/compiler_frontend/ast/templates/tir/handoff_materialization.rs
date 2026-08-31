@@ -9,7 +9,9 @@
 //! owned handoff shapes defined in `runtime_handoff.rs` that HIR lowering
 //! consumes directly.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
@@ -21,6 +23,9 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::tir::preparation::{
     TemplatePreparation, TemplatePreparationOutcome,
+};
+use crate::compiler_frontend::folded_value::{
+    OwnedFoldedString, owned_folded_string_from_const_string,
 };
 
 use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
@@ -42,6 +47,8 @@ use crate::compiler_frontend::ast::templates::tir::view::TirView;
 use crate::compiler_frontend::ast::templates::tir::view::TirViewIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use std::collections::HashSet;
@@ -50,10 +57,12 @@ use std::collections::HashSet;
 pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
     prepared: &TemplatePreparation,
     view: TirView<'_>,
+    string_table: &StringTable,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new();
+    let mut materializer = RuntimeHandoffMaterializer::new(string_table, module_resources);
     materializer.owned_runtime_slot_handoff_for_template(&view, template_id)
 }
 
@@ -61,10 +70,12 @@ pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
 pub(crate) fn owned_runtime_template_handoff_for_prepared_view(
     prepared: &TemplatePreparation,
     view: TirView<'_>,
+    string_table: &StringTable,
+    module_resources: Option<&ModuleResourceTable>,
 ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new();
+    let mut materializer = RuntimeHandoffMaterializer::new(string_table, module_resources);
     materializer.owned_runtime_template_handoff_for_template(&view, template_id)
 }
 
@@ -96,14 +107,21 @@ fn validate_prepared_runtime(
     Ok(())
 }
 
-struct RuntimeHandoffMaterializer {
+struct RuntimeHandoffMaterializer<'a> {
     active_views: HashSet<TirViewIdentity>,
+    string_table: &'a StringTable,
+    module_resources: Option<&'a ModuleResourceTable>,
 }
 
-impl RuntimeHandoffMaterializer {
-    fn new() -> Self {
+impl<'a> RuntimeHandoffMaterializer<'a> {
+    fn new(
+        string_table: &'a StringTable,
+        module_resources: Option<&'a ModuleResourceTable>,
+    ) -> Self {
         Self {
             active_views: HashSet::new(),
+            string_table,
+            module_resources,
         }
     }
 
@@ -296,7 +314,7 @@ impl RuntimeHandoffMaterializer {
                 byte_len: _,
                 origin: _,
             } => Ok(OwnedRuntimeTemplateNode::Text {
-                text: *text,
+                text: OwnedFoldedString::Text(self.string_table.resolve(*text).to_owned()),
                 reactive_subscription: view.store().node_reactive_subscription(id)?.cloned(),
                 location: node.location.clone(),
             }),
@@ -306,14 +324,34 @@ impl RuntimeHandoffMaterializer {
                 origin: _,
                 reactive_subscription,
                 site_id,
-            } => Ok(OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(self.effective_expression(
-                    view,
-                    *site_id,
-                    expression.as_ref(),
-                )?),
-                reactive_subscription: reactive_subscription.clone(),
-            }),
+            } => {
+                let effective_expression =
+                    self.effective_expression(view, *site_id, expression.as_ref())?;
+
+                if let ExpressionKind::StructuralString { pieces } = &effective_expression.kind {
+                    let resources = self.module_resources.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "TIR runtime handoff reached a structural string without the issuing module resource table.",
+                        )
+                    })?;
+                    let value = ConstStringValue::Pieces(pieces.clone());
+                    let text = owned_folded_string_from_const_string(
+                        &value,
+                        resources,
+                        self.string_table,
+                    )?;
+                    Ok(OwnedRuntimeTemplateNode::Text {
+                        text,
+                        reactive_subscription: reactive_subscription.clone(),
+                        location: node.location.clone(),
+                    })
+                } else {
+                    Ok(OwnedRuntimeTemplateNode::DynamicExpression {
+                        expression: Box::new(effective_expression),
+                        reactive_subscription: reactive_subscription.clone(),
+                    })
+                }
+            }
 
             TemplateIrNodeKind::ChildTemplate {
                 reference,
@@ -496,11 +534,11 @@ impl RuntimeHandoffMaterializer {
         Ok(owned_node)
     }
 
-    fn get_template<'a>(
+    fn get_template<'store>(
         &self,
-        view: &TirView<'a>,
+        view: &TirView<'store>,
         id: TemplateIrId,
-    ) -> Result<&'a TemplateIr, CompilerError> {
+    ) -> Result<&'store TemplateIr, CompilerError> {
         view.store().get_template(id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR HIR handoff materialization referenced a missing template.",
@@ -508,11 +546,11 @@ impl RuntimeHandoffMaterializer {
         })
     }
 
-    fn get_node<'a>(
+    fn get_node<'store>(
         &self,
-        view: &TirView<'a>,
+        view: &TirView<'store>,
         id: TemplateIrNodeId,
-    ) -> Result<&'a TemplateIrNode, CompilerError> {
+    ) -> Result<&'store TemplateIrNode, CompilerError> {
         view.store().get_node(id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR HIR handoff materialization referenced a missing node.",
@@ -520,11 +558,11 @@ impl RuntimeHandoffMaterializer {
         })
     }
 
-    fn effective_node<'a>(
+    fn effective_node<'store>(
         &self,
-        view: &TirView<'a>,
+        view: &TirView<'store>,
         id: TemplateIrNodeId,
-    ) -> Result<&'a TemplateIrNode, CompilerError> {
+    ) -> Result<&'store TemplateIrNode, CompilerError> {
         self.get_node(view, id)
     }
 
@@ -954,11 +992,11 @@ impl RuntimeHandoffMaterializer {
         )
     }
 
-    fn get_slot_plan<'a>(
+    fn get_slot_plan<'store>(
         &self,
-        view: &TirView<'a>,
+        view: &TirView<'store>,
         id: TemplateSlotPlanId,
-    ) -> Result<&'a TemplateSlotPlan, CompilerError> {
+    ) -> Result<&'store TemplateSlotPlan, CompilerError> {
         view.store().get_slot_plan(id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "TIR HIR handoff materialization referenced a missing slot plan.",

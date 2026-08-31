@@ -1,0 +1,40 @@
+A file path tells the compiler that a file belongs to your project. Write the path with its extension, in the place where you would write any other value.
+
+### Naming a file
+
+[codeblock, $code("moth"):
+    logo #= @images/logo.svg
+]
+
+`@images/logo.svg` resolves from the module root, so the same spelling works from any file in the module. The compiler checks that the file exists and is a real file, not a folder.
+
+### Extensions matter
+
+An extension is required, and it tells the compiler what kind of file you mean.
+
+[codeblock, $code("moth"):
+    logo  #= @images/logo.svg
+    intro #= @docs/intro.mtf
+]
+
+`@images/logo` has no extension and is rejected. `.mtf` and `.md` files give you their content. Every other extension names a tracked resource, copied into your site when something you actually build uses it. `.moth` files are different: they hold declarations, so you bring those in with a dependency clause instead.
+
+### Linking to your own pages
+
+A page on your site is a route, not a file the compiler emits. Write `@/` for your site root.
+
+[codeblock, $code("moth"):
+    docs #= [$html:<a href="[@/]docs/">Docs</a>]
+]
+
+`@/` names no file. If your project sets an `origin`, `@/` includes it, so a site served from a subfolder keeps working without you repeating that setting in every link.
+
+### URLs stay strings
+
+A web address somewhere else is not a project file, so write it as an ordinary string.
+
+[codeblock, $code("moth"):
+    external #= "https://example.com/logo.svg"
+]
+
+The compiler leaves strings alone. It never copies, rewrites or watches them.

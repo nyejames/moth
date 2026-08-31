@@ -59,7 +59,11 @@ pub(crate) fn project_compilation_from_test_modules(
         diagnosed: Vec::new(),
         blocked: Vec::new(),
     };
-    ProjectCompilation::from_successful_boundaries(project, CompletedSourcePackageRegistry::new())
+    ProjectCompilation::from_successful_boundaries(
+        project,
+        CompletedSourcePackageRegistry::new(),
+        crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry::new(),
+    )
 }
 
 /// Build an immutable `PublicSemanticInterface` for one test-constructed artefact.

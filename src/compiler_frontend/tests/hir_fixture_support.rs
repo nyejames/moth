@@ -22,7 +22,6 @@ use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
@@ -39,13 +38,8 @@ pub(crate) fn entry_and_start(string_table: &mut StringTable) -> (InternedPath, 
 }
 
 pub(crate) fn lower_hir(ast: Ast, string_table: &mut StringTable) -> HirModule {
-    let lowering = lower_module(
-        ast,
-        string_table,
-        PathStringFormatConfig::default(),
-        HirFunctionOriginLookup::default(),
-    )
-    .expect("HIR lowering should succeed");
+    let lowering = lower_module(ast, string_table, HirFunctionOriginLookup::default(), None)
+        .expect("HIR lowering should succeed");
     lowering.hir_module
 }
 

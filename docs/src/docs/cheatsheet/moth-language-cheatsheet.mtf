@@ -14,7 +14,7 @@
 - `copy place` creates independent storage. Moth has no explicit move or lifetime syntax.
 - Square brackets create strings and templates. Curly braces create collections and maps.
 - `!` is the typed error path. `?` is the option path. `assert` is for invariants.
-- `@path` starts dependencies and resource paths. Source dependencies omit extensions.
+- `@path` starts dependencies and file paths. Source dependencies omit extensions; file paths in value position keep them.
 - Names never shadow another visible name.
 - `#Config of T` declares a typed build configuration constant.
 - A compile-time-known `Bool` can specialise an ordinary `if`; there is no `#Config if`.
@@ -1116,7 +1116,7 @@ Template control flow is the final head suffix:
 
 Template `else if` is valid even though statement `else if` is not. Loops support structural `["[break]"]` and `["[continue]"]`. A loop-head wrapper wraps the aggregate once.
 
-`$md` supports headings, paragraphs, lists, emphasis, links and single-backtick inline code. Links use `@./path (label)` or `@https://example.com (label)`. It has no fenced code blocks or pipe tables. Use `$code` for blocks.
+`$md` supports headings, paragraphs, lists, emphasis, links and single-backtick inline code. Links use `@./path (label)`, `@/site-route (label)` or `@https://example.com (label)`. A single-`/` target is a site route and renders through the configured `origin`; every other target renders literally. It has no fenced code blocks or pipe tables. Use `$code` for blocks.
 
 ## Reactivity
 
@@ -1217,31 +1217,37 @@ Path rules:
 
 Aliases cannot shadow another visible name.
 
-## Resource paths and `Path`
+## File paths in value position
 
-An explicit non-source extension in expression position creates a compile-time `Path`:
+An explicit-extension path in expression position evaluates to a `String`. There is no `Path` type.
 
 [codeblock, $code("moth"):
-    logo #= @assets/logo.svg
-    font #Path = @assets/fonts/site.woff2
-    icons #{Path} = {@assets/add.svg, @assets/remove.svg}
+    logo  #= @assets/logo.svg
+    font  #= @assets/fonts/site.woff2
+    intro #= @docs/intro.mtf
+
+    icons {String} = {@assets/add.svg, @assets/remove.svg}
 ]
 
-The path resolves from the owning module root to an existing regular file. It cannot use `@/`, `@./`, parent components or `@@`, and cannot be followed by selections. Source extensions such as `.moth`, `.mtf` and `.md` remain dependencies.
+The extension decides the value. `.mtf` and `.md` give that file's compiler-owned `content` string. `.moth` has no file value, because source declarations come from dependency clauses. Every other accepted extension gives a resource-bearing string.
 
-`Path` is compile-time-only. It may appear in constants, const records, compile-time collections, exports and templates. It is rejected in runtime bindings, signatures, runtime aggregates, options, choices, maps, generic applications, casts and comparisons.
+The path resolves from the owning module root to an existing regular file. It cannot use `@./`, parent components, `@@` or an absolute root such as `@/logo.svg`, cannot be followed by selections, and is rejected in `config.moth`.
+
+Bare `@/` is the site-root URL. It names no file, renders the configured `origin` (or `/` when unset), and stays invalid in a dependency clause.
+
+A resource-bearing string is an ordinary `String`. It may be mutable, a parameter, a return, an optional, a collection element, an exported constant or a runtime value.
 
 [codeblock, $code("moth"):
-    logo #Path = @assets/logo.svg
-
     image #= [$html:
-        <img src="[logo]" alt="Moth">
+        <img src="[@assets/logo.svg]" alt="Moth">
     ]
 ]
 
-The builder keeps the resource structural until output placement. In `.mtf`, use nested Moth template syntax such as `["[@images/ownership.webp]"]`. Plain Markdown paths stay text.
+The value stays structural until the builder knows the output artefact, so no compile-time operation can observe a guessed URL. In `.mtf`, use nested Moth template syntax such as `["[@images/ownership.webp]"]`. Plain Markdown paths stay text.
 
-External, protocol-relative and site-root URLs are ordinary untracked strings. Extensionless resource escapes, resource roots outside `entry_root` and any wider Path-containing type surface remain unsettled.
+Every authored file path is a build input wherever it is written, including in unused constants and statically inactive branches. Reaching an output is separate: an unused resource is never read, hashed or emitted.
+
+External and protocol-relative URLs are ordinary untracked strings. The site root is different: it is structural placement metadata rather than plain text, though it is not a resource and is never copied or watched. Extensionless resource escapes and resource roots outside `entry_root` remain unsettled.
 
 ## Modules, exports and project-local packages
 
@@ -1428,4 +1434,4 @@ declarations or exports, builder-provided target identity flags and backend-spec
 
 Use choices for runtime heterogeneity, trait bounds for static reuse, `copy` for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.
 
-Further detail: @../language-overview (language), @../memory (memory), @../templates (templates), @../resources (resources and Path values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).
+Further detail: @../language-overview (language), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).

@@ -26,6 +26,9 @@ pub(crate) fn invalid_config_message(
         InvalidConfigReason::ConfigImportUnsupported => {
             "`config.moth` is self-contained and does not support dependency clauses.".to_owned()
         }
+        InvalidConfigReason::FileValuePathUnsupported => {
+            "`config.moth` cannot use file-value paths. Config defines build inputs and has no output URL context.".to_owned()
+        }
         InvalidConfigReason::FunctionUnsupported => {
             "`config.moth` does not support user-defined functions. Use earlier private helper constants for reusable folded values.".to_owned()
         }
@@ -361,7 +364,30 @@ pub(crate) fn invalid_compile_time_path_message(
 
     match reason {
         InvalidCompileTimePathReason::MissingTarget => format!(
-            "Compile-time path '{path_text}' does not exist. Check that the file or directory exists relative to the configured path base."
+            "Compile-time path '{path_text}' does not exist. Check that the file exists relative to the configured path base."
+        ),
+        InvalidCompileTimePathReason::TargetIsDirectory => format!(
+            "Compile-time path '{path_text}' is a directory. Path values name one file, so point at a file inside it or write the URL as an ordinary string."
+        ),
+        InvalidCompileTimePathReason::TargetNotRegular => format!(
+            "Compile-time path '{path_text}' does not name a regular file. Point at a regular file or write the URL as an ordinary string."
+        ),
+        InvalidCompileTimePathReason::CurrentDirectorySegment => format!(
+            "Compile-time path '{path_text}' contains a current-directory segment. Remove './' from the path."
+        ),
+        InvalidCompileTimePathReason::ParentDirectorySegment => format!(
+            "Compile-time path '{path_text}' contains a parent-directory segment. Use a path rooted inside the module."
+        ),
+        InvalidCompileTimePathReason::CaseMismatch { provided, expected } => format!(
+            "Compile-time path '{path_text}' has a case mismatch: '{}' should be '{}'.",
+            string_table.resolve(provided),
+            string_table.resolve(expected),
+        ),
+        InvalidCompileTimePathReason::EscapesModuleBoundary => format!(
+            "Compile-time path '{path_text}' crosses a module boundary. Use a file owned by this module."
+        ),
+        InvalidCompileTimePathReason::EscapesSymlink => format!(
+            "Compile-time path '{path_text}' escapes the module through a symlink. Use a target contained by this module."
         ),
         InvalidCompileTimePathReason::EscapesProjectRoot => format!(
             "Compile-time path '{path_text}' escapes the project root. Use a path inside the project root or move the target into the project."

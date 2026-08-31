@@ -6,6 +6,7 @@
 //! WHY: Consolidates duplicated template folding logic to ensure consistent
 //! behavior across all normalization contexts.
 
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::module_ast::finalization::normalize_ast::TemplateNormalizationError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_folding::{
@@ -18,7 +19,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,9 +28,8 @@ use std::rc::Rc;
 ///
 /// WHAT: pairs exactly one semantic outcome with the data needed by its owner.
 /// WHY: a folded value, runtime proof and helper artifact must never be represented
-///      as independent optional/disposition fields that can contradict each other.
 pub(super) enum FinalizedTemplateValue {
-    Folded(StringId, SyntheticInterfaceProvenance),
+    Folded(ConstStringValue, SyntheticInterfaceProvenance),
     Runtime(TemplatePreparation),
     Helper(TemplateHelperKind),
 }
@@ -83,18 +83,19 @@ pub(super) fn finalize_template_value(
     );
     let result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
     let provenance = result.provenance;
-    let folded = template_emission_to_string_id(result.emission, &mut fold_context)?;
+    let folded = template_emission_to_const_string_value(result.emission, &mut fold_context)?;
     increment_ast_counter(AstCounter::TemplatesFoldedDuringFinalization);
     increment_ast_counter(AstCounter::TirFinalizationFoldSuccesses);
     Ok(FinalizedTemplateValue::Folded(folded, provenance))
 }
-
-fn template_emission_to_string_id(
+fn template_emission_to_const_string_value(
     emission: TemplateEmission,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<StringId, TemplateNormalizationError> {
+) -> Result<ConstStringValue, TemplateNormalizationError> {
     match emission {
-        TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
+        TemplateEmission::NoOutput => {
+            Ok(ConstStringValue::Text(fold_context.string_table.intern("")))
+        }
         TemplateEmission::Output(output) => Ok(output),
         TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
             Err(CompilerError::compiler_error(

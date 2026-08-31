@@ -556,6 +556,7 @@ impl SourceTreeIndex {
         // `PackageOrigin` plus package prefix (package boundary), never from an absolute path.
         let mut stats = SourceTreeDiscoveryStats::default();
         let mut queue = VecDeque::from([entry_root.clone()]);
+        let mut visited_directories = BTreeSet::new();
         let mut records = Vec::new();
         let mut recognized_candidates: Vec<DiscoveredSourceCandidate> = Vec::new();
 
@@ -570,6 +571,15 @@ impl SourceTreeIndex {
         let facade_file_for_inventory = facade_root_file.clone();
 
         while let Some(directory) = queue.pop_front() {
+            // Symlink aliases are one physical subtree; canonicalize before indexing so aliases
+            // cannot duplicate source identities, and do not traverse aliases outside this
+            // boundary.
+            let directory = fs::canonicalize(&directory)
+                .map_err(|error| Self::directory_read_error(&directory, error, string_table))?;
+            if !directory.starts_with(&entry_root) || !visited_directories.insert(directory.clone())
+            {
+                continue;
+            }
             stats.dirs_visited += 1;
 
             let mut entries = fs::read_dir(&directory)

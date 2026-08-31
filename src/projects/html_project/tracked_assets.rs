@@ -16,9 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason,
 };
 use crate::compiler_frontend::module_compilation::Module;
-use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePathBase, CompileTimePathKind,
-};
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::rendered_path_usage::RenderedPathUsage;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -89,10 +87,7 @@ pub(crate) fn plan_module_tracked_assets(
         FxHashMap::default();
 
     for usage in &module.metadata.rendered_path_usages {
-        let Some(asset) = plan_one_tracked_asset(module, usage, html_output_path, string_table)?
-        else {
-            continue;
-        };
+        let asset = plan_one_tracked_asset(module, usage, html_output_path, string_table)?;
 
         if asset.byte_size >= DEFAULT_LARGE_TRACKED_ASSET_WARNING_BYTES {
             match large_warning_locations_by_source.entry(asset.source_filesystem_path.clone()) {
@@ -167,11 +162,7 @@ fn plan_one_tracked_asset(
     usage: &RenderedPathUsage,
     html_output_path: &Path,
     string_table: &mut StringTable,
-) -> Result<Option<HtmlTrackedAsset>, CompilerMessages> {
-    if usage.kind == CompileTimePathKind::Directory {
-        return Ok(None);
-    }
-
+) -> Result<HtmlTrackedAsset, CompilerMessages> {
     let canonical_source = fs::canonicalize(&usage.filesystem_path).map_err(|error| {
         let error = CompilerError::file_error(
             &usage.filesystem_path,
@@ -200,7 +191,7 @@ fn plan_one_tracked_asset(
     let (emitted_output_path, reference_kind) =
         derive_emitted_output_path(module, usage, html_output_path, string_table)?;
 
-    Ok(Some(HtmlTrackedAsset {
+    Ok(HtmlTrackedAsset {
         source_filesystem_path: canonical_source,
         source_path: usage.source_path.clone(),
         emitted_output_path,
@@ -208,7 +199,7 @@ fn plan_one_tracked_asset(
         byte_size,
         source_location: usage.render_location.clone(),
         pipeline_plan: AssetPipelinePlan::Passthrough,
-    }))
+    })
 }
 
 fn derive_emitted_output_path(

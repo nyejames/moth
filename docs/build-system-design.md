@@ -37,6 +37,7 @@ refactors or thorough reviews.
 | Generated request aggregation, scheduling or sidecar reuse | `Generated-function boundary` | `docs/compiler-design-overview.md` > `Generated concrete functions` |
 | Entry selection, package assembly, reachability or validation roots | `Entry and package link planning` | Compiler `Per-function link facts`, `Target-contract validation` and routed lifetime material |
 | HTML fragment assembly, target partitioning, physical variants, runtime memory, lowering, external JavaScript or assets | `HTML project builder` and the exact relevant subsection | Compiler `Backend-facing compiler handoff` plus routed memory material for lifecycle, ABI or runtime representation changes |
+| Resource registries, entry or package resource unions, URL contexts, resource output placement or conflicts | `Resource linking and output placement` | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > File values and resources` and the canonical resource references |
 | Output roots, manifests, stale cleanup or output pipelines | `Output ownership` | The selected builder section that produces the output records |
 | Development reuse, invalidation or persistent compatibility | `Incremental and persistent artefacts`; `Command and tooling policies > dev` | `docs/compiler-design-overview.md` > `Fingerprints and reuse facts` |
 | Current source locations | `Build-system implementation map` | Open the owning module entry point and the compiler handoff when the task crosses that boundary |
@@ -49,13 +50,16 @@ refactors or thorough reviews.
 - A physical module is semantically compiled once inside that boundary.
 - Tokenization and declaration-shell parsing happen once. Stage 0 reuses prepared syntax for graph construction, later interface binding and module compilation.
 - Stage 0 schedules one compiler-owned module compilation service and consumes its outcome. It does not sequence interface binding, declaration ordering, AST, HIR or borrow stages, and it does not mutate compiler semantic state.
-- Structural provider references, dependency symbol bindings and module-local declaration-ordering edges are different data classes.
+- Structural provider references, structural file references, dependency symbol bindings and module-local declaration-ordering edges are different data classes.
 - Successful module and dependency artefacts are immutable.
 - A diagnosed module exposes no partial public interface.
 - Tooling may inspect successful independent branches, but project builders receive success-only linkable project payloads.
 - Entry activation, package assembly and backend partitioning never trigger deferred source compilation.
 - Project builders consume compiled graphs and explicit link plans. They do not rediscover source structure.
 - The build system owns output validation, writing, manifests and stale cleanup.
+- Graph and input membership is conservative and comes from the authored file path; output emission is exact and comes from entry or package reachability. Reachability never decides graph membership, and graph membership never forces emission.
+- Resource origin, byte source, emitted output path and rendered URL are four separate facts owned by the build system after the compiler has published semantic resource facts.
+- Builders assign every reachable resource use one semantic URL context. No builder scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover resources.
 - Build configuration may specialise executable behaviour, but it cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology.
 - Source semantics remain target and platform agnostic.
 - Builders and backend capability metadata map stable source semantics to target-specific artefacts.
@@ -560,6 +564,10 @@ A module's `SemanticSourceSet` contains:
 - every reachable builder-supported source asset such as `.mtf` or `.md`
 - any other source-kind input explicitly defined as semantic by the selected builder
 
+A builder-supported source asset becomes reachable through either route: a top-level dependency
+clause, or a structural content-file reference in expression position. The two routes produce the
+same membership and the same single preparation of that file.
+
 Only the semantic source set contributes declarations, HIR, the public interface and module link facts.
 
 Provider-backed explicit-extension files are owned through their provider contract. They produce binding-backed interfaces and runtime facts rather than ordinary module declarations.
@@ -584,6 +592,7 @@ Prepared syntax may contain:
 - declaration shells
 - dependency clause shells
 - structural provider references
+- structural file references
 - local declaration-ordering hints
 - source `#Config` contract shells
 - dormant root activity shells
@@ -592,6 +601,43 @@ Prepared syntax may contain:
 - deterministic string-table deltas or remap information
 
 Stage 0 consumes structural provider references to finalise graphs. It does not bind source symbols itself.
+
+Stage 0 also consumes structural file references, and owns the one filesystem resolution each of them
+gets. A content-source reference brings that `.mtf` or `.md` into the appropriate semantic source set
+through its normal source-kind adapter, before the consuming module reaches AST. A resource reference
+becomes a build input and watch interest, validated against the same ownership rules the resource
+model uses. Stage 0 may register an unhashed byte source; it does not read contents, hash an unused
+file, choose an output path, render a URL or decide whether the resource reaches an output. The
+resolved target is published so AST interprets it without probing the filesystem again.
+
+What Stage 0 creates for a resource is a build input, not a semantic identity. It holds the
+canonical physical source, its owning root, the validated logical target and the watch interest. The
+stable semantic origin is created later, by AST, and associated with that physical source only when
+the module publishes successfully. So a diagnosed module contributes no origin association, and a
+watch interest recorded for a missing target carries no manufactured resource identity. One
+canonical file may back several distinct logical origins, and equal origins must agree on their
+byte-source facts.
+
+Every authored file-value path is graph-active, independently of AST reachability, constant folding
+and static branch specialisation. Graph membership is never decided by output reachability, and
+`#Config` cannot alter file dependency topology.
+
+Because a newly discovered content source may itself contain file references, discovery is a
+monotone worklist rather than a single pass. Stage 0 seeds the set from the module root and its
+dependency-clause sources, prepares each not-yet-prepared source once, consumes that source's
+structural file references, adds any newly discovered `.mtf` or `.md` to the module's semantic
+source set, and repeats until no source is added. Header aggregation and local declaration ordering
+run afterwards, on the settled set.
+
+The loop's rules are what make it deterministic:
+
+- membership deduplicates by canonical source identity, never by authored spelling
+- every authored reference location is retained separately for diagnostics
+- each physical content source is prepared exactly once however many references reach it
+- a repeated reference is not a cycle; a real dependency cycle through synthetic `content`
+  declarations is diagnosed later by local declaration ordering, not by discovery
+- resource files found in newly added sources enter the same build-input registry as any other
+- ordering and diagnostics do not depend on the order in which the worklist happened to insert
 
 Retained source `#Config` contract shells do not create structural provider edges, dependency symbol
 bindings or topology changes. Their later resolved values are consumed only by ordinary module AST
@@ -602,6 +648,7 @@ When a provider interface is available, the compiler's interface-binding phase r
 The three classes remain distinct:
 
 - structural provider references for Stage 0
+- structural file references for Stage 0 graph and input resolution
 - dependency symbol bindings for compiler visibility and AST
 - local declaration-ordering edges for compiler Stage 3
 
@@ -611,7 +658,7 @@ Provider-backed discovery remains serial while it mutates shared package identit
 
 Stage 0 produces structure, resolved build-input contracts and compiler inputs. It does not type-check executable bodies, generate HIR or perform borrow validation.
 
-Provider-independent source preparation is Stage 0's only reach into the compiler before a module is ready. Stage 0 decides which source candidate to prepare, when to prepare it and how to schedule preparation work across threads. Tokenization and header-preparation semantics stay compiler-owned behind one preparation call, and the exception ends at prepared syntax: Stage 0 consumes structural provider references and does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
+Provider-independent source preparation is Stage 0's only reach into the compiler before a module is ready. Stage 0 decides which source candidate to prepare, when to prepare it and how to schedule preparation work across threads. Tokenization and header-preparation semantics stay compiler-owned behind one preparation call, and the exception ends at prepared syntax: Stage 0 consumes structural provider and file references and does not parse expressions, bind source symbols, order declarations or enter AST, HIR or borrow stages.
 
 ## Project and package topology
 
@@ -1143,7 +1190,7 @@ A union may include:
 - reactive features
 - numeric and cast operations
 - maps and target-gated features
-- runtime paths and assets
+- resource uses
 
 Module-wide summaries may be cached as derived indexes. They are not the linking authority.
 
@@ -1180,7 +1227,7 @@ For each HTML entry, the builder:
 
 HIR carries runtime code only. Compile-time fragments and document structure live in compiler metadata and entry plans.
 
-Modules without HTML artefact activity remain available to the graph but produce no route, runtime glue or tracked assets.
+Modules without HTML artefact activity remain available to the graph but produce no route, runtime glue or emitted resources.
 
 ### Mixed-target planning and validation
 
@@ -1382,19 +1429,138 @@ Entry-level glue generation emits only:
 
 Direct builder packages and provider-created packages use the same binding identity and runtime asset model.
 
-### Tracked assets
+### Resource emission
 
-The compiler records semantic path usages while rendering or lowering source values.
+The HTML builder consumes the compiler's semantic resource facts. It does not rediscover files from
+rendered text.
 
-The HTML builder decides:
+It decides:
 
-- which paths become emitted assets
-- output paths relative to the final route
-- deduplication
-- conflicts
-- user-facing asset warnings
+- which reachable resource uses become emitted outputs
+- the URL context for each reachable use
+- deduplication of origins, physical sources, reads and warnings
+- user-facing resource warnings
 
-Tracked assets are returned as ordinary output records.
+Resource bytes are returned as ordinary output records. The general rules live in
+`Resource linking and output placement`.
+
+## Resource linking and output placement
+
+The compiler publishes semantic resource facts. The build system owns every physical decision made
+from them.
+
+### Graph activity versus emission
+
+Stage 0 registers an input and watch interest for every authored file-value path, before any
+reachability question. Registration may create an unhashed byte-source record. It never forces a
+byte read.
+
+Emission is decided later and exactly. A resource that no reachable output uses is never read,
+hashed or emitted, even though it remains a known and watchable build input.
+
+A site-root piece is not a resource. It has no origin, no byte source, no filesystem target, no
+watch interest and no union membership. Builders render it from the selected artefact's
+project-origin policy, and never prepend that origin to an ordinary resource URL.
+
+Having no `ResourceId` is exactly why the site root needs its own owner. It cannot ride the resource
+union, so three decisions are explicit:
+
+- A builder must supply a site-root policy or reject a reachable site-root use during target
+  contract validation. A backend never guesses `/`. A target with no meaningful site root is a
+  legitimate rejection, not a reason to invent a default.
+- A site-root piece inside a dependency's exported constant renders from the final consuming
+  artefact's project-origin policy, not from the dependency package's own config or build origin.
+  Public folded values carry these pieces across package boundaries, so the consuming build decides
+  their text.
+- Selected functions and metadata record their own site-root use, collected by the same structural
+  walk that collects resource uses. That fact drives target capability validation, physical variant
+  specialisation and rerendering of static fragments. Changing the project origin invalidates the
+  affected physical and output variants; it does not invalidate public semantic interfaces or
+  recompile semantic consumers.
+
+### Boundary-wide source registry
+
+One registry spans project, source-package and provider results for a compilation boundary.
+
+- one semantic origin record per stable origin
+- one physical byte-source record per canonical file or generated payload
+- several origins may reference one byte source
+- equal stable origins must agree on their byte-source facts
+- canonical source paths are build IO facts only
+- content hashes are output invalidation facts, never semantic identity
+- module source deltas merge transactionally, and only for publishable module results
+
+Preparation and semantic validation neither read nor hash resource bytes. Conflict validation
+completes before any resource byte is read.
+
+### Exact resource unions
+
+Entry planning unions resource uses from the selected `start`, reachable source and generated
+functions, runtime fragments, compile-time fragments, selected entry settings and reachable provider
+runtime requirements.
+
+Package planning unions externally selected exports, resource-bearing exported folded values,
+reachable source and generated implementations and provider runtime requirements permitted by the
+package target.
+
+Unions are computed from per-function link facts and metadata owners without rescanning HIR, and an
+unused private resource contributes nothing.
+
+### Output placement
+
+- project-local resources preserve their path relative to `entry_root`
+- source, Core, Builder and dependency package resources use one injective package output prefix followed by their package-relative path
+- provider-managed resources use the provider's declared stable output path
+- generated provider resources use their declared path and generated bytes
+
+The package-prefix encoder is one build-system owner. It must be injective over the stable package
+origin, canonical package name and any future package-instance identity. Consumer aliases do not
+change output identity.
+
+### URL contexts
+
+The URL context is the artefact whose URL resolution rules observe the emitted string. It is not
+automatically the JavaScript or Wasm file that contains the generated code.
+
+- ordinary page HTML uses the page document
+- inline CSS uses the page document
+- standalone CSS uses the stylesheet
+- page runtime code uses the active page document unless the builder defines a different sink
+- another builder supplies its own explicit context policy
+
+A builder that cannot assign a context to a reachable resource use rejects it before lowering.
+
+URL rendering picks the validated resource output path, computes a lexical relative path from the
+context artefact's parent, uses `/` separators, percent-encodes each UTF-8 segment, prefixes
+same-or-descendant paths with `./`, retains parent-relative `../` prefixes, and never prepends a
+project HTML origin.
+
+A source or generated function that constructs a resource-bearing runtime String may lower
+differently for different entry URL contexts. The relevant normalised URL map or its fingerprint
+participates in physical variant identity. It never enters source legality, canonical HIR identity,
+public interfaces or semantic module identity.
+
+### Conflicts
+
+- one origin used by many entries emits once when output placement is identical
+- the same output path and the same origin deduplicate
+- the same output path and different origins fail with both useful locations
+- resource output conflicts with HTML, CSS, JavaScript, Wasm, manifest and provider output
+- unchanged provider use and ordinary resource use deduplicate only when origin and output path agree
+- transformed or generated provider output has distinct identity
+- all output paths and conflicts validate before hashing, metadata reads or byte reads
+- warnings such as large-resource warnings are emitted once per reachable physical source
+- conflict diagnostics use semantic origins and authored use locations, never reconstructed strings
+
+### Invalidation
+
+- a stable origin change is a semantic change and follows the compiler's fingerprint owners
+- a byte-only change invalidates the content fingerprint, re-emits affected outputs and may invalidate a provider transform cache, without recompiling semantic consumers
+- a route, output root or URL context change replans URLs and outputs and invalidates affected output or physical variant keys, without reopening source legality
+
+Reachable file bytes are hashed once per build state, emitted bytes are read once per physical
+source, and one read may feed several output records when distinct origins deliberately map to
+distinct paths.
 
 ## Output ownership
 

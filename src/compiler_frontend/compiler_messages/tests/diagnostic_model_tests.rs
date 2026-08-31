@@ -796,6 +796,48 @@ fn remap_string_ids_updates_legacy_dependency_replacement() {
 }
 
 #[test]
+fn remap_string_ids_updates_compile_time_evaluation_operation() {
+    let mut local_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("main.moth", &mut local_table);
+    let operation = local_table.intern("string equality comparison");
+
+    let diagnostic = CompilerDiagnostic::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
+        Some(operation),
+        location(source_path),
+    );
+    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+
+    // Occupy the merged table first so the merge cannot be an identity remap. A stale operation id
+    // would then silently resolve to another module's text instead of naming the real operation.
+    let mut merged_table = StringTable::new();
+    merged_table.intern("a string owned by another module");
+    merged_table.intern("a second string owned by another module");
+    let remap = merged_table.merge_from(&local_table);
+    assert!(
+        !remap.is_identity(),
+        "the fixture must exercise a shifting remap"
+    );
+    bag.remap_string_ids(&remap);
+
+    let DiagnosticPayload::CompileTimeEvaluationError {
+        operation: Some(operation),
+        ..
+    } = &bag.diagnostics()[0].payload
+    else {
+        panic!(
+            "unexpected compile-time evaluation payload after remap: {:?}",
+            bag.diagnostics()[0].payload
+        );
+    };
+    assert_eq!(
+        merged_table.resolve(*operation),
+        "string equality comparison",
+        "the operation name must survive a module table merge"
+    );
+}
+
+#[test]
 fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
@@ -1485,10 +1527,26 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::UnresolvedStackShape,
-                location(source_path),
+                location(source_path.clone()),
             ),
             "This expression does not resolve to exactly one value.",
             "UnresolvedStackShape",
+        ),
+        (
+            CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::MothFileHasNoValue,
+                location(source_path.clone()),
+            ),
+            "A `.moth` file has no file value. Bind its declarations through a dependency clause.",
+            "MothFileHasNoValue",
+        ),
+        (
+            CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::ExtensionlessFileValue,
+                location(source_path),
+            ),
+            "A file value needs an explicit extension. Write the path with a file extension, or use a dependency clause to bind declarations.",
+            "ExtensionlessFileValue",
         ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);

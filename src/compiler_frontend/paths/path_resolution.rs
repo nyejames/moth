@@ -12,8 +12,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason, InvalidImportPathReason,
 };
 use crate::compiler_frontend::paths::compile_time_paths::{
-    CompileTimePath, CompileTimePathBase, CompileTimePathKind, CompileTimePathResolutionError,
-    classify_existing_target,
+    CompileTimePath, CompileTimePathBase, CompileTimePathResolutionError,
+    validate_path_literal_target,
 };
 use crate::compiler_frontend::paths::dependency_resolution::{
     DependencyPathResolutionError, validate_dependency_boundary,
@@ -402,7 +402,6 @@ impl ProjectPathResolver {
             filesystem_path: canonical.clone(),
             public_path,
             base: base_kind,
-            kind: CompileTimePathKind::File,
         };
         Ok((ct_path, canonical))
     }
@@ -425,7 +424,7 @@ impl ProjectPathResolver {
 
     /// WHAT: resolves a general path literal to a typed compile-time path value.
     /// WHY: all Moth path literals must use the same resolution rules as
-    ///       dependencies, but additionally classify file vs directory, reject
+    ///       dependencies, but additionally require an existing regular file, reject
     ///       escapes outside the project root, and carry public-path metadata.
     pub(crate) fn resolve_compile_time_path(
         &self,
@@ -440,7 +439,7 @@ impl ProjectPathResolver {
 
         self.validate_inside_project_root(&filesystem_path, path, declaring_file, string_table)?;
 
-        let kind = classify_existing_target(&filesystem_path, path, declaring_file, string_table)?;
+        validate_path_literal_target(&filesystem_path, path, declaring_file, string_table)?;
 
         let public_path = build_public_path(path, &base_kind, string_table);
 
@@ -449,7 +448,6 @@ impl ProjectPathResolver {
             filesystem_path,
             public_path,
             base: base_kind,
-            kind,
         })
     }
 

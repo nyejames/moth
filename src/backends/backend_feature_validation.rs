@@ -557,6 +557,7 @@ fn first_generic_runtime_expression_location(
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)
+        | HirExpressionKind::StructuralString { .. }
         | HirExpressionKind::Load(_)
         | HirExpressionKind::Copy(_) => None,
     }

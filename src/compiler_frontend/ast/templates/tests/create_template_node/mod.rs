@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
@@ -127,6 +128,17 @@ fn test_project_path_resolver() -> ProjectPathResolver {
     .expect("test path resolver should be valid")
 }
 
+/// Creates a real file inside the test resolver's entry root and returns its resource path.
+///
+/// A path head names one existing regular file, so a template test that needs a rendered path head
+/// has to give the resolver something to find.
+fn test_resource_file(file_name: &str) -> String {
+    let file_path = std::env::temp_dir().join(file_name);
+    std::fs::write(&file_path, b"test resource").expect("test resource file should be writable");
+
+    file_name.to_owned()
+}
+
 fn with_test_path_context(
     context: ScopeContext,
     source_scope: &InternedPath,
@@ -206,7 +218,10 @@ fn fold_template_with_fold_context(
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view, fold_context)?;
     match emission {
-        TemplateEmission::Output(output) => Ok(output),
+        TemplateEmission::Output(ConstStringValue::Text(output)) => Ok(output),
+        TemplateEmission::Output(ConstStringValue::Pieces(_)) => {
+            panic!("structural emission reached a text-only test helper")
+        }
         TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
         TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
             panic!("test template fold signal escaped its loop")

@@ -32,6 +32,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationOutcome, TirView, fold_prepared_template,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::ast::{
+    FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts, TopLevelDeclarationTable,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason, NameNamespace,
 };
@@ -40,10 +43,20 @@ use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTy
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
+use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
+    ResolvedFileReferenceTable, ResolvedFileReferenceTarget, ResourceSourceId,
+};
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::rendered_path_usage::resolve_compile_time_path_for_rendered_output;
+use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -191,6 +204,222 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
                 .msg
                 .contains("does not belong to the consumed path token"),
         "unexpected infrastructure error: {error:?}"
+    );
+}
+
+#[test]
+fn template_head_content_path_uses_stage0_resolution_without_project_resolver() {
+    let mut string_table = StringTable::new();
+    let mut token_stream = template_tokens_from_source("[@docs/intro.mtf]", &mut string_table);
+    let path_syntax = token_stream
+        .tokens
+        .iter()
+        .find_map(|token| match token.kind {
+            TokenKind::Path(path_syntax) => Some(path_syntax),
+            _ => None,
+        })
+        .expect("expected a content path token in the template head");
+
+    let target_path = PathBuf::from("intro.mtf");
+    let source_files = SourceFileTable::build(
+        std::iter::once(&target_path),
+        &target_path,
+        None,
+        &mut string_table,
+    )
+    .expect("content source identity should build without a project resolver");
+    let source_file = source_files
+        .get_by_canonical_path(&target_path)
+        .expect("content source identity should be present")
+        .file_id;
+    let content_path = content_constant_path(
+        &source_files
+            .get(source_file)
+            .expect("content source identity should be indexed")
+            .logical_path,
+        &mut string_table,
+    );
+    let content_string = string_table.intern("resolved head content");
+    let content_declaration = Declaration {
+        id: content_path,
+        value: Expression::string_slice(
+            content_string,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+        ),
+    };
+
+    let mut resolved_references = ResolvedFileReferenceTable::new();
+    resolved_references
+        .push(ResolvedFileReference {
+            source_file,
+            path_syntax,
+            class: PreparedFileReferenceClass::ContentSource,
+            outcome: ResolvedFileReferenceOutcome::Target(
+                ResolvedFileReferenceTarget::ContentSource {
+                    source: source_file,
+                },
+            ),
+        })
+        .expect("content resolved row should be unique");
+
+    let style_directives = frontend_test_style_directives();
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Constant,
+        token_stream.src_path.clone(),
+        Rc::new(TopLevelDeclarationTable::new(vec![content_declaration])),
+        Arc::new(ExternalPackageRegistry::default()),
+        vec![],
+        0,
+    )
+    .with_style_directives(&style_directives)
+    .with_source_file_scope(token_stream.src_path.clone())
+    .with_file_value_resolution(Rc::new(FileValueResolutionServices {
+        stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
+            resolved_references,
+            source_files,
+        ))),
+        module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+        module_origin: None,
+    }))
+    .with_declaring_file_id(Some(source_file));
+
+    let template =
+        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+            .expect("content path in a template head should resolve from Stage 0")
+            .template;
+    let folded = fold_template_in_context(&template, &context, &mut string_table);
+
+    assert_eq!(
+        folded, content_string,
+        "template-head content should reuse the synthetic content constant value"
+    );
+}
+
+// TRANSITIONAL PIN (Phase 2): template-head CONTENT occurrences resolve through Stage 0 (see the
+// test above), but a resource path in a template head still renders through the eager
+// `resolve_compile_time_path_for_rendered_output` lane: it records a rendered-path usage and folds
+// eagerly formatted URL text instead of a structural `Resource` piece. Phase 4 deletes the eager
+// lane and replaces this pin with the structural head behavior in both directions.
+#[test]
+fn template_head_resource_path_still_renders_through_eager_lane_until_phase_4() {
+    let mut string_table = StringTable::new();
+    let resource = test_resource_file("template_head_resource_eager_pin.txt");
+    let mut token_stream =
+        template_tokens_from_source(&format!("[@{resource}]"), &mut string_table);
+    let path_token = token_stream
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::Path(_)))
+        .expect("expected a resource path token in the template head")
+        .clone();
+    let TokenKind::Path(path_syntax) = path_token.kind else {
+        unreachable!("the found token was a path token");
+    };
+    let path_root = token_stream
+        .path_syntax
+        .try_path_for_token(path_syntax, &path_token.location)
+        .expect("the resource path token should own a prepared path row")
+        .root
+        .clone();
+    let target_path = PathBuf::from(resource.as_str());
+    let source_files = SourceFileTable::build(
+        std::iter::once(&target_path),
+        &target_path,
+        None,
+        &mut string_table,
+    )
+    .expect("resource source identity should build");
+    let source_file = source_files
+        .get_by_canonical_path(&target_path)
+        .expect("resource source identity should be present")
+        .file_id;
+
+    // Stage 0 resolves the head path to a resource target exactly as production would. The pin
+    // proves the head still ignores that structural target and renders eagerly until Phase 4.
+    let mut resolved_references = ResolvedFileReferenceTable::new();
+    resolved_references
+        .push(ResolvedFileReference {
+            source_file,
+            path_syntax,
+            class: PreparedFileReferenceClass::ResourceFile,
+            outcome: ResolvedFileReferenceOutcome::Target(
+                ResolvedFileReferenceTarget::ResourceSource {
+                    source: ResourceSourceId::from_index(0),
+                    owner_relative_path: PortableResourcePath::from_relative_logical_path(
+                        Path::new(resource.as_str()),
+                    )
+                    .expect("fixture resource path should be relative and portable"),
+                },
+            ),
+        })
+        .expect("resource resolved row should be unique");
+
+    let scope = token_stream.src_path.clone();
+    let style_directives = frontend_test_style_directives();
+    let context = with_test_path_context(
+        ScopeContext::new_for_tests(
+            ContextKind::Constant,
+            scope.clone(),
+            Rc::new(TopLevelDeclarationTable::new(vec![])),
+            Arc::new(ExternalPackageRegistry::default()),
+            vec![],
+            0,
+        ),
+        &scope,
+        &style_directives,
+    )
+    .with_file_value_resolution(Rc::new(FileValueResolutionServices {
+        stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
+            resolved_references,
+            source_files,
+        ))),
+        module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+        module_origin: None,
+    }))
+    .with_declaring_file_id(Some(source_file));
+
+    let template =
+        Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
+            .expect("resource path in a template head should still parse through the eager lane")
+            .template;
+    let folded = fold_template_in_context(&template, &context, &mut string_table);
+
+    // The eager lane's signature facts: exactly one rendered-path usage is recorded for the head,
+    // and the folded head text is the eagerly formatted URL text. The structural lane Phase 4
+    // introduces records no usage and folds a Resource piece, so either direction breaks here.
+    let usages = context.take_rendered_path_usages();
+    assert_eq!(
+        usages.len(),
+        1,
+        "a resource path in a template head must record exactly one rendered-path usage while the eager lane exists"
+    );
+    assert!(
+        usages[0].filesystem_path.ends_with(resource.as_str()),
+        "the recorded usage must resolve to the authored resource file, got {:?}",
+        usages[0].filesystem_path
+    );
+
+    let declaring_file = scope.to_path_buf(&string_table);
+    let (_, recorded) = resolve_compile_time_path_for_rendered_output(
+        &path_root,
+        &test_project_path_resolver(),
+        &declaring_file,
+        &scope,
+        &SourceLocation::default(),
+        &PathStringFormatConfig::default(),
+        &mut string_table,
+    )
+    .expect("eager rendered-path resolution should succeed for the pinned expectation");
+    let folded_text = string_table.resolve(folded);
+    assert_eq!(
+        folded_text,
+        recorded.rendered_text.as_str(),
+        "the head text must be the eagerly rendered path text, not a structural resource value"
+    );
+    assert!(
+        folded_text.contains(resource.as_str()),
+        "the eagerly rendered head text must still name the resource file, got {folded_text:?}"
     );
 }
 

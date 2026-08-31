@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPag
 use crate::compiler_frontend::hir::constants::HirConstValue;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 const PAGE_TITLE: &str = "page_title";
 const PAGE_DESCRIPTION: &str = "page_description";
@@ -62,12 +62,34 @@ pub(crate) fn extract_html_page_metadata(
 
         let value = match &module_constant.value {
             HirConstValue::String(value) => value.to_owned(),
-            _ => {
-                return Err(Box::new(CompilerDiagnostic::invalid_page_metadata(
+
+            // A structural string is a legitimate string, but its resource or site-root pieces
+            // gain final text only when the build assigns URL contexts. Extraction runs before
+            // that boundary, so the honest refusal is NotYetRenderable, never NotAString.
+            HirConstValue::StructuralString { .. } => {
+                return Err(invalid_page_metadata_rejection(
+                    key_id,
+                    InvalidPageMetadataReason::NotYetRenderable,
+                    &error_location,
+                ));
+            }
+
+            // Every remaining constant shape genuinely holds a non-string value.
+            HirConstValue::Int(_)
+            | HirConstValue::Float(_)
+            | HirConstValue::Bool(_)
+            | HirConstValue::Char(_)
+            | HirConstValue::Collection(_)
+            | HirConstValue::Record(_)
+            | HirConstValue::Range(_, _)
+            | HirConstValue::OptionSome(_)
+            | HirConstValue::OptionNone
+            | HirConstValue::Choice { .. } => {
+                return Err(invalid_page_metadata_rejection(
                     key_id,
                     InvalidPageMetadataReason::NotAString,
-                    error_location.clone(),
-                )));
+                    &error_location,
+                ));
             }
         };
 
@@ -82,11 +104,11 @@ pub(crate) fn extract_html_page_metadata(
         };
 
         if target_slot.is_some() {
-            return Err(Box::new(CompilerDiagnostic::invalid_page_metadata(
+            return Err(invalid_page_metadata_rejection(
                 key_id,
                 InvalidPageMetadataReason::DuplicateDeclaration,
-                error_location.clone(),
-            )));
+                &error_location,
+            ));
         }
 
         *target_slot = Some(value);
@@ -115,6 +137,19 @@ fn is_reserved_page_key(name: &str) -> bool {
         name,
         PAGE_TITLE | PAGE_DESCRIPTION | PAGE_LANG | PAGE_FAVICON | PAGE_BODY_STYLE | PAGE_HEAD
     )
+}
+
+/// Builds the boxed diagnostic shared by every invalid page-metadata arm.
+fn invalid_page_metadata_rejection(
+    key_id: StringId,
+    reason: InvalidPageMetadataReason,
+    location: &SourceLocation,
+) -> Box<CompilerDiagnostic> {
+    Box::new(CompilerDiagnostic::invalid_page_metadata(
+        key_id,
+        reason,
+        location.clone(),
+    ))
 }
 
 #[cfg(test)]

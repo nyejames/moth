@@ -15,7 +15,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-use crate::compiler_frontend::module_dependencies::resolve_module_dependencies;
+use crate::compiler_frontend::module_dependencies::{
+    ContentSourceTargets, resolve_module_dependencies,
+};
 use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -109,18 +111,20 @@ pub(crate) fn parse_single_file_ast_build_result(
         )
     })?;
 
-    let sorted = resolve_module_dependencies(headers, &mut string_table).map_err(|bag| {
-        Box::new(
-            bag.into_diagnostics()
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| {
-                    compiler_error_to_diagnostic(&CompilerError::compiler_error(
-                        "unknown dependency sorting error",
-                    ))
-                }),
-        )
-    })?;
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .map_err(|bag| {
+                Box::new(
+                    bag.into_diagnostics()
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| {
+                            compiler_error_to_diagnostic(&CompilerError::compiler_error(
+                                "unknown dependency sorting error",
+                            ))
+                        }),
+                )
+            })?;
 
     let entry_path = InternedPath::from_single_str("@page.moth", &mut string_table);
     let build_result = Ast::new(
@@ -138,6 +142,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             entry_dir: entry_path,
             build_profile: FrontendBuildProfile::Dev,
             project_path_resolver: Some(test_project_path_resolver()),
+            file_value_resolution: None,
             path_format_config: PathStringFormatConfig::default(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),

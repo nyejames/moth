@@ -1,6 +1,11 @@
 //! Imported aliases, constants, defaults, and folded values.
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::paths::module_resources::ResourceId;
+use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 
 /// Services needed to invert one stable folded value into a fresh AST environment.
 ///
@@ -10,6 +15,11 @@ use super::*;
 /// WHY: a second recursive value converter would make defaults and constants diverge between
 /// provider dependencies and generated sidecars.
 pub(crate) trait FoldedValueMaterialiser {
+    fn intern_resource_origin(
+        &mut self,
+        origin: &StableResourceOriginId,
+        location: &SourceLocation,
+    ) -> Result<ResourceId, CompilerError>;
     fn intern_canonical_type(
         &mut self,
         identity: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity,
@@ -32,6 +42,22 @@ impl<'context, 'services> FoldedValueMaterialiser
         _string_table: &mut StringTable,
     ) -> Result<TypeId, CompilerError> {
         self.intern_imported_canonical_type(identity)
+    }
+
+    fn intern_resource_origin(
+        &mut self,
+        origin: &StableResourceOriginId,
+        location: &SourceLocation,
+    ) -> Result<ResourceId, CompilerError> {
+        let services = self.context.file_value_resolution.as_ref().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Imported structural string projection requires module file-value resolution services",
+            )
+        })?;
+        Ok(services
+            .module_resources
+            .borrow_mut()
+            .intern_origin(origin.clone(), location.clone()))
     }
 
     fn type_environment(&self) -> &TypeEnvironment {
@@ -132,7 +158,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         expected_type_id: TypeId,
         string_table: &mut StringTable,
     ) -> Result<Expression, CompilerError> {
-        materialize_public_folded_value(self, folded, expected_type_id, string_table)
+        // Public folded values intentionally omit declaration locations, so imported projections
+        // have no authored range to carry into a consumer-local resource table.
+        let location = SourceLocation::default();
+        materialize_public_folded_value(self, folded, expected_type_id, string_table, &location)
     }
 }
 
@@ -155,6 +184,35 @@ fn append_projected_constant(
 #[cfg(test)]
 #[path = "../../../../tests/imported_constant_projection_tests.rs"]
 mod tests;
+/// Rebuild one owned folded string in the active module-local string and resource tables.
+///
+/// This is the string-specific inverse projection shared by imported declarations and generated
+/// materialisation. Its callback keeps resource interning explicit without coupling this leaf
+/// projection to the full recursive [`FoldedValueMaterialiser`] service bundle.
+pub(in crate::compiler_frontend::ast) fn materialize_owned_folded_string(
+    value: &OwnedFoldedString,
+    string_table: &mut StringTable,
+    mut intern_resource_origin: impl FnMut(&StableResourceOriginId) -> Result<ResourceId, CompilerError>,
+) -> Result<ExpressionKind, CompilerError> {
+    match value {
+        OwnedFoldedString::Text(text) => Ok(ExpressionKind::StringSlice(string_table.intern(text))),
+        OwnedFoldedString::Pieces(pieces) => {
+            let mut projected = Vec::with_capacity(pieces.len());
+            for piece in pieces {
+                projected.push(match piece {
+                    OwnedFoldedStringPiece::Text(text) => {
+                        ConstStringPiece::Text(string_table.intern(text))
+                    }
+                    OwnedFoldedStringPiece::Resource(origin) => {
+                        ConstStringPiece::Resource(intern_resource_origin(origin)?)
+                    }
+                    OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
+                });
+            }
+            Ok(ExpressionKind::StructuralString { pieces: projected })
+        }
+    }
+}
 
 /// Rebuild one stable folded value in the active module-local type and TIR environment.
 pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
@@ -162,20 +220,26 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     folded: &PublicFoldedValue,
     expected_type_id: TypeId,
     string_table: &mut StringTable,
+    location: &SourceLocation,
 ) -> Result<Expression, CompilerError> {
     let kind = match folded {
         PublicFoldedValue::Int(value) => ExpressionKind::Int(*value),
         PublicFoldedValue::Float(value) => ExpressionKind::Float(value.value()),
         PublicFoldedValue::Bool(value) => ExpressionKind::Bool(*value),
         PublicFoldedValue::Char(value) => ExpressionKind::Char(*value),
-        PublicFoldedValue::String(value) => ExpressionKind::StringSlice(string_table.intern(value)),
+        PublicFoldedValue::String(value) => {
+            materialize_owned_folded_string(value, string_table, |origin| {
+                materialiser.intern_resource_origin(origin, location)
+            })?
+        }
         PublicFoldedValue::ConstTemplate(template) => {
             let template_ir_store = materialiser.template_ir_store();
             ExpressionKind::Template(Box::new(materialize_public_const_template(
+                materialiser,
                 template,
                 &template_ir_store,
                 string_table,
-                Default::default(),
+                location.clone(),
             )?))
         }
         PublicFoldedValue::Collection(values) => {
@@ -195,6 +259,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                     value,
                     element_type_id,
                     string_table,
+                    location,
                 )?);
             }
             ExpressionKind::Collection(items)
@@ -209,8 +274,13 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                     )
                 })?
                 .to_vec();
-            let projected =
-                materialize_public_folded_fields(materialiser, fields, &definitions, string_table)?;
+            let projected = materialize_public_folded_fields(
+                materialiser,
+                fields,
+                &definitions,
+                string_table,
+                location,
+            )?;
             ExpressionKind::StructInstance(projected)
         }
         PublicFoldedValue::Choice {
@@ -250,6 +320,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 fields,
                 field_definitions,
                 string_table,
+                location,
             )?;
             let nominal_path = materialiser
                 .type_environment()
@@ -272,12 +343,14 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 start,
                 builtin_type_ids::INT,
                 string_table,
+                location,
             )?;
             let end = materialize_public_folded_value(
                 materialiser,
                 end,
                 builtin_type_ids::INT,
                 string_table,
+                location,
             )?;
             ExpressionKind::Range(Box::new(start), Box::new(end))
         }
@@ -290,8 +363,13 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                         "Imported folded option value has a non-option canonical type",
                     )
                 })?;
-            let inner =
-                materialize_public_folded_value(materialiser, value, inner_type_id, string_table)?;
+            let inner = materialize_public_folded_value(
+                materialiser,
+                value,
+                inner_type_id,
+                string_table,
+                location,
+            )?;
             ExpressionKind::Coerced {
                 value: Box::new(inner),
                 to_type: expected_type_id,
@@ -302,7 +380,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
 
     Ok(Expression::new(
         kind,
-        Default::default(),
+        location.clone(),
         expected_type_id,
         diagnostic_type_spelling(expected_type_id, materialiser.type_environment()),
         ValueMode::ImmutableReference,
@@ -314,6 +392,7 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
     fields: &[PublicFoldedField],
     definitions: &[FieldDefinition],
     string_table: &mut StringTable,
+    location: &SourceLocation,
 ) -> Result<Vec<Declaration>, CompilerError> {
     if fields.len() != definitions.len() {
         return Err(CompilerError::compiler_error(
@@ -340,6 +419,7 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
                 &field.value,
                 definition.type_id,
                 string_table,
+                location,
             )?,
         });
     }
@@ -350,15 +430,23 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
 ///
 /// Imported constants and generated sidecars share this inverse projection so neither path
 /// carries a provider or declaring-module TIR identity into a fresh AST compilation.
-pub(in crate::compiler_frontend::ast) fn materialize_public_const_template(
+pub(in crate::compiler_frontend::ast) fn materialize_public_const_template<
+    M: FoldedValueMaterialiser,
+>(
+    materialiser: &mut M,
     template: &PublicConstTemplate,
     store_handle: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     string_table: &mut StringTable,
     location: crate::compiler_frontend::tokenizer::tokens::SourceLocation,
 ) -> Result<Template, CompilerError> {
     let mut store = store_handle.borrow_mut();
-    let root =
-        materialize_public_const_template_in_store(template, &mut store, string_table, &location)?;
+    let root = materialize_public_const_template_in_store(
+        materialiser,
+        template,
+        &mut store,
+        string_table,
+        &location,
+    )?;
 
     Ok(Template {
         tir_reference: TemplateTirReference {
@@ -370,7 +458,8 @@ pub(in crate::compiler_frontend::ast) fn materialize_public_const_template(
     })
 }
 
-fn materialize_public_const_template_in_store(
+fn materialize_public_const_template_in_store<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
     template: &PublicConstTemplate,
     store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     string_table: &mut StringTable,
@@ -380,20 +469,21 @@ fn materialize_public_const_template_in_store(
 
     for piece in &template.pieces {
         let node = match piece {
-            PublicConstTemplatePiece::Text(text) => {
-                let text_id = string_table.intern(text);
-                store.push_node(TemplateIrNode::new(
-                    TemplateIrNodeKind::Text {
-                        text: text_id,
-                        byte_len: text.len(),
-                        origin: TemplateSegmentOrigin::Head,
-                    },
-                    location.clone(),
-                ))
-            }
+            PublicConstTemplatePiece::Text(value) => materialize_public_const_template_string(
+                materialiser,
+                value,
+                store,
+                string_table,
+                location,
+            )?,
             PublicConstTemplatePiece::Slot(slot) => {
-                let placeholder =
-                    materialize_public_const_template_slot(slot, store, string_table, location)?;
+                let placeholder = materialize_public_const_template_slot(
+                    materialiser,
+                    slot,
+                    store,
+                    string_table,
+                    location,
+                )?;
                 store.push_node(TemplateIrNode::new(
                     TemplateIrNodeKind::Slot { placeholder },
                     location.clone(),
@@ -416,6 +506,7 @@ fn materialize_public_const_template_in_store(
     let summary = summarize_existing_root(store, root)?;
     let mut template_ir = TemplateIr::new(root, Style::default(), kind, summary, location.clone());
     let conditional_wrappers = materialize_public_wrapper_references(
+        materialiser,
         &template.conditional_child_wrappers,
         store,
         string_table,
@@ -429,20 +520,113 @@ fn materialize_public_const_template_in_store(
     Ok(store.push_template(template_ir))
 }
 
-fn materialize_public_const_template_slot(
+/// Materializes one owned string run into a fresh module-local TIR node.
+///
+/// WHAT: re-interns owned text and stable resource origins, using a structural expression whenever
+///       the run contains a resource or site-root anchor.
+/// WHY: imported values outlive their donor tables, so inverse projection must rebuild local IDs
+///      without converting structural pieces into rendered placeholder text.
+fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
+    value: &OwnedFoldedString,
+    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
+    string_table: &mut StringTable,
+    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrNodeId, CompilerError> {
+    let (pieces, has_structural) = match value {
+        OwnedFoldedString::Text(text) => {
+            let text_id = string_table.intern(text);
+            return Ok(store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::Text {
+                    text: text_id,
+                    byte_len: text.len(),
+                    origin: TemplateSegmentOrigin::Head,
+                },
+                location.clone(),
+            )));
+        }
+        OwnedFoldedString::Pieces(pieces) => {
+            let mut projected = Vec::with_capacity(pieces.len());
+            let mut has_structural = false;
+            for piece in pieces {
+                projected.push(match piece {
+                    OwnedFoldedStringPiece::Text(text) => {
+                        ConstStringPiece::Text(string_table.intern(text))
+                    }
+                    OwnedFoldedStringPiece::Resource(origin) => {
+                        has_structural = true;
+                        ConstStringPiece::Resource(
+                            materialiser.intern_resource_origin(origin, location)?,
+                        )
+                    }
+                    OwnedFoldedStringPiece::SiteRoot => {
+                        has_structural = true;
+                        ConstStringPiece::SiteRoot
+                    }
+                });
+            }
+            (projected, has_structural)
+        }
+    };
+
+    if !has_structural {
+        let mut text = String::new();
+        for piece in &pieces {
+            if let ConstStringPiece::Text(text_id) = piece {
+                text.push_str(string_table.resolve(*text_id));
+            }
+        }
+        let text_id = string_table.intern(&text);
+        return Ok(store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Text {
+                text: text_id,
+                byte_len: text.len(),
+                origin: TemplateSegmentOrigin::Head,
+            },
+            location.clone(),
+        )));
+    }
+
+    let expression = Expression::new(
+        ExpressionKind::StructuralString { pieces },
+        location.clone(),
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        ValueMode::ImmutableReference,
+    );
+    let site_id = store.next_expression_site_id();
+    Ok(store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::DynamicExpression {
+            expression: Box::new(expression),
+            origin: TemplateSegmentOrigin::Head,
+            reactive_subscription: None,
+            site_id,
+        },
+        location.clone(),
+    )))
+}
+
+fn materialize_public_const_template_slot<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
     slot: &PublicConstTemplateSlot,
     store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     string_table: &mut StringTable,
     location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
 ) -> Result<TirSlotPlaceholder, CompilerError> {
     let applied = materialize_public_wrapper_references(
+        materialiser,
         &slot.applied_child_wrappers,
         store,
         string_table,
         location,
     )?;
-    let child =
-        materialize_public_wrapper_references(&slot.child_wrappers, store, string_table, location)?;
+    let child = materialize_public_wrapper_references(
+        materialiser,
+        &slot.child_wrappers,
+        store,
+        string_table,
+        location,
+    )?;
     let applied_set = (!applied.is_empty()).then(|| store.push_or_reuse_wrapper_set(applied));
     let child_set = (!child.is_empty()).then(|| store.push_or_reuse_wrapper_set(child));
 
@@ -456,7 +640,8 @@ fn materialize_public_const_template_slot(
     ))
 }
 
-fn materialize_public_wrapper_references(
+fn materialize_public_wrapper_references<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
     wrappers: &[PublicConstTemplate],
     store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     string_table: &mut StringTable,
@@ -464,8 +649,13 @@ fn materialize_public_wrapper_references(
 ) -> Result<Vec<TemplateWrapperReference>, CompilerError> {
     let mut references = Vec::with_capacity(wrappers.len());
     for wrapper in wrappers {
-        let root =
-            materialize_public_const_template_in_store(wrapper, store, string_table, location)?;
+        let root = materialize_public_const_template_in_store(
+            materialiser,
+            wrapper,
+            store,
+            string_table,
+            location,
+        )?;
         references.push(TemplateWrapperReference::new(
             root,
             TemplateTirPhase::Finalized,

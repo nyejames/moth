@@ -14,7 +14,6 @@ use crate::compiler_frontend::hir::functions::{
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::FunctionId;
-use crate::compiler_frontend::paths::path_format::PathStringFormatConfig;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -75,7 +74,6 @@ fn classifies_entry_start_and_normal_functions() {
 
     let lowering = HirBuilder::new(
         &mut string_table,
-        PathStringFormatConfig::default(),
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
     )
@@ -134,7 +132,6 @@ fn lowers_exact_stable_origin_to_local_function_id() {
     .expect("exact function-origin path should be unique");
     let module = HirBuilder::new(
         &mut string_table,
-        PathStringFormatConfig::default(),
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
     )
@@ -216,7 +213,6 @@ fn rejects_unused_concrete_origin_seed() {
 
     let result = HirBuilder::new(
         &mut string_table,
-        PathStringFormatConfig::default(),
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
     )
@@ -261,7 +257,6 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
 
     let lowering = HirBuilder::new(
         &mut string_table,
-        PathStringFormatConfig::default(),
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
     )

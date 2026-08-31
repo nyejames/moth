@@ -1,0 +1,7 @@
+identity type T |value T| -> String:
+    return [: nested generic file [@nested.mtf] ]
+;
+
+forward type T |value T| -> String:
+    return [: root generic file [@root.mtf] nested [identity("nested")] ]
+;

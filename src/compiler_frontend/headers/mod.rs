@@ -24,7 +24,7 @@ pub(crate) mod plain_markdown_prepare;
 mod public_exports;
 mod start_capture;
 mod symbol_collection;
-mod synthetic_content_header;
+pub(crate) mod synthetic_content_header;
 mod top_level_classifier;
 mod trait_headers;
 mod types;

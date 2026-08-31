@@ -447,6 +447,7 @@ fn build_draft_with_constants(
         string_table: refs.string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &const_values,
+        module_resources: None,
     })
     .build()
     .map(|result| result.draft.declarations)
@@ -1746,6 +1747,7 @@ fn project_struct_with_receiver_method(
         string_table,
         generic_function_templates: &FxHashMap::default(),
         const_values: &ConstValueStore::default(),
+        module_resources: None,
     })
     .build()
     .map(|result| result.draft.declarations)

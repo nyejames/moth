@@ -933,6 +933,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             external_package_registry: Arc::clone(&self.context.external_package_registry),
             style_directives: self.context.style_directives.clone(),
             project_path_resolver: self.context.project_path_resolver.clone(),
+            file_value_resolution: self.context.file_value_resolution.clone(),
             path_format_config: self.context.path_format_config.clone(),
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),

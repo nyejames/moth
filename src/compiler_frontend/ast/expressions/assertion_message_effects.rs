@@ -237,13 +237,12 @@ fn classify_expression(
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::StringSlice(_)
+        | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_)
         | ExpressionKind::Function(_)
         | ExpressionKind::StructDefinition(_) => Ok(None),
-        #[cfg(test)]
-        ExpressionKind::Path(_) => Ok(None),
         #[cfg(test)]
         ExpressionKind::FallibleCarrierConstruct { value, .. } => {
             classify_expression(value, template_ir_store, state)

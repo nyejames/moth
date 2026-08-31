@@ -93,7 +93,8 @@ mod pipeline;
 
 pub(crate) use pipeline::CompilerFrontend;
 pub(crate) use pipeline::{
-    FrontendFilePrepareContext, FrontendFilePrepareInput, FrontendFilePrepareSource,
+    AstBuildRequest, FrontendFilePrepareContext, FrontendFilePrepareInput,
+    FrontendFilePrepareSource,
 };
 #[cfg(test)]
 pub(crate) use pipeline::{
