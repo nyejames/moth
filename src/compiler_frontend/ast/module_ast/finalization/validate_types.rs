@@ -123,7 +123,7 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
             Ok(())
         }
 
-        NodeKind::ScopedBlock { body } => validate_nodes(body, context),
+        NodeKind::LexicalScope { body } => validate_nodes(body, context),
 
         NodeKind::RangeLoop {
             bindings,
@@ -328,7 +328,9 @@ fn validate_expression(
                 validate_nodes(&value_if.then_body, context)?;
                 validate_nodes(&value_if.else_body, context)
             }
-            ValueBlock::Scoped(value_scoped) => validate_nodes(&value_scoped.body, context),
+            ValueBlock::LexicalScope(value_lexical_scope) => {
+                validate_nodes(&value_lexical_scope.body, context)
+            }
             ValueBlock::Match(value_match) => {
                 validate_expression(&value_match.scrutinee, context)?;
                 for arm in &value_match.arms {

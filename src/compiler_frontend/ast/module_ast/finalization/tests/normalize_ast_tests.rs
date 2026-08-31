@@ -3191,8 +3191,8 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
 
     candidate.publish(&mut ast);
 
-    let NodeKind::ScopedBlock { body } = &ast[1].kind else {
-        panic!("known Bool should publish one scoped active body");
+    let NodeKind::LexicalScope { body } = &ast[1].kind else {
+        panic!("known Bool should publish one active lexical scope");
     };
     let NodeKind::ExpressionStatement(expression) = &body[0].kind else {
         panic!("selected body should retain its template expression");

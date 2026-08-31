@@ -350,15 +350,15 @@ fn match_marked_has_default_without_default_body_is_not_terminal() {
 }
 
 #[test]
-fn scoped_block_terminates_when_body_terminates() {
+fn lexical_scope_terminates_when_body_terminates() {
     let terminal_block = node(
-        NodeKind::ScopedBlock {
+        NodeKind::LexicalScope {
             body: vec![int_return(2)],
         },
         test_source_location(1),
     );
     let fallthrough_block = node(
-        NodeKind::ScopedBlock {
+        NodeKind::LexicalScope {
             body: vec![expression_statement(2)],
         },
         test_source_location(1),

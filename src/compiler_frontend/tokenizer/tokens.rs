@@ -967,7 +967,6 @@ pub enum TokenKind {
     ReturnBang,
     Catch,
     Then,
-    Block,
     Checked,
     Async,
 
@@ -1122,7 +1121,6 @@ impl TokenKind {
             | TokenKind::ReturnBang
             | TokenKind::Catch
             | TokenKind::Then
-            | TokenKind::Block
             | TokenKind::Checked
             | TokenKind::Async
             | TokenKind::Cast

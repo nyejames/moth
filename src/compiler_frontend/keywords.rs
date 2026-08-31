@@ -10,11 +10,10 @@ use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
-pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 36] = [
-    "export", "if", "return", "yield", "else", "block", "checked", "async", "cast", "as", "copy",
-    "type", "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue", "is",
-    "not", "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool", "char",
-    "assert",
+pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 35] = [
+    "export", "if", "return", "yield", "else", "checked", "async", "cast", "as", "copy", "type",
+    "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue", "is", "not",
+    "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool", "char", "assert",
 ];
 
 /// Neutral presentation class for an exact Moth source word.
@@ -84,7 +83,6 @@ pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
         "catch" => Some(ClassifiedSourceWord::keyword(TokenKind::Catch)),
         "then" => Some(ClassifiedSourceWord::keyword(TokenKind::Then)),
         "else" => Some(ClassifiedSourceWord::keyword(TokenKind::Else)),
-        "block" => Some(ClassifiedSourceWord::keyword(TokenKind::Block)),
         "checked" => Some(ClassifiedSourceWord::keyword(TokenKind::Checked)),
         "cast" => Some(ClassifiedSourceWord::keyword(TokenKind::Cast)),
         "break" => Some(ClassifiedSourceWord::keyword(TokenKind::Break)),

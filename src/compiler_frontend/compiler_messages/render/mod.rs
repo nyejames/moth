@@ -561,6 +561,9 @@ fn deferred_feature_static_message(reason: &DeferredFeatureReason) -> &'static s
         DeferredFeatureReason::GenericReceiverMethod => {
             "Receiver methods on instantiated generic receiver types are not supported. Define the method on the generic type declaration using the receiver type's own parameters."
         }
+        DeferredFeatureReason::DeclaredRegion => {
+            "Declared regions using `name:` and `into name` are accepted but not implemented yet."
+        }
         DeferredFeatureReason::CheckedBlock => {
             "`checked:` blocks are reserved for future advanced validation, but are not implemented yet."
         }

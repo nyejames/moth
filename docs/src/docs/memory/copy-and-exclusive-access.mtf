@@ -16,7 +16,7 @@
 - internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation
 - internal cycles are preserved in the copied graph
 - a copied acyclic graph may be allocated into an inferred or declared destination region
-- a copied cyclic graph must be allocated wholly into one explicit declared group. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the group-only cycle rule
+- a copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region
 - the copied graph shares no mutable allocation with the source graph
 - a reactive source is copied as its current value, not as the same reactive source identity
 - an external opaque handle or resource that doesn't define a genuine independent-copy operation produces a source diagnostic
@@ -78,7 +78,7 @@ A fresh rvalue passed to an ordinary mutable parameter is materialised into a co
 
 - @#reference-semantics (Reference semantics)
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)
-- @#declared-memory-groups (Declared memory groups)
+- @#declared-regions (Declared regions)
 
 For the formal access rules, see
 @../../developer-docs/memory-management/access-and-aliasing (Access and aliasing).

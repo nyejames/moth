@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::SourceLocation;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
-    types::{ValueIfBlock, ValueMatchBlock, ValueScopedBlock},
+    types::{ValueIfBlock, ValueLexicalScope, ValueMatchBlock},
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -240,9 +240,9 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Lowers one statically selected value-producing body without rebuilding a Bool branch.
-    pub(crate) fn lower_value_block_scoped(
+    pub(crate) fn lower_value_lexical_scope(
         &mut self,
-        value_scoped: &ValueScopedBlock,
+        value_lexical_scope: &ValueLexicalScope,
         location: &SourceLocation,
         _result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
@@ -251,8 +251,8 @@ impl<'a> HirBuilder<'a> {
         let body_region = self.create_child_region(parent_region);
         let body_block = self.create_block(body_region, location, "static-value-if-body")?;
         let merge_block = self.create_block(parent_region, location, "static-value-if-merge")?;
-        let result_locals =
-            self.allocate_value_block_result_locals(&value_scoped.result_type_ids, location)?;
+        let result_locals = self
+            .allocate_value_block_result_locals(&value_lexical_scope.result_type_ids, location)?;
 
         self.emit_jump_to(entry_block, body_block, location, "static-value-if.enter")?;
         self.set_current_block(body_block, location)?;
@@ -261,7 +261,7 @@ impl<'a> HirBuilder<'a> {
                 result_locals: result_locals.clone(),
                 merge_block,
             },
-            |builder| builder.lower_statement_sequence(&value_scoped.body),
+            |builder| builder.lower_statement_sequence(&value_lexical_scope.body),
         )?;
 
         let body_tail = self.current_block_id_or_error(location)?;
@@ -272,7 +272,7 @@ impl<'a> HirBuilder<'a> {
 
         let value = self.value_block_result_expression(
             &result_locals,
-            &value_scoped.result_type_ids,
+            &value_lexical_scope.result_type_ids,
             location,
             parent_region,
         )?;

@@ -5,9 +5,9 @@ fn keyword_shadow_matching_ignores_case_and_leading_underscores() {
     assert_eq!(keyword_shadow_match("_true"), Some("true"));
     assert_eq!(keyword_shadow_match("FALSE"), Some("false"));
     assert_eq!(keyword_shadow_match("__LoOp"), Some("loop"));
-    assert_eq!(keyword_shadow_match("block"), Some("block"));
-    assert_eq!(keyword_shadow_match("Block"), Some("block"));
-    assert_eq!(keyword_shadow_match("_BLOCK"), Some("block"));
+    assert_eq!(keyword_shadow_match("block"), None);
+    assert_eq!(keyword_shadow_match("Block"), None);
+    assert_eq!(keyword_shadow_match("_BLOCK"), None);
     assert_eq!(keyword_shadow_match("checked"), Some("checked"));
     assert_eq!(keyword_shadow_match("Checked"), Some("checked"));
     assert_eq!(keyword_shadow_match("_async"), Some("async"));

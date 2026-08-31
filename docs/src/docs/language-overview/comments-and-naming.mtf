@@ -61,3 +61,5 @@ is case-insensitive and strips leading underscores, so `config`, `Config`, `CONF
 ]
 
 Ordinary dependency clauses do not use an `import` keyword.
+
+`block`, `group` and `region` are not keywords. They follow ordinary identifier policy. In executable statement position, each corresponding `name:` header has the same reserved declared-region shape as any other valid identifier.

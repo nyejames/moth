@@ -434,7 +434,7 @@ pub fn fold_compile_time_expression(
                 )
             }
 
-            ValueBlock::If(_) | ValueBlock::Scoped(_) | ValueBlock::Match(_) => {
+            ValueBlock::If(_) | ValueBlock::LexicalScope(_) | ValueBlock::Match(_) => {
                 Ok(expression.to_owned())
             }
         },
@@ -646,7 +646,7 @@ fn extract_single_produced_value(body: &[AstNode]) -> Option<&Expression> {
 
             NodeKind::If(..)
             | NodeKind::Match { .. }
-            | NodeKind::ScopedBlock { .. }
+            | NodeKind::LexicalScope { .. }
             | NodeKind::RangeLoop { .. }
             | NodeKind::CollectionLoop { .. }
             | NodeKind::WhileLoop(..)

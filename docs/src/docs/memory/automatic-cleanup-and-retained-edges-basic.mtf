@@ -9,4 +9,4 @@ When stored aliases disappear one at a time and a region would keep too much
 storage alive, the compiler may track those stored obligations internally with
 Retained Edge Counting. You never write REC code or inspect its counter.
 
-An explicit group chooses one bulk cleanup. Group-owned values never use REC.
+A declared region chooses one bulk cleanup. Declared-region-owned values never use REC.

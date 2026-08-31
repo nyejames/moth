@@ -2,7 +2,7 @@
 
 Moth proves access safety and lifetime topology before it chooses physical
 cleanup. Most values need no runtime count. Last-use analysis handles ordinary
-aliases, inferred regions handle bounded stored lifetimes and explicit groups
+aliases, inferred regions handle bounded stored lifetimes and declared regions
 choose one deliberate bulk lifetime.
 
 When a runtime-dependent number of stored aliases disappears one at a time, the
@@ -48,10 +48,12 @@ reachable through a chain.
 
 ### Last use and stored obligations work together
 
-An ordinary value starts with one cleanup obligation: something has to release
-it. Storing it can hand that obligation over rather than creating a new one.
+A separately releasable heap value starts with one cleanup obligation: something
+has to release it. Storing it can hand that obligation over rather than creating
+a new one. Scalars, region-owned values and values the compiler never releases
+individually have no such obligation to begin with.
 
-- An ordinary value starts with one cleanup obligation.
+- A separately releasable heap value starts with one cleanup obligation.
 - If storing it is that value's final use, the compiler can turn that existing
   obligation into the stored one. Nothing extra needs tracking.
 - If one operation stores two direct references to the same allocation, only one
@@ -62,9 +64,14 @@ So storing a value twice in one operation, such as using it as both a map key
 and a map value, does add work even at a final use. Storing it once at a final
 use does not.
 
+The reverse can happen too. Detachment, such as `remove` taking a stored value back out into an owned result, can hand the stored cleanup obligation to that result instead of creating new work.
+
+Replacing one stored reference with another reference to the same value in one operation is a same-family, atomic change with no net extra tracking. The compiler does not briefly drop the value to nothing and then put it back.
+
 This is why last-use analysis still matters when a count is involved. The count
-is not tracking your aliases; it is tracking obligations that last-use analysis
-could not already resolve statically.
+is not tracking your aliases. It tracks the stored references that are still
+live in a counted family, plus at most one outstanding owned reference, and
+last-use analysis is what keeps that number as small as it can be.
 
 ### When a region is enough
 
@@ -112,21 +119,21 @@ REC never counts:
 - parameters
 - temporary projections
 - `get()` results
-- ordinary affine transfers
-- group-owned values
+- handing cleanup responsibility to another place moves or reclassifies the one obligation that already exists, so it never adds another.
+- declared-region-owned values
 
 The compiler selects REC only after static cleanup, inferred regions, cleanup
-frontiers, field-sensitive splitting, bounded retention and explicit groups have
+frontiers, field-sensitive splitting, bounded retention and declared regions have
 failed to give a precise enough answer. Every REC family keeps its statically
 proven fallback region and can reclaim the family earlier than that region
 frontier.
 
-### Explicit groups
+### Declared regions
 
-An explicit group chooses one hard lifetime and one bulk cleanup. Last-use
-analysis still checks access inside the group, but it never releases one group
-child early. Group-owned storage carries no REC counter. A group also provides
-Moth's only source mechanism for direct reference cycles.
+A declared region chooses one hard lifetime and one bulk cleanup domain. Last-use
+analysis still checks access inside it, but declared-region-owned allocations remain until region
+exit. Declared-region-owned storage carries no REC counter. A declared region is also Moth's only
+source mechanism for direct reference cycles.
 
 ### Fallible operations commit effects on success
 
@@ -152,11 +159,12 @@ original arrangement is untouched.
 
 ### Source visibility
 
-You never declare, inspect or configure an REC counter. REC is one possible
-compiler-selected physical strategy for source code that already passed the
-same borrow and lifetime checks as every other program. Debug or
-garbage-collected representations may erase cleanup operations, while a
-capable full-control release backend cannot fall back to tracing garbage
+You never declare, inspect or configure an REC counter.
+
+Only retention-sensitive commits on values the compiler chose to count can change a count: storing into or removing from a counted family, and cleanup points. Reading, passing, borrowing and ordinary calls never change a count. A call that stores or removes changes it only at that operation's planned commit point.
+
+REC is one possible compiler-selected physical strategy for source code that already passed the same borrow and lifetime checks as every other program. Debug or
+garbage-collected representations may erase cleanup operations, while a capable full-control release backend cannot fall back to tracing garbage
 collection.
 
 For the compiler contract, see

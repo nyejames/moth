@@ -160,7 +160,7 @@ Documentation state after the memory model consistency closure:
 - `docs/src/docs/collections/growable-collections.mtf`, `growable-collections-basic.mtf`, `collection-operations.mtf`, `collection-operations-basic.mtf` and `docs/src/docs/packages/core/collections/collections-basic.mtf` now teach the accepted growable/fixed split. They are no longer stale
 - `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf` and the canonical REC page now say *fixed-capacity* push where they mean the fallible one
 - `docs/src/docs/packages/core/collections/collections.mtf` still describes five host functions and one unified fallible push helper, correctly, and now carries an explicit implementation-debt paragraph pointing at this plan. Removing that paragraph is this plan's job, not the closure's
-- `docs/src/docs/bindings/*`, `docs/src/docs/errors/*`, `docs/src/docs/memory/*`, `docs/src/docs/reactivity/*` and the canonical access, aliasing and declared-group pages now use growable `push` without `catch`, and use fixed receivers where a fallible push example is the teaching point
+- `docs/src/docs/bindings/*`, `docs/src/docs/errors/*`, `docs/src/docs/memory/*`, `docs/src/docs/reactivity/*` and the canonical access, aliasing and declared-region pages now use growable `push` without `catch`, and use fixed receivers where a fallible push example is the teaching point
 - the progress matrix still reports that the current compiler treats every push as fallible, which remains true, and now names the accepted split as deferred
 - generated pages under `docs/release/**` reflect whichever build last ran
 

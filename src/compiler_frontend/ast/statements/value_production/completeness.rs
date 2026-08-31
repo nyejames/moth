@@ -133,7 +133,7 @@ fn statement_exits(statement: &AstNode) -> BranchExitSummary {
             ..
         } => match_exits(arms, maybe_default_body.as_deref()),
 
-        NodeKind::ScopedBlock { body } => analyze_branch_exits(body),
+        NodeKind::LexicalScope { body } => analyze_branch_exits(body),
 
         NodeKind::Assert { condition, .. } if assert_condition_is_statically_false(condition) => {
             BranchExitSummary::TERMINATES
@@ -194,7 +194,7 @@ fn visit_statement_then_values<E>(
             Ok(())
         }
 
-        NodeKind::ScopedBlock { body } => visit_reachable_then_values(body, visitor),
+        NodeKind::LexicalScope { body } => visit_reachable_then_values(body, visitor),
 
         _ => Ok(()),
     }
@@ -228,7 +228,7 @@ fn visit_statement_then_values_mut<E>(
             Ok(())
         }
 
-        NodeKind::ScopedBlock { body } => visit_reachable_then_values_mut(body, visitor),
+        NodeKind::LexicalScope { body } => visit_reachable_then_values_mut(body, visitor),
 
         _ => Ok(()),
     }

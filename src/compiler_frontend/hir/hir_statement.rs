@@ -76,7 +76,7 @@ impl<'a> HirBuilder<'a> {
     // -------------------------
 
     // WHAT: enters one function's lowering context, lowers its body, then restores builder state.
-    // WHY: function lowering needs scoped block/region/current-function state that must not leak
+    // WHY: function lowering needs lexical scope/region/current-function state that must not leak
     //      into the next function.
     pub(super) fn lower_function_body(
         &mut self,
@@ -237,9 +237,7 @@ impl<'a> HirBuilder<'a> {
                 &node.location,
             ),
 
-            NodeKind::ScopedBlock { body } => {
-                self.lower_scoped_block_statement(body, &node.location)
-            }
+            NodeKind::LexicalScope { body } => self.lower_lexical_scope(body, &node.location),
 
             NodeKind::RangeLoop {
                 bindings,

@@ -14,7 +14,7 @@ Companion authorities:
 
 The source language stays small: existing values use shared access by default, mutation requires explicit exclusive access, copies are explicit and moves are inferred by the compiler.
 
-These pages record accepted memory model and target backend architecture. They include design decisions that are not yet implemented, particularly around lifetime-topology validation, retained-edge liveness, grouped memory, Retained Edge Counting and collector-free backend lowering.
+These pages record the accepted memory model and target backend architecture. They include design decisions that are not yet implemented, particularly around lifetime-topology validation, retained-edge liveness, declared regions, Retained Edge Counting and collector-free backend lowering.
 
 They are not an implementation-status report. Use `docs/src/docs/progress/@page.moth` for current support and major gaps.
 
@@ -23,6 +23,8 @@ They are not an implementation-status report. Use `docs/src/docs/progress/@page.
 Moth is reference-semantic and statically memory-safe. Existing values use shared, read-only access by default. Mutation requires explicit exclusive access. Copies are explicit and transfer is inferred. Memory safety comes from mandatory borrow validation and mandatory lifetime-topology validation, not from a collector. Every allocation family has exactly one statically proven semantic lifetime owner, and every retained edge must point to storage that lives at least as long as the container holding it.
 
 Garbage collection is a permitted physical representation of a topology that has already been proven legal. It is not the semantic correctness baseline. GC cannot legalise an invalid or unproven topology, and a release build on a backend that advertises full memory control must not fall back to a tracing collector.
+
+**Region** is Moth's general semantic lifetime-owner concept. An **inferred region** is chosen by the compiler. A **declared region** is a hard source-declared `name:` region whose membership is explicit through `into name`. A declared region is not necessarily a physical arena.
 
 ## Mandatory proof and physical strategy
 
@@ -45,7 +47,7 @@ After shared topology and backend-neutral memory requirements are complete, targ
 - stack or inline placement
 - static affine cleanup at a proven final use
 - inferred region allocation with a complete exit
-- explicit-group bulk reclamation
+- declared-region bulk reclamation
 - Retained Edge Counting for unresolved runtime-many persistent edges
 - host garbage-collected representation on debug profiles and GC-native backends
 
@@ -83,20 +85,20 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
     ]
 
     [td:
-        [: Explicit groups]
-        [: hard source-declared bulk lifetimes, count-free cycles, group exits]
-        [: individual early cleanup, REC, dynamic sharing outside the group]
+        [: Declared regions]
+        [: hard source-declared bulk lifetimes, count-free cycles, declared-region exits]
+        [: individual early cleanup, REC, dynamic sharing outside the declared region]
     ]
 
     [td:
         [: Retained Edge Counting]
-        [: unresolved runtime-many persistent retained-edge obligations]
+        [: the physical counter for a family selected because unresolved runtime-many persistent retained edges disappear independently; a selected counter carries those persistent-edge obligations plus at most one affine-root obligation]
         [: ordinary aliases, legality, cycles, source types]
     ]
 
     [td:
         [: Physical memory planning]
-        [: stack placement, affine heap cleanup, inferred arenas, explicit-group arenas, REC layouts, drop coalescing]
+        [: stack placement, affine heap cleanup, inferred arenas, declared-region arenas, REC layouts, drop coalescing]
         [: source validity, borrow rules, lifetime topology]
     ]
 ]
@@ -117,13 +119,66 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 **7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
 
-**8. Inferred regions are non-lexical.** Implicit lifetime regions are compiler-generated CFG intervals, not merely lexical scopes. The compiler starts from the narrowest valid candidate owner and may widen only along the nearest existing ancestor on one ordered lifetime chain. It must not promote laterally across independently ending siblings, and it must not invent a page, application or process owner to avoid a diagnostic.
+**8. Inferred regions are non-lexical.** Inferred regions are compiler-generated CFG intervals, not merely lexical scopes. The compiler starts from the narrowest valid candidate owner and may widen only along the nearest existing ancestor on one ordered lifetime chain. It must not promote laterally across independently ending siblings, and it must not invent a page, application or process owner to avoid a diagnostic.
 
 **9. Retained-edge liveness can end a region early.** A final cleanup frontier is a CFG point after which every relevant retained edge into an allocation family or inferred region is proven gone. A collection may outlive the region whose values it once held.
 
-**10. Cycles require an explicit group.** Implicit lifetime inference never invents a cyclic region. Direct source-created reference cycles are legal only inside one declared group, and group-owned storage is reclaimed in bulk at group exit.
+**10. Cycles require a declared region.** Inferred-region analysis never invents a cyclic region. Direct source-created reference cycles are legal only inside one declared region, and declared-region-owned storage is reclaimed in bulk at declared-region exit.
 
 **11. Release builds on capable backends are collector-free.** There is no source-visible or project-visible no-GC mode. Backends declare whether they support collector-free release lowering, and a capable backend must not silently fall back to a tracing or reachability collector. REC is a selective retained-edge strategy, not the correctness fallback.
+
+### One fact, several consumers
+
+One future-use substrate feeds several systems. Borrow validation supplies the facts; lifetime analysis and memory planning own the decisions taken from them.
+
+[table:
+    [th:
+        [: **Fact**]
+        [: **Consumer**]
+    ]
+
+    [td:
+        [: a shared or exclusive access may still be used]
+        [: borrow conflict validation]
+    ]
+
+    [td:
+        [: no later source use exists on every relevant path]
+        [: optional affine transfer]
+    ]
+
+    [td:
+        [: no capable source alias survives]
+        [: cleanup-frontier proof]
+    ]
+
+    [td:
+        [: a final-use persistent store commits]
+        [: affine root to persistent edge reclassification]
+    ]
+
+    [td:
+        [: a stored value is detached into an owned result]
+        [: persistent edge to affine root reclassification]
+    ]
+
+    [td:
+        [: a final loop iteration is statically known]
+        [: final-iteration responsibility transfer]
+    ]
+
+    [td:
+        [: no observer or recreating source survives an epoch]
+        [: inferred-region epoch completion]
+    ]
+
+    [td:
+        [: edge sets are mutually exclusive across paths or epochs]
+        [: avoid a false cycle coexistence result]
+    ]
+]
+
+`docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf` owns the complete stable fact contract.
 
 ## Collector-free correctness argument
 
@@ -135,11 +190,12 @@ For every accepted allocation family `A`:
 4. Last-use analysis may move or discharge individual cleanup responsibility earlier.
 5. A complete cleanup frontier may end `R` before the retaining aggregate itself dies.
 6. Runtime-many independent persistent edges may use REC for earlier cleanup.
-7. Explicit-group-owned values remain until their one bulk exit.
-8. If no earlier strategy applies, `A` remains alive until `R` ends.
-9. When `R` ends, no surviving legal value can retain an edge into `R`.
+7. Root-to-edge and edge-to-root obligation reclassification may remove count traffic without changing source semantics.
+8. Declared-region-owned values remain until their one bulk exit.
+9. If no earlier strategy applies, `A` remains alive until `R` ends.
+10. When `R` ends, no surviving legal value can retain an edge into `R`.
 
-A full-control backend can therefore reclaim every remaining allocation in `R` without tracing runtime reachability. The proof guarantees correctness. Memory quality depends on interval precision, cleanup frontiers, affine transfer, REC selection, field splitting and physical region planning.
+A full-control backend can therefore reclaim every remaining allocation in `R` without tracing runtime reachability. The proof guarantees correctness. Memory quality depends on interval precision, cleanup frontiers, affine transfer, obligation reclassification, REC selection, field splitting and physical region planning.
 
 ## Goals and tradeoffs
 
@@ -153,7 +209,7 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
 ## Compiler and backend layers
 
 [codeblock, $code("text"):
-    source access, copy and group syntax
+    source access, copy and declared-region syntax
         -> AST access-mode, placement and freshness validation
         -> validated HIR
         -> borrow and last-use analysis
@@ -175,14 +231,15 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
 
 Local module compilation produces local lifetime constraints and exported summaries. Project/link analysis instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Backends receive a validated topology and a memory plan, and may not reconsider source legality.
 
-- AST validates source access syntax, mutable call requirements, explicit copies and group placement.
+- AST validates source access syntax, mutable call requirements, explicit copies and declared-region placement.
 - HIR represents places and control flow explicitly and materialises fresh mutable call arguments where necessary.
 - Borrow validation enforces exclusivity, alias safety and optional affine transfer safety.
 - Lifetime-topology validation enforces one owner, retained-edge legality, escapes, frontiers and cycles.
-- Backend-neutral memory requirements are the last target-independent handoff. They carry family identity, owners, intervals, frontiers, retention facts, REC candidacy and group membership, but never a selected physical strategy.
+- Backend-neutral memory requirements are the last target-independent handoff. They carry family identity, owners, intervals, frontiers, retention facts, REC candidacy and declared-region membership, but never a selected physical strategy.
 - Target partition and target-contract validation are build-owned and run before physical memory planning.
 - The compiler-owned memory planner selects the physical representation for each validated allocation family, once per target/profile physical variant, and produces one `ValidatedMemoryPlan` per variant.
-- Backend lowering realises that plan without changing semantics or selecting strategy.
+- The planner turns each semantic commit into one normalised per-family obligation transition and owns root-to-edge and edge-to-root reclassification.
+- Backend lowering realises that plan without changing semantics or selecting strategy. It encodes the planned transitions and never derives them.
 
 `check` runs through creation and validation of the `ValidatedMemoryPlan`. It stops before backend lowering and output emission.
 
@@ -215,7 +272,7 @@ Local module compilation produces local lifetime constraints and exported summar
         ]
         [:
             - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
-            - `docs/src/developer-docs/memory-management/declared-memory-groups/declared-memory-groups.mtf`
+            - `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`
         ]
     ]
 
@@ -238,12 +295,12 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: `group` / `into`, destination scope, hard group exits, nested groups]
+        [: `name:` / `into name`, destination scope, hard declared-region exits, nested declared regions]
         [:
-            - `docs/src/developer-docs/memory-management/declared-memory-groups/overview.mtf`
+            - `docs/src/developer-docs/memory-management/declared-regions/overview.mtf`
             - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
         ]
-        [: `docs/src/developer-docs/memory-management/declared-memory-groups/declared-memory-groups.mtf`]
+        [: `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`]
     ]
 
     [td:
@@ -294,7 +351,7 @@ Local module compilation produces local lifetime constraints and exported summar
 - A capable full-control release backend must not fall back to a tracing or reachability collector.
 - A missing physical strategy after successful topology validation is `CompilerError`.
 - Affine cleanup responsibility may move or be discharged, but it never duplicates.
-- REC counts persistent retained edges only. It never counts ordinary aliases and never establishes legality.
-- Group-owned storage is count-free, is never released individually and is the only source mechanism for cycles. Count-free describes the group's own targets: an edge from group storage into an externally owned REC family is still a counted edge into that external family, released at group exit before bulk reclamation.
+- For one REC-selected family `F`, `REC count(F) = live counted persistent-edge obligations(F) + optional affine-root obligation(F)`, where the affine-root term is zero or one. Ordinary aliases, parameters, temporary projections and `get()` results never contribute obligations, and REC never establishes legality.
+- Declared-region-owned storage is count-free, is never released individually and is the only source mechanism for cycles. Count-free describes the declared region's own targets: an edge from declared-region-owned storage into an externally owned REC family is still a counted edge into that external family, released at declared-region exit before bulk reclamation.
 - Backends receive validated topology and a memory plan, and may not reconsider source legality.
 - No compiler or backend path may rely on unchecked aliasing or undefined behaviour to make the memory model work.

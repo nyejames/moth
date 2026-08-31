@@ -322,7 +322,7 @@ that evidence, and stops applying the moment the code moves.
 ]
 
 Eight package-scoped lanes cover the default configuration, `timers`, `detailed_timers`,
-`benchmark_counters`, `timers` with `benchmark_counters`, the scoped-block features, every `show_*`
+`benchmark_counters`, `timers` with `benchmark_counters`, the scoped-block feature lane, every `show_*`
 feature and the `xtask` package. `testing.mtf > Feature and platform lanes` owns the lane table and
 what each lane uniquely covers.
 

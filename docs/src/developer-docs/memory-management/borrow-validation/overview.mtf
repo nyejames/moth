@@ -5,10 +5,12 @@ Roots, joins, optional transfer safety and facts.
 ## Contract
 
 - Input: validated HIR, access/effect metadata, and external boundary classifications
-- Output: read-only access, alias, optional-transfer, reactivity, and advisory-drop facts
+- Output: normalised semantic places and overlap facts, value origins and preliminary provenance, shared and exclusive access liveness, path-sensitive future-use and last-use classifications, optional affine-transfer candidates, capable-source-death and temporary-borrow-safety proofs, preliminary return-root alias and projection evidence, reactive invalidation facts, and resolved external access-boundary classifications
 - Decides: shared/exclusive conflicts and whether transfer is safe as an optimisation
 - Must not decide: lifetime topology, physical ownership, final allocation, or backend lowering
 - Invariant: borrow validation reads HIR and writes side tables; it doesn't rewrite HIR
+
+This output contract is solver-independent. The current alpha lattice, root approximation and advisory drop candidates are current scaffolding rather than permanent architecture; a stronger production borrow checker may replace them without changing the contract or source legality.
 
 ## Main paths
 

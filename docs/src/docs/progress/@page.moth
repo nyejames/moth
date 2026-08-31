@@ -131,11 +131,11 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Variables, assignment, and scoped blocks]
+            [: Variables, assignment and lexical scope]
             [: Supported]
-            [: Broad declaration, reassignment, mutability, scope, shadowing, undefined-mutation, block-scope, and diagnostic coverage.]
+            [: Broad declaration, reassignment, mutability, structured-control-flow scope, shadowing, undefined-mutation and diagnostic coverage.]
             [: JS / HTML]
-            [: Mutable writes require mutable places. [$html:<code>block:</code>] creates a lexical/control-flow scope. Bare labeled scopes are rejected.]
+            [: Mutable writes require mutable places. There is no dedicated general lexical-block construct and no control-flow labels. Structured control flow owns lexical scope, and statically selected Bool branches retain their authored child scope while disappearing before HIR.]
         ]
 
         [data:
@@ -347,19 +347,19 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Declared memory groups (`group` / `into`)]
+            [: Declared regions (`name:` / `into name`)]
             [: Deferred]
-            [: None]
+            [: Targeted lexer, statement-classification, deferred-diagnostic, anonymous-declared-region rejection and reclaimed-identifier coverage.]
             [: Frontend / HIR / lifetime analysis / all backends]
-            [: Accepted end-state syntax; not current source support. Groups are hard count-free bulk lifetimes whose storage is never released individually. Canonical semantics live under `docs/src/developer-docs/memory-management/declared-memory-groups/`; implementation sequencing in `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. Complete when source, HIR, topology and backend support are implemented.]
+            [: Valid [$html:<code>name:</code>] headers are reserved in executable statement position and report a deferred-feature diagnostic. Exact [$html:<code>_:</code>] is rejected. Full declared-region parsing, [$html:<code>into name</code>] placement, HIR metadata, topology and backend support remain deferred. Declared regions are hard count-free bulk lifetimes whose owned storage is never released individually.]
         ]
 
         [data:
-            [: Group-only reference cycles]
+            [: Direct source-created reference cycles]
             [: Deferred]
             [: None]
             [: Frontend / lifetime analysis / all backends]
-            [: Accepted design only. A declared group is the only source mechanism for reference cycles, and implicit inference never invents a cyclic region. Complete when explicit cycle construction and bulk cleanup are implemented.]
+            [: Accepted design only. A declared region is the only source mechanism for reference cycles, and inferred-region analysis never invents a cyclic region. Complete when direct source-created cycle construction and bulk cleanup are implemented.]
         ]
 
         [data:
@@ -375,7 +375,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. A distinct planner must select stack, affine, inferred-region, explicit-group, REC or garbage-collected representation per allocation family after topology is proven. A missing strategy after successful validation is a `CompilerError` in the accepted design. Complete when the planner owns every strategy decision.]
+            [: Accepted design only. A distinct compiler-owned planner must select stack, inline, affine, inferred-region, declared-region, REC or host garbage-collected representation per allocation family after topology is proven, and must also produce the concrete per-family obligation transitions the backend encodes. A missing strategy after successful validation is a `CompilerError` in the accepted design. No `ValidatedMemoryPlan` implementation owner exists yet. Complete when the planner owns every strategy decision and its plan is validated before lowering.]
         ]
 
         [data:
@@ -383,7 +383,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. Retained Edge Counting is a compiler-selected physical representation for runtime-many persistent retained edges, never source semantics. Detailed contract in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`. Complete when the companion analysis and its decision reporting are implemented.]
+            [: Accepted design only. Retained Edge Counting is a compiler-selected physical representation for runtime-many persistent retained edges, never source semantics. The canonical contract lives under `docs/src/developer-docs/memory-management/retained-edge-counting/`. Complete when the companion analysis and its decision reporting are implemented.]
         ]
 
         [data:
@@ -403,11 +403,11 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: Inferred-region and group backend lowering]
+            [: Inferred-region and declared-region backend lowering]
             [: Deferred]
             [: None]
             [: Full-control backends]
-            [: Accepted design only. Wasm runtime memory currently provides basic linear-memory page and heap-base planning with no allocator, region, group or destruction-plan support. Complete when region allocation with complete exits and group bulk cleanup are implemented.]
+            [: Accepted design only. Wasm runtime memory currently provides basic linear-memory page and heap-base planning with no allocator, inferred-region, declared-region or destruction-plan support. Complete when inferred-region allocation with complete exits and declared-region bulk cleanup are implemented.]
         ]
 
         [data:
@@ -742,7 +742,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Static Bool [$html:<code>if</code>] specialisation]
             [: Implemented]
             [: Frontend pipeline, HIR boundary, terminality, branch scope, inactive diagnostics and generated-request coverage.]
-            [: Both branches remain frontend-valid. A known Bool selects one scoped body before terminality, durable generated work and HIR. Runtime conditions retain ordinary branch lowering, and source structure never depends on the condition.]
+            [: Both branches remain frontend-valid. A known Bool selects one compiler-generated lexical scope before terminality, durable generated work and HIR. Runtime conditions retain ordinary branch lowering, and source structure never depends on the condition.]
         ]
     ]
 ]

@@ -447,7 +447,7 @@ fn register_collection_types_from_node(node: &mut AstNode, type_environment: &mu
                 register_collection_types_from_nodes(default_nodes, type_environment);
             }
         }
-        NodeKind::ScopedBlock { body } => {
+        NodeKind::LexicalScope { body } => {
             register_collection_types_from_nodes(body, type_environment);
         }
         NodeKind::RangeLoop { range, body, .. } => {

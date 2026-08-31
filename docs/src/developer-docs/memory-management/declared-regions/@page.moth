@@ -1,0 +1,18 @@
+@declared-regions content as reference_content
+@styles navbar, section, theme_head
+
+page_title #= "Declared regions"
+page_description #= "Accepted deferred declared-region syntax, placement and hard destination lifetimes."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Memory management) / Declared regions
+
+    **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
+
+    A declared region is a hard semantic lifetime region. Values placed into a declared region belong to that declared region for their full lifetime. Accepted design with implementation deferred.
+]
+
+#[section, reference_content]

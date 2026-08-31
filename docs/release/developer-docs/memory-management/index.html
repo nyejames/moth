@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Memory management | Moth</title>
-    <meta name="description" content="Reference semantics, borrow validation, lifetime topology, explicit groups and collector-free backend lowering.">
+    <meta name="description" content="Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -465,14 +465,14 @@ copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-ke
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'><span class='moth-code-function'>change</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;fresh&quot;</span><span class='moth-code-delimiter'>}</span><span class='moth-code-delimiter'>)</span></code></pre></section>
-<section class="container"><h2>Lifetime owners</h2><p>Every runtime allocation family has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.</p><p>An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>Inferred regions are compiler-generated intervals over control flow, not plain lexical scopes. The compiler starts from the narrowest valid owner and widens only along the nearest enclosing ancestor. It never promotes across independently ending siblings and never invents a page or application owner to avoid a diagnostic.</p><p>The compiler rejects illegal sibling sharing and cross-region cycles on every backend. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.</p><p>Declared <code>group</code> / <code>into</code> syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See <a href="./declared-memory-groups">Declared memory groups</a> for the source contract and <a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a> for the general topology model.</p></section>
+<section class="container"><h2>Lifetime owners</h2><p>Every runtime allocation family has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.</p><p>An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.</p><p>Inferred regions are compiler-generated intervals over control flow, not plain lexical scopes. The compiler starts from the narrowest valid owner and widens only along the nearest enclosing ancestor. It never promotes across independently ending siblings and never invents a page or application owner to avoid a diagnostic.</p><p>The compiler rejects illegal sibling sharing and cross-region cycles on every backend. GC is a permitted representation for a statically legal topology, not a way to accept invalid retained edges.</p><p>Declared <code>name:</code> / <code>into name</code> syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See <a href="./declared-regions">Declared regions</a> for the source contract and <a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a> for the general topology model.</p></section>
 <section class="container"><h2>How the compiler layers it</h2><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'>source access, copy and group syntax
+"><code class='codeblock'>source access, copy and declared-region syntax
     -&gt; AST access-mode, placement and freshness validation
     -&gt; validated HIR with explicit places and control flow
     -&gt; borrow and last-use analysis
@@ -485,9 +485,9 @@ copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-ke
     -&gt; target-contract validation
     -&gt; per-physical-variant family/layout refinement
     -&gt; target/profile-aware compiler-owned memory planning
-    -&gt; ValidatedMemoryPlan
+    -&gt; ValidatedMemoryPlan validation
     -&gt; backend memory lowering</code></pre></section>
-<section class="container"><h2>Detailed pages</h2><ul><li><a href="./access-and-aliasing">Access and aliasing</a>: shared reads, explicit copies and <code>~</code> access</li><li><a href="./borrow-validation">Borrow validation</a>: roots, joins, last-use facts and affine transfer safety</li><li><a href="./boracle">Boracle reference solver</a>: the developer-facing reference borrow model and borrow-analysis laboratory</li><li><a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes</li><li><a href="./declared-memory-groups">Declared memory groups</a>: accepted deferred <code>group</code> / <code>into</code> semantics and hard bulk lifetimes</li><li><a href="./retained-edge-counting">Retained Edge Counting</a>: the narrow counted strategy for runtime-many persistent retained edges</li><li><a href="./ownership-and-drops">Affine ownership and drops</a>: affine cleanup responsibility, the ownership ABI and conditional destruction</li><li><a href="./runtime-and-backend-lowering">Runtime and backend lowering</a>: physical strategies and the collector-free release guarantee</li></ul></section>
+<section class="container"><h2>Detailed pages</h2><ul><li><a href="./access-and-aliasing">Access and aliasing</a>: shared reads, explicit copies and <code>~</code> access</li><li><a href="./borrow-validation">Borrow validation</a>: roots, joins, last-use facts and affine transfer safety</li><li><a href="./boracle">Boracle reference solver</a>: the developer-facing reference borrow model and borrow-analysis laboratory</li><li><a href="./lifetime-regions-and-escape-validation">Lifetime regions and escape validation</a>: one owner, retained edges, non-lexical intervals, cleanup frontiers and escapes</li><li><a href="./declared-regions">Declared regions</a>: accepted deferred <code>name:</code> / <code>into name</code> semantics and hard bulk lifetimes</li><li><a href="./retained-edge-counting">Retained Edge Counting</a>: the narrow counted strategy for runtime-many persistent retained edges</li><li><a href="./ownership-and-drops">Affine ownership and drops</a>: affine cleanup responsibility, the ownership ABI and conditional destruction</li><li><a href="./runtime-and-backend-lowering">Runtime and backend lowering</a>: physical strategies and the collector-free release guarantee</li></ul></section>
 <section class="container"><h2>Current support</h2><p>See <a href="../../docs/progress">Progress matrix</a> for what is implemented today. Most of this model is accepted design with implementation deferred.</p></section>
 <script>
 function __moth_is_ref(value) {

@@ -14,7 +14,7 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
 Examples of deferred features:
 
-- declared memory groups (`group` / `into`)
+- declared regions (`name:` / `into name`)
 - mandatory lifetime-region and escape validation
 - choice payload field access without pattern matching
 - nested choice payload patterns

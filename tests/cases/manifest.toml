@@ -3996,39 +3996,25 @@ contract = "backend.html.js_structured_if_no_dispatcher_lowering"
 role = "backend"
 
 [[case]]
-id = "block_scoped_success"
-path = "block_scoped_success"
-tags = ["integration", "control-flow"]
-contract = "language.control_flow.block_return_value_acceptance"
+id = "block_identifier_success"
+path = "block_identifier_success"
+tags = ["integration", "identifiers", "functions"]
+contract = "language.identifiers.declared_region_names_are_ordinary_identifiers"
 role = "primary"
 
 [[case]]
-id = "block_outer_assignment"
-path = "block_outer_assignment"
-tags = ["integration", "control-flow"]
-contract = "language.control_flow.block_outer_assignment_acceptance"
+id = "declared_region_deferred"
+path = "declared_region_deferred"
+tags = ["integration", "diagnostics", "memory"]
+contract = "language.memory.declared_region_header_reserved"
 role = "primary"
 
 [[case]]
-id = "block_local_does_not_escape"
-path = "block_local_does_not_escape"
-tags = ["integration", "diagnostics", "control-flow"]
-contract = "language.control_flow.block_local_does_not_escape_rejected"
-role = "primary"
-
-[[case]]
-id = "labeled_scope_rejected"
-path = "labeled_scope_rejected"
-tags = ["integration", "diagnostics"]
-contract = "language.syntax.labeled_scope_rejected"
-role = "primary"
-
-[[case]]
-id = "typescript_style_declaration_rejected"
-path = "typescript_style_declaration_rejected"
-tags = ["integration", "diagnostics"]
-contract = "language.syntax.typescript_style_declaration_rejected"
-role = "primary"
+id = "anonymous_declared_region_rejected"
+path = "anonymous_declared_region_rejected"
+tags = ["integration", "diagnostics", "memory"]
+contract = "language.memory.anonymous_declared_region_rejected"
+role = "boundary"
 
 [[case]]
 id = "checked_block_reserved"
@@ -4043,13 +4029,6 @@ path = "async_block_reserved"
 tags = ["integration", "diagnostics", "control-flow"]
 contract = "language.syntax.reserved_block_keyword_rejected"
 role = "boundary"
-
-[[case]]
-id = "block_keyword_declaration_rejected"
-path = "block_keyword_declaration_rejected"
-tags = ["integration", "diagnostics"]
-contract = "language.syntax.reserved_keyword_declaration_rejected"
-role = "primary"
 
 [[case]]
 id = "checked_keyword_declaration_rejected"
@@ -4861,13 +4840,6 @@ id = "result_empty_catch_zero_success_statement"
 path = "result_empty_catch_zero_success_statement"
 tags = ["integration", "results"]
 contract = "language.results.empty_catch_zero_success_statement_acceptance"
-role = "primary"
-
-[[case]]
-id = "nested_block_return_error_success"
-path = "nested_block_return_error_success"
-tags = ["integration", "results", "errors", "control-flow"]
-contract = "language.errors.nested_block_return_success"
 role = "primary"
 
 [[case]]
@@ -12158,6 +12130,20 @@ path = "static_if_branch_scope_preserved"
 tags = ["integration", "control-flow", "constants"]
 contract = "language.control_flow.compile_time_bool_branch_scope_preserved"
 role = "primary"
+
+[[case]]
+id = "static_if_true_local_does_not_escape"
+path = "static_if_true_local_does_not_escape"
+tags = ["integration", "control-flow", "constants", "diagnostics"]
+contract = "language.control_flow.compile_time_true_branch_local_scope"
+role = "boundary"
+
+[[case]]
+id = "static_if_false_local_not_visible"
+path = "static_if_false_local_not_visible"
+tags = ["integration", "control-flow", "constants", "diagnostics"]
+contract = "language.control_flow.compile_time_false_branch_local_scope"
+role = "boundary"
 
 [[case]]
 id = "static_if_inactive_branch_generic_call"

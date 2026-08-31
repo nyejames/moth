@@ -189,7 +189,7 @@ A mutable declaration initialized from a fresh value creates an independent muta
 - Internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation.
 - Internal cycles are preserved in the copied graph.
 - A copied acyclic graph may be allocated into an inferred or declared destination region.
-- A copied cyclic graph must be allocated wholly into one explicit declared group. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the group-only cycle rule.
+- A copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region.
 - The copied graph shares no mutable allocation with the source graph.
 - Immutable scalar storage may be physically reused only where identity and alias behaviour are unobservable.
 - A reactive source is copied as its current value, not as the same reactive source identity.
@@ -268,7 +268,7 @@ Topology questions about retained edges, escapes and region owners belong to @..
 
 Two distinct facts travel with a value. Do not collapse them.
 
-**Static result provenance** answers where storage came from and which lifetime constraints apply to it. It is a compile-time summary fact: fresh root, alias of one or more parameters, projection of a parameter, detached stored result, alias of another result or independent result graph, together with any retained-parameter and outlives constraints. Group extraction or adoption and interior projection detachment are separate topology questions. Provenance never enters `TypeId` and is never source syntax.
+**Static result provenance** answers where storage came from and which lifetime constraints apply to it. It is a compile-time summary fact: fresh root, alias of one or more parameters, projection of a parameter, detached stored result, alias of another result or independent result graph, together with any retained-parameter and outlives constraints. Declared-region extraction or adoption and interior projection detachment are separate topology questions. Provenance never enters `TypeId` and is never source syntax.
 
 **Runtime cleanup responsibility** answers who may perform individual cleanup on the current path. It is affine and may move through calls, returns and aggregate insertion, but it never duplicates.
 
@@ -325,7 +325,7 @@ rule lives in `docs/src/docs/bindings/shadowing.mtf`.
 - @../ (Memory management): concise memory-model contract
 - @../borrow-validation (Borrow validation): how shared and exclusive access are checked
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges, escapes and region topology
-- @../declared-memory-groups (Declared memory groups): accepted `group` / `into` placement and destination lifetimes
+- @../declared-regions (Declared regions): accepted `name:` / `into name` placement and destination lifetimes
 - @../ownership-and-drops (Affine ownership and drops): affine cleanup responsibility after access validation
 - @../retained-edge-counting (Retained Edge Counting): why ordinary aliases are never counted
 - @../../language/ (Language reference): canonical source syntax and semantics

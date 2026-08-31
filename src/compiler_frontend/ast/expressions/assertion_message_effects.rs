@@ -307,8 +307,8 @@ fn classify_value_block(
             }
             classify_nodes(&value_if.else_body, template_ir_store, state)
         }
-        ValueBlock::Scoped(value_scoped) => {
-            classify_nodes(&value_scoped.body, template_ir_store, state)
+        ValueBlock::LexicalScope(value_lexical_scope) => {
+            classify_nodes(&value_lexical_scope.body, template_ir_store, state)
         }
         ValueBlock::Match(value_match) => {
             if let Some(effect) =
@@ -429,7 +429,7 @@ fn classify_nodes(
                 }
                 effect
             }
-            NodeKind::ScopedBlock { body } => classify_nodes(body, template_ir_store, state)?,
+            NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
             NodeKind::RangeLoop { range, body, .. } => {
                 let mut effect = classify_expression(&range.start, template_ir_store, state)?;
                 if effect.is_none() {

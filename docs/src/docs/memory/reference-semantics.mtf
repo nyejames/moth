@@ -55,7 +55,7 @@ A backend may represent a shared alias as a pointer, a handle, a GC reference or
 
 - @#copy-and-exclusive-access (Copy and exclusive access)
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)
-- @#declared-memory-groups (Declared memory groups)
+- @#declared-regions (Declared regions)
 
 For the formal memory model, see
 @../../developer-docs/memory-management (Memory management).

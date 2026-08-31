@@ -1,9 +1,0 @@
-fail || -> Error!:
-    block:
-        return! Error("nested")
-    ;
-;
-
-fail() catch |err|:
-    io.line([: [err.message]])
-;

@@ -159,7 +159,7 @@ fn debug_validate_node_type_ids(node: &AstNode, context: &DebugTypeValidationCon
             }
         }
 
-        NodeKind::ScopedBlock { body } => {
+        NodeKind::LexicalScope { body } => {
             debug_validate_nodes_type_ids(body, context);
         }
 
@@ -471,9 +471,9 @@ fn debug_validate_expression_type_id_with_context(
                 debug_validate_nodes_type_ids(&value_if.then_body, context);
                 debug_validate_nodes_type_ids(&value_if.else_body, context);
             }
-            ValueBlock::Scoped(value_scoped) => {
-                debug_validate_nodes_type_ids(&value_scoped.body, context);
-                for result_type_id in &value_scoped.result_type_ids {
+            ValueBlock::LexicalScope(value_lexical_scope) => {
+                debug_validate_nodes_type_ids(&value_lexical_scope.body, context);
+                for result_type_id in &value_lexical_scope.result_type_ids {
                     debug_validate_type_id(
                         *result_type_id,
                         context.type_environment,

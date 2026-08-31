@@ -73,7 +73,6 @@ fn source_word_classifier_maps_keyword_words() {
         ("catch", TokenKind::Catch),
         ("then", TokenKind::Then),
         ("else", TokenKind::Else),
-        ("block", TokenKind::Block),
         ("checked", TokenKind::Checked),
         ("cast", TokenKind::Cast),
         ("as", TokenKind::As),
@@ -107,6 +106,15 @@ fn import_is_an_ordinary_identifier() {
     assert_eq!(classify_source_word("import"), None);
     assert_eq!(keyword_shadow_match("import"), None);
     assert_eq!(keyword_shadow_match("IMPORT"), None);
+}
+
+#[test]
+fn block_spellings_follow_ordinary_identifier_policy() {
+    for identifier in ["block", "_block", "block_value"] {
+        assert_eq!(classify_source_word(identifier), None);
+        assert_eq!(keyword_shadow_match(identifier), None);
+        assert!(is_valid_identifier(identifier));
+    }
 }
 
 #[test]

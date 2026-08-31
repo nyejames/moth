@@ -20,6 +20,9 @@ A colon opens a block. A semicolon closes that block.
 - Statements inside a block are evaluated in source order unless control flow exits or redirects the block.
 - Child blocks create child scopes.
 - Indentation is for readability. Explicit delimiters define block boundaries.
+- The language has no general authored lexical-block construct or control-flow labels.
+- Immediate `identifier:` headers in executable statement position are reserved for declared regions. Full declared-region semantics remain deferred.
+- Exact `_:` is invalid. Keyword-led semantic scopes such as `async:` remain distinct.
 
 ### Reading the shape
 
@@ -27,4 +30,4 @@ The final semicolon in the example closes the function. The earlier semicolon
 closes the `if` block.
 
 Nested language features may add their own structural rules. Branching, loops,
-functions and template control flow document those forms in detail.
+functions, declared regions and template control flow document those forms in detail.

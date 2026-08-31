@@ -607,7 +607,7 @@ fn compile_time_false_condition_without_else_lowers_no_branch_body() {
     assert_eq!(
         branch_terminator_count(&hir),
         0,
-        "a compile-time `false` condition with no `else` must produce an empty scoped result"
+        "a compile-time `false` condition with no `else` must produce an empty lexical-scope result"
     );
 }
 
@@ -674,11 +674,11 @@ fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flo
         })
         .expect("entry function should exist");
     let selected = &body[1];
-    let NodeKind::ScopedBlock {
+    let NodeKind::LexicalScope {
         body: selected_body,
     } = &selected.kind
     else {
-        panic!("static outer if should become one scoped body");
+        panic!("static outer if should become one lexical scope");
     };
     let nested = selected_body
         .first()

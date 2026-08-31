@@ -1,7 +1,7 @@
 //! Static Bool `if` specialisation at the executable AST boundary.
 //!
 //! WHAT: resolves ordinary statement and value-producing `if` conditions through the module's
-//! folded-value resolver, retains only the selected scoped body and records provisional generic
+//! folded-value resolver, retains only the selected lexical scope and records provisional generic
 //! request ranges owned by inactive bodies.
 //! WHY: both authored bodies finish frontend validation before selection, while terminality,
 //! generated materialisation and HIR consume active executable control flow only.
@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ValueBlock, ValueScopedBlock,
+    ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -191,7 +191,7 @@ impl StaticIfSpecializer<'_> {
                     (body, selected_scope)
                 })
             }
-            NodeKind::ScopedBlock { body } => {
+            NodeKind::LexicalScope { body } => {
                 let mut nested_environment = environment.clone();
                 self.specialize_body(body, &mut nested_environment)?;
                 None
@@ -279,12 +279,12 @@ impl StaticIfSpecializer<'_> {
             if let Some(selected_scope) = selected_scope {
                 node.scope = selected_scope;
             }
-            node.kind = NodeKind::ScopedBlock { body };
+            node.kind = NodeKind::LexicalScope { body };
         }
 
         if let Some((body, scope)) = take_terminal_receiver_body(&mut node.kind) {
             node.scope = scope;
-            node.kind = NodeKind::ScopedBlock { body };
+            node.kind = NodeKind::LexicalScope { body };
         }
         Ok(())
     }
@@ -417,16 +417,16 @@ impl StaticIfSpecializer<'_> {
                             value_if.else_scope.clone(),
                         )
                     };
-                    ValueScopedBlock {
+                    ValueLexicalScope {
                         body,
                         scope,
                         result_type_ids: value_if.result_type_ids.clone(),
                     }
                 })
             }
-            ValueBlock::Scoped(value_scoped) => {
-                let mut scoped_environment = environment.clone();
-                self.specialize_body(&mut value_scoped.body, &mut scoped_environment)?;
+            ValueBlock::LexicalScope(value_lexical_scope) => {
+                let mut lexical_environment = environment.clone();
+                self.specialize_body(&mut value_lexical_scope.body, &mut lexical_environment)?;
                 None
             }
             ValueBlock::Match(value_match) => {
@@ -452,7 +452,7 @@ impl StaticIfSpecializer<'_> {
         };
 
         if let Some(selected) = selected {
-            **block = ValueBlock::Scoped(selected);
+            **block = ValueBlock::LexicalScope(selected);
         }
         Ok(())
     }
@@ -537,14 +537,14 @@ fn take_terminal_receiver_body(kind: &mut NodeKind) -> Option<(Vec<AstNode>, Int
 fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>, InternedPath)> {
     match &mut expression.kind {
         ExpressionKind::ValueBlock { block } => {
-            let ValueBlock::Scoped(value_scoped) = block.as_mut() else {
+            let ValueBlock::LexicalScope(value_lexical_scope) = block.as_mut() else {
                 return None;
             };
-            let exits = analyze_branch_exits(&value_scoped.body);
+            let exits = analyze_branch_exits(&value_lexical_scope.body);
             if exits.terminates && !exits.produces_value && !exits.can_fall_through {
                 Some((
-                    std::mem::take(&mut value_scoped.body),
-                    value_scoped.scope.clone(),
+                    std::mem::take(&mut value_lexical_scope.body),
+                    value_lexical_scope.scope.clone(),
                 ))
             } else {
                 None

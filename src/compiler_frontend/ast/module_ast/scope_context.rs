@@ -554,7 +554,6 @@ pub enum ContextKind {
     Condition,
 
     Loop,
-    Block,
     Branch,
     CatchHandler,
 

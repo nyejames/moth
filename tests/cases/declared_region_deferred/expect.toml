@@ -1,0 +1,10 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-DEFERRED-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-DEFERRED-0001"
+reason = "deferred_feature.declared_region"
+path = "input/@page.moth"
+line = 1

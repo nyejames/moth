@@ -123,7 +123,7 @@ pub(crate) fn invalid_type_annotation_message(
             "`as` is not valid here. It is only supported in type aliases, dependency clauses, and choice payload patterns.".to_string()
         }
         InvalidTypeAnnotationReason::UnexpectedColon => {
-            "Unexpected ':' after declaration name. Moth does not support bare labeled blocks or `name: Type` declarations. Use `block:` for a scoped block, or write declarations as `name Type = value`.".to_string()
+            "Unexpected ':' after declaration name. Declarations use `name Type = value`; immediate `name:` headers in executable bodies are reserved for declared regions.".to_string()
         }
         InvalidTypeAnnotationReason::ReactiveAccessNotAllowed => {
             "`$Type` is reactive access syntax, not a standalone type annotation. Use it only on reactive declarations such as `name $Type = value` or function parameters such as `param $Type`."
@@ -487,6 +487,9 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
         }
         InvalidStatementPositionReason::UnexpectedWildcard => {
             "Unexpected wildcard '_' in function body. Wildcards are not standalone statements.".to_string()
+        }
+        InvalidStatementPositionReason::AnonymousDeclaredRegion => {
+            "Declared regions require a value-like name before ':'. Exact `_:` is not an anonymous region.".to_string()
         }
         InvalidStatementPositionReason::GenericParameterOutsideDeclarationHeader => {
             "`type` is valid only in a top-level generic declaration header after the declaration name.".to_string()

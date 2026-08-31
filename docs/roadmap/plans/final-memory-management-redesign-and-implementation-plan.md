@@ -13,9 +13,9 @@ This plan is the parent roadmap for Moth's final memory-management model. It rep
 
 Milestone A is closed after the final multi-edge REC and target-aware physical-planning consistency closure.
 
-The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
+The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, declared regions, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
-The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid explicit-group implementation detail is folded into Phases 7 and 8 and into the canonical declared-group pages, and the old plan is deleted. Do not reintroduce a second overlapping implementation authority.
+The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid declared-region implementation detail is folded into Phases 7 and 8 and into the canonical declared-region pages, and the old plan is deleted. Do not reintroduce a second overlapping implementation authority.
 
 ## Current state
 
@@ -40,7 +40,7 @@ BLOCKERS: none for the documentation slice; implementation phases remain gated o
 
 Moth is reference-semantic by default, copy-explicit and move-inferred. Memory safety comes from mandatory borrow validation and compiler-inferred lifetime topology rather than source-visible ownership, references or lifetime annotations. Every allocation family has one statically proven lifetime owner, and every retained edge must point to storage that lives for the same or a longer lifetime.
 
-The compiler combines path-sensitive alias tracking, last-use analysis and affine cleanup transfer with compiler-generated non-lexical lifetime intervals. Retained-edge liveness and final cleanup frontiers let inferred regions end before the collections or objects that once held their aliases. Explicit groups provide hard count-free bulk lifetimes and are the only source mechanism for reference cycles. REC covers only unresolved runtime-many persistent retained edges.
+The compiler combines path-sensitive alias tracking, last-use analysis and affine cleanup transfer with compiler-generated non-lexical lifetime intervals. Retained-edge liveness and final cleanup frontiers let inferred regions end before the collections or objects that once held their aliases. Declared regions provide hard count-free bulk lifetimes and are the only source mechanism for reference cycles. REC covers only unresolved runtime-many persistent retained edges.
 
 These semantics are identical on every backend. Debug builds and GC-native backends may use a garbage-collected representation. Release builds on backends that advertise full memory control must lower every accepted topology without a tracing collector.
 
@@ -88,12 +88,12 @@ These decisions are final for this plan.
 
 1. Every runtime allocation family has exactly one semantic lifetime owner.
 2. A retained edge from container `C` to value `V` is legal only when `V` belongs to the same region or a region that outlives `C`.
-3. Implicit lifetime regions are compiler-generated non-lexical CFG intervals, not merely lexical scopes.
+3. Inferred regions are compiler-generated non-lexical CFG intervals, not merely lexical scopes.
 4. The compiler starts with the narrowest valid candidate owner.
 5. Widening may follow only the nearest existing ancestor on one ordered lifetime chain.
 6. The compiler must not promote laterally across independently ending sibling lifetimes.
 7. The compiler must not invent a page, application or process owner merely to avoid a diagnostic.
-8. Shared sibling persistence requires a real common lifecycle owner, an explicit group or an independent copy.
+8. Shared sibling persistence requires a real common lifecycle owner, a declared region or an independent copy.
 9. Projections remain rooted in their allocation family until field-sensitive splitting proves an independent family.
 10. Cross-region cycles are invalid.
 
@@ -122,7 +122,7 @@ The hidden destination:
 - is not source syntax
 - is not a source lifetime parameter
 - does not enter `TypeId`
-- may select affine, inferred-region, explicit-group or REC layout
+- may select affine, inferred-region, declared-region or REC layout
 - may be ignored physically by a GC backend
 
 A final successful public or generated summary must not leave topology-relevant result provenance unknown.
@@ -138,7 +138,7 @@ A final successful public or generated summary must not leave topology-relevant 
    - collection or map `clear`
    - aggregate destruction
    - whole-value replacement when old contents are definitely discarded
-   - explicit group exit
+   - declared region exit
    - builder lifecycle teardown
 7. Individual `remove`, `set` or partial cleanup does not establish uniqueness by itself.
 8. Uniqueness scans, alias registries and adaptive owner recovery are rejected from the baseline design.
@@ -148,12 +148,12 @@ A final successful public or generated summary must not leave topology-relevant 
 
 1. Cleanup responsibility is affine.
 2. Cleanup responsibility may move or be discharged. It never duplicates.
-2a. **Transfer**, **discharge**, **destroy** and **bulk reclaim** are four different things and are never used as synonyms. Transfer moves the obligation to another path. Discharge satisfies it. Destroy physically destroys one allocation family. Bulk reclaim reclaims a region or group.
-2b. Discharging an affine root destroys the family only when the plan makes that family individually destructible and nothing else keeps it alive. For an REC family, discharge removes one affine-root obligation and decrements the count; destruction happens only if the count reaches zero. For a region- or group-owned family, discharge never destroys anything individually.
+2a. **Transfer**, **discharge**, **destroy** and **bulk reclaim** are four different things and are never used as synonyms. Transfer moves the obligation to another path. Discharge satisfies it. Destroy physically destroys one allocation family. Bulk reclaim reclaims allocations remaining at a validated inferred-region or declared-region exit.
+2b. Discharging an affine root destroys the family only when the plan makes that family individually destructible and nothing else keeps it alive. For an REC family, discharge removes one affine-root obligation and decrements the count; destruction happens only if the count reaches zero. For an inferred-region-owned or declared-region-owned family, discharge never destroys anything individually.
 3. Semantic lifetime ownership remains static even when cleanup responsibility moves at runtime.
 4. Runtime owned or borrowed state answers who may perform individual cleanup on the current path.
 5. Static result provenance answers where storage came from and which lifetime constraints apply.
-6. Region-owned and group-owned allocation-family mode is static memory-plan metadata.
+6. Inferred-region-owned and declared-region-owned allocation-family mode is static memory-plan metadata.
 7. Simple `AlwaysConsumes` and `NeverConsumes` cases may be specialized.
 8. Mixed call paths use one function body with local tag handling around retention-sensitive or cleanup-sensitive operations.
 9. The current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding. Final lowering must consume a validated memory plan instead.
@@ -178,21 +178,21 @@ bit 1: REC representation
 
 The tags belong to an allocation-family handle. A projection must retain or recover the family base. Scalars and target-native immediate values do not use this handle ABI.
 
-### 2.9 Explicit groups and cycles
+### 2.9 Declared regions and cycles
 
-1. A declared group is one hard semantic lifetime and one bulk cleanup domain.
-2. Direct source-created reference cycles are legal only inside one declared group.
-3. Implicit lifetime inference never invents a cyclic region.
-4. Group-owned allocations never use REC.
-5. Group-owned allocations never transfer individual cleanup responsibility.
-6. Last-use analysis still validates access and alias legality inside groups.
-7. Last-use analysis does not shorten the physical lifetime of group-owned storage.
-8. Group exit performs bulk cleanup.
-9. An overly broad declared group is a visible programmer choice.
-10. Field-sensitive splitting may improve layout inside a group but must not shorten group-owned lifetime.
-11. Group-owned values do not cross channel boundaries as individually transferable values.
-12. Group ownership is a property of the **target** allocation, not of every edge whose source lives inside a group. A group-owned target carries no counter; an edge from group storage to an externally owned REC family is an ordinary counted persistent edge into that external family.
-13. At `clear()` or group exit, outgoing REC boundary obligations are released **before** group storage is bulk reclaimed. The external target is destroyed only if its own count reaches zero.
+1. A declared region is one hard semantic lifetime and one bulk cleanup domain.
+2. Direct source-created reference cycles are legal only inside one declared region.
+3. Inferred-region analysis never invents a cyclic region.
+4. Declared-region-owned allocations never use REC.
+5. Declared-region-owned allocations never transfer individual cleanup responsibility.
+6. Last-use analysis still validates access and alias legality inside declared regions.
+7. Last-use analysis does not shorten the physical lifetime of declared-region-owned storage.
+8. Declared-region exit performs bulk cleanup.
+9. An overly broad declared region is a visible programmer choice.
+10. Field-sensitive splitting may improve layout inside a declared region but must not shorten declared-region-owned lifetime.
+11. Declared-region-owned values do not cross channel boundaries as individually transferable values.
+12. Declared-region ownership is a property of the **target** allocation, not of every edge whose source lives inside a declared region. A declared-region-owned target carries no counter; an edge from declared-region-owned storage to an externally owned REC family is an ordinary counted persistent edge into that external family.
+13. At `clear()` or declared-region exit, outgoing REC boundary obligations are released **before** declared-region-owned storage is bulk reclaimed. The external target is destroyed only if its own count reaches zero.
 
 ### 2.10 Retained Edge Counting
 
@@ -206,7 +206,7 @@ REC applies only when:
 - those edges disappear independently
 - static affine cleanup cannot identify the final obligation
 - no complete cleanup frontier gives a precise enough region
-- explicit-group ownership does not apply
+- declared-region ownership does not apply
 - field-sensitive splitting and cheap bounded retention do not remove the problem
 
 REC does not count:
@@ -217,7 +217,7 @@ REC does not count:
 - ordinary call borrows
 - `get()` results
 - affine transfers
-- explicit-group-owned edges
+- declared-region-owned edges
 
 REC obligations are per target allocation family. For a family `F`, the count is the number of live counted persistent-edge obligations into `F` plus at most one affine-root obligation for `F`. Every retention-sensitive commit is evaluated independently per family as:
 
@@ -288,8 +288,8 @@ Keeping builtin destructive operations narrow is an intentional language-design 
    - one common proven enclosing region
    - no intervening function call
    - no intervening effectful or potentially expensive operation
-5. Compatible implicit intervals may become one synthetic arena or grouped drop.
-6. Explicit groups remain separate and keep their hard bulk lifetime.
+5. Compatible inferred intervals may become one synthetic arena or grouped drop.
+6. Declared regions remain separate and keep their hard bulk lifetime.
 7. More advanced heuristics require benchmark evidence.
 
 ### 2.14 Channels and future async
@@ -300,7 +300,7 @@ Keeping builtin destructive operations narrow is an intentional language-design 
 4. A failed send preserves or returns responsibility to the sender.
 5. Queued values belong to a statically bounded channel or task lifecycle.
 6. Arbitrary shared Moth reference graphs do not cross task boundaries.
-7. Group-owned values do not cross independently and require an independent copy or fresh message.
+7. Declared-region-owned values do not cross independently and require an independent copy or fresh message.
 8. REC remains non-atomic under the accepted task model.
 9. A future requirement for atomic REC is a new memory-model design decision.
 10. The async and channel design must fit this memory model. The memory model must not be weakened to fit async.
@@ -324,9 +324,9 @@ Keeping builtin destructive operations narrow is an intentional language-design 
 | Borrow and last-use analysis | access conflicts, alias activity, final potential uses, optional affine transfer | lifetime owner assignment, REC selection, physical drops |
 | Lifetime topology | allocation families, retained edges, outlives constraints, escapes, non-lexical intervals, cleanup frontiers, lifecycle roots | runtime ownership tags, allocator layout, target lowering |
 | Affine Ownership ABI | the runtime path that may perform individual cleanup | lifetime legality, result provenance, alias counting |
-| Explicit groups | hard source-declared bulk lifetimes, count-free cycles, group exits | individual early cleanup, REC, dynamic sharing outside the group |
+| Declared regions | hard source-declared bulk lifetimes, count-free cycles, declared-region exits | individual early cleanup, REC, dynamic sharing outside the declared region |
 | Retained Edge Counting | unresolved runtime-many persistent retained-edge obligations | ordinary aliases, legality, cycles, source types |
-| Physical memory planning | stack placement, affine heap cleanup, inferred arenas, explicit-group arenas, REC layouts, drop coalescing | source validity, borrow rules, lifetime topology |
+| Physical memory planning | stack placement, affine heap cleanup, inferred arenas, declared-region arenas, REC layouts, drop coalescing | source validity, borrow rules, lifetime topology |
 
 The mechanisms are ordered. A later mechanism consumes validated facts from earlier owners and must not reconstruct them.
 
@@ -342,7 +342,7 @@ For every accepted allocation family `A`:
 4. Last-use analysis may move or discharge individual cleanup responsibility earlier.
 5. A complete cleanup frontier may end `R` before the retaining aggregate itself dies.
 6. Runtime-many independent persistent edges may use REC for earlier cleanup.
-7. Explicit-group-owned values remain until their one bulk exit.
+7. Declared-region-owned values remain until their one bulk exit.
 8. If no earlier strategy applies, `A` remains alive until `R` ends.
 9. When `R` ends, no surviving legal value can retain an edge into `R`.
 
@@ -385,8 +385,8 @@ AST owns:
 
 - source access syntax
 - `copy`
-- group and `into` syntax
-- group scope and destination rules
+- declared region and `into` syntax
+- declared region scope and destination rules
 - obvious freshness and placement diagnostics
 - no lifetime or REC type identity
 
@@ -396,7 +396,7 @@ HIR owns:
 
 - explicit places and CFG
 - calls, returns and aggregate operations
-- group declarations and exits when implemented
+- declared region declarations and exits when implemented
 - retained source operations in backend-neutral form
 
 HIR does not own exact lifetime regions, REC strategy or physical allocation.
@@ -451,13 +451,15 @@ The compiler-owned memory planner is invoked once per candidate physical variant
 
 - `Affine`
 - `InferredRegion`
-- `ExplicitGroup`
+- `DeclaredRegion`
 - `Rec`
 - hidden destination plans
 - allocation-family layout requirements
 - cleanup plans
 - physical coalescing candidates
 - developer decision records
+
+Developer-facing decision records use source terminology, including `strategy: declared region`; they do not expose obsolete terminology or physical-arena wording as source semantics.
 
 Strategy planning runs only after topology is valid **and** after target partition and target validation have established the physical variant. It produces one `ValidatedMemoryPlan` per variant, and never affects source legality.
 
@@ -468,7 +470,7 @@ Backends own:
 - concrete handle representation
 - allocation and region runtime
 - affine `drop_if_owned`
-- region and group release
+- inferred-region and declared-region release
 - REC operations from the companion plan
 - stack or arena placement
 - collector-free artifact verification
@@ -489,7 +491,7 @@ Backends do not reconsider legality and do not select a memory strategy. They re
 - cleanup frontiers
 - compiler-generated lifetime intervals and epochs
 - lifetime topology and diagnostics
-- explicit groups and cycles
+- declared regions and cycles
 - field-sensitive splitting
 - Affine Ownership ABI semantics
 - memory-strategy planning
@@ -528,13 +530,13 @@ Baseline observations at `34afc996b746bfe93281dad115c40083a9106ac8`:
 | Public call summaries | `Fresh`, `AliasParams` and `Unknown` plus access and transfer effects | Add full result provenance, retained parameters, detached stored results, outlives, domain kills and final-summary completeness |
 | Lifetime topology | Accepted design only, no implementation owner | Add local constraint analysis and project/link topology validation |
 | Retained-edge liveness | Not implemented | Add domains, edge creation and kills, cleanup frontiers and epochs |
-| Declared groups | Accepted syntax and semantics only | Add AST, HIR, topology and backend bulk cleanup |
-| Wasm ownership lowering | Borrow advisory sites directly emit `DropIfOwned` under transitional garbage-collected scaffolding | Replace with memory-plan-driven affine, region, group and REC lowering |
+| Declared regions | Accepted syntax and semantics only | Add AST, HIR, topology and backend bulk cleanup |
+| Wasm ownership lowering | Borrow advisory sites directly emit `DropIfOwned` under transitional garbage-collected scaffolding | Replace with memory-plan-driven affine, inferred-region, declared-region and REC lowering |
 | Wasm LIR | Has `DropIfOwned` and a reserved retain instruction | Extend around the final memory plan and remove obsolete single-tag assumptions |
-| Wasm runtime memory | Only basic linear-memory page and heap-base planning | Add allocator, region, group, REC and destruction-plan runtime support |
+| Wasm runtime memory | Only basic linear-memory page and heap-base planning | Add allocator, inferred-region, declared-region, REC and destruction-plan runtime support |
 | REC | Accepted companion plan, no implementation | Execute only after parent topology and strategy prerequisites |
 | Collections | Maps have `clear`, fixed and growable collections expose five operations without `clear` | Add compiler-owned `clear` and trusted retention effects |
-| Progress matrix | Tracks deferred lifetime and group implementation separately from the accepted design | Keep accepted design and current implementation status separate |
+| Progress matrix | Tracks deferred lifetime and declared region implementation separately from the accepted design | Keep accepted design and current implementation status separate |
 | Roadmap | Still contains superseded collector-first sequencing | Replace with the collector-free plan and correct sequencing |
 | Async draft | Says channel send may move or pass and leaves memory transfer open | Lock mandatory affine transfer and memory prerequisites while keeping async deferred |
 | Canonical docs | Repeatedly permit release GC fallback and describe single-tag ownership only | Rewrite to the accepted final model |
@@ -556,9 +558,9 @@ The canonical docs, roadmap and progress matrix describe the final model while c
 
 A full-control backend can lower accepted acyclic programs without tracing GC through affine cleanup and conservative inferred regions. REC and field-sensitive splitting are not required for correctness.
 
-### Milestone C: explicit-group and lifecycle baseline
+### Milestone C: declared-region and lifecycle baseline
 
-Declared groups, group-only cycles and builder lifecycle regions are implemented.
+Declared regions, cycles requiring one declared region and builder lifecycle regions are implemented.
 
 ### Milestone D: precision baseline
 
@@ -588,7 +590,7 @@ The repository currently has a completed historical memory documentation plan, a
 - [x] Record the activation branch and exact activation HEAD.
 - [x] Confirm the REC companion plan remains the sole detailed REC owner.
 - [x] Mark `grouped-memory-design.md` as superseded.
-- [x] Move any still-useful group implementation tasks into this plan.
+- [x] Move any still-useful declared region implementation tasks into this plan.
 - [x] Delete the old grouped plan after every live link is migrated. Every live link now points at this plan; no historical stub was retained.
 - [x] Add this plan to `docs/roadmap/roadmap.md`. The documentation slice ran under active work; every implementation phase stays under deferred design until explicitly activated.
 - [x] Remove the roadmap statement that ownership optimisation is deferred until after the superseded collector-first model.
@@ -622,12 +624,12 @@ Accepted design must be authoritative before implementation starts. This phase d
 - [x] Rewrite `docs/src/developer-docs/memory-management/@page.moth` with the concise final summary and detailed-page routing.
 - [x] Update `access-and-aliasing` with last-use centrality, allocation-family meaning and the static provenance versus runtime responsibility distinction.
 - [x] Update `borrow-validation` with the final last-use contract and explicit handoff to retained-edge analysis.
-- [x] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, group-only cycles and REC eligibility.
-- [x] Update `declared-memory-groups` with hard count-free lifetimes, no individual early cleanup and the only-source-cycle rule.
+- [x] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, cycles requiring one declared region and REC eligibility.
+- [x] Update `declared-regions` with hard count-free lifetimes, no individual early cleanup and the only-source-cycle rule.
 - [x] Rename the ownership page title to `Affine ownership and drops`. The existing `ownership-and-drops/` path is kept; no file move was needed.
 - [x] Update `ownership-and-drops` with affine cleanup responsibility, memory-plan ownership and the two-bit logical extension.
 - [x] Update `runtime-and-backend-lowering` with the collector-free release invariant and all physical strategies.
-- [x] Restrict copied cyclic graphs to one explicit declared group across access, copy and lifetime authorities.
+- [x] Restrict copied cyclic graphs to one declared region across access, copy and lifetime authorities.
 - [x] Make physical coalescing distinct from semantic lifetime widening.
 - [x] Add the canonical REC documentation directory and page required by the companion plan.
 - [x] Route the REC page from the memory index.
@@ -649,11 +651,11 @@ Accepted design must be authoritative before implementation starts. This phase d
 - [x] Generalise collection and map effects to value-shaped retained-edge summaries, including key/value replacement and detached stored results.
 - [x] Document atomic successful commits and unchanged error paths for fallible builtin mutations.
 - [x] Keep concrete cleanup frontiers caller-local while exporting exit-specific and frontier-enabling effects.
-- [x] Add the public Automatic cleanup and retained edges page pair and route it between lifetime and group teaching.
+- [x] Add the public Automatic cleanup and retained edges page pair and route it between lifetime and declared region teaching.
 - [x] Remove educational diagram placeholders from the memory and borrow pages and qualify current Wasm and historical GC terminology.
 - [x] Update the language cheatsheet with a concise user-facing collector-free release statement.
 - [x] Do not expose REC counters, tags or regions as source types in the cheatsheet.
-- [x] Update the async draft with mandatory send transfer, channel-owned queued values, group restrictions and non-atomic REC prerequisites.
+- [x] Update the async draft with mandatory send transfer, channel-owned queued values, declared region restrictions and non-atomic REC prerequisites.
 - [x] Keep async status explicitly deferred.
 - [x] Update `README.md` from optional GC avoidance to the accepted collector-free release direction.
 - [x] Update `AGENTS.md` core memory contracts and routing only where the new REC page or release invariant needs explicit mention.
@@ -674,7 +676,7 @@ Create or update separate rows for:
 - [x] lifetime-region and escape validation
 - [x] retained-edge liveness and cleanup frontiers
 - [x] compiler-generated intervals and region epochs
-- [x] declared groups and group-only cycles
+- [x] declared regions and cycles requiring one declared region
 - [x] Affine Ownership ABI
 - [x] memory-strategy planning
 - [x] REC analysis and selection
@@ -683,7 +685,7 @@ Create or update separate rows for:
 - [x] Builder lifecycle regions
 - [x] Channels
 - [x] field-sensitive allocation splitting
-- [x] inferred-region and group backend lowering
+- [x] inferred-region and declared-region backend lowering
 - [x] collector-free release verification
 - [x] debug or GC-native representation parity
 
@@ -691,7 +693,7 @@ Use these initial status rules:
 
 - current borrow validation and local last-use analysis: `Supported` or `Partial` with exact limitations
 - current Wasm ownership scaffolding: `Experimental`
-- lifetime topology, frontiers, groups, REC, field splitting and collector-free verification: `Deferred`
+- lifetime topology, frontiers, declared regions, REC, field splitting and collector-free verification: `Deferred`
 - current GC fallback paths: implementation migration debt, not accepted final behavior
 
 ### Audit and validation
@@ -699,8 +701,8 @@ Use these initial status rules:
 - [x] No final authority calls GC the semantic correctness baseline.
 - [x] No final authority says capable release builds may silently fall back to tracing GC.
 - [x] No user-facing page exposes REC as a source memory type.
-- [x] No page permits source-created cycles outside explicit groups.
-- [x] No page permits individual early cleanup of group-owned storage.
+- [x] No page permits source-created cycles outside declared regions.
+- [x] No page permits individual early cleanup of declared-region-owned storage.
 - [x] All links form one clear authority chain.
 - [x] Run the documentation-only release-build gate and inspect every changed route.
 
@@ -763,7 +765,7 @@ Cross-function and cross-package topology cannot be inferred from the current `F
 - [ ] Add allocation-family identity for local facts.
 - [ ] Add retained-parameter and retained-receiver facts.
 - [ ] Add outlives constraints.
-- [ ] Add detached stored results and distinguish them from group extraction and interior projection detachment.
+- [ ] Add detached stored results and distinguish them from declared-region extraction and interior projection detachment.
 - [ ] Add result-to-result family aliasing.
 - [ ] Add complete retention-domain kill facts.
 - [ ] Add static retention cardinality required by the REC companion.
@@ -839,7 +841,7 @@ Local modules cannot prove cross-module calls, builder lifecycles or package roo
 - [ ] Distinguish invalid topology from topology not proven by conservative analysis.
 - [ ] Produce ranked remedies:
   1. allocate directly into the destination
-  2. use one common explicit group
+  2. use one common declared region
   3. use `copy`
   4. shorten the retained edge
   5. repair external metadata
@@ -898,39 +900,42 @@ A safe topology can still retain too much memory. This phase creates precise com
 
 ---
 
-## Phase 7: Implement declared-group frontend and HIR contracts
+## Phase 7: Implement declared-region frontend and HIR contracts
 
 ### Summary and reasoning
 
-Groups are the explicit source escape hatch for deliberate shared lifetimes and cycles.
+Declared regions are the explicit source escape hatch for deliberate shared lifetimes and cycles.
 
 ### Tasks
 
-- [ ] Implement `group name:` parsing.
-- [ ] Implement declaration-site `into group` placement.
+- [ ] Replace the current deferred `identifier:` diagnostic with real declared-region body parsing.
+- [ ] Keep exact `_:` rejected and validate declared-region name collisions against visible names and active declared regions.
+- [ ] Implement declaration-site `into region_name` placement.
 - [ ] Enforce current and ancestor placement only.
 - [ ] Enforce destination-scope visibility and collision rules.
 - [ ] Reject conditional or repeatable ancestor declarations under the accepted V1 rule.
-- [ ] Require fresh result roots, independent graphs or legal same-group transfer.
-- [ ] Keep group identity outside `TypeId`, signatures and generics.
-- [ ] Add HIR group identity, placement and exit metadata.
+- [ ] Require fresh result roots, independent graphs or legal same declared region transfer.
+- [ ] Keep declared-region identity outside `TypeId`, signatures and generics.
+- [ ] Add HIR declared-region identity, placement and exit metadata.
 - [ ] Record every fallthrough, return, error, break and recovery exit.
-- [ ] Reject group values in constants, config, fields, signatures and exports.
-- [ ] Keep source-created cycles invalid until all members are placed into one explicit group.
+- [ ] Reject declared regions in constants, config, fields, signatures and exports.
+- [ ] Warn when no direct or straight-line nested placement targets a declared region.
+- [ ] Allow ancestor placement only through straight-line nested declared regions, never through conditional or repeatable syntax.
+- [ ] Keep source-created cycles invalid until all members are placed into one declared region.
 
-HIR group metadata has this conceptual shape. Group identity must not enter `TypeId`.
+HIR declared-region metadata has this conceptual shape. Declared-region identity must not enter `TypeId`.
 
 ```rust
-pub struct HirMemoryGroup {
-    pub id: MemoryGroupId,
+pub struct HirDeclaredRegion {
+    pub id: DeclaredRegionId,
     pub name: StringId,
     pub owner_region: RegionId,
-    pub parent_group: Option<MemoryGroupId>,
+    pub parent_region: Option<DeclaredRegionId>,
     pub source_location: SourceLocation,
 }
 
 pub struct HirPlacement {
-    pub group: MemoryGroupId,
+    pub region: DeclaredRegionId,
     pub source_location: SourceLocation,
 }
 ```
@@ -939,15 +944,15 @@ Conditional production uses one declaration in the destination scope whose initi
 value-producing `if`, match or `catch`. Loop production mutates a destination-owned aggregate
 rather than repeatedly declaring an ancestor-owned name.
 
-### Group and topology diagnostic coverage
+### Declared-region and topology diagnostic coverage
 
-Lifetime and group diagnostics are part of the memory model. They must distinguish topology proven
-invalid, topology not proven legal by conservative analysis, invalid group syntax or placement,
+Lifetime and declared-region diagnostics are part of the memory model. They must distinguish topology proven
+invalid, topology not proven legal by conservative analysis, invalid declared-region syntax or placement,
 non-copyable graph contents, unsupported external boundary profiles, and missing or inconsistent
 compiler-owned metadata. User-facing failures use stable codes and structured reason payloads.
 Internal impossible or inconsistent metadata uses `CompilerError`.
 
-- [ ] invalid group name or position
+- [ ] invalid declared region name or position
 - [ ] non-fresh placement
 - [ ] alias result placement
 - [ ] return or projection escape
@@ -962,7 +967,7 @@ Internal impossible or inconsistent metadata uses `CompilerError`.
 Diagnostics must present this remedy order:
 
 1. allocate directly into the required destination region
-2. place observers under one common group
+2. place observers under one common declared region
 3. create independent storage with `copy`
 4. shorten the alias or retained edge
 5. repair package-owned external lifetime metadata
@@ -974,39 +979,39 @@ There is no backend-specific escape from semantic lifetime diagnostics.
 - [ ] AST owns syntax and obvious placement diagnostics.
 - [ ] HIR owns structure, not final topology.
 - [ ] No source lifetime parameter is introduced.
-- [ ] No hidden widening of declared groups exists.
-- [ ] Every listed group diagnostic has coverage and a stable code.
+- [ ] No hidden widening of declared regions exists.
+- [ ] Every listed declared-region diagnostic has coverage and a stable code.
 - [ ] Run `just validate`.
 
 ---
 
-## Phase 8: Implement group topology and bulk backend cleanup
+## Phase 8: Implement declared-region topology and bulk backend cleanup
 
 ### Summary and reasoning
 
-The group implementation must realize the hard count-free contract without reusing ordinary individual ownership rules.
+The declared region implementation must realize the hard count-free contract without reusing ordinary individual ownership rules.
 
 ### Tasks
 
-- [ ] Integrate groups into the lifetime-topology solver.
-- [ ] Permit same-group retained edges and cycles.
+- [ ] Integrate declared regions into the lifetime-topology solver.
+- [ ] Permit same declared region retained edges and cycles.
 - [ ] Permit child-to-parent retained edges.
-- [ ] Reject parent-to-child, sibling and cross-group illegal edges.
-- [ ] Reject every group escape.
-- [ ] Mark group-owned families as count-free and individually non-releasable.
-- [ ] Ignore early-drop optimization for group-owned storage.
-- [ ] Generate one bulk cleanup plan per group exit.
-- [ ] Lower groups to no-op physical grouping on JS while preserving legality.
+- [ ] Reject parent-to-child, sibling and illegal edges between declared regions.
+- [ ] Reject every declared region escape.
+- [ ] Mark declared-region-owned families as count-free and individually non-releasable.
+- [ ] Ignore early-drop optimization for declared-region-owned storage.
+- [ ] Generate one bulk cleanup plan per declared-region exit.
+- [ ] Lower declared regions to no-op physical grouping on JS while preserving legality.
 - [ ] Add full-control arena, segmented arena or grouped-allocation lowering.
 - [ ] Preserve explicit cleanup for outgoing edges to externally owned REC families as defined by the companion plan.
-- [ ] Ensure group-owned values cannot cross channels independently.
+- [ ] Ensure declared-region-owned values cannot cross channels independently.
 
 ### Audit and validation
 
-- [ ] Group-owned cycles are valid and count-free.
+- [ ] Declared-region-owned cycles are valid and count-free.
 - [ ] Implicit cycles remain diagnostics.
-- [ ] No group child carries individual cleanup responsibility.
-- [ ] Group exit covers every CFG exit.
+- [ ] No declared-region-owned allocation carries individual cleanup responsibility.
+- [ ] Declared-region exit covers every CFG exit.
 - [ ] Run `just validate`.
 
 ---
@@ -1032,7 +1037,7 @@ Only then does target/profile memory planning run, producing one `ValidatedMemor
 
 - [ ] Define backend-neutral memory requirements as the last target-independent handoff, carrying no selected physical strategy.
 - [ ] Define a final memory plan keyed by allocation family and reachable function, scoped to one target/profile physical variant.
-- [ ] Add `Affine`, `InferredRegion`, `ExplicitGroup` and `Rec` strategy categories.
+- [ ] Add `Affine`, `InferredRegion`, `DeclaredRegion` and `Rec` strategy categories.
 - [ ] Run planning only after complete topology validation, target partition and target-contract validation.
 - [ ] Consume the selected target, build profile and backend memory capability metadata.
 - [ ] Carry hidden destination plans.
@@ -1041,7 +1046,7 @@ Only then does target/profile memory planning run, producing one `ValidatedMemor
 - [ ] Carry representation state for retention-sensitive operations.
 - [ ] Define affine owned and borrowed runtime semantics.
 - [ ] Preserve static result provenance separately.
-- [ ] Preserve region-owned and group-owned mode as static metadata.
+- [ ] Preserve inferred-region-owned and declared-region-owned mode as static metadata.
 - [ ] Adopt the two-bit logical full-control handle contract from the REC companion.
 - [ ] Preserve allocation-family base identity through projections.
 - [ ] Remove the direct Wasm path that consumes borrow advisory drop sites as final authority.
@@ -1108,7 +1113,7 @@ This phase reduces allocation and cleanup overhead without weakening precise sem
 - [ ] Support synthetic arenas where layout permits.
 - [ ] Record retained-byte and cleanup-operation estimates.
 - [ ] Add deterministic debug reporting.
-- [ ] Do not apply implicit coalescing rules to shorten or reinterpret explicit groups.
+- [ ] Do not apply implicit coalescing rules to shorten or reinterpret declared regions.
 
 ### Audit and validation
 
@@ -1134,7 +1139,7 @@ REC is a precision layer after the parent topology and memory-plan substrate exi
 - [ ] Keep all exact counter, ABI and iterative-destruction mechanics in the companion plan.
 - [ ] Keep uniqueness scans, alias registries, adaptive switching and source REC rejected.
 - [ ] Integrate REC decisions into the parent memory plan.
-- [ ] Integrate region and group cleanup with outgoing REC obligations.
+- [ ] Integrate inferred-region and declared-region cleanup with outgoing REC obligations.
 - [ ] Preserve non-atomic REC under the accepted channel model.
 - [ ] Update parent progress rows when REC phases land.
 
@@ -1142,8 +1147,8 @@ REC is a precision layer after the parent topology and memory-plan substrate exi
 
 - [ ] REC remains subordinate to topology.
 - [ ] Ordinary locals, parameters, calls and `get()` remain count-free.
-- [ ] Groups remain count-free.
-- [ ] Cycles remain group-only.
+- [ ] Declared regions remain count-free.
+- [ ] Direct source-created cycles continue to require one declared region.
 - [ ] No full-control release path uses tracing GC.
 - [ ] Use the companion plan's required validation and closeout gates.
 
@@ -1168,7 +1173,7 @@ Collector-free correctness does not require splitting, but the final performance
 - [ ] Revalidate the affected outlives, SCC and family-base invariants after each accepted split.
 - [ ] Fall back to the unsplit family and conservative retention when the optimisation cannot be proven, without emitting a source diagnostic.
 - [ ] Rerun physical strategy and REC selection after a successful split.
-- [ ] Keep all fields inside an explicit group until group exit even when physically split.
+- [ ] Keep all fields inside a declared region until declared-region exit even when physically split.
 - [ ] Add developer reporting for accepted and rejected splits.
 
 ### Audit and validation
@@ -1176,7 +1181,7 @@ Collector-free correctness does not require splitting, but the final performance
 - [ ] No source-visible partial move exists.
 - [ ] No broad parent is retained solely because splitting was skipped silently in a required case.
 - [ ] REC targets the post-split family.
-- [ ] Group lifetime remains hard.
+- [ ] Declared-region lifetime remains hard.
 - [ ] Run `just validate`.
 
 ---
@@ -1221,7 +1226,7 @@ Channel semantics must be constrained before any async implementation starts.
 - [ ] Define failed-send responsibility preservation.
 - [ ] Define queue and receiver lifecycle ownership.
 - [ ] Forbid arbitrary shared Moth reference graphs across tasks.
-- [ ] Forbid independent transfer of group-owned values.
+- [ ] Forbid independent transfer of declared-region-owned values.
 - [ ] Require `copy` or fresh message construction when the sender retains its graph.
 - [ ] Preserve non-atomic REC by forbidding cross-task shared REC families.
 - [ ] Define cancellation and channel destruction as deterministic cleanup obligations before implementation.
@@ -1252,7 +1257,7 @@ Verification operates on each complete target/profile `ValidatedMemoryPlan` and 
 - [ ] Require one complete memory strategy for every reachable heap family.
 - [ ] Verify every affine family has a cleanup path.
 - [ ] Verify every inferred region has complete exits.
-- [ ] Verify every explicit group has complete bulk exits.
+- [ ] Verify every declared region has complete bulk exits.
 - [ ] Verify every REC family has valid counter and destruction plans.
 - [ ] Verify every projection can recover its family base.
 - [ ] Verify all builder lifecycle roots have teardown plans.
@@ -1297,7 +1302,7 @@ Phase 1 records accepted design. This phase records what actually landed and rem
   - release may fall back to a tracing collector
   - single-tag-only handle
   - implicit cycle
-  - individual group drop
+  - individual declared region drop
   - collector elision as optional on capable release backends
 
 ### Audit and validation
@@ -1331,10 +1336,10 @@ Correctness comes first. Performance evidence determines whether later precision
 - [ ] collection survives beyond its retained-value region
 - [ ] repeated region epochs
 - [ ] user collection wrapper with inferred effects
-- [ ] explicit group bulk cleanup
-- [ ] explicit group cycle
+- [ ] declared region bulk cleanup
+- [ ] declared region cycle
 - [ ] implicit cycle diagnostic
-- [ ] group-owned no-early-drop behavior
+- [ ] declared-region-owned no-early-drop behavior
 - [ ] REC runtime-many independent removal
 - [ ] region with outgoing REC edges
 - [ ] field-sensitive split
@@ -1365,7 +1370,7 @@ Representative workloads must include:
 - collection population followed by `clear`
 - long-lived cache with independent eviction
 - large parent with one retained small field
-- explicit-group cyclic graph
+- declared-region cyclic graph
 - reactive mount and unmount
 - mixed package calls
 - mixed counted and uncounted collection operations
@@ -1393,8 +1398,8 @@ The final progress matrix should make these distinctions explicit.
 | Result provenance and retention summaries | Partial | complete stable summaries across modules and packages |
 | Lifetime topology and escape validation | Deferred | mandatory local and link proof implemented |
 | Retained-edge liveness and cleanup frontiers | Deferred | whole-domain effects, frontiers and epochs implemented |
-| Declared groups | Deferred | source, HIR, topology and backend support implemented |
-| Group-only cycles | Deferred | explicit cycle construction and bulk cleanup implemented |
+| Declared regions | Deferred | source, HIR, topology and backend support implemented |
+| Direct source-created cycles | Deferred | direct cycle construction and bulk cleanup implemented |
 | Affine Ownership ABI | Experimental | memory-plan-driven full-control lowering implemented |
 | Inferred-region lowering | Deferred | region allocation and complete exits implemented |
 | Physical coalescing | Deferred | simple verified coalescing pass implemented |
@@ -1418,8 +1423,8 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/src/developer-docs/memory-management/@page.moth` | concise introduction and REC route |
 | `access-and-aliasing/**` | last-use centrality, allocation families, field-splitting extension |
 | `borrow-validation/**` | affine transfer facts and handoff to retained-edge analysis |
-| `lifetime-regions-and-escape-validation/**` | intervals, liveness, frontiers, epochs, group-only cycles |
-| `declared-memory-groups/**` | count-free hard lifetimes, no early cleanup, cycles |
+| `lifetime-regions-and-escape-validation/**` | intervals, liveness, frontiers, epochs, cycles requiring one declared region |
+| `declared-regions/**` | count-free hard lifetimes, no early cleanup, cycles |
 | `ownership-and-drops/**` | Affine Ownership ABI and memory-plan-driven cleanup |
 | `runtime-and-backend-lowering/**` | all strategies and no tracing fallback for capable release |
 | new `retained-edge-counting/**` | canonical REC technical authority, routed from the memory index |
@@ -1431,7 +1436,7 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` | concise user-facing final model only |
 | `docs/src/docs/progress/@page.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no superseded collector-first wording |
-| `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its group implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
+| `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its declared region implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
 | historical memory cleanup plan | confirm the file is absent and record that no historical annotation is required |
 | `README.md` | collector-free capable release goal |
 | `AGENTS.md` | update memory route and invariant wording where needed |
@@ -1453,7 +1458,7 @@ Rejected from the baseline model:
 - runtime adaptive REC and region switching
 - implicit cyclic regions
 - cycle collection
-- individual early cleanup for group-owned storage
+- individual early cleanup for declared-region-owned storage
 - target-specific source legality
 - unknown ordinary foreign retention
 - whole-function REC and non-REC variants by default
@@ -1463,16 +1468,16 @@ Accepted but implementation-deferred:
 - field-sensitive allocation splitting
 - more advanced physical coalescing heuristics
 - profile-guided strategy selection
-- group-local allocator reuse
+- declared-region-local allocator reuse
 - richer aggregate REC beyond the collection-first slice
 - channel and task implementation
 - any future atomic REC model
 - reserved-byte or preallocation syntax
-- safe adoption of an ungrouped uniquely owned value into a group
-- safe group extraction or movement between declared groups
+- safe adoption of an ordinary uniquely owned value into a declared region
+- safe declared-region extraction or movement between declared regions
 - expression-site placement
-- group-local graph construction and publication
-- direct source construction of reference cycles inside one group
+- declared-region-local graph construction and publication
+- direct source construction of reference cycles inside one declared region
 - builder lifecycle region metadata for reactivity
 
 Final-use interior projection detachment from an allocation family is not accepted
@@ -1497,7 +1502,7 @@ The final memory-management redesign is complete only when all of these are true
 4. Public and generated summaries carry complete result, retention, detached stored-result and outlives facts.
 5. Retained-edge liveness can end regions at final cleanup frontiers.
 6. Fixed collections, growable collections and maps expose the trusted retention vocabulary.
-7. Explicit groups provide hard count-free bulk lifetimes and the only source cycle mechanism.
+7. Declared regions provide hard count-free bulk lifetimes and the only source cycle mechanism.
 8. The Affine Ownership ABI is memory-plan-driven and cleanup responsibility never duplicates.
 9. REC is integrated only as defined by its companion plan.
 10. Field-sensitive splitting fits before final strategy selection and is implemented before final optimization closure.

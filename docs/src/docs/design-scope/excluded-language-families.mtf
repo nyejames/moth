@@ -121,21 +121,27 @@ internally. Source-visible lifetime parameters, temporary-reference syntax,
 explicit move syntax and separate borrowed and owned function signatures remain
 outside scope.
 
+### General lexical blocks and control-flow labels
+
+Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Anonymous `_:` blocks and brace replacements remain outside scope. Structured control flow introduces ordinary lexical scopes, while bare `identifier:` headers belong exclusively to declared regions.
+
+Arbitrary statement labels, labelled `break`, labelled `continue` and `goto` remain outside scope. Unlabelled loop exits stay structural and target the nearest enclosing loop. Keyword-led semantic scopes such as `async:` remain distinct because their keyword carries language-defined behaviour.
+
 ### Source-visible RC and dynamic shared ownership
 
 Source-visible RC, retain/release, weak ownership, finalisers and unrestricted
-dynamic shared ownership stay outside the language. Diagnostics, common-owner
-groups, `copy` and builder lifecycle roots replace source-level RC.
+dynamic shared ownership stay outside the language. Diagnostics, common declared
+regions, `copy` and builder lifecycle roots replace source-level RC.
 
 Retained Edge Counting is a compiler-selected physical representation for
 already-legal topology. It is not source syntax, not a type, and no program can
 name, observe or request a counter. There is no source REC.
 
-### Implicit cyclic regions
+### Inferred cyclic regions
 
 The compiler never invents a cyclic lifetime region to accept a program. Direct
-source-created reference cycles are legal only inside one declared group, where
-storage is count-free and reclaimed in bulk at group exit. Cross-region cycles
+source-created reference cycles are legal only inside one declared region, where
+storage is count-free and reclaimed in bulk at declared-region exit. Cross-region cycles
 are invalid, and Moth has no cycle collector.
 
 ### Backend-specific source legality

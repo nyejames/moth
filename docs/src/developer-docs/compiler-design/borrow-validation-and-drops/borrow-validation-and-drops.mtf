@@ -20,17 +20,28 @@ Shared and exclusive aliases use **non-lexical**, control-flow-sensitive activit
 
 ## Data-flow facts
 
-Borrow validation runs as a **data-flow analysis** over HIR's control-flow graph. It tracks facts such as:
+### Stable semantic facts
 
-- uninitialised versus initialised storage
-- which aliases exist
-- exclusive versus shared state
-- future use on each relevant path
-- conservative join results when paths meet
+Borrow validation reads validated HIR and publishes a solver-independent handoff of semantic facts. It records:
 
-On branches, facts split. At joins, they merge conservatively. On loops, the analysis revisits blocks until a **fixed point**: further iteration stops changing the facts.
+- normalised semantic places and overlap facts
+- value origins and preliminary provenance
+- shared and exclusive loan or access liveness
+- path-sensitive future-use and last-use classifications
+- optional affine-transfer candidates
+- proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
+- proof that no capable source alias survives a candidate cleanup frontier
+- preliminary return-root alias and projection evidence
+- reactive invalidation and observability facts
+- resolved external access-boundary classifications
 
-The later lifetime-region analysis separately distinguishes topology proven invalid from topology it cannot prove legal.
+These are stable semantic outputs, not a required lattice, root table or solver storage format. Branches and loops remain path-sensitive, but a different solver may derive the same handoff differently. Borrow validation supplies facts without rewriting HIR or choosing lifetime topology or physical representation.
+
+### Current alpha implementation
+
+Today's alpha checker approximates these facts with an abstract-state lattice (`uninitialized`, `slot`, `alias` and `slot + alias`), a `LocalId`-centred root approximation, per-block may/must future-use precomputation and a forward fixed-point transfer implementation. These are current implementation details, not permanent architecture. Advisory drop candidates are scaffolding output only. They are not stable handoff facts, lifetime proof or accepted backend input.
+
+A stronger production borrow solver and the Boracle reference solver may improve precision without changing this stable handoff or source semantics. Normal compilation does not depend on Boracle running.
 
 ## Cross-function access
 
@@ -49,9 +60,15 @@ Lifetime and retained-edge analysis adds complete result provenance, retained pa
 
 ## Future use and inferred transfer
 
-There is no move keyword. The compiler asks a sharper question: may this value transfer cleanup responsibility here without losing a later valid use?
+### Stable semantic contract
 
-**Future-use analysis** answers. If a later path still needs the value, the operation remains a borrow. If every relevant path proves a final use, an inferred transfer may proceed.
+There is no move keyword. Future-use and last-use analysis asks whether a semantic place or value has a later source use on each relevant path.
+
+- **No later source use on every relevant path:** an optional affine-transfer candidate is eligible.
+- **A later use remains possible:** the operation remains a borrow.
+- **The result is path-dependent or imprecise:** the operation remains a borrow conservatively.
+
+A candidate is valid only when the proof also preserves any dependent temporary borrow and shows that no capable source alias survives the candidate cleanup frontier. A persistent edge or affine root must not disappear while a dependent temporary borrow remains usable. An inferred transfer moves existing affine cleanup responsibility and never duplicates it.
 
 Optional inferred transfer follows one conservative path:
 
@@ -63,11 +80,17 @@ Optional inferred transfer follows one conservative path:
 
 Failure to prove transfer does not reject an otherwise valid source program. The source stays under its validated lifetime owner. This rule differs from channel send, which remains the accepted deferred mandatory-transfer boundary.
 
+Borrow validation supplies these candidate and proof facts. Lifetime and retained-edge analysis consumes last-use and capable-source-death facts for retained-edge liveness and cleanup-frontier validation. The compiler-owned memory planner then uses the validated facts for affine transfer, obligation reclassification and REC selection. Borrow validation does not make any of those decisions.
+
+### Current alpha implementation
+
+The alpha details listed above are how today's checker approximates this contract. They are replaceable implementation choices, not a permanent handoff. Advisory drop candidates remain current Wasm scaffolding debt, not final lowering input.
+
 ## Aggregates, copies and exclusive access
 
 Existing values stored in structs, choices, collections, maps or templates use shared alias semantics by default. Storing a value does not automatically duplicate its child.
 
-**`copy place`** creates an independent value graph on purpose. A copied cyclic graph must enter one explicit declared group as a whole.
+**`copy place`** creates an independent value graph on purpose. A copied cyclic graph must enter one declared region as a whole.
 
 **`~place`** requests exclusive mutation-capable access to an existing mutable place. It is not a move marker or a type constructor. Fresh rvalues satisfy ordinary mutable parameters without source `~`. Mutable receiver methods still need an existing mutable place.
 
@@ -75,16 +98,23 @@ Assignment through a mutable alias writes through to the referent. It must not s
 
 ## Handoff to lifetime validation
 
-Borrow validation reads validated HIR and writes side tables. Its handoff contains:
+### Stable semantic handoff
 
-- access and alias facts
-- last potential use per alias and path
-- optional affine-transfer eligibility
-- preliminary return-root alias evidence
+Borrow validation reads validated HIR and supplies the next analysis with:
+
+- normalised semantic places, overlap and validated access facts
+- value origins and preliminary provenance
+- shared and exclusive loan or access liveness
+- path-sensitive future-use and last-use classifications
+- optional affine-transfer candidates
+- proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
+- proof that no capable source alias survives a candidate cleanup frontier
+- preliminary return-root alias and projection evidence
 - reactive invalidation and observability facts
-- resolved external boundary classifications
+- resolved external access-boundary classifications
+- path- and epoch-sensitive evidence about which committed edge sets may coexist
 
-Lifetime and retained-edge analysis then owns:
+Lifetime and retained-edge analysis consumes the last-use classifications and capable-source-death proofs for retained-edge liveness and cleanup-frontier validation. It then owns:
 
 - allocation-family identity
 - complete result provenance
@@ -95,14 +125,24 @@ Lifetime and retained-edge analysis then owns:
 - outcome-sensitive success and error effects
 - outlives constraints and exported summaries
 
-The handoff does not rewrite HIR and does not choose target partition or physical representation.
+The compiler-owned memory planner consumes these validated topology facts and the future-use, last-use and capable-source-death facts to decide affine transfer, obligation reclassification and REC selection. It owns concrete obligation transitions, cleanup and destruction plans. Borrow validation supplies facts. It does not choose target partition or physical representation.
+
+### Current alpha implementation
+
+The alpha checker realises these semantic outputs through the current implementation described above. Its advisory drop candidates remain current Wasm scaffolding debt and never become accepted backend input.
 
 ## From facts to lowering
 
-The final lowering path consumes explicit validated artefacts:
+### Current alpha boundary
+
+The alpha checker may expose advisory drop candidates to the current Wasm scaffolding path. They are implementation debt, not final cleanup decisions or accepted backend input. Final lowering consumes a validated memory plan instead.
+
+### Stable lowering handoff
+
+The final lowering path consumes explicit validated artefacts. Borrow facts remain validated context:
 
 [codeblock, $code("text"):
-    borrow facts
+    borrow and last-use facts
         -> validated lifetime topology
         -> backend-neutral memory requirements
         -> target partition and validation
@@ -111,11 +151,13 @@ The final lowering path consumes explicit validated artefacts:
         -> backend lowering
 ]
 
-The `ValidatedMemoryPlan` carries allocation-family layout, selected representations, affine cleanup decisions, region and group placement, cleanup plans and destruction plans. It is produced once per target/profile physical variant, after build-owned target partition and target validation. Backends consume that plan instead of consuming advisory drop sites directly.
+The `ValidatedMemoryPlan` carries allocation-family layout, selected representations, planned affine-responsibility transitions, planned retained-edge obligation transitions, region and declared-region placement, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions. `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/` owns the full plan contract and its validation invariants. It is produced once per target/profile physical variant, after build-owned target partition and target validation. The compiler-owned planner also settles obligation reclassification and concrete count transitions before lowering.
 
-Last-use facts influence the planner: they are what let it choose affine cleanup at a proven final use, or reclassify an affine root into a stored obligation. They are never interpreted directly by the final lowerer as drop authority. If a drop appears in the emitted code, it is because the plan put it there.
+Last-use and capable-source-death facts first support retained-edge liveness and cleanup frontiers. The memory planner then uses them with validated topology for affine transfer, obligation reclassification and REC selection. Backends consume that settled plan rather than interpreting borrow facts or advisory drop sites directly.
 
 Debug and GC-native representations may erase individual cleanup operations when their runtime owns storage. A capable full-control release backend must still lower without a tracing or reachability collector. It may retain storage under the proven region when optional transfer or a more precise physical optimisation does not apply.
+
+`ValidatedMemoryPlan` is the single final physical authority for cleanup and count transitions. Borrow facts are validated context, not an alternate lowering authority.
 
 ## Reactive liveness
 
@@ -154,7 +196,7 @@ Return-escape legality, retained-edge legality and cycle legality belong to life
 
 - **Accepted design:** borrow validation reads HIR and writes side tables. Reference-semantic defaults, explicit copy, exclusive `~`, optional inferred moves and mandatory lifetime topology.
 - **Current implementation:** memory and progress pages record supported checks and the current advisory Wasm scaffolding.
-- **Deferred implementation:** complete lifetime summaries, memory-strategy planning, ownership-aware backend ABI, groups, REC and collector-free verification.
+- **Deferred implementation:** complete lifetime summaries, memory-strategy planning, ownership-aware backend ABI, declared regions, REC and collector-free verification.
 - **Implementation debt:** advisory drop candidates may still feed the current Wasm `DropIfOwned` path. They do not form the accepted backend input contract.
 - **Outside scope:** current concurrency syntax, trait objects and source-visible reference types.
 

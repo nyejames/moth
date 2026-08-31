@@ -13,10 +13,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 - [Boracle - borrow checker test/reference solver for desiging and validating final borrow checker behaviour](./plans/boracle-reference-solver-implementation-plan.md) - Active in separate worktree
 
-## Queued documentation work
-
-- [Memory management documentation corrections](./plans/memory-management-documentation-corrections-plan.md) - Queued, ready to establish the permanent authority for the replacement collector-free memory implementation plan
-
 ## Queued implementation chain
 
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
@@ -67,10 +63,14 @@ Canonical memory design lives under [the memory management design docs](docs/src
 
 The accepted end state is mandatory static lifetime topology with a collector-free release guarantee for backends that advertise full memory control. GC is a permitted representation for an already legal topology on debug profiles and GC-native backends. It is not the semantic correctness baseline and it cannot legalise unproven topology.
 
-Two plans own this work:
+Canonical design for source semantics, analysis boundaries, inferred regions, cleanup frontiers, declared regions, Retained Edge Counting, physical memory planning and backend parity lives in the permanent memory, compiler and build-system authorities. No plan is a semantic authority for this work.
 
-- [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) is the parent authority for source semantics, analysis boundaries, inferred regions, cleanup frontiers, explicit groups, physical memory planning and backend parity.
-- [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) is the sole detailed owner of REC analysis, the two-bit handle ABI, counters and lowering.
+Two temporary implementation plans remain in the tree. They are work items awaiting consolidation into one replacement implementation plan, not design authorities:
+
+- [Final memory-management redesign](./plans/final-memory-management-redesign-and-implementation-plan.md) - temporary implementation plan covering analysis, region and planning sequencing
+- [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) - temporary implementation plan covering REC analysis, the two-bit handle ABI, counters and lowering sequencing
+
+Where a temporary plan and a permanent authority disagree, the permanent authority wins.
 
 ## Post-TIR template performance follow-ups
 

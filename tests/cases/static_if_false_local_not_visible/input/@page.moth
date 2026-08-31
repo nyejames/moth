@@ -1,0 +1,5 @@
+if false:
+    inactive_local = "inside"
+;
+
+io.line(inactive_local)

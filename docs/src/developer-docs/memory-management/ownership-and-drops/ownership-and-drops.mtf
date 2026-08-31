@@ -7,7 +7,7 @@ Moth ownership is a runtime cleanup discipline over statically validated topolog
 
 Cleanup responsibility is **affine**: it may move or be discharged, but it never duplicates. That single property is what makes deterministic cleanup safe without counting ordinary aliases.
 
-Borrow and lifetime analysis prove transfer eligibility and topology legality. Ownership lowering only realises already-validated facts, and it consumes a **validated memory plan** rather than borrow-checker advisory drop sites.
+Borrow and lifetime analysis prove transfer eligibility and topology legality. Ownership lowering only realises already-validated facts. The compiler-owned memory planner produces concrete responsibility and retained-edge obligation transitions plus cleanup and destruction plans. Backend lowering consumes the `ValidatedMemoryPlan` and encodes its planned transitions and cleanup decisions rather than reconstructing them from borrow-checker advisory cleanup sites.
 
 The compiler may transfer cleanup responsibility only where static analysis proves that doing so can't invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the allocation stays under its region owner.
 
@@ -28,12 +28,12 @@ Bit 0 of a full-control allocation-family handle records affine cleanup responsi
         The runtime path must not destroy the value.
 
     owned
-        The runtime path carries release or safe-transfer responsibility.
+        The runtime path carries cleanup or safe-transfer responsibility.
 ]
 
 ## The two-bit logical handle
 
-Full-control backends carry one representation bit alongside affine cleanup responsibility. The two bits are independent: bit 0 is per-handle responsibility, bit 1 describes the target allocation family's physical representation.
+Cleanup responsibility and physical representation are independent dimensions of a full-control handle. Bit 0 is per-handle affine cleanup responsibility. Bit 1 describes the target allocation family's physical representation. Neither bit determines the other.
 
 [codeblock, $code("text"):
     bit 0: affine cleanup responsibility
@@ -49,7 +49,7 @@ Full-control backends carry one representation bit alongside affine cleanup resp
 
 The tags belong to an allocation-family handle, so a projection must retain or recover the family base. Scalars and target-native immediate values do not use this handle ABI, and GC-native backends may erase the tags while preserving the same semantic analysis.
 
-Only retention-sensitive and cleanup-sensitive operations need to inspect bit 1. The exact counter, transition and destruction contract lives in @../retained-edge-counting (Retained Edge Counting).
+Only retention-sensitive and cleanup-sensitive operations need to inspect bit 1. The compiler-owned memory planner decides REC selection, concrete obligation transitions and destruction plans. Backend lowering encodes those decisions. The retained-edge-counting page documents the REC representation contract.
 
 ## Ownership responsibility versus lifetime ownership
 
@@ -59,38 +59,38 @@ Contrast these distinct concepts:
 - **Static result provenance:** where a result's storage came from and which outlives constraints apply
 - **Cleanup-responsibility path:** the runtime path that may perform individual cleanup, affine and movable
 - **Shared aliases:** observers that do not become additional lifetime owners
-- **Region-owned or group-owned allocation family:** storage whose release is owned by a region or group rather than an individual callee, recorded as static memory-plan metadata
+- **Inferred-region-owned or declared-region-owned allocation family:** storage whose reclamation is owned by an inferred or declared region rather than an individual callee, recorded as static memory-plan metadata
 
-Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime. The bit does not imply individual releasability when the value belongs to a region-owned or group-owned allocation family.
+Semantic lifetime ownership stays static even when cleanup responsibility moves at runtime. The bit does not imply individual releasability when the value belongs to an inferred-region-owned or declared-region-owned allocation family.
 
 ## Discharging responsibility is not necessarily destruction
 
-Use these four words for four different things:
+This section is the terminology authority for these four cleanup terms:
 
-- **transfer:** move affine cleanup responsibility to another path
-- **discharge:** satisfy the current affine cleanup obligation
-- **destroy:** physically destroy one allocation family
-- **bulk reclaim:** reclaim a region or group
+- **transfer:** moves affine cleanup responsibility to another path
+- **discharge:** satisfies one affine cleanup obligation
+- **destroy:** physically destroys one allocation family
+- **bulk reclaim:** ends a region or declared region
 
-Discharging responsibility means the obligation is gone from this path. Whether that also destroys the allocation family depends on the family's selected strategy:
+A discharged obligation is gone from this path. It does not by itself mean that the allocation family is destroyed. The selected physical strategy determines what happens after the obligation is discharged:
 
 [codeblock, $code("text"):
     uncounted individually releasable family:
         discharge may destroy immediately
 
     REC family:
-        discharge removes one affine-root obligation
-        destroy only when REC count reaches zero
+        discharge removes the affine-root obligation
+        destroy only when the total count reaches zero
 
-    region-owned family:
-        individual handle does not own region destruction
+    inferred-region family:
+        the individual handle does not own region reclamation
 
-    group-owned family:
-        no individual early destruction
-        group exit bulk-reclaims storage
+    declared-region family:
+        no individual discharge destroys declared-region-owned storage
+        declared-region exit bulk-reclaims it
 ]
 
-`drop owned` and `destroy allocation` are therefore never synonyms.
+These terms are not synonyms.
 
 ## Inferred transfer
 
@@ -104,86 +104,90 @@ Assignments and calls can be optional transfer points. Analysis proves eligibili
 When transfer is realised:
 
 - aliases can't remain usable after a possible transfer
-- a callee that receives ownership assumes eventual release responsibility
-- responsibility may be discharged by release or a further proven transfer
+- a callee that receives ownership of an individually releasable family assumes eventual cleanup responsibility for it
+- responsibility may be discharged or transferred again at a further proven transfer point
 
-Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site. Parameter mutability controls access; ownership metadata controls destruction responsibility. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
+Immutable and mutable parameters may both receive inferred cleanup responsibility at a proven final-use call site. Parameter mutability controls access; ownership metadata controls cleanup responsibility. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
 
 Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
 
 ## Single ownership transfer
 
 - Ownership transfers at most once along a control-flow path.
-- A borrowed value is never released by the borrower.
-- An owned value must reach a valid release or transfer point.
+- A borrowed value is never discharged by the borrower.
+- An owned value from an individually releasable family must reach a valid discharge or transfer point. Inferred-region and declared-region-owned families stay under their region's bulk reclamation instead.
 - Joins conservatively account for paths that may own.
 
-## Group-owned values
+## Declared-region-owned values
 
-- The group owns release responsibility for its allocation family.
-- Ordinary calls normally borrow group-owned storage.
-- An individual callee cannot release one group child merely because an owned bit exists.
-- Hidden destination allocation may produce a fresh result root directly in a group when every retained edge is legal for that destination.
-- Group-owned values use bulk release at group exit rather than individual drop.
-- Group-owned allocations are count-free and never carry a REC representation.
-- Last-use analysis still checks access legality inside a group, but never shortens group-owned physical lifetime.
+- The declared region owns responsibility for bulk reclaim of its allocation family.
+- Ordinary calls normally borrow declared-region-owned storage.
+- An individual callee cannot discharge or destroy declared-region-owned storage merely because an owned bit exists.
+- Hidden destination allocation may produce a fresh result root directly in a declared region when every retained edge is legal for that destination.
+- Declared-region-owned values use bulk reclaim at declared-region exit rather than individual discharge.
+- Declared-region-owned allocations are count-free and never carry a REC representation.
+- Last-use analysis still checks access legality inside a declared region, but never shortens declared-region-owned physical lifetime.
 
 ## Unified ownership ABI
 
-Ownership-aware lowering uses one calling convention rather than separate source-visible borrowed and owned function variants.
+Ownership-aware lowering uses one calling convention rather than separate source-visible borrowed and owned function variants. Because responsibility and representation are independent handle dimensions, one convention covers every combination of the two bits.
 
 Heap-managed or handle-based values that participate in ownership lowering carry ownership metadata with the runtime value. Scalar values may continue to use target-native representations.
 
 ABI behaviour:
 
 - Borrowed metadata → callee must not destroy the value.
-- Owned metadata → callee receives release responsibility.
-- Callee must release or safely transfer that responsibility before it ends.
+- Owned metadata → callee receives cleanup responsibility.
+- Callee must discharge or safely transfer that responsibility before it ends.
 - Caller must not use a value again after a path that may have transferred ownership.
-- Source function signatures don't distinguish borrowed and owned variants.
-- Backend specialisation may remove redundant checks without changing the semantic ABI.
+- Source function signatures do not distinguish borrowed and owned variants.
+- Local specialisation may remove known tag checks without introducing source-visible owned/borrowed function overloads.
 
-The unified ABI keeps dispatch static without generating separate borrowed and owned function families. It also limits ownership-driven monomorphisation and binary-size growth, especially for Wasm, while still allowing static specialisation to remove redundant ownership checks.
+The unified ABI keeps dispatch static without generating separate borrowed and owned function families. It limits ownership-driven monomorphisation and binary-size growth, especially for Wasm, while preserving the same semantic ABI when local specialisation removes a known check.
 
-## Conditions for release
+## Conditions for discharge
 
-Deterministic release is legal only when:
+An individual discharge is legal only when:
 
 - topology is already valid
 - no observable alias remains
 - responsibility is owned
-- the allocation is individually releasable or its owning region is ending
+- the allocation family is individually releasable
+
+When an owning inferred or declared region ends, bulk reclaim handles region-owned storage instead of individual discharge.
 
 ## Conditional destruction
 
-`drop_if_owned` is inserted at possible destruction points. It checks ownership metadata and, when responsibility is owned, discharges that owned responsibility according to the validated memory plan. Discharge destroys the allocation family only when the plan says this family is individually releasable and nothing else keeps it alive; for an REC family it removes one affine-root obligation and destroys only if the count reaches zero.
+`discharge_if_owned` is the conceptual operation at a possible individual-cleanup point. It checks ownership metadata and, when responsibility is owned, discharges that affine obligation according to the concrete transitions in `ValidatedMemoryPlan`. A discharge may destroy an uncounted individually releasable family immediately. For an REC family it removes the affine-root obligation and destroys the family only when the total count reaches zero. Inferred-region and declared-region families remain under their owning region's reclamation rules.
+
+The current Wasm scaffolding instruction is spelled `DropIfOwned`; this page names it only when describing migration debt to `discharge_if_owned`, not as a second conceptual operation.
 
 - It is a conditional responsibility check only.
 - It is not an alias count.
 - It is not a topology validator.
 - It is a no-op for borrowed state.
 - Under pure GC it can lower to no-op or be erased where allowed.
-- Region-owned and group-owned values are bulk reclaimed at region or group exit rather than individually destroyed.
-- It is a conceptual backend operation, not source syntax.
-- Different backends may represent it differently while preserving behaviour.
+- Inferred-region-owned values remain until their validated inferred-region exit. Declared-region-owned values remain until declared-region exit. Neither is individually destroyed merely because a runtime owned bit exists.
+- It is a planned conceptual operation, not source syntax.
+- Backend lowering encodes the planner's transition and cleanup decisions. It does not select a strategy or reconstruct ownership or count transitions.
 
 ## Control-flow exits
 
-Possible destruction points include:
+Possible cleanup points include:
 
 - normal region or scope exits
 - function returns
 - error returns
 - loop `break` and other reachable loop-exit paths
 - branch edges that leave an owning region
-- region/group exits
+- region/declared-region exits for bulk reclaim
 - return values that transfer responsibility out
 
-A non-exiting loop needs no exit destruction point. A loop that can exit must account for ownership on each reachable break, return, error-return or region-exit path.
+A non-exiting loop needs no cleanup point. A loop that can exit must account for ownership on each reachable break, return, error-return or region-exit path.
 
-A control-flow join determines whether a later exit may own. The join itself is not a destruction point and is not automatically a release site.
+A control-flow join determines whether a later exit may own. The join itself is not a cleanup point and is not automatically a discharge site.
 
-Deterministic release is enabled where analysis supports it. Where individual release cannot be placed, the allocation remains under its region or group owner and is reclaimed at that owner's exit. Conservative retention is the acceptable outcome; falling back to a tracing collector in a capable release build is not.
+Deterministic cleanup is enabled where analysis supports it. Where individual discharge cannot be placed, the allocation remains under its inferred or declared region owner and is bulk reclaimed at that owner's validated exit. Conservative retention is the acceptable outcome; falling back to a tracing collector in a capable release build is not.
 
 ## Aggregates and stored values
 
@@ -208,22 +212,24 @@ Accepted effect categories:
 These are analysis/lowering facts only, not required exact Rust enum names and not source-visible signature categories.
 
 - `MayConsume` retains conditional ownership handling.
-- `NeverConsumes` can omit drop responsibility.
+- `NeverConsumes` can omit conditional discharge handling.
 - `AlwaysConsumes` may remove ownership-condition branches only after call-path proof.
 - Specialisation must not create source-visible overloads or ordinary mandatory-consuming function APIs.
-- Exact monomorphisation extent remains a backend and benchmarking decision.
+- At a site where responsibility state or REC state is statically known, lowering may locally constant-fold that state and remove its known tag check.
+- This local folding does not require whole-function duplication, cloning or monomorphisation.
+- Whole-function cloning policy is deferred to benchmarks.
 - The unified semantic contract remains fixed even if implementation encoding evolves.
 
 ## Physical representations
 
-Retained Edge Counting is permitted as a narrow backend representation for statically legal topology with runtime-many persistent retained edges. Source-visible RC, retain/release, weak ownership, finalizers or dynamic shared-ownership semantics remain outside the language design.
+Retained Edge Counting is permitted as a narrow physical representation for statically legal topology with runtime-many persistent retained edges. The memory planner selects it for eligible families, and backend lowering encodes the selected layout and planned transitions. Source-visible RC, explicit retain/release APIs, weak ownership, finalizers or dynamic shared-ownership semantics remain outside the language design.
 
 Compatible extension points within the accepted memory model:
 
 - stronger future-use precision
 - inferred region allocation and region epochs
 - place- and projection-based alias precision
-- drop elision and physical drop coalescing through region knowledge
+- discharge elision and physical cleanup coalescing through region knowledge
 - static ownership specialisation
 - field-sensitive allocation splitting
 - escape analysis
@@ -239,8 +245,10 @@ These must preserve source-language semantics and the unified ownership contract
 - Treating bit 0 as uniqueness or observer count.
 - Confusing bit 0 (affine responsibility) with bit 1 (REC representation).
 - Masking an arbitrary interior pointer to recover an allocation-family base.
-- Treating borrow-checker advisory drop sites as the final lowering authority.
-- Treating individual owned bits as permission to free group-owned children.
+- Treating borrow-checker advisory cleanup sites as the final lowering authority.
+- Reconstructing count or ownership transitions in the backend instead of consuming the planned transitions from `ValidatedMemoryPlan`.
+- Treating discharge as destruction.
+- Treating individual owned bits as permission to free declared-region-owned children.
 - Generating separate visible borrowed/owned functions.
 - Assuming every scalar is a tagged pointer.
 - Destroying borrowed values.
@@ -255,8 +263,8 @@ These must preserve source-language semantics and the unified ownership contract
 - @../access-and-aliasing (Access and aliasing): source semantics
 - @../borrow-validation (Borrow validation): optional transfer facts
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): lifetime owners and topology
-- @../declared-memory-groups (Declared memory groups): count-free bulk release families and reassignment
+- @../declared-regions (Declared regions): count-free bulk reclaim families and reassignment
 - @../retained-edge-counting (Retained Edge Counting): the counted representation carried by bit 1
 - @../runtime-and-backend-lowering (Runtime and backend memory lowering): ABI realisation and representations
-- @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): transfer and drop facts
+- @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): transfer and cleanup facts
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler Wasm lowering): ownership-aware backend seam

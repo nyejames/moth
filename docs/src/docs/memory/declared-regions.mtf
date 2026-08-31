@@ -1,0 +1,234 @@
+### Accepted deferred syntax
+
+The following is accepted end-state syntax. Implementation is deferred and must not be treated as current source support.
+
+### Declared regions
+
+`name:` creates a declared hard lifetime region in runtime statement position. Values placed into a declared region belong to that declared region for their full lifetime. No declared-region-owned value, projection or alias may outlive the declared region.
+
+A declaration targets the declared region with the `into` keyword:
+
+[codeblock, $code("moth"):
+    request:
+        parsed ParsedPost into request = parse_post(post)
+        html String into request = render_post(parsed)
+    ;
+]
+
+[codeblock, $code("text"):
+    name [access/type] into region_name = expression
+]
+
+There is no `group` keyword. The declared region name is the ordinary value-like identifier before `:`.
+
+### Bulk cleanup and cycles
+
+A declared region forms one deliberate allocation and cleanup domain. Every declared-region-owned allocation remains under that declared region until declared-region exit. Last-use analysis still checks access inside the declared region, but it never shortens declared-region-owned storage or releases one child early. The declared region reclaims its contents together in one bulk cleanup. Because declared-region-owned storage is reclaimed in bulk, it carries no REC counter.
+
+Count-free is a property of what the declared region owns, not of every reference written inside it. A reference from declared-region-owned storage to a value the same declared region owns is free. An external REC target is different. A reference from declared-region-owned storage to a value owned outside the region that the compiler chose to count is still a counted reference to that outside value. At declared-region exit, the compiler releases those outgoing references to outside values first, then reclaims the declared region's own storage in bulk.
+
+The rule that direct source-created cycles require one declared region follows from that bulk lifetime. A declared region provides the only source mechanism for constructing a direct reference cycle. Every member of the cycle must belong to the same declared region. Inferred regions never become cyclic, and a copied cyclic graph must enter one declared region as a whole.
+
+### Declared region header and placement rules
+
+- `name:` is valid only in runtime executable bodies
+- The declared region name follows normal value-like identifier policy
+- Exact `_:` is invalid and does not create an anonymous declared region
+- `into region_name` appears only on declaration receiving boundaries in V1
+- Placement may target the current declared region or a lexically enclosing ancestor declared region
+- Placement may not target a sibling, child, unrelated declared region or builder lifecycle root by spelling its name
+- Declared regions cannot be passed, returned, stored, imported, exported, compared or used as values
+- Declared-region identity is not a type, field, parameter, generic argument, trait, allocator object or lifetime annotation
+- Declared-region identity must not enter `TypeId` or a source signature
+- Declared region closure occurs on every exit: fallthrough, `return`, `return!`, `break`, recovery exit and checked-operation failure path
+
+The declared region name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant, reactive source or active declared region.
+
+Ordinary declarations written inside the declared region are not implicitly declared-region-owned. Only a declaration that uses `into region_name` places its result into that declared region.
+
+A declared region with no direct or nested placement targeting it produces an unused-region warning. This discourages treating declared regions as labels or general lexical blocks.
+
+### No general lexical-block feature or labels
+
+Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Exact `_:` is invalid. Bare `identifier:` syntax is reserved for declared regions, not arbitrary control-flow labels.
+
+Moth does not add labelled `break`, labelled `continue` or `goto`. Unlabelled `break` and `continue` keep targeting the nearest enclosing loop.
+
+An ordinary statically known `if true:` can provide a rare local lexical scope:
+
+[codeblock, $code("moth"):
+    if true:
+        temporary = calculate()
+        use(temporary)
+    ;
+]
+
+This is not a special block alias. It follows ordinary static Bool `if` rules, preserves the selected branch scope and disappears before HIR. It does not create a declared region or change ancestor-placement legality.
+
+Keyword-led semantic scopes such as `async:` remain distinct. Their keyword describes language-defined execution behaviour rather than naming a user-declared lifetime region.
+
+### `into` declaration position
+
+`into region_name` appears after access or type syntax and before `=`. V1 has no expression-site placement. Declarations are the only placement surface.
+
+[codeblock, $code("moth"):
+    parsed into scratch = parse_post(post)
+    parsed ParsedPost into scratch = parse_post(post)
+    rows ~{Row} into scratch = {}
+    maybe_name String? into scratch = find_name(id)?
+]
+
+Prefer:
+
+[codeblock, $code("moth"):
+    row Row into scratch = parse_row(raw)
+    ~rows.push(row)
+]
+
+Do not initially add:
+
+[codeblock, $code("moth"):
+    -- INVALID: expression-site placement is not supported in V1
+    ~rows.push(parse_row(raw) into scratch)
+]
+
+Placement stays attached to closed receiving boundaries.
+
+### Destination scope and visibility
+
+A declaration targeting an ancestor declared region is a narrow V1 escape mechanism, not a general definite-assignment system.
+
+- A declaration targeting an ancestor declared region is legal only from a straight-line nested declared region that executes at most once
+- It is invalid directly inside `if` branches, match arms, `catch` branches, loops, repeated template or runtime control flow or any construct that may execute zero or multiple times
+- A statically known `if true:` is still conditional syntax for this rule and does not make ancestor placement legal
+- Conditional production must use one declaration in the destination scope whose initializer is a value-producing `if`, match or `catch`
+- Loop production must mutate a collection or aggregate already owned by the destination declared region through ordinary exclusive access
+- Name collisions and definite initialization are checked in the destination scope
+- Visibility begins at the declaration point and continues through the remainder of the destination declared region
+
+Ordinary declarations without `into` retain normal lexical visibility.
+
+### Placement eligibility
+
+A declaration may be placed into a declared region when its result root is fresh and every retained edge is legal for the destination declared region, or when it is an independent result graph such as an explicit `copy`.
+
+An alias result cannot become new declared-region-owned storage through `into`.
+
+A fresh result root may retain parameters or other pre-existing values only when every retained edge satisfies the destination lifetime's outlives constraints. An independent acyclic result graph can enter an unrelated destination lifetime without retained-edge constraints to its source graph. A copied cyclic graph must enter one declared region as a whole.
+
+### Nested declared regions and retained edges
+
+Nested declared regions are valid.
+
+[codeblock, $code("moth"):
+    request:
+        config Config into request = load_config()
+
+        scratch:
+            parsed ParsedPost into scratch = parse_post(post)
+            html String into request = render_post(parsed, config)
+        ;
+
+        use(html)
+    ;
+]
+
+For a child declared region nested in a parent declared region:
+
+- a child value may retain a parent value: valid
+- a child value may retain a same-child value: valid
+- a parent value may retain a child value: invalid
+- a sibling may retain a value owned by a sibling declared region: invalid
+- a child may retain an unrelated shorter-lived value: invalid
+
+A declared region has one lexical entry and explicit exits. Values placed into the declared region cannot escape it. The compiler must not silently widen a declared region. A child declared region ends before its parent.
+
+### No declared-region transfer in V1
+
+V1 has no declared-region extraction, declared-region adoption or unrestricted declared-region transfer. A value crosses from a shorter-lived declared region into a longer-lived declared region only by producing independent storage in the destination lifetime or by invoking a fresh producer that allocates directly into the destination.
+
+Use one of:
+
+- allocate the result directly into the destination declared region
+- `copy` into the destination declared region
+- place the whole graph in the correct common declared region from the start
+
+The restriction on extraction means moving a declared-region-owned allocation out of its declared region or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
+
+### Escapes
+
+Lifetime-region validation rejects every path where a declared-region-owned value or alias can outlive the declared region.
+
+Invalid escapes include:
+
+- returning a declared-region-owned value
+- returning a projection or alias rooted in declared-region-owned storage
+- storing a declared-region-owned value in a longer-lived local or aggregate
+- storing a value owned by a child declared region in a parent or sibling declared region
+- assigning a declared-region-owned value into longer-lived reactive storage
+- passing a declared-region-owned value to an external call that may retain it
+- keeping a map lookup, collection element or field alias live after declared-region exit
+- creating a longer-lived retained edge into the declared region
+
+Backend GC representation does not legalise these cases.
+
+### Reassignment inside a declared region
+
+V1 has no `into` placement on reassignment. A mutable binding already owned by a declared region may be reassigned only with:
+
+- a fresh result root valid for that same declared region
+- an independent copy allocated into that declared region
+- a value already owned by the same declared region reused or rebound at a proven final use
+
+Reassignment does not let a declared-region-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Reusing or rebinding a value already owned by the same declared region at final use does not transfer individual cleanup responsibility. The declared region remains responsible for cleanup. Use a separate ordinary alias binding for an ancestor or external value.
+
+### Reactive storage restrictions
+
+V1 rejects:
+
+- reactive declarations placed directly into a declared region
+- assigning declared-region-owned values into reactive storage that outlives the declared region
+- subscriptions or mounted state retaining declared-region-owned aliases past declared-region exit
+
+### Calls and hidden result destinations
+
+Functions whose result root is fresh may allocate that root directly into a caller-selected destination. The function summary classifies the result root as fresh and records retained-edge constraints separately.
+
+A hidden destination:
+
+- is not part of the source signature
+- is not a region parameter visible to generics or callers
+- is not a source lifetime parameter
+- may be ignored by a GC backend
+- lets an optimising backend allocate a fresh result root directly into the caller's region when every retained edge is legal
+
+Hidden result destinations do not become source signature parameters.
+
+### V1 restrictions
+
+- no expression-site placement
+- no `into` placement on reassignment
+- no declared-region extraction or declared-region adoption
+- no unrestricted declared-region-to-declared-region adoption
+- no anonymous declared region
+- no general lexical block
+- no control-flow labels
+
+### Why declared regions exist
+
+Declared regions give authors explicit control over one allocation and cleanup domain without exposing reference types, pointer syntax or manual memory management. Their defining performance property comes from predictable bulk cleanup: the compiler can reclaim the declared region together at exit instead of releasing children one by one. The compiler validates declared region topology as part of its mandatory lifetime-region analysis.
+
+### Current implementation status
+
+Declared-region semantics and `into` placement are not implemented yet. The compiler reserves valid `name:` headers with a targeted deferred-feature diagnostic, rejects exact `_:` and treats `block`, `group` and `region` as ordinary identifiers. There is no authored general lexical-block parser.
+
+### Read next
+
+- @#reference-semantics (Reference semantics)
+- @#copy-and-exclusive-access (Copy and exclusive access)
+- @#lifetimes-and-result-shapes (Lifetimes and result shapes)
+
+For the formal declared region semantics, see
+@../../developer-docs/memory-management/declared-regions (Declared regions).
+For implementation sequencing, see
+@https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (Roadmap).

@@ -425,7 +425,7 @@ Borrow validation owns the access and independence facts. It does not own every 
 - AST and type checking decide whether the source graph is copyable.
 - The copy implementation preserves internal alias topology.
 - Lifetime analysis chooses the destination owner.
-- A copied cycle must later enter one explicit group.
+- A copied cycle must later enter one declared region.
 - Boracle must not legalise a copied cycle's placement merely because the copy is independent from its source.
 
 Boracle may represent repeated internal aliases in a copied graph so tests can prove that one source node becomes one corresponding copied node, not several unrelated copies.

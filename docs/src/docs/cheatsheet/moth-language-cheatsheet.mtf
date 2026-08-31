@@ -170,18 +170,9 @@
 
 `--` starts a single-line comment in ordinary Moth code. Inside template and `.mtf` bodies, `--` is output text. Use `$note` or `$todo` to discard template-authored content.
 
-A plain lexical block uses `block:`:
+Moth has no general authored lexical-block construct or control-flow labels. Structured control flow introduces scope. A statically selected `if true:` remains an ordinary branch and can provide rare local name isolation without adding another scope form.
 
-[codeblock, $code("moth"):
-    name = "Priya"
-
-    block:
-        label = [: User: [name]]
-        io.line(label)
-    ;
-]
-
-`block:` creates a child lexical and control-flow scope. Bare labelled blocks are invalid.
+Bare `identifier:` headers are reserved for declared regions. The compiler currently reports that accepted declared-region surface as deferred, and exact `_:` is invalid. Keyword-led semantic scopes such as `async:` remain separate.
 
 Naming conventions:
 
@@ -311,16 +302,16 @@ There is no source or project setting that turns GC on or off, and nothing about
 The compiler may use internal Retained Edge Counting in certain cases.
 Ordinary local aliases and `get()` borrows are never counted, and no REC mechanism appears in source.
 
-### Declared memory groups
+### Declared regions
 
 [codeblock, $code("moth"):
-    group request:
+    request:
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)
     ;
 ]
 
-`into group_name` appears after access/type syntax and before `=`. A group is a hard local lifetime owner, not a value or type. Placement targets the current group or an ancestor. Parent/sibling storage cannot retain child-group values, and group-owned values cannot escape. Everything in a group is released together when the group exits, never individually. A group is also the only place a program may build a reference cycle. V1 has no expression placement, extraction or unrestricted group transfer.
+`into region_name` appears after access/type syntax and before `=`. There is no `group` keyword. A declared region is a hard local lifetime owner, not a value or type. Placement targets the current declared region or an ancestor. Parent or sibling storage cannot retain values owned by a child declared region, and declared-region-owned values cannot escape. The whole declared region is reclaimed at exit, never allocation by allocation. A declared region is also the only place a program may build a reference cycle. V1 has no expression placement, extraction or unrestricted declared-region transfer. Declared-region semantics and placement remain deferred; the compiler currently reserves valid `name:` headers with a targeted diagnostic.
 
 ## Numbers and operators
 
@@ -1419,7 +1410,7 @@ Do not infer forms for:
 - reactive paths, derived values, events/effects, `$bind` or component messages
 - direct choice payload access/narrowing or nested payload patterns
 - lossy `Float <-> NumberN`, Number formatting helpers or broader Byte APIs
-- group capacity, expression placement, extraction, adoption or group transfer
+- declared-region capacity, expression placement, extraction, adoption or declared-region transfer
 - broader anonymous-record storage
 - final builder-selection or build-script syntax
 

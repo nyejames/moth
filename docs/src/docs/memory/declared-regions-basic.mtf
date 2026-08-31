@@ -1,0 +1,52 @@
+Moth has an accepted but not yet implemented feature called declared regions.
+This page explains what they are so you know the concept exists.
+
+### What declared regions do
+
+`request:` declares a region and opens its body. A declaration becomes owned by
+that region only when it uses `into request`.
+
+[codeblock, $code("moth"):
+    request:
+        parsed ParsedPost into request = parse_post(post)
+        html String into request = render_post(parsed)
+    ;
+]
+
+The declared region name is written directly before `:`. There is no `group`
+keyword. An ordinary declaration inside the body keeps normal inferred lifetime
+behaviour.
+
+Every declared-region-owned value stays with the declared region until it exits. Last-use
+analysis still checks access, but it never releases one declared-region-owned allocation early.
+The declared region reclaims its contents together in one bulk cleanup. Declared-region-owned
+storage carries no REC counter because the declared region never releases one child on
+its own.
+
+A declared region also provides Moth's only source mechanism for direct reference cycles.
+Every member of a cycle must belong to the same declared region. Inferred regions never
+become cyclic.
+
+### Scope surface
+
+Moth has no dedicated general lexical-block construct. `block` is an ordinary
+identifier, so `block:` declares a region just like any other valid `name:`
+header. Exact `_:` is invalid. Bare names followed by `:` are reserved for
+declared regions, not control-flow labels. Labelled `break` and `continue` are
+not part of the language.
+
+An ordinary statically known `if true:` still creates a lexical branch scope
+and is removed before HIR. It does not create a declared region and does not change declared region
+placement rules.
+
+### Current status
+
+Declared region syntax is **accepted but deferred**. Current programs cannot declare or
+place values into declared regions yet.
+
+The compiler reserves valid `name:` headers with a deferred-feature diagnostic
+and rejects exact `_:`. Full declared region parsing and `into` placement remain deferred.
+
+You do not need declared regions to write Moth programs today. Current shared-access,
+explicit-copy and `~` rules cover access conflicts, while lifetime-topology
+validation remains deferred.

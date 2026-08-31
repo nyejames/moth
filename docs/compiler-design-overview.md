@@ -13,7 +13,7 @@ Companion authorities:
 - `docs/build-system-design.md` for project and build orchestration
 - `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
+- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared regions, affine ownership, Retained Edge Counting and backend memory lowering
 - `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
@@ -817,7 +817,7 @@ AST owns:
 - root-local entry metadata folding through ordinary module visibility
 - common frontend value-to-string behaviour for Float, Number, templates and runtime lowering
 
-When accepted deferred `group` / `into` syntax is implemented, AST also owns parser, scope, placement and freshness validation for declared memory groups. Group identity must not enter `TypeId`. Implementation is deferred.
+AST currently reserves accepted deferred `name:` headers in executable statement position and rejects exact `_:`. The later declared-region implementation owns body parsing, scope, `into name` placement and freshness validation. Declared-region identity must not enter `TypeId`.
 
 AST is defined by ownership and data flow rather than a fixed number of internal passes.
 
@@ -1157,6 +1157,8 @@ HIR lowers fully typed AST and generated concrete functions into the first backe
 
 Each module retains local HIR IDs and its paired local `TypeEnvironment`. Cross-module executable references use stable targets. The callee body is never copied into the caller.
 
+Current HIR `RegionId` identifies the lexical HIR scope/region tree. It is not source-declared-region identity and must not be reused as such. The future source construct uses a distinct `DeclaredRegionId`.
+
 HIR owns:
 
 - explicit local control flow
@@ -1287,9 +1289,24 @@ It enforces:
 - control-flow joins
 - reactive invalidation facts
 
+Its output contract is solver-independent. Later stages consume:
+
+- normalised semantic places and overlap facts
+- value origins and preliminary provenance
+- shared and exclusive loan or access liveness
+- path-sensitive future-use and last-use classifications
+- optional affine-transfer candidates
+- proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
+- proof that no capable source alias survives a candidate cleanup frontier
+- preliminary return-root alias and projection evidence
+- reactive invalidation and observability facts
+- resolved external access-boundary classifications
+
+The current alpha checker's abstract-state lattice, `LocalId`-centred root approximation, per-block future-use precomputation, forward fixed-point transfer implementation and advisory drop candidates are current implementation rather than permanent architecture. A stronger production solver may replace them without changing this handoff or source legality. `docs/src/developer-docs/memory-management/borrow-validation/` owns the detailed contract.
+
 Borrow validation reads validated HIR and writes read-only side tables. It does not rewrite HIR, decide lifetime topology or decide final runtime ownership.
 
-Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred destruction responsibility at a proven final-use call site.
+Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred affine cleanup responsibility at a proven final-use call site.
 
 Borrow validation may emit preliminary return-root alias evidence for the later lifetime analysis. It does not own final result provenance, retained-edge summaries or topology constraints.
 
@@ -1336,8 +1353,12 @@ Retained-edge liveness belongs to this analysis, not to a separate runtime owner
 - edge creation and whole-domain kill effects
 - final cleanup frontiers, which may be path-sensitive
 - compiler-generated region epochs for repeated population and teardown
+- semantic commit points and the committed retained-edge state each successful mutation produces
+- the may-coexist relation over direct retained edges
 
 A final cleanup frontier lets an inferred region end before the aggregate that once held its values. Individual `remove` or `set` does not establish a frontier. Uniqueness scans and alias registries are rejected.
+
+Cycle validation runs over direct retained edges that may coexist in one reachable committed program state. A successful retention-sensitive mutation removes old edges and adds new edges atomically at its semantic commit; a failed mutation preserves the old topology and the retained-edge obligations that topology holds, while an incoming affine responsibility follows its separately planned failure path. Path or epoch separation may prove two edge sets never coexist, so a path-insensitive union of pre-commit and post-commit edges is not by itself proof of a runtime cycle. Where coexistence cannot be disproved, the topology is not proven legal and receives the normal topology diagnostic. A real direct source-created self-cycle or multi-family strongly connected component still requires one declared region.
 
 ### Backend-neutral memory requirements
 
@@ -1351,7 +1372,7 @@ They may contain:
 - retained-edge and retention-domain facts
 - retention cardinality
 - REC candidacy facts
-- group membership
+- declared-region membership
 - affine transfer and cleanup candidates
 - hidden-destination constraints
 - lifecycle constraints
@@ -1365,18 +1386,46 @@ They must not contain:
 - concrete counter layout
 - target-specific arena layout
 - target-specific handle representation
+- concrete retained-edge obligation transitions
+- planned affine-responsibility transitions
 
 Mandatory lifetime topology and these requirements are target-independent. Anything that depends on the target, the build profile or physical layout belongs to memory-strategy planning below.
 
 ### Memory-strategy planning
 
-The memory-strategy planner is compiler-owned and selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
+The memory-strategy planner is compiler-owned and selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
 
 It is invoked only after build-owned target partition and target-contract validation have established a candidate physical variant. It consumes validated topology, the backend-neutral memory requirements, the selected target, the build profile and backend memory capability metadata, performs target-specific family and layout refinement, and returns one `ValidatedMemoryPlan` per physical variant.
 
 The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Backend lowerers realise the plan and never choose a strategy. Selection is deterministic for one target, profile and backend configuration, and never affects source legality.
 
 Field-sensitive family and layout refinement runs per candidate variant, rebuilds the affected direct family-edge graph and revalidates the affected outlives, SCC and family-base facts. A refinement that cannot be proven falls back to the unsplit family and conservative retention; it never produces a source diagnostic.
+
+The planner also owns every concrete physical transition. Retained-edge analysis says which direct persistent edges an operation creates or removes; the planner turns each semantic commit into one normalised per-family obligation transition, fuses same-family removals and additions before lowering, and decides root-to-edge and edge-to-root reclassification. Backends encode those transitions and never derive them.
+
+One `ValidatedMemoryPlan` belongs to one target/profile physical-variant scope. It is not one plan per source module, not one project-global physical plan, not part of the canonical semantic module artefact and not a backend-owned strategy choice. It carries:
+
+```text
+physical variant identity and capability inputs
+post-refinement allocation-family graph
+one selected physical family plan for every reachable family
+region plans and complete exits
+declared-region plans and complete exits
+planned affine-responsibility transitions
+planned retained-edge obligation transitions
+hidden-destination plans
+cleanup plans
+destruction plans
+REC layout and counter decisions
+physical coalescing decisions
+normalised memory-plan identity inputs
+```
+
+Every reachable post-refinement family receives exactly one selected plan from `Stack`, `Inline`, `Affine`, `InferredRegion`, `DeclaredRegion`, `REC` and `HostGC`. Exact Rust enum decomposition remains open, and stack or inline placement may be separate from heap cleanup strategy, but no accepted outcome may be omitted.
+
+Physical coalescing is finalised before final plan validation and fingerprinting. It may retain storage slightly longer; it never widens semantic topology, changes an outlives relationship, changes source legality or changes diagnostics.
+
+Plan validation is an explicit step before the plan is published. It proves one selected plan per reachable family inside this variant scope, valid direct post-refinement families behind every obligation transition, one preserved semantic lifetime owner per family, a planned discharge or safe transfer for every affine obligation on every relevant path, complete inferred-region and declared-region exits, declared-region-owned families that are never individually releasable and never REC-selected, acyclic REC families with valid counter layouts and retained fallback regions, destruction plans that process outgoing obligations exactly once, projection representations that preserve or recover their allocation-family base, hidden destinations that satisfy their validated constraints, coalescing that preserved the original semantic topology, rejection of `HostGC` for a capable full-control release variant, and deterministic normalised plan identity for identical inputs. `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/` owns the complete numbered invariant list.
 
 The full planning order is:
 
@@ -1401,19 +1450,19 @@ validated HIR
 
 `check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering and output emission.
 
-Canonical REC design lives under `docs/src/developer-docs/memory-management/retained-edge-counting/`, with detailed sequencing in `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`.
+Canonical REC design lives under `docs/src/developer-docs/memory-management/retained-edge-counting/`. `docs/roadmap/roadmap.md` owns implementation sequencing.
 
 ### Backend handoff
 
-Backends receive validated HIR, borrow facts, validated affine cleanup decisions, validated lifetime topology and the complete `ValidatedMemoryPlan` for their target/profile physical variant. That plan carries allocation-family layout, selected physical strategies, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
+Backends receive validated HIR, borrow facts, validated lifetime topology and the complete `ValidatedMemoryPlan` for their target/profile physical variant. The plan is the single final physical memory authority: it carries allocation-family layout, selected physical strategies, inferred-region and declared-region placement, planned affine-responsibility transitions, planned retained-edge obligation transitions, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions. Borrow facts and lifetime topology are validated context and assertion material, never a second source of cleanup or count decisions. Backends realise the plan and never reconsider source legality, recompute topology or select their own strategy. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing collector; a missing strategy at that point is `CompilerError`.
 
-Canonical design lives under `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`. Declared `group` / `into` is accepted end-state syntax with implementation deferred; see `docs/src/developer-docs/memory-management/declared-memory-groups/` for the canonical semantic contract and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md` for implementation sequencing.
+Canonical design lives under `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`. Declared `name:` / `into name` is accepted end-state syntax with declared-region semantics deferred; see `docs/src/developer-docs/memory-management/declared-regions/` for the canonical semantic contract and `docs/roadmap/roadmap.md` for implementation sequencing.
 
-When group syntax is implemented:
+When declared-region syntax is implemented:
 
 - AST owns parser, scope, placement and freshness validation
-- group identity must not enter `TypeId`
-- HIR records explicit group metadata and exits
+- declared-region identity must not enter `TypeId`
+- HIR records declared-region metadata and exits
 - recoverable checked failure paths remain explicit HIR control flow before memory analyses
 - HIR still does not decide exact lifetime topology
 
@@ -1482,15 +1531,14 @@ Backend lowerers receive only explicit validated inputs:
 - stable local, cross-module and binding-backed call targets
 - borrow facts
 - validated lifetime-region facts and exported lifetime summaries
-- validated affine cleanup decisions
-- the target/profile-specific `ValidatedMemoryPlan` for this physical variant, with allocation-family layouts, selected strategies, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
+- the target/profile-specific `ValidatedMemoryPlan` for this physical variant, the single final physical memory authority, carrying allocation-family layouts, selected strategies, region and declared-region placement, planned affine-responsibility transitions, planned retained-edge obligation transitions, hidden-destination plans, cleanup plans, destruction plans, REC layout decisions and physical coalescing decisions
 - external boundary classifications
 - per-function link facts
 - selected-function, import and capability plans
 - semantic layout identities required by the target
 - builder lifecycle and runtime plans where relevant
 
-Borrow facts and validated lifetime-region facts are present as validated context where a lowerer needs them. They are not the authority from which a lowerer invents ownership or drop operations: every ownership, cleanup, region, group and REC decision comes from the `ValidatedMemoryPlan` for the variant being lowered.
+Borrow facts and validated lifetime-region facts are present as validated context where a lowerer needs them. They are not the authority from which a lowerer invents ownership, cleanup or count operations: every ownership, cleanup, inferred-region, declared-region and REC decision, and every concrete obligation transition, comes from the `ValidatedMemoryPlan` for the variant being lowered.
 
 Generated function sidecars carry the same conceptual lifetime summaries and facts as ordinary functions.
 

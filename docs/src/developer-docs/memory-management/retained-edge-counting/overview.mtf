@@ -6,31 +6,31 @@ The narrow counted strategy for runtime-many persistent retained edges.
 
 ## Contract
 
-- Retained-edge analysis supplies: allocation-family candidates, retained-edge creation and destruction facts, value-shape cardinality, outcome-sensitive effects, frontier-enabling effects and builtin collection/map summaries
-- The memory-strategy planner supplies: the selected `REC` strategy or an explicit REC-elision decision
-- REC lowering produces: counted-family layout, tags, count transitions and iterative destruction plans for REC-selected families
-- Decides: how an already-selected REC family carries retain, release and detached stored-result operations and how counted destruction runs
-- Must not decide: source legality, lifetime ownership, retained-edge legality, cycle legality, memory-strategy selection or whether a program compiles
-- Invariant: REC counts persistent retained edges only. It never counts ordinary aliases, never establishes legality and never permits cycles
+- Retained-edge analysis supplies: allocation-family candidates, semantic direct-edge creation and removal facts, value-shape cardinality, outcome-sensitive commit effects, whole-domain kills, detached stored-result provenance, frontier-enabling effects and builtin collection/map summaries
+- The compiler-owned memory planner supplies: the selected `REC` strategy or an explicit REC-elision decision, the counter layout, the concrete normalised per-family obligation transitions and the cleanup and destruction plans
+- REC lowering produces: the encoding only, that is tag extraction and masking, the counter load, checked update and zero test the plan requires, and the planned iterative destruction worklist
+- Decides: how an already-selected REC family encodes its planned transitions and how it performs the counted destruction the plan specifies
+- Must not decide: source legality, lifetime ownership, retained-edge legality, cycle legality, memory-strategy selection, concrete count transitions or whether a program compiles
+- Invariant: for one REC-selected family `F`, `REC count(F) = live counted persistent-edge obligations(F) + optional affine-root obligation(F)`, where the affine-root term is zero or one. Ordinary aliases, parameters, temporary projections and `get()` results never contribute obligations. REC never establishes legality and never permits cycles
 
 The ownership chain stays one-way:
 
 ```text
 retained-edge analysis
-    -> candidate and cardinality facts
-memory-strategy planner
-    -> REC selected or elided
-REC lowering
-    -> tags, counter layout, transitions and destruction plan
+    -> semantic edge facts, cardinality and commit effects
+memory planner
+    -> selected layout and planned transitions
+backend REC encoding
+    -> tags, counter updates and the planned destruction worklist
 ```
 
 Retained-edge and cardinality summaries are backend-neutral and precede target partition. Selected REC representation does not: REC selection happens inside target/profile-aware memory planning, after build-owned target partition and target-contract validation, and is therefore scoped to one physical variant.
 
-Final count transitions operate on direct post-refinement persistent edges, evaluated per target allocation family. One affine root can replace at most one persistent-edge obligation, so a storage operation that creates several direct edges into one family still changes the count. The normative per-family transition equation lives in `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`.
+Final count transitions operate on direct post-refinement persistent edges, evaluated per target allocation family. The planner fuses and normalises each semantic commit before lowering, so a same-family replacement never lowers as a decrement to zero followed by an increment. One affine root can replace at most one newly created direct persistent edge, so a storage operation that creates several direct edges into one family still changes the count. The normative per-family transition equation lives in `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`.
 
 Every REC family keeps its statically proven fallback lifetime region. REC can only reclaim that family earlier than the fallback region frontier. If counting did not exist or failed to improve precision, the static region would still make the program collector-free and correct. The planner fixes the representation before lowering: an uncounted strategy never upgrades to REC at runtime, and an REC-selected strategy never abandons counting or downgrades to an uncounted representation at runtime.
 
-REC is selected only after affine cleanup, inferred regions, cleanup frontiers, explicit groups, field-sensitive splitting and cheap bounded retention have all failed to give a precise enough answer. It is a precision mechanism inside a statically safe collector-free system, not the correctness fallback.
+REC is selected only after affine cleanup, inferred regions, cleanup frontiers, declared regions, field-sensitive splitting and cheap bounded retention have all failed to give a precise enough answer. It is a precision mechanism inside a statically safe collector-free system, not the correctness fallback.
 
 Implementation of this analysis is deferred.
 
@@ -39,6 +39,6 @@ Implementation of this analysis is deferred.
 - `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
 - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
-- `docs/src/developer-docs/memory-management/declared-memory-groups/overview.mtf`
+- `docs/src/developer-docs/memory-management/declared-regions/overview.mtf`
 - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
-- `docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md`
+- `docs/roadmap/roadmap.md`

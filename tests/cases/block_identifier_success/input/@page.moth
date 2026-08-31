@@ -1,0 +1,14 @@
+block || -> Int:
+    return 39
+;
+
+group || -> Int:
+    return 1
+;
+
+region || -> Int:
+    return 2
+;
+
+block_value = block() + group() + region()
+[:block_identifier_success value=[block_value]]

@@ -99,6 +99,7 @@ pub(crate) mod statements {
     pub(crate) mod collections;
     pub(crate) mod condition_validation;
     pub(crate) mod declarations;
+    pub(crate) mod declared_regions;
     pub(crate) mod diagnostics;
     pub(crate) mod fallible_handling;
     pub(crate) mod functions;
@@ -110,7 +111,6 @@ pub(crate) mod statements {
     pub(crate) mod match_headers;
     pub(crate) mod match_patterns;
     pub(crate) mod multi_bind;
-    pub(crate) mod scoped_blocks;
     pub(crate) mod terminality;
     pub(crate) mod value_production;
 }

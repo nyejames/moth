@@ -201,8 +201,8 @@ disappears.
 
 `clear` kills the map's complete retention domain. If no other live alias or
 retention domain can retain a target allocation family, the call becomes that
-family's final cleanup frontier. The map itself may continue to live. Group-owned
-allocation storage still remains until group exit.
+family's final cleanup frontier. The map itself may continue to live. Declared-region-owned
+allocation storage still remains until declared-region exit.
 
 Future map APIs must preserve narrow, analysable destruction effects. The full
 contract is explained for users in

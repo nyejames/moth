@@ -11,7 +11,7 @@ Companion authorities:
 - `docs/compiler-design-overview.md` for core compiler architecture
 - `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared groups, affine ownership, Retained Edge Counting and backend memory lowering
+- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared regions, affine ownership, Retained Edge Counting and backend memory lowering
 - `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
@@ -497,7 +497,8 @@ select command, artefact builder, build profile and tooling overlays
 -> target/profile-specific family/layout refinement
 -> revalidate affected refined family-edge facts
 -> memory-strategy planning
--> ValidatedMemoryPlan
+-> ValidatedMemoryPlan validation
+-> plan fingerprint and final variant key
 -> backend lowering
 -> collector-free artefact verification when required
 ```
@@ -1256,7 +1257,8 @@ entry/package roots
 -> target/profile-specific family/layout refinement
 -> revalidate affected refined family-edge facts
 -> memory-strategy planning
--> ValidatedMemoryPlan
+-> ValidatedMemoryPlan validation
+-> plan fingerprint and final variant key
 -> backend lowering
 -> collector-free artefact verification when required
 ```
@@ -1290,7 +1292,10 @@ Partitioning is entry-specific. A physical variant is not complete, and cannot b
 partition
 -> candidate physical variant
 -> target validation
+-> target/profile-specific family and layout refinement
+-> revalidate affected family-edge facts
 -> target/profile memory planning
+-> ValidatedMemoryPlan validation
 -> memory-plan fingerprint
 -> final physical-variant key
 -> deduplication/reuse
@@ -1314,15 +1319,18 @@ The memory-plan fingerprint covers a stable normalised representation of:
 
 - the post-refinement allocation-family graph
 - the selected strategy per family
-- region and group placement
-- affine cleanup decisions
-- hidden-destination physical requirements
+- inferred-region and declared-region placement
+- planned affine-responsibility transitions
+- normalised retained-edge obligation transitions
+- hidden-destination plans
 - REC representation decisions
 - cleanup plans
 - destruction plans
 - physical coalescing decisions
 
 Donor-local or process-local indexes are never fingerprinted directly.
+
+Physical coalescing is finalised before plan validation and fingerprinting, so a coalescing decision is part of the fingerprinted plan rather than a later lowering choice.
 
 Entries with the same key reuse one variant. Different keys produce separate JavaScript companion or Wasm variants.
 
@@ -1336,7 +1344,7 @@ Project and package link planning instantiates local lifetime summaries with bui
 
 `ProjectCompilation` or the link plan conceptually carries project-level validated lifetime topology. That topology is shared and target-independent, and it does not carry one project-global physical memory plan. Exact Rust shape remains open.
 
-Its handoff to physical planning is a set of backend-neutral memory requirements: allocation-family identity, validated lifetime owner, intervals, frontiers and epochs, retained-edge and retention-domain facts, retention cardinality, REC candidacy facts, group membership, affine transfer and cleanup candidates, hidden-destination constraints, lifecycle constraints and external-boundary constraints. They must not contain any selected physical strategy, host-GC representation, allocator choice, counter layout, arena layout or target-specific handle representation.
+Its handoff to physical planning is a set of backend-neutral memory requirements: allocation-family identity, validated lifetime owner, intervals, frontiers and epochs, retained-edge and retention-domain facts, retention cardinality, REC candidacy facts, declared-region membership, affine transfer and cleanup candidates, hidden-destination constraints, lifecycle constraints and external-boundary constraints. They must not contain any selected physical strategy, host-GC representation, allocator choice, counter layout, arena layout, target-specific handle representation, concrete retained-edge obligation transition or planned affine-responsibility transition.
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity. Lifecycle-root instantiation is what lets reactive and mounted storage that outlives a lexical function still satisfy one lifetime owner and the retained-edge outlives rule.
 
@@ -1346,11 +1354,50 @@ External boundary profile and capability metadata belong on the builder surface 
 
 ### Memory-strategy plans
 
-After link-level topology validation succeeds, and after build-owned target partition and target validation have established a candidate physical variant, the compiler-owned memory planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, explicit-group bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, region and group placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
+After link-level topology validation succeeds, and after build-owned target partition and target validation have established a candidate physical variant, the compiler-owned memory planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, inferred-region and declared-region placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
 
 Validated topology and backend-neutral memory requirements remain shared link facts. Each target/profile physical variant receives its own `ValidatedMemoryPlan` after partition and validation.
 
 The build system owns target partition, physical-variant orchestration, the build profile and target/backend capability metadata, and invokes the planner once per candidate physical variant. The planner stays compiler-owned. Backends consume the finished plan and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
+
+`ValidatedMemoryPlan` is scoped to one physical variant and carries:
+
+```text
+physical variant identity and capability inputs
+post-refinement allocation-family graph
+one selected physical family plan for every reachable family
+region plans and complete exits
+declared-region plans and complete exits
+planned affine-responsibility transitions
+planned retained-edge obligation transitions
+hidden-destination plans
+cleanup plans
+destruction plans
+REC layout and counter decisions
+physical coalescing decisions
+normalised memory-plan identity inputs
+```
+
+Every reachable post-refinement family receives exactly one selected plan from `Stack`, `Inline`, `Affine`, `InferredRegion`, `DeclaredRegion`, `REC` and `HostGC`. Exact Rust enum decomposition remains open; no accepted outcome may be omitted.
+
+Plan validation runs before the plan is published and fingerprinted, and proves:
+
+1. Every reachable post-refinement family has exactly one selected physical plan.
+2. Every plan family belongs to this physical-variant scope.
+3. Every retained-edge transition refers to valid direct post-refinement families.
+4. Every family preserves its one validated semantic lifetime owner.
+5. Every affine obligation reaches a planned discharge or safe transfer on every relevant path.
+6. Every inferred region has complete exits.
+7. Every declared region has complete bulk exits.
+8. Declared-region-owned families are never individually releasable and never REC-selected.
+9. Every REC family is acyclic and has a valid counter layout.
+10. Every REC family keeps its validated fallback region.
+11. Every destruction plan processes outgoing obligations exactly once.
+12. Every projection representation preserves or recovers the allocation-family base.
+13. Every hidden destination satisfies its validated destination and retained-edge constraints.
+14. Every physical coalescing decision preserves the original semantic topology.
+15. `HostGC` is rejected for a capable full-control release variant.
+16. Normalised plan identity is deterministic for identical inputs.
 
 ### Backend capability metadata and collector-free verification
 
@@ -1373,9 +1420,9 @@ This one-page runtime/memory contract applies to linked Moth Wasm variants. It d
 
 Project-level runtime bytes may be emitted once and instantiated separately for each page.
 
-Wasm lowering consumes explicit selected-function, import, export, capability, layout, validated lifetime and `ValidatedMemoryPlan` inputs.
+Wasm lowering consumes explicit selected-function, import, export, capability, layout, validated lifetime and `ValidatedMemoryPlan` inputs. It encodes the plan's normalised per-family retained-edge obligation transitions and planned discharge sites rather than deriving generic retain or release operations from borrow facts.
 
-Full-control runtime memory support must eventually cover allocator, inferred region, explicit-group, REC counter and destruction-plan behaviour. The current basic linear-memory page and heap-base planning is migration debt, not the accepted end state.
+Full-control runtime memory support must eventually cover allocator, inferred region, declared-region, REC counter and destruction-plan behaviour. The current basic linear-memory page and heap-base planning is migration debt, not the accepted end state.
 
 Wasm LIR is structured and backend-owned. It is not a second frontend semantic authority.
 

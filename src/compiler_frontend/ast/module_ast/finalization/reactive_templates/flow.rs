@@ -82,7 +82,7 @@ fn collect_initial_function_flows_from_node(
             }
         }
 
-        NodeKind::ScopedBlock { body }
+        NodeKind::LexicalScope { body }
         | NodeKind::RangeLoop { body, .. }
         | NodeKind::CollectionLoop { body, .. }
         | NodeKind::WhileLoop(_, body) => {
@@ -163,7 +163,7 @@ fn refresh_function_template_flows_from_node(
             }
         }
 
-        NodeKind::ScopedBlock { body }
+        NodeKind::LexicalScope { body }
         | NodeKind::RangeLoop { body, .. }
         | NodeKind::CollectionLoop { body, .. }
         | NodeKind::WhileLoop(_, body) => {
@@ -289,7 +289,7 @@ fn collect_return_metadata_from_node(
             }
         }
 
-        NodeKind::ScopedBlock { body }
+        NodeKind::LexicalScope { body }
         | NodeKind::RangeLoop { body, .. }
         | NodeKind::CollectionLoop { body, .. }
         | NodeKind::WhileLoop(_, body) => {

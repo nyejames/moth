@@ -234,9 +234,9 @@ fn branch_exits_ignore_statements_after_every_path_has_exited() {
 }
 
 #[test]
-fn branch_exits_recurse_into_scoped_blocks() {
+fn branch_exits_recurse_into_lexical_scopes() {
     let scoped = node(
-        NodeKind::ScopedBlock {
+        NodeKind::LexicalScope {
             body: vec![then_value(2)],
         },
         test_source_location(1),

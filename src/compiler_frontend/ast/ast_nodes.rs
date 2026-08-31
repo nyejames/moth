@@ -134,7 +134,9 @@ pub enum NodeKind {
         exhaustiveness: MatchExhaustiveness,
     },
 
-    ScopedBlock {
+    /// Compiler-generated lexical scope retained after static control-flow specialization.
+    /// Executable source parsing never emits this node directly.
+    LexicalScope {
         body: Vec<AstNode>,
     },
 

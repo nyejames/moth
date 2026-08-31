@@ -10,7 +10,7 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Runtime and backend memory lowering
 
-    Backends may choose different allocation and GC representations. They may not choose different language semantics.
+    Different targets and profiles may receive different allocation and GC representations. The compiler-owned memory planner selects them per physical variant, and no backend chooses different language semantics.
 ]
 
 #[section, reference_content]

@@ -322,9 +322,9 @@ Initial cases must cover:
 - copy in branches and joins
 - copy in loops
 - repeated internal aliases inside a copied aggregate
-- the boundary between borrow-level independence and later group-only cycle legality
+- the boundary between borrow-level independence and later cycle requiring one declared region legality
 
-AST/type checking still owns whether a graph is copyable. Lifetime analysis later owns destination regions and the explicit-group requirement for copied cycles. Boracle owns the access and provenance facts between those stages.
+AST/type checking still owns whether a graph is copyable. Lifetime analysis later owns destination regions and the declared-region requirement for copied cycles. Boracle owns the access and provenance facts between those stages.
 
 ## Modular last-use contract
 
@@ -561,7 +561,7 @@ This plan must not:
 - make Boracle a correctness fallback for compiler failures
 - assign allocation-family lifetime owners
 - validate retained-edge topology or cycles
-- choose affine, region, group, REC or GC representations
+- choose affine, region, declared region, REC or GC representations
 - emit drops or mutate HIR
 - expose source lifetime, reference or move syntax
 - add a stable public solver-selection CLI

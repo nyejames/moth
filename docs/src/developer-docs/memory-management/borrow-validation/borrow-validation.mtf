@@ -1,15 +1,31 @@
-
 # Borrow validation
 
 ## Design contract
 
-Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional affine-transfer safety, and writes analysis facts beside HIR.
+Borrow validation runs after HIR generation. It reads coherent, validated HIR, enforces source-language access safety and optional affine-transfer safety, and publishes solver-independent facts beside HIR.
 
-Last-use analysis is central to the memory model. Its facts are what let later stages transfer affine cleanup responsibility, end inferred regions at cleanup frontiers and avoid counting most allocations.
+It doesn't rewrite HIR, choose the final memory strategy, perform backend lowering or decide lifetime topology. Borrow validation supplies facts. Lifetime analysis and memory planning own the later decisions. Lifetime owners, retained edges, escapes and cycles belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+
+Last-use analysis is central to the memory model. Its facts let later stages transfer affine cleanup responsibility, prove candidate cleanup frontiers and select physical representations without treating ordinary aliases as counted obligations. The later stages make those decisions after validating the complete topology.
 
 Recoverable numeric, cast and fallible-operation paths are already explicit HIR branches, locals and exits before borrow validation.
 
-It doesn't rewrite HIR, choose the final memory strategy, perform backend lowering, or decide lifetime topology. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy. Lifetime owners, retained edges, escapes and cycles belong to @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+### Stable downstream fact contract
+
+Every borrow solver must publish the same semantic handoff even when its internal representation and algorithm differ. The stable downstream facts are:
+
+- normalised semantic places and overlap facts
+- value origins and preliminary provenance
+- shared and exclusive loan or access liveness
+- path-sensitive future-use and last-use classifications
+- optional affine-transfer candidates
+- proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
+- proof that no capable source alias survives a candidate cleanup frontier
+- preliminary return-root alias and projection evidence
+- reactive invalidation and observability facts
+- resolved external access-boundary classifications
+
+These are semantic facts rather than a required lattice, root table or solver storage format. A different solver can compute them differently without changing source semantics. The handoff never selects REC, constructs a physical memory plan or emits runtime instructions.
 
 ## Main compiler paths
 
@@ -33,32 +49,18 @@ It doesn't rewrite HIR, choose the final memory strategy, perform backend loweri
 
 Borrow validation doesn't reparse source syntax, solve generics or traits, or see AST-only generic or trait state.
 
-## Analysis model
+## Semantic places and access liveness
 
-Accepted abstract states:
+Every analysed place is normalised to a semantic place with explicit projections and an overlap relation. The overlap facts state which places may designate the same storage. A solver may report overlap conservatively when it cannot prove disjointness, but downstream consumers don't depend on a particular root-set representation.
 
-- **uninitialized:** local has no valid value.
-- **slot:** local may own independent storage.
-- **alias:** local observes roots owned elsewhere.
-- **slot + alias:** conservative control-flow result where either shape may arrive.
-
-These are analysis lattice states. They are not Moth source types and do not directly prescribe one backend runtime representation.
-
-## Access roots and aliases
-
-Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.
-
-Root tracking is analysis metadata, not source-visible reference identity.
-
-## Alias activity
+Value origins and preliminary provenance identify where a value came from and which place or result may be observed. Alias bindings carry those facts rather than creating independent copies. Root tracking is analysis metadata, not source-visible reference identity.
 
 Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
 
 - A shared alias blocks overlapping mutation only until its last potential use on the relevant path.
-- An unused shared alias does not block later mutation.
-- Branches are analysed independently.
-- Joins conservatively retain activity when any incoming path may still use the alias.
-- Loops use fixed-point future-use reasoning.
+- An unused shared alias doesn't block later mutation.
+- Shared and exclusive loan or access liveness is part of the stable handoff.
+- Ordinary aliases, parameters, temporary projections and `get()` results don't become Retained Edge Counting obligations.
 
 ## Exclusivity validation
 
@@ -72,52 +74,106 @@ Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
 
 ## The last-use contract
 
-These points are locked accepted design.
+These points are locked accepted design and are independent of the solver used to derive them.
 
-1. Last-use analysis is central to memory precision.
+1. Last-use analysis produces path-sensitive future-use and last-use classifications for the stable downstream handoff.
 2. Alias activity is path-sensitive and non-lexical.
 3. Branches are analysed independently.
 4. Loops use fixed-point future-use reasoning.
 5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.
-6. When optional transfer is not proven, the operation remains a borrow and the program remains valid.
+6. When optional transfer isn't proven, the operation remains a borrow and the program remains valid.
 7. Last-use facts may move affine cleanup responsibility through calls, returns, aggregate insertion, container detachment and control-flow paths.
 8. Loop forms may expose a final-iteration fact only when finality is known without changing source evaluation order.
-9. Borrow validation does not assign semantic lifetime owners and does not choose a physical memory strategy.
+9. A candidate cleanup frontier requires proof that no capable source alias survives it.
+10. A persistent edge or affine root must not disappear while a dependent temporary borrow remains usable.
+11. Borrow validation doesn't assign semantic lifetime owners and doesn't choose a physical memory strategy.
 
-Cleanup responsibility is affine: it may move or be discharged, but it never duplicates.
+Cleanup responsibility is affine: it may move or be discharged, but it never duplicates. Borrow validation supplies candidates and proofs. It doesn't make the final physical affine decision.
+
+### One fact, several consumers
+
+Borrow validation supplies facts. Lifetime analysis and memory planning own the later decisions.
+
+[table:
+    [th:
+        [: Fact]
+        [: Consumer]
+    ]
+
+    [td:
+        [: a shared or exclusive access may still be used]
+        [: borrow conflict validation]
+    ]
+
+    [td:
+        [: no later source use exists on every relevant path]
+        [: optional affine transfer]
+    ]
+
+    [td:
+        [: no capable source alias survives]
+        [: cleanup-frontier proof]
+    ]
+
+    [td:
+        [: a final-use persistent store commits]
+        [: affine root to persistent edge reclassification]
+    ]
+
+    [td:
+        [: a stored value is detached into an owned result]
+        [: persistent edge to affine root reclassification]
+    ]
+
+    [td:
+        [: a final loop iteration is statically known]
+        [: final-iteration responsibility transfer]
+    ]
+
+    [td:
+        [: no observer or recreating source survives an epoch]
+        [: inferred-region epoch completion]
+    ]
+
+    [td:
+        [: edge sets are mutually exclusive across paths or epochs]
+        [: avoid a false cycle coexistence result]
+    ]
+]
+
+The table describes data flow, not a transfer of ownership. Borrow validation supplies the facts. Lifetime topology validates retained-edge and cycle legality, and the memory planner decides physical reclassification and cleanup plans.
 
 ## Future-use and optional transfer safety
 
-Future-use analysis answers whether a root is required again after the current program point. It is a sufficient basis for optional transfer eligibility, not a source-visible lifetime system.
+Future-use analysis answers whether a semantic place or value is required again after the current program point. It is a sufficient basis for optional transfer eligibility, not a source-visible lifetime system.
 
 Semantic classification:
 
-- **no future use on every relevant path:** transfer is eligible as an optimisation.
+- **no future use on every relevant path:** transfer is eligible as an optimisation candidate.
 - **future use:** the operation remains a borrow.
 - **path-dependent or imprecise:** the operation remains a borrow conservatively.
 
-Inferred transfer is optional. When safe transfer is not proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.
+An optional transfer candidate is valid only with the relevant path-sensitive proof. It must also preserve any dependent temporary borrow and must not leave a capable source alias that could recreate a retained edge beyond a candidate cleanup frontier.
 
-Transfer proof failure is not a source diagnostic. Path-dependent optional transfer always backs off to borrowing in the accepted design.
+Inferred transfer is optional. When safe transfer isn't proven on every relevant path, the operation remains a borrow. Failure to prove an ownership optimisation must not make an otherwise valid source program invalid.
 
-The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. The progress matrix records the remaining precision gaps without changing this accepted fallback rule.
+Transfer proof failure isn't a source diagnostic. Path-dependent optional transfer always backs off to borrowing in the accepted design.
 
 ## No ordinary mandatory-consuming operation
 
 Current source syntax has no mandatory-consuming ordinary-value operation. There is no move keyword, consuming parameter spelling or owned signature variant.
 
-A user-facing use-after-consumption diagnostic is reserved for a future accepted mandatory-consuming surface. It is not valid for ordinary optional transfer.
+A user-facing use-after-consumption diagnostic is reserved for a future accepted mandatory-consuming surface. It isn't valid for ordinary optional transfer.
 
 Internal inconsistent-analysis or impossible metadata uses `CompilerError`.
 
-## Control flow and joins
+## Control-flow requirements
 
 - Branches are analysed independently.
-- Loops participate in fixed-point analysis.
-- Joins conservatively combine possible states and roots.
-- Branch-local aliases are removed when they leave visibility.
-- Returns, breaks and region exits inform advisory destruction planning.
-- Infinite paths without exits don't require an exit drop merely because they loop.
+- Loops participate in fixed-point future-use analysis.
+- Joins preserve path-sensitive future-use and access facts and conservatively retain a fact when any incoming path may still use it.
+- Branch-local aliases cease to be usable when they leave visibility.
+- Returns, breaks and region exits expose control-flow facts to lifetime validation and memory planning. They don't decide destruction.
 
 ## Function and external-call summaries
 
@@ -126,20 +182,20 @@ Borrow validation consumes and produces:
 - parameter access mode
 - mutation effects
 - transfer eligibility / effect category
-- preliminary return-root alias evidence for lifetime analysis
+- preliminary return-root alias and projection evidence
 - reactive effects
 - external function access rules
 - external return-alias metadata
 
-Borrow validation does not produce final result provenance, retained-parameter constraints, retention cardinality, detached stored-result effects, whole-domain kills, frontier-enabling effects, outcome-sensitive retention effects or outlives summaries. Lifetime and retained-edge analysis owns those final summaries and validates their topology.
+Borrow validation doesn't produce final result provenance, retained-parameter constraints, retention cardinality, detached stored-result effects, whole-domain kills, outcome-sensitive retention effects, frontier-enabling effects or outlives summaries. It may provide candidate-frontier capability-death proof as a stable fact, but retained-edge analysis owns the final frontier-enabling decision and those retained-edge effects.
 
 All runtime value parameters, immutable or mutable, may be eligible for inferred responsibility transfer. Parameter access mode remains separate from optional ownership effect. An immutable parameter receiving ownership remains read-only. A mutable parameter receiving ownership may mutate according to the source contract.
 
-Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
+Closed external boundary profiles override this general rule. WIT value-only calls are non-consuming. Restricted host-value crossings are non-consuming, and mutable opaque-handle access doesn't transfer Moth storage through the ordinary Moth ownership ABI.
 
 `MayConsume`, `NeverConsumes` and `AlwaysConsumes` are analysis/lowering categories, not source-visible signature categories.
 
-A `MayConsume` summary means the call path can receive responsibility when the caller proves a safe transfer. It does not let a callee unpredictably invalidate a borrowed argument.
+A `MayConsume` summary means the call path can receive responsibility when the caller proves a safe transfer. It doesn't let a callee unpredictably invalidate a borrowed argument.
 
 `AlwaysConsumes` may describe a specialised already-proven call path. It must not turn a source function into a mandatory-consuming API.
 
@@ -147,20 +203,17 @@ Call transfer uses resolved metadata, not source dependencies or runtime names.
 
 ## Side-table outputs
 
-- function summaries
-- block-entry states
-- block-exit states
-- statement-entry states
-- source access facts
-- transfer eligibility facts
-- preliminary return-root alias evidence
-- reactive invalidation facts
-- advisory drop candidates
-- aggregate statistics where useful for tooling
+### Stable required facts
 
-These facts are read-only outputs keyed by HIR identity. They don't become a second semantic IR and must not mutate HIR.
+The read-only side-table handoff carries every fact listed under `Stable downstream fact contract`, plus the function, block and statement context needed to key those facts to HIR identity.
 
-Advisory drop candidates are not lifetime topology and not exact release permission.
+These facts are read-only outputs keyed by HIR identity. They don't become a second semantic IR and must not mutate HIR. A solver may use additional internal state or tooling statistics, but consumers depend on the semantic facts rather than that storage.
+
+### Current scaffolding debt
+
+The alpha side table may emit advisory `DropIfOwned` drop candidates. `DropIfOwned` names the current Wasm scaffolding instruction and its migration debt only. These candidates aren't stable handoff facts, lifetime topology, exact release permission or final cleanup decisions.
+
+The permanent conceptual conditional operation is `discharge_if_owned`. The memory planner owns final transfer, discharge, destroy and bulk-reclaim plans.
 
 ## Reactive subscriptions and invalidation
 
@@ -178,49 +231,76 @@ Reactivity V1 precision:
 - field, item and path granularity is future precision
 - subscription observability is consumed by lifetime validation
 
-Reactive invalidation facts are distinct from builder-owned page/mount lifetime roots.
+Reactive invalidation and observability facts are part of the stable handoff. They're distinct from builder-owned page/mount lifetime roots.
 
 ## Handoff to lifetime validation
 
 Borrow validation supplies the next analysis with:
 
-- validated access and alias facts
+- normalised semantic places, overlap and validated access facts
+- shared and exclusive loan or access liveness
+- path-sensitive future-use and last-use classifications
 - optional-transfer eligibility facts
+- capable-source death proof that no source alias able to recreate an edge survives a candidate cleanup frontier
+- temporary-borrow safety proof that a persistent edge or affine root cannot disappear while its dependent temporary borrow remains usable
+- path- and epoch-sensitive edge-coexistence evidence
 - preliminary return-root alias and projection evidence
 - reactive invalidation and observability facts
 - external boundary classifications already resolved for access
 
-Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles and outlives constraints. See @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
+Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles, edge coexistence and outlives constraints. It reasons about committed retained-edge states rather than treating every analysis fact as a physical decision. See @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
 
 ### Handoff to retained-edge analysis
 
 Retained-edge liveness is part of lifetime topology, not a separate runtime ownership system. Borrow validation supplies the alias-liveness substrate it depends on:
 
-- last potential use per alias, per path
+- last potential use per semantic place and path
 - proof that no capable source alias survives a candidate frontier
 - proof that a persistent edge or affine root cannot be destroyed while a dependent temporary borrow is still usable
+- path- and epoch-sensitive evidence about which edge sets may coexist
 
-That last guarantee is what allows Retained Edge Counting to ignore temporary aliases entirely rather than adding a second safety mechanism. Borrow validation never decides which allocation families are counted. See @../retained-edge-counting (Retained Edge Counting).
+Retained-edge analysis owns the semantic facts about direct persistent edges, their cardinality, outcome-specific commit effects, whole-domain kills, detached stored-result provenance and final frontier-enabling effects. The compiler-owned memory planner decides REC selection, concrete obligation transitions, root-to-edge or edge-to-root reclassification, cleanup and destruction. Backend lowering encodes that plan only.
+
+That last guarantee allows Retained Edge Counting to ignore temporary aliases entirely rather than adding a second safety mechanism. Borrow validation never decides which allocation families are counted. Ordinary aliases, parameters, temporary projections and `get()` results never contribute REC obligations.
 
 ## Conservative precision and extension points
 
-Borrow validation may be conservative. Stronger field-, projection-, region- or path-level analysis may accept more programs or unlock more optimisation, but it must not change the semantics of already-valid programs.
+Borrow validation may be conservative. Stronger field-, projection-, region- or path-level production solvers may accept more programs or unlock more optimisation, but they must not change the stable handoff or the semantics of already-valid programs.
 
-The accepted design permits conservative analysis. The current analysis shape includes:
+Boracle is a permanent reference solver and experiment facility. It may improve precision and test alternative algorithms without changing the stable handoff or source semantics. The memory model doesn't depend on Boracle running during normal compilation, and a production solver need not reuse Boracle's storage or algorithm.
 
-- Projections may share their base root conservatively.
-- Map lookup aliases the map conservatively.
-- Joined control flow may retain mixed slot/alias state.
-- Advisory drop sites are candidates, not exact source lifetimes.
-- Exact region destruction may be refined later.
+Missing optional transfer proof falls back to borrowing. Missing mandatory topology proof remains a topology diagnostic rather than a physical-strategy fallback.
 
-These are precision choices, not permanent source-language restrictions.
+## Current alpha implementation
+
+Everything in this section describes the current alpha algorithm or its scaffolding. It isn't the solver-independent architecture above and may be replaced without changing the stable handoff or source semantics.
+
+### Abstract states and root approximation
+
+The current alpha lattice uses these states:
+
+- **uninitialized:** local has no valid value.
+- **slot:** local may own independent storage.
+- **alias:** local observes roots owned elsewhere.
+- **slot + alias:** conservative control-flow result where either shape may arrive.
+
+The current root approximation is centred on `LocalId`. Fields and indexes resolve conservatively through their base roots. Alias bindings carry root sets, and merged control flow may union those sets. This metadata isn't source-visible reference identity and isn't a permanent downstream representation.
+
+### Future-use transfer and joins
+
+The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Branches are visited independently. Joins conservatively combine incoming alpha states and root sets, retaining activity when any incoming path may still use an alias. Loops use the same fixed-point transfer until the current result stabilises.
+
+Branch-local aliases are removed when they leave visibility. The current transfer implementation records returns, breaks and region exits for advisory cleanup-candidate generation. An infinite path without an exit doesn't receive an exit candidate merely because it loops.
+
+### Advisory drop candidates
+
+Current advisory drop candidates are implementation hints for the alpha lowering path. They don't prove lifetime topology, exact release permission or a final destruction point. Stronger production analysis may replace their derivation or omit them entirely.
 
 ## Diagnostics
 
 - Access conflicts remain user-facing `CompilerDiagnostic` values.
 - Diagnostics carry source locations and structured reasons.
-- Lack of optional move/transfer proof is not a diagnostic.
+- Lack of optional move/transfer proof isn't a diagnostic.
 - Internal malformed-HIR or impossible-analysis state uses `CompilerError`.
 - Conflicting mutable/shared access, duplicate exclusive access and invalid place access need distinct reasons.
 - Diagnostics must not be stored as analysis state.
@@ -233,6 +313,7 @@ These are precision choices, not permanent source-language restrictions.
 - Reject a program merely because optional transfer is unavailable.
 - Restrict transfer eligibility to mutable parameters.
 - Choose the physical memory strategy or select counted representations.
+- Choose concrete retained-edge obligation transitions.
 - Emit runtime drops or frees.
 - Decide pointer tagging.
 - Solve generics or traits.
@@ -243,14 +324,14 @@ These are precision choices, not permanent source-language restrictions.
 
 ## Common mistakes
 
-- Equating analysis slot state with guaranteed runtime ownership.
+- Equating an internal analysis state with guaranteed runtime ownership.
 - Treating aliases as independent copies.
 - Allowing a garbage-collected representation to bypass invalid aliasing.
 - Using diagnostics as transfer state.
-- Mutating HIR to insert drops.
+- Mutating HIR to insert cleanup.
 - Deciding runtime ABI inside the checker.
-- Assuming `May` future use is always safe to consume.
-- Treating advisory drop sites as exact lifetimes or validated release permission.
+- Assuming may-future-use is always safe to consume.
+- Treating advisory candidates as exact lifetimes or validated release permission.
 - Rejecting path-dependent optional transfer instead of borrowing.
 - Folding lifetime topology into borrow validation.
 
@@ -259,7 +340,7 @@ These are precision choices, not permanent source-language restrictions.
 - @../ (Memory management): core memory contract
 - @../access-and-aliasing (Access and aliasing): source access semantics
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): retained edges and region topology
-- @../ownership-and-drops (Affine ownership and drops): consumers of transfer and drop facts
+- @../ownership-and-drops (Affine ownership and drops): consumers of transfer and cleanup facts
 - @../retained-edge-counting (Retained Edge Counting): why temporary aliases are never counted
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler HIR generation): validated HIR input
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler borrow validation): module ownership and exported call effects

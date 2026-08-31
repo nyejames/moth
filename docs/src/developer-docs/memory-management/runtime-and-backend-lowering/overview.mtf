@@ -4,10 +4,10 @@ Physical memory strategies and the collector-free release guarantee.
 
 ## Contract
 
-- Input: validated HIR; borrow facts; validated affine cleanup decisions; validated lifetime topology; `ValidatedMemoryPlan` containing allocation-family layouts, selected strategies, cleanup/destruction plans, REC decisions and physical coalescing decisions; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
+- Input: validated HIR; `ValidatedMemoryPlan` for this physical variant, the single final physical authority, containing allocation-family layouts, selected strategies, inferred-region and declared-region placement, planned affine-responsibility transitions, planned retained-edge obligation transitions, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions; borrow facts and validated lifetime topology as validation context; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
 - Output: target-specific allocation, region, counted, garbage-collected and ownership representations
 - Decides: realisation of the selected memory plan, handle-tag representation and conservative retention behaviour for already-legal topology
-- Must not decide: source legality, borrow facts, region legality, memory-strategy selection, target partition or page lifecycle policy
+- Must not decide: source legality, borrow facts, region legality, memory-strategy selection, concrete obligation transitions, target partition or page lifecycle policy
 - Invariant: every backend consumes the complete validated memory plan, preserves the same shared, exclusive, copy and move semantics, and a capable full-control release backend must not fall back to a tracing collector
 
 ## Planning order
@@ -31,7 +31,7 @@ Physical memory strategies and the collector-free release guarantee.
         -> collector-free artefact verification where required
 ]
 
-`check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering. Each `ValidatedMemoryPlan` is scoped to one target/profile physical variant. The compiler-owned memory planner chooses host GC versus affine, region, group or REC representation for that variant; lowerers only realise the selected plan. GC-native and collector-free variants share the same mandatory topology result.
+`check` runs through creation and validation of the `ValidatedMemoryPlan` and stops before backend lowering. Each `ValidatedMemoryPlan` is scoped to one target/profile physical variant. The compiler-owned memory planner chooses host GC versus affine, inferred-region, declared-region or REC representation for that variant; lowerers only realise the selected plan. GC-native and collector-free variants share the same mandatory topology result.
 
 ## Main paths
 

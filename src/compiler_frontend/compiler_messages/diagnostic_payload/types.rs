@@ -1572,6 +1572,7 @@ pub enum DeferredFeatureReason {
     NestedPayloadPattern,
     ChoiceVariantDefaultValue,
     GenericReceiverMethod,
+    DeclaredRegion,
     CheckedBlock,
     AsyncBlock,
 }
@@ -1676,6 +1677,7 @@ pub enum InvalidStatementPositionReason {
     UnexpectedPipe,
     UnexpectedArrow,
     UnexpectedWildcard,
+    AnonymousDeclaredRegion,
     GenericParameterOutsideDeclarationHeader,
     UnexpectedOf,
     UnexpectedScopeCloseInExpression,

@@ -65,7 +65,7 @@ impl<'a> ConstFactCollector<'a> {
     /// Copy one advisory environment for a nested lexical scope.
     ///
     /// WHAT: clones the lexical overlay and attributes the copy.
-    /// WHY: every function body and every nested block, `if` arm and scoped block takes a copy of
+    /// WHY: every function body and every nested block, `if` arm and generated lexical scope takes a copy of
     /// what is visible so inner declarations cannot leak outward. The module base is shared behind
     /// an `Rc`, so only bindings the scopes introduced themselves are duplicated; the counters
     /// record how much that is.
@@ -250,7 +250,7 @@ impl<'a> ConstFactCollector<'a> {
                 self.try_add_body_local_fact(declaration, env)?;
             }
 
-            NodeKind::ScopedBlock { body } => {
+            NodeKind::LexicalScope { body } => {
                 let mut nested_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut nested_env)?;
             }
@@ -448,7 +448,7 @@ impl<'a> ConstFactCollector<'a> {
     ///
     /// WHAT: recursively descends through nested AST nodes, function literals,
     ///       and fallible handling structures.
-    /// WHY: expressions may contain scoped blocks or call arguments that
+    /// WHY: expressions may contain compiler-generated lexical scopes or call arguments that
     ///      reference or declare const-foldable values.
     fn walk_place_expression_for_body_local(place: &PlaceExpression) {
         match &place.kind {
@@ -556,9 +556,9 @@ impl<'a> ConstFactCollector<'a> {
                     let mut else_env = Self::scope_environment(env);
                     self.walk_body_local(&value_if.else_body, &mut else_env)?;
                 }
-                ValueBlock::Scoped(value_scoped) => {
+                ValueBlock::LexicalScope(value_lexical_scope) => {
                     let mut nested_env = Self::scope_environment(env);
-                    self.walk_body_local(&value_scoped.body, &mut nested_env)?;
+                    self.walk_body_local(&value_lexical_scope.body, &mut nested_env)?;
                 }
                 ValueBlock::Match(value_match) => {
                     self.walk_expression_for_body_local(&value_match.scrutinee, env)?;

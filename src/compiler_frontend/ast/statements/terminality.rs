@@ -13,7 +13,7 @@
 //!
 //! - `Return(_)` and `ReturnError(_)` terminate.
 //! - `Assert { condition: false, .. }` terminates only when the condition is the literal `false`.
-//! - `ScopedBlock { body }` terminates when its body terminates.
+//! - `LexicalScope { body }` terminates when its body terminates.
 //! - `If(_, then_body, Some(else_body))` terminates only when both bodies terminate.
 //! - `If(_, _, None)` does not terminate.
 //! - `Match` with a default arm terminates only when every arm body and the default body terminate.
@@ -120,7 +120,7 @@ fn body_is_all_paths_terminal(body: &[AstNode]) -> bool {
 /// Returns true when a single statement guarantees that all paths through it terminate.
 ///
 /// WHAT: inspects the AST node kind and delegates to recursive analysis for compound
-/// statements (`if`, `match`, `ScopedBlock`).
+/// statements (`if`, `match`, `LexicalScope`).
 /// WHY: simple statements have fixed behavior, but nested control flow requires checking
 /// every branch.
 fn statement_is_all_paths_terminal(statement: &AstNode) -> bool {
@@ -131,7 +131,7 @@ fn statement_is_all_paths_terminal(statement: &AstNode) -> bool {
             matches!(condition.kind, ExpressionKind::Bool(false))
         }
 
-        NodeKind::ScopedBlock { body } => body_is_all_paths_terminal(body),
+        NodeKind::LexicalScope { body } => body_is_all_paths_terminal(body),
 
         NodeKind::If(_, then_body, Some(else_body), _) => {
             body_is_all_paths_terminal(then_body) && body_is_all_paths_terminal(else_body)

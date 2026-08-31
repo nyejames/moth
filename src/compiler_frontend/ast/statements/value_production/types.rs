@@ -103,7 +103,7 @@ pub enum ValueReceiverKind {
 #[derive(Clone, Debug)]
 pub enum ValueBlock {
     If(ValueIfBlock),
-    Scoped(ValueScopedBlock),
+    LexicalScope(ValueLexicalScope),
     Match(ValueMatchBlock),
     Catch(ValueCatchBlock),
 }
@@ -148,7 +148,7 @@ pub struct ValueIfBlock {
 /// WHY: HIR still needs the ordinary value-block target for `then` values, but must not receive
 /// a runtime branch or the inactive body.
 #[derive(Clone, Debug)]
-pub struct ValueScopedBlock {
+pub struct ValueLexicalScope {
     pub body: Vec<AstNode>,
     pub scope: InternedPath,
     pub result_type_ids: Vec<TypeId>,

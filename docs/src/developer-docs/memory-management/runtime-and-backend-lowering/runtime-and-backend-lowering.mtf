@@ -3,7 +3,7 @@
 
 ## Design contract
 
-Backends may choose different allocation, region, counted, handle and ownership representations. They may not choose different language semantics.
+Different targets and profiles may receive different allocation, region, counted, handle and ownership representations. The compiler-owned memory planner selects them per physical variant, backend lowering encodes the result, and no target may receive different language semantics.
 
 Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, reactive liveness and identical observable results.
 
@@ -24,8 +24,8 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Borrow validation and lifetime-region validation precede target lowering.
 - Invalid source access or topology is rejected before backend codegen.
 - Backend doesn't infer access or topology from source syntax.
-- Backend consumes HIR plus borrow facts plus validated lifetime facts and validated affine cleanup decisions.
-- Backend consumes a complete `ValidatedMemoryPlan` rather than rediscovering or selecting strategy.
+- Backend consumes HIR plus borrow facts and validated lifetime facts as validation context and assertion material only.
+- `ValidatedMemoryPlan` is the single final physical authority for ownership decisions and count transitions. Backend consumes it rather than rediscovering or selecting strategy.
 - Backend representation can't affect `copy`, alias or `~` semantics.
 - Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
@@ -56,12 +56,77 @@ Physical memory strategy is chosen after target assignment, not before it.
 
 `check` runs through creation and validation of the `ValidatedMemoryPlan`. It stops before backend lowering and output emission.
 
+Final physical ownership decisions and count transitions come only from the `ValidatedMemoryPlan`. Lowering starts after that plan has been validated.
+
 - A `ValidatedMemoryPlan` is scoped to one target/profile physical variant, never to the whole project.
-- Host GC versus affine, region, group or REC representation is chosen by the compiler-owned planner, and only after target and build-profile information exists.
+- Host GC versus affine, inferred-region, declared-region or REC representation is chosen by the compiler-owned planner, and only after target and build-profile information exists.
 - Lowerers receive the already selected plan for their variant.
-- Lowerers do not choose REC, GC, region or group representation, and do not reconsider the plan.
+- Lowerers do not choose REC, GC, inferred-region or declared-region representation, and do not reconsider the plan.
 - A missing physical strategy after successful planning is `CompilerError`.
 - GC-native and collector-free variants share the same mandatory topology result. They differ only in the physical plan built on top of it.
+
+## ValidatedMemoryPlan contract
+
+A `ValidatedMemoryPlan` belongs to one target/profile physical-variant scope. It is not:
+
+- one plan per source module
+- one project-global physical plan
+- part of the canonical semantic module artefact
+- a backend-owned strategy choice
+
+Its conceptual contents are:
+
+[codeblock, $code("text"):
+    ValidatedMemoryPlan
+        physical variant identity and capability inputs
+        post-refinement allocation-family graph
+        one selected physical family plan for every reachable family
+        region plans and complete exits
+        declared-region plans and complete exits
+        planned affine-responsibility transitions
+        planned retained-edge obligation transitions
+        hidden-destination plans
+        cleanup plans
+        destruction plans
+        REC layout and counter decisions
+        physical coalescing decisions
+        normalised memory-plan identity inputs
+]
+
+The accepted family strategy outcomes are:
+
+[codeblock, $code("text"):
+    Stack
+    Inline
+    Affine
+    InferredRegion
+    DeclaredRegion
+    REC
+    HostGC
+]
+
+Exact Rust enum decomposition remains open. Stack or inline placement may be separate from heap cleanup strategy. No accepted outcome may be omitted from the conceptual contract.
+
+Before publication, plan validation proves:
+
+1. Every reachable post-refinement family has exactly one selected physical plan.
+2. Every plan family belongs to this physical-variant scope.
+3. Every retained-edge transition refers to valid direct post-refinement families.
+4. Every family preserves its one validated semantic lifetime owner.
+5. Every affine obligation reaches a planned discharge or safe transfer on every relevant path.
+6. Every inferred region has complete exits.
+7. Every declared region has complete bulk exits.
+8. Declared-region-owned families are never individually releasable and never REC-selected.
+9. Every REC family is acyclic and has a valid counter layout.
+10. Every REC family keeps its validated fallback region.
+11. Every destruction plan processes outgoing obligations exactly once.
+12. Every projection representation preserves or recovers the allocation-family base.
+13. Every hidden destination satisfies its validated destination and retained-edge constraints.
+14. Every physical coalescing decision preserves the original semantic topology.
+15. `HostGC` is rejected for a capable full-control release variant.
+16. Normalised plan identity is deterministic for identical inputs.
+
+Physical coalescing occurs before final plan validation and fingerprinting. It may retain storage slightly longer, but it never widens semantic topology, changes outlives, changes source legality or changes diagnostics.
 
 ## Physical memory strategies
 
@@ -70,7 +135,7 @@ The memory planner selects one strategy per validated allocation family. Backend
 - stack or inline placement
 - static affine cleanup at a proven final use
 - inferred region allocation with a complete exit, including region epochs
-- explicit-group bulk reclamation
+- declared-region bulk reclamation
 - Retained Edge Counting for unresolved runtime-many persistent edges
 - host garbage-collected representation on debug profiles and GC-native backends
 
@@ -89,7 +154,7 @@ Where garbage collection is used, it represents an already-legal topology:
 - Deterministic destruction is not required for observable correctness.
 - Mandatory access and lifetime validation still run.
 - Affine cleanup operations may be erased.
-- `drop_if_owned` may be a no-op.
+- `discharge_if_owned` may be a no-op.
 - Handle tags may be erased when the host owns storage.
 
 The representation can use host garbage collection, Wasm GC or a runtime tracing collector. Exact current target support belongs in the progress matrix.
@@ -219,19 +284,21 @@ A future resource-capable profile requires a separate complete design for identi
 
 - Borrow and lifetime facts precede LIR.
 - Bit 0 of a family handle is affine cleanup responsibility only.
-- Bit 1 identifies REC representation; group and region representation are separate memory-plan metadata.
-- Imprecise planning retains conservatively; it does not reintroduce a collector in a capable release build.
+- Bit 1 identifies REC representation; declared region and region representation are separate memory-plan metadata.
+- Imprecise planning keeps storage conservatively under the owning region; it does not reintroduce a collector in a capable release build.
 - Missing topology proof is not a backend fallback.
 - Ownership-aware heap values use allocation-family handles carrying the two tag bits.
 - A projection must retain or recover the family base rather than masking an arbitrary interior pointer.
-- Conditional drops discharge owned handles; they destroy a family only where the plan says individual destruction is legal and nothing else retains it.
-- Runtime helpers own allocation, release, string, collection and handle contracts.
+- The `ValidatedMemoryPlan` supplies each family's planned persistent-edge obligation transitions, including created and removed edges, affine-root reclassification and transition fusion. Wasm encodes those transitions at their planned semantic commit points.
+- Wasm lowering does not independently derive physical count transitions. It must not emit a temporary decrement-to-zero followed by an increment for a same-family replacement whose planned net transition is zero.
+- `discharge_if_owned` satisfies planned affine cleanup obligations. It destroys a family only where the plan says individual destruction is legal and no other obligation remains.
+- Runtime helpers own allocation, discharge, destruction, string, collection and handle contracts.
 - The unified ownership ABI applies across ownership-aware calls.
 - Source semantics remain backend independent.
 
 ### Current implementation debt
 
-`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retain support. The current direct path from borrow-checker advisory drop sites to `DropIfOwned` remains scaffolding: final lowering must consume a validated memory plan and support affine, region, group and REC strategies. Treat the present implementation as migration debt, not as the accepted architecture.
+`src/backends/wasm/hir_to_lir/ownership.rs` is the ownership projection seam, and Wasm LIR includes conditional `DropIfOwned` plus reserved retained-edge transition support. The current direct path from borrow-checker advisory drop sites to `DropIfOwned` remains scaffolding: final lowering must consume a validated memory plan and support affine, inferred-region, declared-region and REC strategies. Treat the present implementation as migration debt, not as the accepted architecture.
 
 ## Runtime ownership metadata
 
@@ -244,29 +311,34 @@ A future resource-capable profile requires a separate complete design for identi
 - scalar values need not use tagged handles
 - representation details can evolve while preserving the accepted contract
 
-## Drop and retain behaviour
+## Planned discharge and retained-edge transitions
 
-- Release only owned values that are individually releasable or whose region is ending.
-- Never release borrowed values.
-- Retain when a runtime representation requires extending shared storage lifetime.
-- Remove retain and release checks when static proof permits.
-- Avoid double release.
-- Ensure all potential ownership paths reach release or safe transfer.
+- `transfer` moves affine cleanup responsibility to another path.
+- `discharge` satisfies one affine cleanup obligation.
+- `destroy` physically destroys one allocation family.
+- `bulk reclaim` ends a region or declared region.
+- `discharge_if_owned` is the only conceptual permanent name for the conditional operation.
+- It never discharges borrowed values.
+- The plan supplies each family's discharge sites and its normalised per-family obligation transitions. The backend encodes them.
+- A discharge does not always destroy:
+  - For an uncounted individually releasable family, discharge may destroy immediately.
+  - For an REC family, discharge removes the affine-root obligation. Destroy occurs only when the total count reaches zero.
+  - For an inferred-region family, the individual handle does not own region reclamation.
+  - For a declared-region family, no individual discharge destroys declared-region-owned storage. Declared-region exit bulk-reclaims it.
 - Garbage-collected lowering can erase ownership-specific operations.
 - REC may be used only for already-legal topology, and only where the planner selected it.
 - Counted destruction is iterative through a worklist, never recursive through the target stack.
-- Group-owned storage is released in bulk at group exit and never individually.
 
 ## Fact consumption
 
+Borrow facts and validated lifetime topology are validation context and assertion material only. They do not supply final physical ownership, cleanup or count decisions.
+
 Backends may consume:
 
-- value access classifications
-- call effects
+- value access classifications and call effects
 - complete result provenance, including detached stored results, retention, outcome-sensitive effects and outlives summaries
-- validated transfer decisions
-- validated affine cleanup decisions
-- `ValidatedMemoryPlan`, including allocation-family layout, selected representation, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
+- optional affine-transfer candidates, ownership constraints and candidate cleanup sites
+- `ValidatedMemoryPlan` as the single final physical authority, including allocation-family layout, selected representation, cleanup plans, destruction plans, REC decisions and physical coalescing decisions
 - validated lifetime topology and allocation-family facts
 - builder lifecycle roots
 - region/exit information
@@ -292,14 +364,17 @@ Live reactive subscriptions and mounted fragments can keep state observable. Own
 Allowed optimisations include:
 
 - ownership-effect specialisation
-- drop-check elimination
-- retain elimination
+- discharge-check elimination
+- local tag-test elimination where ownership or representation state is statically known
 - region allocation
 - stack or arena allocation
 - collector-free release lowering and artefact verification
-- physical drop coalescing after semantic proof
+- realisation of planned physical coalescing
+- base-pointer mask hoisting as an encoding optimisation
 - devirtualized runtime helpers
 - target-specific handle representation
+
+Transition fusion stays plan-owned and is not a backend optimisation. Backends may only encode the transitions after plan validation.
 
 Requirements:
 
@@ -311,7 +386,7 @@ Requirements:
 
 ## Imprecision requirements
 
-When a backend can't place precise individual cleanup for a value, the allocation remains under its region or group owner and is reclaimed at that owner's exit.
+When a backend can't place precise individual cleanup for a value, the allocation remains under its inferred or declared region owner and is reclaimed at that owner's validated exit.
 
 Conservative retention is valid. Semantic divergence isn't. In a capable full-control release build, imprecision must not reintroduce a tracing collector, and unknown external retention is never a collector fallback. A missing physical strategy after successful topology validation is `CompilerError`.
 
@@ -352,6 +427,6 @@ Conservative retention is valid. Semantic divergence isn't. In a capable full-co
 - @../retained-edge-counting (Retained Edge Counting): counted layout, transitions and iterative destruction
 - @../borrow-validation (Borrow validation): analysis facts
 - @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation): topology legality
-- @../declared-memory-groups (Declared memory groups): declared lifetimes, placement, exits and group-crossing restrictions
+- @../declared-regions (Declared regions): declared lifetimes, placement, exits and declared-region crossing restrictions
 - @https://github.com/nyejames/moth/blob/main/docs/compiler-design-overview.md (Compiler design overview)
 - @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build-system design)

@@ -1253,27 +1253,22 @@ fn tokenizes_lowercase_this_as_reserved_receiver_keyword() {
 }
 
 #[test]
-fn tokenizes_statement_block_keywords_as_reserved_tokens() {
-    let (file_tokens, _string_table) = tokenize_source("block checked async\n");
+fn tokenizes_declared_region_names_as_symbols_and_semantic_scope_words_as_keywords() {
+    let (file_tokens, _string_table) = tokenize_source("block group region checked async\n");
 
+    for (index, word) in [(1, "block"), (2, "group"), (3, "region")] {
+        assert!(
+            matches!(file_tokens.tokens[index].kind, TokenKind::Symbol(_)),
+            "expected '{word}' to lex as an ordinary symbol"
+        );
+    }
     assert!(
-        matches!(file_tokens.tokens[1].kind, TokenKind::Block),
-        "expected 'block' to lex as a statement block token"
-    );
-    assert!(
-        matches!(file_tokens.tokens[2].kind, TokenKind::Checked),
+        matches!(file_tokens.tokens[4].kind, TokenKind::Checked),
         "expected 'checked' to lex as a reserved checked block token"
     );
     assert!(
-        matches!(file_tokens.tokens[3].kind, TokenKind::Async),
+        matches!(file_tokens.tokens[5].kind, TokenKind::Async),
         "expected 'async' to lex as a reserved async block token"
-    );
-    assert!(
-        !file_tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Symbol(_))),
-        "statement block keywords should not remain user symbols"
     );
 }
 

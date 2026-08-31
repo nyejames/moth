@@ -1,0 +1,29 @@
+# Declared regions
+
+Accepted deferred `name:` / `into name` semantics, count-free bulk lifetimes and the requirement that direct cycles use one declared region.
+
+**Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
+
+## Contract
+
+- Input: accepted `identifier:` declared-region headers and declaration receiving-boundary placement
+- Output: declared lifetime-owner, placement, destination-scope and declared-region-exit semantics
+- Decides: declared-region identity, legal placement syntax, destination binding visibility, nested declared-region retained-edge rules, cycle legality and declared-region escape rules
+- Must not decide: current implementation support, borrow-checker algorithm, physical arena representation, backend allocation or implementation order
+- Invariant: a declared region is a hard, count-free semantic lifetime boundary that cannot be silently widened, and its storage is never released individually
+
+The final source surface has no `group` keyword, dedicated general lexical-block construct, anonymous `_:` region or control-flow labels. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Keyword-led semantic scopes such as `async:` remain separate from programmer-declared regions.
+
+Count-free describes the declared region's own allocation families. A retained edge stored inside a declared region whose target is an externally owned REC family is still a counted persistent edge into that external family, released at declared-region exit before bulk reclamation.
+
+The compiler currently reserves valid `name:` headers with a deferred-feature diagnostic and rejects exact `_:`. Full declared-region parsing, placement, topology and cleanup remain deferred.
+
+## Read next
+
+- `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`
+- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/src/developer-docs/memory-management/access-and-aliasing/overview.mtf`
+- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/roadmap/roadmap.md`
+- `docs/src/docs/memory/declared-regions.mtf`
+- `docs/src/docs/progress/@page.moth`

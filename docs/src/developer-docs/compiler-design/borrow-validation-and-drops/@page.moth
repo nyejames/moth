@@ -10,7 +10,7 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 13. Borrow validation and drops
 
-    Data-flow over HIR enforces shared and exclusive access, infers moves and records advisory drops beside unchanged HIR.
+    Data-flow over HIR enforces shared and exclusive access, infers moves and publishes solver-independent facts beside unchanged HIR. The advisory drop candidates it also records are current scaffolding, not the final cleanup authority.
 ]
 
 #[section, reference_content]

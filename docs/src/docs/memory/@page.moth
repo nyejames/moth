@@ -14,9 +14,9 @@
 
 @automatic-cleanup-and-retained-edges-basic content as automatic_cleanup_and_retained_edges_basic
 
-@declared-memory-groups content as declared_memory_groups
+@declared-regions content as declared_regions
 
-@declared-memory-groups-basic content as declared_memory_groups_basic
+@declared-regions-basic content as declared_regions_basic
 
 @styles navbar,
     section,
@@ -25,7 +25,7 @@
     doc_pager
 
 page_title #= "Memory and lifetimes"
-page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared memory groups in Moth."
+page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."
 page_head #= language_theme_head
 
 #[navbar]
@@ -88,11 +88,11 @@ page_head #= language_theme_head
 
 #[section:
     [doc_level:
-        [$insert("key"):declared-memory-groups]
-        [$insert("title"):Declared memory groups]
-        [$insert("advanced"):[declared_memory_groups]]
+        [$insert("key"):declared-regions]
+        [$insert("title"):Declared regions]
+        [$insert("advanced"):[declared_regions]]
 
-        [declared_memory_groups_basic]
+        [declared_regions_basic]
     ]
 ]
 

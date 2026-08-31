@@ -14,7 +14,12 @@ None.
 
 Filed, not yet triaged.
 
-None.
+- [AUD-0005-F01: Tight `<`/`>` spacing suppression accepts binary comparisons that violate the operator spacing contract](./audits/AUD-0005-tokenizer-correctness.md#aud-0005-f01-tight--spacing-suppression-accepts-binary-comparisons-that-violate-the-operator-spacing-contract)
+  - `Correctness` | `frontend.tokenizer`
+- [AUD-0005-F02: Consecutive bare-CR newlines are consumed as horizontal whitespace, drifting line and column tracking](./audits/AUD-0005-tokenizer-correctness.md#aud-0005-f02-consecutive-bare-cr-newlines-are-consumed-as-horizontal-whitespace-drifting-line-and-column-tracking)
+  - `Correctness` | `frontend.tokenizer`
+- [AUD-0005-F03 (linked, Diagnostics lane): Unicode numeric characters are diagnosed as `_` separator errors](./audits/AUD-0005-tokenizer-correctness.md#aud-0005-f03-linked-diagnostics-lane-unicode-numeric-characters-are-diagnosed-as-_-separator-errors)
+  - `Diagnostics` | `frontend.tokenizer`
 
 ## Accepted
 

@@ -7,7 +7,7 @@ legal under one lifetime owner, and GC won't bypass it.
 
 After that proof succeeds, the compiler selects a physical strategy for each
 allocation: stack placement, cleanup at a proven final use, an inferred region,
-bulk release with a declared group, selective Retained Edge Counting or a
+bulk release with a declared region, selective Retained Edge Counting or a
 garbage-collected representation. REC may handle a runtime-dependent number of
 persistent stored edges that disappear independently when a region would retain
 storage materially beyond its useful lifetime. Strategy selection changes memory
@@ -36,9 +36,9 @@ An object may retain a reference only when the referenced allocation belongs to 
 
 where `R_value` lives at least as long as `R_container`.
 
-Valid edges include a local retaining a longer-lived parameter, a child-group value retaining a parent-group value, or two fields of one page-owned aggregate sharing one page-owned child.
+Valid edges include a local retaining a longer-lived parameter, a value owned by a child declared region retaining a value owned by a parent declared region, or two fields of one page-owned aggregate sharing one page-owned child.
 
-Invalid edges include a longer-lived object retaining shorter-lived storage, a parent retaining a child-group value, or a returned local outliving its source region without independent storage.
+Invalid edges include a longer-lived object retaining shorter-lived storage, a parent retaining a value owned by a child declared region, or a returned local outliving its source region without independent storage.
 
 ### Lexical scope doesn't define allocation lifetime
 
@@ -53,7 +53,7 @@ Widening follows one ordered owner chain only. The compiler must not widen farth
 Siblings don't form one ordered chain. Independently ending lifetime domains cannot be laterally promoted across each other. Sharing across sibling domains requires one of:
 
 1. an already-existing common semantic owner
-2. an enclosing declared memory group
+2. an enclosing declared region
 3. a builder-declared common lifecycle
 4. independent storage created by `copy`
 
@@ -71,7 +71,7 @@ A fresh result root may retain parameters or other pre-existing values only when
 
 ### Alias results
 
-An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results. An alias result stays tied to its existing lifetime owner and cannot become new group-owned storage through `into`.
+An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results. An alias result stays tied to its existing lifetime owner and cannot become new declared-region-owned storage through `into`.
 
 [codeblock, $code("moth"):
     original = load_items()
@@ -107,7 +107,7 @@ from its old allocation without rebinding another alias.
 
 ### Independent result graphs
 
-An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent acyclic graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph. A copied cyclic graph preserves its internal alias topology, so the whole graph must enter one explicit declared group. It cannot enter an ordinary inferred region.
+An independent result graph has no retained Moth reference to pre-existing storage. `copy` produces independent results. WIT value-only lifting produces independent results. An independent acyclic graph may enter an unrelated destination lifetime without retained-edge constraints to its source graph. A copied cyclic graph preserves its internal alias topology, so the whole graph must enter one declared region. It cannot enter an ordinary inferred region.
 
 ### Aggregate storage
 
@@ -127,7 +127,7 @@ that more precise per-result analysis could prove independent.
 
 ### Cycles
 
-Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. A declared `group` is the only source mechanism for building a direct cycle: the compiler never invents a cyclic region on your behalf. `copy` preserves internal alias topology, but copying a cycle into an ordinary inferred region remains invalid. Direct source construction of cyclic graphs is deferred with the rest of declared-group implementation.
+Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. A declared region is the only source mechanism for building a direct cycle: the compiler never invents a cyclic region on your behalf. `copy` preserves internal alias topology, but copying a cycle into an ordinary inferred region remains invalid. Direct source construction of cyclic graphs is deferred with the rest of declared-region implementation.
 
 ### Reactive and builder-owned lifetimes
 
@@ -159,7 +159,7 @@ Immutable and mutable parameters may both receive inferred destruction responsib
 - @#reference-semantics (Reference semantics)
 - @#copy-and-exclusive-access (Copy and exclusive access)
 - @#automatic-cleanup-and-retained-edges (Automatic cleanup and retained edges)
-- @#declared-memory-groups (Declared memory groups)
+- @#declared-regions (Declared regions)
 
 For the formal lifetime-region rules, see
 @../../developer-docs/memory-management/lifetime-regions-and-escape-validation (Lifetime regions and escape validation).

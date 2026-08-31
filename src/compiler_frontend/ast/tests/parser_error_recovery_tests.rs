@@ -7,7 +7,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, InvalidControlFlowStatementReason,
     InvalidFunctionSignatureReason, InvalidMatchPatternReason, InvalidMultiBindReason,
     InvalidStatementPositionReason, InvalidThisUsageReason, InvalidTraitKeywordUsageReason,
-    InvalidTypeAnnotationReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
+    RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -102,24 +102,6 @@ fn reports_invalid_match_pattern_forms_as_permanent_rule_errors() {
             case.name
         );
     }
-}
-
-#[test]
-fn rejects_bare_labeled_blocks_with_declaration_guidance() {
-    let diagnostic = parse_single_file_ast_diagnostic("label:\n    io.line([: [\"x\"]])\n;\n");
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidTypeAnnotation)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            context: TypeAnnotationContext::DeclarationTarget,
-            reason: InvalidTypeAnnotationReason::UnexpectedColon,
-        }
-    );
-    assert!(diagnostic.primary_location.start_pos.char_column > 0);
 }
 
 #[test]

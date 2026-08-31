@@ -1,0 +1,10 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0030"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0030"
+reason = "invalid_statement_position.anonymous_declared_region"
+path = "input/@page.moth"
+line = 1

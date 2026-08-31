@@ -1,4 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["block_scoped_success value=inside"]

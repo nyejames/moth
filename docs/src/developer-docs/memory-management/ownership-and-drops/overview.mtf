@@ -1,16 +1,16 @@
 # Affine ownership and drops
 
-Affine cleanup responsibility, the unified two-bit ABI and conditional destruction.
+Affine cleanup responsibility, the unified two-bit ABI and planned conditional discharge.
 
 ## Contract
 
 - Input: validated HIR, borrow and last-use facts, validated lifetime facts and the selected memory plan
-- Output: affine cleanup lowering decisions, handle-tag encoding and conditional drop placement
-- Decides: runtime realisation of validated transfer facts, handle-tag encoding, unified ABI behaviour, and conditional destruction
-- Must not decide: source legality, lifetime topology, HIR shape, or borrow facts
+- Output: encoded affine cleanup behaviour, handle-tag encoding and the planned `discharge_if_owned` sites the memory plan specifies
+- Decides: runtime realisation of the plan's affine-responsibility transitions, handle-tag encoding and unified ABI behaviour
+- Must not decide: source legality, lifetime topology, HIR shape, borrow facts, or the final affine cleanup decisions, which belong to `ValidatedMemoryPlan`
 - Invariant: cleanup responsibility is affine and never duplicates; collector-free, GC-native and debug paths preserve identical observable behavior
 
-Source legality and lifetime topology are already fixed before ownership lowering. Final lowering must consume a validated memory plan; the current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding to be replaced.
+Source legality and lifetime topology are already fixed before ownership lowering. `ValidatedMemoryPlan` owns the final discharge, destroy and bulk-reclaim decisions and lowering only encodes them; the current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding to be replaced.
 
 ## Main paths
 

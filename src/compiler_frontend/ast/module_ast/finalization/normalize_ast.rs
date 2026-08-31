@@ -663,7 +663,7 @@ fn normalize_ast_node_templates(
     match &mut node.kind {
         NodeKind::If(..)
         | NodeKind::Match { .. }
-        | NodeKind::ScopedBlock { .. }
+        | NodeKind::LexicalScope { .. }
         | NodeKind::RangeLoop { .. }
         | NodeKind::CollectionLoop { .. }
         | NodeKind::WhileLoop(_, _) => normalize_control_flow_templates(node, context),
@@ -793,7 +793,7 @@ fn normalize_control_flow_templates(
             Ok(())
         }
 
-        NodeKind::ScopedBlock { body } => normalize_nodes(body, context),
+        NodeKind::LexicalScope { body } => normalize_nodes(body, context),
 
         NodeKind::RangeLoop {
             bindings,
@@ -1003,7 +1003,7 @@ fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
             }
         }
 
-        NodeKind::ScopedBlock { body } => discard_inactive_assertion_messages(body),
+        NodeKind::LexicalScope { body } => discard_inactive_assertion_messages(body),
 
         NodeKind::RangeLoop {
             bindings,
@@ -1148,8 +1148,8 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
                 discard_inactive_assertion_messages(&mut value_if.else_body);
             }
 
-            ValueBlock::Scoped(value_scoped) => {
-                discard_inactive_assertion_messages(&mut value_scoped.body);
+            ValueBlock::LexicalScope(value_lexical_scope) => {
+                discard_inactive_assertion_messages(&mut value_lexical_scope.body);
             }
 
             ValueBlock::Match(value_match) => {
@@ -1556,8 +1556,8 @@ fn normalize_expression_templates_with_context(
                     normalize_nodes(&mut value_if.then_body, context)?;
                     normalize_nodes(&mut value_if.else_body, context)?;
                 }
-                ValueBlock::Scoped(value_scoped) => {
-                    normalize_nodes(&mut value_scoped.body, context)?;
+                ValueBlock::LexicalScope(value_lexical_scope) => {
+                    normalize_nodes(&mut value_lexical_scope.body, context)?;
                 }
                 ValueBlock::Match(value_match) => {
                     normalize_expression_templates_with_context(

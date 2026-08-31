@@ -20,7 +20,7 @@ Companion to:
 - `docs/src/developer-docs/memory-management/overview.mtf`
 - `docs/src/developer-docs/memory-management/ownership-and-drops/`
 - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`
-- `docs/src/developer-docs/memory-management/declared-memory-groups/`
+- `docs/src/developer-docs/memory-management/declared-regions/`
 - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/`
 
 The canonical REC page now exists. REC implementation remains deferred and follows the phases in this plan.
@@ -47,8 +47,8 @@ The following decisions are locked for the final design.
 4. Local aliases, parameters, temporary projections, ordinary calls and `get()` borrows are never counted.
 5. Persistent edges with statically known cardinality remain under affine and region analysis when possible.
 6. Dynamic retained multiplicity makes an allocation eligible for REC. It does not force REC.
-7. Final cleanup frontiers, inferred region epochs, explicit groups, field-sensitive splitting and statically cheap retention may elide REC.
-8. Explicit-group-owned allocations never use REC. Cycles require explicit groups.
+7. Final cleanup frontiers, inferred region epochs, declared regions, field-sensitive splitting and statically cheap retention may elide REC.
+8. Declared-region-owned allocations never use REC. Cycles require declared regions.
 9. REC strategy is selected statically. Runtime adaptive switching between REC and region ownership is rejected.
 10. Profiling-guided REC strategy selection is out of scope for the initial design and implementation.
 11. Full-control backends use a two-bit tagged allocation-family handle for heap values that participate in the memory ABI.
@@ -93,14 +93,14 @@ This carries the runtime path that may perform individual cleanup when control f
 
 Cleanup responsibility is affine. It may move or be discharged. It never duplicates.
 
-### Explicit groups
+### Declared regions
 
-A declared group is one hard lifetime and cleanup domain.
+A declared region is one hard lifetime and cleanup domain.
 
-- group-owned values are not individually released early
-- group-owned values do not use REC
-- cycles are legal only inside one explicit group
-- group exit performs bulk reclamation
+- declared-region-owned values are not individually released early
+- declared-region-owned values do not use REC
+- cycles are legal only inside one declared region
+- declared-region exit performs bulk reclamation
 
 ### Retained Edge Counting
 
@@ -108,7 +108,7 @@ REC counts only runtime-dependent persistent retained edges that survive the sta
 
 ### Physical memory planning
 
-The compiler-owned memory planner chooses stack placement, static drops, individual heap allocations, inferred arenas, explicit-group arenas and REC layouts for a topology already proven legal. It runs after build-owned target partition and target-contract validation, once per candidate physical variant, and the backend only realises the resulting `ValidatedMemoryPlan`. The backend never chooses a memory strategy.
+The compiler-owned memory planner chooses stack placement, static drops, individual heap allocations, inferred arenas, declared-region arenas and REC layouts for a topology already proven legal. It runs after build-owned target partition and target-contract validation, once per candidate physical variant, and the backend only realises the resulting `ValidatedMemoryPlan`. The backend never chooses a memory strategy.
 
 REC is therefore a precision mechanism inside a statically safe collector-free system. It is not the correctness fallback.
 
@@ -170,7 +170,7 @@ One counted obligation represented by one runtime persistent retained edge.
 - detached stored results
 - transitive aggregate retention
 - iterative destruction
-- mixed region and REC cleanup
+- mixed inferred-region and REC cleanup
 - developer tracing and validation
 - release-backend verification
 
@@ -188,7 +188,7 @@ One counted obligation represented by one runtime persistent retained edge.
 - user-facing `config.moth` REC thresholds
 - uniqueness scans on collection removal
 - alias registries
-- `group self`
+- `declared region self`
 - a `checked` block or expensive-analysis source mode
 - foreign code retaining ordinary Moth references
 - unsafe pointers or allocator APIs
@@ -207,8 +207,8 @@ These invariants must hold in every implementation.
 8. Ordinary local aliases contribute no obligation.
 9. Temporary `get()` aliases contribute no obligation.
 10. Borrow validation prevents the final counted obligation from disappearing while an uncounted temporary alias remains usable.
-11. REC graphs are acyclic. Cycles require explicit groups.
-12. Explicit-group-owned allocations carry no REC counter.
+11. REC graphs are acyclic. Cycles require declared regions.
+12. Declared-region-owned allocations carry no REC counter.
 13. REC state never changes an allocation's source type or public semantic identity.
 14. A strategy selected as uncounted is never upgraded to REC at runtime.
 15. A strategy selected as REC never abandons counting at runtime.
@@ -349,7 +349,7 @@ target/profile-aware memory planning          (compiler-owned)
     |
     +-- affine static cleanup
     +-- inferred region
-    +-- explicit group
+    +-- declared region
     +-- REC
     |
     v
@@ -395,12 +395,12 @@ pub enum RetentionKill {
 pub enum MemoryStrategy {
     Affine,
     InferredRegion,
-    ExplicitGroup,
+    DeclaredRegion,
     Rec,
 }
 ```
 
-`Fixed` does not automatically require REC. A statically bounded edge set can often remain affine or region-owned.
+`Fixed` does not automatically require REC. A statically bounded edge set can often remain affine or inferred-region-owned.
 
 `RuntimeMany` means REC-eligible, not REC-selected.
 
@@ -560,9 +560,9 @@ The summary vocabulary must preserve this distinction so the caller can:
 - keep a borrowed alias under another owner
 - reclassify the detached value's persistent obligations into the returned result
 
-This applies to maps, collections, stacks, queues, deques, caches and other container detachment operations. Container detachment does not mean group extraction or adoption, which would move a group-owned allocation family outside its group. It also does not mean interior projection detachment, which would separate a field from its containing allocation family. Group extraction and adoption remain forbidden in V1. Interior projection detachment remains deferred until field-sensitive splitting has established separate ownership.
+This applies to maps, collections, stacks, queues, deques, caches and other container detachment operations. Container detachment does not mean declared-region extraction or adoption, which would move a declared-region-owned allocation family outside its declared region. It also does not mean interior projection detachment, which would separate a field from its containing allocation family. Declared-region extraction and adoption remain forbidden in V1. Interior projection detachment remains deferred until field-sensitive splitting has established separate ownership.
 
-The restriction on extraction means moving a group-owned allocation out of its group or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
+The restriction on extraction means moving a declared-region-owned allocation out of its declared region or retroactively detaching an interior projection from its allocation family. It does not prohibit builtin collection or map `remove`, which kills a container-retained edge and returns the already-stored value under ordinary lifetime rules.
 
 ## REC elision and strategy selection
 
@@ -578,9 +578,9 @@ Use affine cleanup or an inferred region. Do not emit REC.
 
 Use affine or region handling where path-sensitive analysis can resolve the obligations. Do not emit REC merely because more than one edge may exist.
 
-### 3. Explicit-group ownership
+### 3. Declared-region ownership
 
-Use the hard group lifetime. Do not emit REC for group-owned allocations.
+Use the hard declared-region lifetime. Do not emit REC for declared-region-owned allocations.
 
 ### 4. Complete final cleanup frontier
 
@@ -592,7 +592,7 @@ use(index)
 ~index.clear()
 ```
 
-The collection may continue living. If no other live alias or retention domain can retain a target allocation family, `clear()` can become that family's final cleanup frontier. The collection itself may continue to live. Group-owned storage still remains until group exit, even though `clear()` kills the group's collection edges logically.
+The collection may continue living. If no other live alias or retention domain can retain a target allocation family, `clear()` can become that family's final cleanup frontier. The collection itself may continue to live. Declared-region-owned storage still remains until declared-region exit, even though `clear()` kills the declared region's collection edges logically.
 
 ### 5. Field-sensitive family splitting
 
@@ -729,7 +729,7 @@ The exact offset and any integration with an existing backend header are backend
 Requirements:
 
 - no global REC side table
-- no universal counter on affine, region or group allocations
+- no universal counter on affine, inferred-region or declared-region allocations
 - one target-word-sized unsigned count
 - `u32` on Wasm32
 - `u64` on ordinary 64-bit native targets
@@ -817,7 +817,7 @@ It excludes:
 - ordinary call borrows
 - `get()` results
 - statically known region-only edges
-- explicit-group-owned edges
+- declared-region-owned edges
 
 ## Initialization
 
@@ -868,7 +868,7 @@ These `0` results are scoped to `N = 1`. There is no unconditional general rule 
 
 ### Discharge is not destruction
 
-Keep four terms distinct: **transfer** moves affine cleanup responsibility, **discharge** satisfies the current obligation, **destroy** physically destroys one allocation family and **bulk reclaim** reclaims a region or group.
+Keep four terms distinct: **transfer** moves affine cleanup responsibility, **discharge** satisfies the current obligation, **destroy** physically destroys one allocation family and **bulk reclaim** reclaims allocations remaining at a validated inferred-region or declared-region exit.
 
 ```text
 discharge owned REC root
@@ -1016,7 +1016,7 @@ Return tags preserve affine responsibility.
 Fresh-result allocation may be directed into:
 
 - an inferred region
-- an explicit group
+- a declared region
 - an REC layout
 - an ordinary affine allocation
 
@@ -1066,7 +1066,7 @@ A destruction plan may contain:
 - uncounted owned child drop
 - REC child decrement
 - borrowed child no-op
-- region-owned child no-op until region release
+- inferred-region-owned child no-op until inferred-region exit
 - backing-storage cleanup
 - final allocation free
 
@@ -1095,14 +1095,14 @@ The runtime may reuse dead object header space for worklist links where the back
 
 The worklist must preserve deterministic cleanup semantics without exposing destruction order to source programs.
 
-## Mixed region and REC cleanup
+## Mixed inferred-region and REC cleanup
 
 A region may contain internal objects plus outgoing edges to REC-managed allocations owned elsewhere.
 
 When the region ends:
 
 - internal region-to-region edges need no individual processing
-- group-owned internal edges need no individual processing
+- declared-region-owned internal edges need no individual processing
 - outgoing REC edges must be decremented
 - the region then bulk-reclaims its internal storage
 
@@ -1116,39 +1116,39 @@ destroy region R:
 
 A `clear()` frontier may therefore bulk-release one local region while still decrementing external REC targets retained by that collection.
 
-## Explicit groups
+## Declared regions
 
-Explicit groups have hard semantics.
+Declared regions have hard semantics.
 
-- group-owned allocations carry no REC counter
-- group-owned children do not receive individual affine cleanup responsibility
-- last-use analysis still validates accesses but does not shorten group-owned physical lifetime
-- group exit performs bulk cleanup
-- cycles are allowed only inside one group
+- declared-region-owned allocations carry no REC counter
+- declared-region-owned children do not receive individual affine cleanup responsibility
+- last-use analysis still validates accesses but does not shorten declared-region-owned physical lifetime
+- declared-region exit performs bulk cleanup
+- cycles are allowed only inside one declared region
 
-Group ownership affects the **target** allocation, not every edge whose source happens to be inside a group.
+Declared-region ownership affects the **target** allocation, not every edge whose source happens to be inside a declared region.
 
 ```text
-group-owned target
+declared-region-owned target
     -> no REC counter
 
-edge inside group -> group-owned target
+edge inside declared region -> declared-region-owned target
     -> count-free
 
-edge inside group -> external REC target
+edge inside declared region -> external REC target
     -> ordinary persistent REC obligation on external target
 ```
 
-At `clear()` or group exit the ordering is:
+At `clear()` or declared-region exit the ordering is:
 
 ```text
 process outgoing obligations to external REC families
--> bulk reclaim group-owned storage
+-> bulk reclaim declared-region-owned storage
 ```
 
-The external target is destroyed only if its own count reaches zero. Group count-free semantics never mean that every external allocation referenced from a group is count-free.
+The external target is destroyed only if its own count reaches zero. Declared-region count-free semantics never mean that every external allocation referenced from a declared region is count-free.
 
-The initial implementation does not attempt to coalesce every group-to-external alias into one group-domain count.
+The initial implementation does not attempt to coalesce every declared-region-to-external alias into one declared-region-domain count.
 
 ## Field-sensitive allocation splitting
 
@@ -1202,7 +1202,7 @@ Accepted hard elisions:
 - no dynamic retained multiplicity
 - affine transfer
 - complete cleanup frontier
-- explicit-group ownership
+- declared-region ownership
 - field-sensitive split that removes the expensive family
 - short and statically bounded fallback region
 
@@ -1227,8 +1227,8 @@ The future channel system must preserve this assumption.
 - arbitrary shared Moth reference graphs do not cross task boundaries
 - queued values belong to a channel or task lifecycle
 - failed send preserves or returns responsibility to the sender
-- group-owned values do not cross independently
-- cycles remain group-only
+- declared-region-owned values do not cross independently
+- direct source-created cycles continue to require one declared region
 
 If future concurrency requires atomic REC, that is a new memory-model design decision and not an implementation detail.
 
@@ -1240,7 +1240,7 @@ Rejected because it counts ordinary locals, parameters and temporary borrows tha
 
 ### Universal REC header
 
-Rejected because affine, region and group allocations must not pay REC memory overhead.
+Rejected because affine, inferred-region and declared-region allocations must not pay REC memory overhead.
 
 ### Runtime adaptive REC
 
@@ -1258,9 +1258,9 @@ Rejected because scans can turn expected constant-time removals into linear or q
 
 Rejected because maintaining a dynamic alias set is more metadata and pointer traffic than a counter.
 
-### `group self`
+### `declared region self`
 
-Rejected because group extraction, shared values and cross-collection retention would require region migration, adoption or implicit copying.
+Rejected because declared-region extraction, shared values and cross-collection retention would require region migration, adoption or implicit copying.
 
 ### Source-visible RC
 
@@ -1324,7 +1324,7 @@ pub enum RecDecisionReason {
     NoDynamicMultiplicity,
     AffineTransfer,
     FixedRetainedSet,
-    ExplicitGroup,
+    DeclaredRegion,
     FinalCleanupFrontier,
     ShortFallbackRegion,
     SmallBoundedRetention,
@@ -1375,7 +1375,7 @@ The first implementation should be deliberately narrow.
 - non-atomic inline counter
 - iterative zero-count destruction
 - cleanup-frontier REC elision
-- explicit-group REC elision
+- declared-region REC elision
 - structured decision reporting
 
 ### Required compositional slice
@@ -1394,7 +1394,7 @@ The first implementation should be deliberately narrow.
 - field-sensitive allocation splitting
 - more sophisticated static cost models
 - profile-guided strategy selection
-- group-to-external domain coalescing
+- declared-region-to-external domain coalescing
 
 These are deferred implementation stages, not permission to design a collection-only semantic model.
 
@@ -1406,7 +1406,7 @@ Each phase ends with an audit before the next phase starts. Do not implement a p
 
 ### Summary and reasoning
 
-This phase locks REC into the replacement final model rather than treating it as an optional patch to the superseded collector-fallback architecture. The canonical memory authorities now make static topology proof mandatory, keep cycles group-only, and place REC after topology validation as one physical strategy. Compiler implementation remains deferred.
+This phase locks REC into the replacement final model rather than treating it as an optional patch to the superseded collector-fallback architecture. The canonical memory authorities now make static topology proof mandatory, require direct source-created cycles to use one declared region, and place REC after topology validation as one physical strategy. Compiler implementation remains deferred.
 
 ### Tasks
 
@@ -1490,7 +1490,7 @@ Eligibility and physical selection must remain separate. This phase chooses stra
 
 ### Tasks
 
-- [ ] Add `Affine`, `InferredRegion`, `ExplicitGroup` and `Rec` strategy facts.
+- [ ] Add `Affine`, `InferredRegion`, `DeclaredRegion` and `Rec` strategy facts.
 - [ ] Run strategy selection only after complete topology validation.
 - [ ] Implement the deterministic elision order in this plan.
 - [ ] Add `RecDecisionReason` as structured data.
@@ -1498,7 +1498,7 @@ Eligibility and physical selection must remain separate. This phase chooses stra
 - [ ] Add the internal `--show-rec` report path.
 - [ ] Report every considered allocation site, including elided sites.
 - [ ] Add tests for each decision reason.
-- [ ] Add a hard assertion that group-owned families never select REC.
+- [ ] Add a hard assertion that declared-region-owned families never select REC.
 
 ### Audit and validation
 
@@ -1551,7 +1551,7 @@ This phase adds exact REC mechanics while keeping all non-REC layouts free of co
 - [ ] Implement zero-count enqueue.
 - [ ] Trap on underflow in every profile.
 - [ ] Assert overflow in REC development builds.
-- [ ] Keep affine, region and group layouts count-free.
+- [ ] Keep affine, inferred-region and declared-region layouts count-free.
 - [ ] Add allocation-layout verification to backend handoff.
 
 ### Audit and validation
@@ -1605,7 +1605,7 @@ REC cascades must not recurse through the machine stack. Concrete destruction pl
 - [ ] Add iterative zero-count worklist processing.
 - [ ] Process REC children through decrements.
 - [ ] Process uncounted owned children through deterministic drop.
-- [ ] Skip borrowed and region-owned children where appropriate.
+- [ ] Skip borrowed and inferred-region-owned children where appropriate.
 - [ ] Free each family exactly once.
 - [ ] Add long-chain fixtures that would overflow recursive destruction.
 - [ ] Add diamond-DAG fixtures with shared REC children.
@@ -1615,7 +1615,7 @@ REC cascades must not recurse through the machine stack. Concrete destruction pl
 
 - [ ] Long chains use bounded call-stack space.
 - [ ] DAG children free only at final obligation removal.
-- [ ] No cycle fixture is accepted outside an explicit group.
+- [ ] No cycle fixture is accepted outside a declared region.
 - [ ] Destruction order remains source-unobservable.
 
 ## Phase 8: Compose through user functions and Moth packages
@@ -1645,7 +1645,7 @@ User collection packages must receive builtin-quality memory behavior without so
 - [ ] Mixed paths branch only around retention operations.
 - [ ] Binary growth remains bounded in representative generic and package fixtures.
 
-## Phase 9: Integrate regions, explicit groups and mixed cleanup
+## Phase 9: Integrate inferred regions, declared regions and mixed cleanup
 
 ### Summary and reasoning
 
@@ -1653,22 +1653,22 @@ REC must remain subordinate to region proof. This phase removes unnecessary coun
 
 ### Tasks
 
-- [ ] Hard-disable REC for group-owned families.
-- [ ] Preserve REC for externally owned targets retained from inside a group where needed.
+- [ ] Hard-disable REC for declared-region-owned families.
+- [ ] Preserve REC for externally owned targets retained from inside a declared region where needed.
 - [ ] Generate outgoing REC boundary-edge plans for region cleanup.
 - [ ] Bulk-release internal region edges without individual decrements.
 - [ ] End inferred region epochs at final cleanup frontiers.
 - [ ] Verify whole-domain `clear` chooses region cleanup when all targets are internal.
 - [ ] Verify mixed `clear` decrements external REC targets before bulk release.
-- [ ] Keep explicit groups free of individual early drop.
+- [ ] Keep declared regions free of individual early drop.
 
 ### Audit and validation
 
-- [ ] Group-owned cycles remain count-free.
+- [ ] Declared-region-owned cycles remain count-free.
 - [ ] Cross-region cycles remain invalid.
 - [ ] Region cleanup never loses an outgoing external obligation.
 - [ ] Complete internal domains perform no pointless REC traffic.
-- [ ] Group semantics remain visible and predictable to the programmer.
+- [ ] Declared region semantics remain visible and predictable to the programmer.
 
 ## Phase 10: Preserve generic aggregate and field-splitting extension points
 
@@ -1681,7 +1681,7 @@ The initial implementation is collection-first, but the semantic mechanism must 
 - [ ] Represent retained edges through ordinary struct fields.
 - [ ] Propagate transitive retention summaries through values stored in collections.
 - [ ] Reserve REC planning for choice payloads and recursive acyclic aggregates.
-- [ ] Keep cycles group-only.
+- [ ] Require direct source-created cycles to use one declared region.
 - [ ] Define the handoff from field-sensitive family splitting into strategy planning.
 - [ ] Rerun cardinality and REC selection after a split.
 - [ ] Add deferred fixtures for tiny projections retaining heavy parent families.
@@ -1705,8 +1705,8 @@ The feature is not complete until capable release backends prove collector-free 
 - [ ] Add backend capability metadata for collector-free release.
 - [ ] Verify every reachable heap family has one physical strategy.
 - [ ] Verify all REC families have valid count and destruction plans.
-- [ ] Verify all region families have complete cleanup plans.
-- [ ] Verify all group families have hard bulk exits.
+- [ ] Verify all inferred-region families have complete cleanup plans.
+- [ ] Verify all declared-region families have hard bulk exits.
 - [ ] Reject missing strategy data as `CompilerError`.
 - [ ] Verify no tracing collector dependency remains in capable release output.
 - [ ] Keep debug and GC-native backends semantically equivalent.
@@ -1730,18 +1730,18 @@ The documentation migration and consistency pass now use the accepted collector-
 - [x] Update `docs/src/developer-docs/memory-management/overview.mtf` with the six-part memory model and concise REC role.
 - [x] Update `ownership-and-drops` to the Affine Ownership ABI and two-bit handle extension.
 - [x] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
-- [x] Update declared-group docs with hard count-free group ownership and cycle policy.
+- [x] Update declared-region docs with hard count-free declared-region ownership and cycle policy.
 - [x] Update runtime/backend docs with the strategy planner, two-bit tags, REC layout and collector-free release invariant.
 - [x] Add the canonical REC technical page.
 - [x] Update language collection and map docs with value-shaped retained-edge summaries, key/value effects, successful commits and unchanged error paths.
 - [x] Add the public Automatic cleanup and retained edges page pair and route it from the public Memory page.
-- [x] Distinguish detached stored results from group extraction/adoption and interior projection detachment.
+- [x] Distinguish detached stored results from declared-region extraction/adoption and interior projection detachment.
 - [x] Keep public summary effects exit-specific and caller-localise concrete cleanup frontiers.
 - [x] Update `docs/compiler-design-overview.md` public summaries, analysis boundaries and backend handoff.
 - [x] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
 - [x] Update the README memory goal from optional GC avoidance to the accepted collector-free release direction.
 - [x] Update the language cheatsheet with only a concise user-facing statement. Do not expose REC mechanics as source semantics.
-- [x] Update `docs/src/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, explicit groups and collector-free release verification.
+- [x] Update `docs/src/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, declared regions and collector-free release verification.
 - [x] Mark old compiler paths that still assume GC fallback as incomplete migration work.
 - [x] Link this plan from the main final memory-management plan.
 
@@ -1768,7 +1768,7 @@ Close REC only after semantic, ABI, runtime, package and documentation gates pas
 - [ ] Run map key/value, replacement, equal-content lookup and detached-value fixtures.
 - [ ] Run successful-commit and failed-mutation fixtures with exit-sensitive summaries.
 - [ ] Run user-wrapper and package-summary fixtures.
-- [ ] Run explicit-group count-elision fixtures.
+- [ ] Run declared-region count-elision fixtures.
 - [ ] Run cleanup-frontier region-elision fixtures.
 - [ ] Run mixed region-to-external-REC cleanup fixtures.
 - [ ] Run long DAG destruction fixtures.
@@ -1782,7 +1782,7 @@ Close REC only after semantic, ABI, runtime, package and documentation gates pas
 - [ ] No universal counter remains.
 - [ ] No ordinary local alias changes a counter.
 - [ ] No `get()` changes a counter.
-- [ ] No group-owned allocation carries REC.
+- [ ] No declared-region-owned allocation carries REC.
 - [ ] No cycle depends on REC.
 - [ ] No full-control release path depends on tracing GC.
 - [ ] No whole-function strategy explosion was introduced by default.
@@ -1818,8 +1818,8 @@ one-direct-handle shortcut.
 | one-direct-edge remove returning affine result | one detached obligation reclassifies into the result, with no count change; a multi-edge detachment is `1 - N` |
 | remove while another affine root exists | edge decrement, borrowed result |
 | overwrite REC child | old decrement and new retain/reclassification |
-| explicit group with arbitrary aliases | no REC, bulk cleanup |
-| explicit group cycle | valid and count-free |
+| declared region with arbitrary aliases | no REC, bulk cleanup |
+| declared region cycle | valid and count-free |
 | implicit cycle | diagnostic |
 | region with outgoing REC edges | decrement boundary edges then bulk release |
 | user collection wrapper around builtin map | same inferred summaries as builtin composition |
@@ -1832,8 +1832,8 @@ one-direct-handle shortcut.
 | no transient destruction during same-family overwrite | family never destroyed mid-commit |
 | separately allocated `Holder -> Blob` | no duplicated collection-to-`Blob` obligation |
 | inline `Holder` with embedded `Blob` handle | direct collection-domain `Blob` obligation |
-| group-owned target | no REC |
-| group-to-external REC target | decrement on `clear` or group exit, before bulk reclamation |
+| declared-region-owned target | no REC |
+| declared-region-to-external REC target | decrement on `clear` or declared-region exit, before bulk reclamation |
 | failed fallible mutation with later source use | borrow, no transfer |
 | failed fallible mutation after all-path final use | no committed edge, affine obligation discharged safely |
 | same source function in two physical variants | GC-native in one and REC-capable in the other, with no semantic interface change |
@@ -1848,7 +1848,7 @@ one-direct-handle shortcut.
 REC is complete only when all of these are true.
 
 1. The compiler can identify runtime-many persistent retained edges.
-2. The compiler can elide REC through cleanup frontiers, regions and explicit groups.
+2. The compiler can elide REC through cleanup frontiers, regions and declared regions.
 3. REC-selected families use the two-bit handle ABI and selective inline counters.
 4. Count transitions preserve the affine cleanup invariant.
 5. Builtin collections implement exact retain, release, clear and detached-stored-result behavior.
@@ -1863,6 +1863,6 @@ REC is complete only when all of these are true.
 
 The main plan should carry only this concise contract:
 
-> Moth uses REC only for allocation families with runtime-dependent persistent retained-edge multiplicity that cannot be reclaimed precisely enough through affine last-use analysis, inferred cleanup-frontier regions, field-sensitive splitting or explicit groups. REC counts persistent retained edges, not ordinary aliases. Full-control heap handles carry two logical tag bits: affine owned/borrowed responsibility and REC counted/uncounted representation. Explicit-group-owned values are count-free, cycles remain group-only and capable release backends use REC as one collector-free lowering strategy. Detailed analysis, ABI, counter and elision rules live in the REC companion plan.
+> Moth uses REC only for allocation families with runtime-dependent persistent retained-edge multiplicity that cannot be reclaimed precisely enough through affine last-use analysis, inferred cleanup-frontier regions, field-sensitive splitting or declared regions. REC counts persistent retained edges, not ordinary aliases. Full-control heap handles carry two logical tag bits: affine owned/borrowed responsibility and REC counted/uncounted representation. Declared-region-owned values are count-free, direct source-created cycles continue to require one declared region and capable release backends use REC as one collector-free lowering strategy. Detailed analysis, ABI, counter and elision rules live in the REC companion plan.
 
 The main plan must then link to this document rather than restating its phases and implementation details.

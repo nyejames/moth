@@ -3,7 +3,7 @@ Moth has three ways to describe a feature that isn't available today.
 ### Accepted but not built yet
 
 Some features belong to the accepted design but aren't built yet. Examples
-include declared memory groups and recursive choice types. These features may
+include declared regions and recursive choice types. These features may
 appear in the progress matrix as implementation work.
 
 ### Still being considered

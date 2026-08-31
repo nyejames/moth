@@ -77,7 +77,7 @@ source-language obligations.
 
     [td:
         [: Declared bulk lifetimes]
-        [: Accepted deferred `group` / `into` hard lifetime regions]
+        [: Accepted deferred `name:` / `into name` hard lifetime regions]
     ]
 
     [td:

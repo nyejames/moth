@@ -1,7 +1,7 @@
 //! Static `if` finalisation invariant tests.
 
 use super::*;
-use crate::compiler_frontend::ast::statements::value_production::types::ValueScopedBlock;
+use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -15,7 +15,7 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
     let nested_scope = InternedPath::from_single_str("nested", &mut string_table);
     let location = SourceLocation::default();
     let nested_terminal = AstNode {
-        kind: NodeKind::ScopedBlock {
+        kind: NodeKind::LexicalScope {
             body: vec![AstNode {
                 kind: NodeKind::Return(vec![Expression::int(
                     1,
@@ -31,7 +31,7 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
     };
     let value = Expression::new(
         ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::Scoped(ValueScopedBlock {
+            block: Box::new(ValueBlock::LexicalScope(ValueLexicalScope {
                 body: vec![nested_terminal],
                 scope: branch_scope.clone(),
                 result_type_ids: vec![builtin_type_ids::INT],

@@ -1,0 +1,5 @@
+if true:
+    selected_local = "inside"
+;
+
+io.line(selected_local)

@@ -11,9 +11,9 @@ A lowerer receives explicit records:
 - selected HIR for module and generated functions
 - paired local or generated-local type environments
 - stable call targets
-- borrow facts
-- validated lifetime facts and summaries
-- the `ValidatedMemoryPlan` for this target/profile physical variant
+- borrow facts as validation context
+- validated lifetime facts and summaries as validation context
+- the `ValidatedMemoryPlan` for this target/profile physical variant, including its already-settled planned affine-responsibility transitions, retained-edge obligation transitions and discharge operations
 - external boundary classifications
 - builder lifecycle/runtime plan
 - per-function link facts
@@ -32,7 +32,7 @@ A lowerer does **not**:
 
 If a lowerer needs a fact, an earlier owner should have recorded it.
 
-The `ValidatedMemoryPlan` is the memory half of that rule. It arrives already decided and carries the selected memory layout per allocation family, region and group placement, the cleanup and destruction plans, and the REC representation decisions. The lowerer reads it the way it reads a call target: as a settled fact.
+The `ValidatedMemoryPlan` is the memory half of that rule. For this physical variant, it arrives with its physical decisions already settled: selected memory layout per allocation family, region and declared-region placement, planned affine-responsibility transitions, retained-edge obligation transitions and discharge operations, cleanup and destruction plans, and REC representation decisions. The lowerer encodes those decisions. It does not infer them from borrow facts, recompute a count delta or choose a cleanup site. Borrow facts and validated lifetime topology remain validation context and assertion material only.
 
 Because the plan is built after target partition and target validation, it is scoped to **one physical variant**. The same source function can be lowered GC-native in a variant targeting a host collector and collector-free with REC-capable handles in a variant targeting full memory control. Those variants share the same validated topology and the same source semantics; only the physical plan differs.
 
@@ -56,6 +56,7 @@ Accepted Wasm design prefers a **structured** path:
 1. optionally derive a structured HIR view (not a second semantic authority)
 2. lower into backend-owned structured **LIR** (a lower IR)
 3. apply ABI, handles, layouts, memory and runtime imports
+Ownership-aware Wasm operations encode the plan's settled transitions at their planned semantic commit points. The lowerer emits planned discharge operations and retained-edge obligation transitions as provided. It does not derive ownership or obligation changes, recompute count deltas or choose cleanup sites.
 
 Beginner picture:
 
@@ -86,7 +87,7 @@ JavaScript companion facades and wrappers call Wasm exports through explicit han
 
 Binding-backed calls lower through demand-driven glue. The binder's semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.
 
-Borrow and last-use facts feed **upstream** topology validation and memory planning. The lowerer does not read them and invent ownership operations of its own: it follows the final plan. Where the plan selected a GC-native representation, ownership cleanup operations may be erased; where it selected affine, region, group or REC handling, the lowerer emits exactly what the plan says. Every backend still requires the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
+At a binding-backed boundary, the closed external-boundary classification and the `ValidatedMemoryPlan` supply the ownership and obligation behaviour for this physical variant. The lowerer encodes that settled result rather than rereading borrow facts to decide whether a call transfers or discharges responsibility. Borrow and last-use facts and validated lifetime topology remain upstream inputs and validation context, not a source for new physical decisions. Where the plan selected a GC-native representation, planned ownership-specific operations may be absent in the target encoding; where it selected affine, inferred-region, declared-region or REC handling, the lowerer emits exactly what the plan says. Every backend still requires the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 
 ## What can fail here
 

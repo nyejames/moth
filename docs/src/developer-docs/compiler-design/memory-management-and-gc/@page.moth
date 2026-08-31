@@ -10,7 +10,7 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / 12. Memory topology and lowering
 
-    Access validation and lifetime topology prove the legal program. Backend lowering then chooses a physical representation for those validated facts.
+    Access validation and lifetime topology prove the legal program. The compiler-owned memory planner then chooses a physical representation for those validated facts, and backend lowering only encodes the resulting plan.
 ]
 
 #[section, reference_content]

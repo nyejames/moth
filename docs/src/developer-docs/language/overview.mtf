@@ -220,8 +220,8 @@ The public Memory route covers source-facing memory behaviour:
 - `docs/src/docs/memory/lifetimes-and-result-shapes-basic.mtf`
 - `docs/src/docs/memory/automatic-cleanup-and-retained-edges.mtf`
 - `docs/src/docs/memory/automatic-cleanup-and-retained-edges-basic.mtf`
-- `docs/src/docs/memory/declared-memory-groups.mtf`
-- `docs/src/docs/memory/declared-memory-groups-basic.mtf`
+- `docs/src/docs/memory/declared-regions.mtf`
+- `docs/src/docs/memory/declared-regions-basic.mtf`
 
 The formal memory model, borrow validation, lifetime-region analysis and
 backend lowering live under

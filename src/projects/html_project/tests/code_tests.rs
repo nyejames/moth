@@ -209,13 +209,11 @@ fn code_formatter_wraps_an_opaque_only_body() {
 #[test]
 fn moth_highlighter_uses_compiler_word_classes() {
     let highlighted = highlight_code_html(
-        "if import return assert is not and or Int Float Bool String Char None True False async yield checked block",
+        "if import return assert is not and or Int Float Bool String Char None True False async yield checked block group region",
         CodeLanguage::Moth,
     );
 
-    for word in [
-        "if", "return", "assert", "async", "yield", "checked", "block",
-    ] {
+    for word in ["if", "return", "assert", "async", "yield", "checked"] {
         assert!(
             highlighted.contains(&format!("<span class='moth-code-keyword'>{word}</span>")),
             "expected keyword span for {word:?} in: {highlighted}"
@@ -225,6 +223,12 @@ fn moth_highlighter_uses_compiler_word_classes() {
         !highlighted.contains("<span class='moth-code-keyword'>import</span>"),
         "import must remain an ordinary identifier: {highlighted}"
     );
+    for word in ["block", "group", "region"] {
+        assert!(
+            !highlighted.contains(&format!("<span class='moth-code-keyword'>{word}</span>")),
+            "{word} must remain an ordinary identifier: {highlighted}"
+        );
+    }
 
     for word in ["is", "not", "and", "or"] {
         assert!(
@@ -244,13 +248,15 @@ fn moth_highlighter_uses_compiler_word_classes() {
 }
 
 #[test]
-fn moth_highlighter_wraps_literals_and_keeps_planned_words_plain() {
-    let highlighted =
-        highlight_code_html("true false none in fn group into where", CodeLanguage::Moth);
+fn moth_highlighter_wraps_literals_and_keeps_non_keywords_plain() {
+    let highlighted = highlight_code_html(
+        "true false none in fn group region into where",
+        CodeLanguage::Moth,
+    );
 
     assert_eq!(
         highlighted,
-        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group into where"
+        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group region into where"
     );
 }
 

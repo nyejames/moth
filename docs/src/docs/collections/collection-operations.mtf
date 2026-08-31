@@ -141,7 +141,7 @@ error:
     no retention change
 ```
 
-`clear` kills the collection's complete retention domain. If no other live alias or retention domain can retain a target allocation family, the call becomes that family's final cleanup frontier. The collection itself may continue to live. Group-owned allocation storage still remains until group exit.
+`clear` kills the collection's complete retention domain. If no other live alias or retention domain can retain a target allocation family, the call becomes that family's final cleanup frontier. The collection itself may continue to live. Declared-region-owned allocation storage still remains until declared-region exit.
 
 Individual `remove` or `set` does not establish a final cleanup frontier by itself.
 

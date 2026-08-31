@@ -564,7 +564,7 @@ fn annotate_node(
             }
         }
 
-        NodeKind::ScopedBlock { body } => {
+        NodeKind::LexicalScope { body } => {
             let mut body_environment = value_environment.clone();
             annotate_nodes(body, flows, &mut body_environment, store)?;
         }
@@ -1039,12 +1039,12 @@ fn annotate_value_block(
             let mut else_environment = value_environment.clone();
             annotate_nodes(&mut value_if.else_body, flows, &mut else_environment, store)?;
         }
-        ValueBlock::Scoped(value_scoped) => {
-            let mut scoped_environment = value_environment.clone();
+        ValueBlock::LexicalScope(value_lexical_scope) => {
+            let mut lexical_environment = value_environment.clone();
             annotate_nodes(
-                &mut value_scoped.body,
+                &mut value_lexical_scope.body,
                 flows,
-                &mut scoped_environment,
+                &mut lexical_environment,
                 store,
             )?;
         }

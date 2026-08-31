@@ -197,7 +197,6 @@ pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable
         TokenKind::ReturnBang => "`return!`".to_owned(),
         TokenKind::Catch => "`catch`".to_owned(),
         TokenKind::Then => "`then`".to_owned(),
-        TokenKind::Block => "`block`".to_owned(),
         TokenKind::Checked => "`checked`".to_owned(),
         TokenKind::Async => "`async`".to_owned(),
         TokenKind::Loop => "`loop`".to_owned(),

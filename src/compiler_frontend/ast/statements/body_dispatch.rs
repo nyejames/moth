@@ -15,15 +15,13 @@ use crate::compiler_frontend::ast::statements::body_symbol::{
     parse_symbol_statement, parse_this_statement,
 };
 use crate::compiler_frontend::ast::statements::branching::create_branch;
+use crate::compiler_frontend::ast::statements::declared_regions::classify_deferred_declared_region_header;
 use crate::compiler_frontend::ast::statements::diagnostics::{
     UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token,
 };
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
     current_line_contains_top_level_fat_arrow, current_token_starts_match_arm_header,
-};
-use crate::compiler_frontend::ast::statements::scoped_blocks::{
-    parse_scoped_block_statement, reserved_block_keyword_as_name_error,
 };
 use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues, ProducedValuesParseInput, ValueReceiverKind,
@@ -35,10 +33,11 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidControlFlowStatementReason,
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
+    ReservedNameOwner,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings;
 
@@ -51,6 +50,13 @@ type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
 fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
     diagnostic.into()
+}
+
+fn reserved_keyword_as_name_error(
+    keyword: StringId,
+    location: SourceLocation,
+) -> CompilerDiagnostic {
+    CompilerDiagnostic::reserved_name_collision(keyword, ReservedNameOwner::Keyword, location)
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -69,7 +75,7 @@ fn deferred_block_error(
         Some(token) if token.is_assignment_operator()
     ) {
         let keyword_id = string_table.intern(keyword);
-        return reserved_block_keyword_as_name_error(keyword_id, string_table, location);
+        return reserved_keyword_as_name_error(keyword_id, location);
     }
 
     CompilerDiagnostic::deferred_feature_reason(reason, location)
@@ -111,6 +117,10 @@ pub(crate) fn parse_function_body_statements(
             }
         }
 
+        if let Some(diagnostic) = classify_deferred_declared_region_header(token_stream) {
+            return Err(statement_dispatch_error(diagnostic));
+        }
+
         match current_token {
             // Module start marker
             TokenKind::ModuleStart => {
@@ -135,15 +145,7 @@ pub(crate) fn parse_function_body_statements(
                 string_table,
             )?,
 
-            // Scoped blocks and deferred features
-            TokenKind::Block => body_nodes.push(parse_scoped_block_statement(
-                token_stream,
-                &context,
-                type_interner,
-                warnings,
-                string_table,
-            )?),
-
+            // Deferred keyword-led semantic scopes
             TokenKind::Checked => {
                 return Err(statement_dispatch_error(deferred_block_error(
                     token_stream,
@@ -269,10 +271,7 @@ pub(crate) fn parse_function_body_statements(
                 let Some(active_target) = &context.active_value_target else {
                     let reason = if matches!(
                         context.kind,
-                        ContextKind::Loop
-                            | ContextKind::Block
-                            | ContextKind::CatchHandler
-                            | ContextKind::Template
+                        ContextKind::Loop | ContextKind::CatchHandler | ContextKind::Template
                     ) {
                         InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct
                     } else {
