@@ -937,6 +937,10 @@ impl<'a> HirDisplayContext<'a> {
                     format!("{name}<{args}>")
                 }
             }
+
+            // The compile-time-only anonymous const-record marker never lowers; HIR debug
+            // rendering names it without implying a struct.
+            TypeDefinition::AnonymousConstRecordMarker => "anonymous const record".to_owned(),
         }
     }
 

@@ -72,6 +72,10 @@ pub(crate) enum CanonicalTypeIdentity {
     /// and sidecars. Public-interface validation rejects this variant.
     ModulePrivateGenericInstance(ModulePrivateGenericInstanceTypeIdentity),
     GenericParameter(ExportedGenericParameterIdentity),
+    /// Compile-time identity of one complete anonymous const record. Carries no payload:
+    /// every anonymous const record shares the compile-time-only marker type interned once
+    /// per `TypeEnvironment`, and field facts live on the folded record values.
+    AnonymousConstRecord,
 }
 
 impl CanonicalTypeIdentity {
@@ -108,7 +112,8 @@ impl CanonicalTypeIdentity {
             | Self::SourceNominal(_)
             | Self::ModulePrivateNominal(_)
             | Self::ExternalOpaque(_)
-            | Self::GenericParameter(_) => {}
+            | Self::GenericParameter(_)
+            | Self::AnonymousConstRecord => {}
         }
     }
 }
@@ -794,6 +799,12 @@ pub(crate) fn project_type_id_to_canonical_identity(
                     ))
                 })?;
             Ok(CanonicalTypeIdentity::GenericParameter(identity))
+        }
+
+        // The compile-time-only anonymous const-record marker projects to the payload-free
+        // public identity; it has no origin type and never resolves through a nominal.
+        TypeDefinition::AnonymousConstRecordMarker => {
+            Ok(CanonicalTypeIdentity::AnonymousConstRecord)
         }
     }
 }

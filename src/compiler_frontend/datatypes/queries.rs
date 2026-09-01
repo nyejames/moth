@@ -19,4 +19,6 @@ pub enum TypeKind {
     External,
     GenericParameter,
     GenericInstance,
+    /// Compile-time-only anonymous const-record marker; never a runtime type.
+    AnonymousConstRecordMarker,
 }

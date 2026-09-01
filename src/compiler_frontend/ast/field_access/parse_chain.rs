@@ -63,6 +63,17 @@ pub(crate) fn reference_expression_from_declaration(
             );
         }
 
+        if reference_arg.value.is_const_record_value() {
+            return Expression::reference_with_type_id(
+                reference_arg.id.to_owned(),
+                reference_arg.value.diagnostic_type.to_owned(),
+                reference_arg.value.type_id,
+                base_location,
+                ValueMode::ImmutableOwned,
+                reference_arg.value.const_record_state,
+            );
+        }
+
         let mut inlined_expression = reference_arg.value.to_owned();
         inlined_expression.value_mode = ValueMode::ImmutableOwned;
         inlined_expression

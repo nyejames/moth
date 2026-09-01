@@ -769,6 +769,7 @@ fn annotate_expression(
 
         ExpressionKind::StructInstance(fields)
         | ExpressionKind::StructDefinition(fields)
+        | ExpressionKind::AnonymousConstRecord { fields }
         | ExpressionKind::ChoiceConstruct { fields, .. } => {
             for field in fields {
                 annotate_declaration(field, flows, value_environment, store)?;

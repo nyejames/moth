@@ -1647,3 +1647,31 @@ fn canonical_trait_identity_carries_no_local_ids_or_paths() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+//  Anonymous const-record marker projection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn projects_anonymous_const_record_marker_to_payload_free_identity() {
+    let resolver = MapNominalOriginResolver::new();
+    let generic_resolver = MapGenericParameterOriginResolver::new();
+    let registry = ExternalPackageRegistry::new();
+    let env = TypeEnvironment::new();
+    let context = projection_context(&resolver, &generic_resolver, &registry);
+
+    let marker = env.anonymous_const_record_type();
+    let identity = project_type_id_to_canonical_identity(marker, &env, &context)
+        .expect("the compile-time marker is a legal closed type");
+
+    // The identity is the payload-free variant and equal across independent projections.
+    assert_eq!(identity, CanonicalTypeIdentity::AnonymousConstRecord);
+    let again = project_type_id_to_canonical_identity(marker, &env, &context)
+        .expect("projection is deterministic");
+    assert_eq!(identity, again);
+
+    // The payload-free variant is a leaf: it visits exactly itself.
+    let mut visited = Vec::new();
+    identity.visit(&mut |visited_identity| visited.push(visited_identity.clone()));
+    assert_eq!(visited, vec![CanonicalTypeIdentity::AnonymousConstRecord]);
+}

@@ -847,7 +847,7 @@ name <span class='moth-code-nominal'>Type</span> <span class='moth-code-operator
 
 <span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> DEFAULT_PREFIX, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. Choice payload fields do not support defaults.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. A const record uses the same <code>|...|</code> parameters list with a value required for every parameter, and it does not declare a constructable type. See <a href="../constants/#const-records">Const records</a>. Choice payload fields do not support defaults.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">

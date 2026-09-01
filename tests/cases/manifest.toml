@@ -12284,3 +12284,108 @@ tags = ["integration", "paths", "diagnostics", "file-values"]
 contract = "language.paths.compile_time_map_resource_key_rejected"
 role = "boundary"
 
+
+[[case]]
+id = "anonymous_const_record_success"
+path = "anonymous_const_record_success"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_parses_and_compiles"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_duplicate_field_rejected"
+path = "anonymous_const_record_duplicate_field_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_duplicate_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_positional_field_rejected"
+path = "anonymous_const_record_positional_field_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_positional_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_unterminated_rejected"
+path = "anonymous_const_record_unterminated_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_unterminated_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_malformed_separator_rejected"
+path = "anonymous_const_record_malformed_separator_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_malformed_separator_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_missing_value_rejected"
+path = "anonymous_const_record_missing_value_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_missing_value_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_runtime_rejected"
+path = "anonymous_const_record_runtime_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_runtime_context_deferred"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_nested_literal_rejected"
+path = "anonymous_const_record_nested_literal_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_nested_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_extra_pipe_rejected"
+path = "anonymous_const_record_extra_pipe_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_extra_pipe_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_empty_parameter_value_rejected"
+path = "anonymous_const_record_empty_parameter_value_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_empty_parameter_value_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_nonconstant_field_rejected"
+path = "anonymous_const_record_nonconstant_field_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_nonconstant_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_exported_field_projection_success"
+path = "anonymous_const_record_exported_field_projection_success"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_exported_field_projection"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_imported_field_projection_success"
+path = "anonymous_const_record_imported_field_projection_success"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_imported_field_projection"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_body_local_field_access_success"
+path = "anonymous_const_record_body_local_field_access_success"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_body_local_field_projection"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_collection_element_rejected"
+path = "anonymous_const_record_collection_element_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_collection_element_rejected"
+role = "primary"

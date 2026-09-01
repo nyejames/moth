@@ -1575,6 +1575,7 @@ pub enum DeferredFeatureReason {
     DeclaredRegion,
     CheckedBlock,
     AsyncBlock,
+    RuntimeAnonymousRecord,
 }
 
 impl DeferredFeatureReason {
@@ -1616,6 +1617,10 @@ pub enum InvalidExpressionReason {
     MothFileHasNoValue,
     /// A value-position path is missing the explicit file extension the language requires.
     ExtensionlessFileValue,
+    /// A record literal field was not written as `name = value`.
+    AnonymousRecordFieldNotNamed,
+    /// A record literal appeared as a field value of another record literal.
+    NestedAnonymousConstRecord,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

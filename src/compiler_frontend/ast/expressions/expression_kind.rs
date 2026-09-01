@@ -261,6 +261,17 @@ pub enum ExpressionKind {
     /// Struct instance construction literal.
     StructInstance(Vec<Declaration>),
 
+    /// Anonymous compile-time record literal (`| field = value, ... |`).
+    ///
+    /// WHAT: carries ordered, named field declarations parsed in a compile-time receiving
+    ///       context. The record is a member group, not a runtime value or structural type.
+    /// WHY: anonymous records need a distinct variant so lowering never mistakes them for
+    ///      `StructInstance` values; field types live on the field values and the record
+    ///      itself resolves to the compile-time marker type.
+    AnonymousConstRecord {
+        fields: Vec<Declaration>,
+    },
+
     /// Inclusive range operator (`..`). Kept as a dedicated variant to simplify
     /// constant folding; this may become a general operator in the future.
     Range(Box<Expression>, Box<Expression>),

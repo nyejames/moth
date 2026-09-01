@@ -65,4 +65,7 @@ Rejected:
 - references to other parameters
 
 Struct fields share the same `= default` syntax, but struct defaults have their
-own compile-time rule. Choice payload fields do not support defaults.
+own compile-time rule. A const record uses the same `|...|` parameters list
+with a value required for every parameter, and it does not declare a
+constructable type. See @../constants/#const-records (Const records).
+Choice payload fields do not support defaults.

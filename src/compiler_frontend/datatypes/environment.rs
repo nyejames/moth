@@ -136,6 +136,12 @@ pub struct TypeEnvironment {
     // Seeded builtins.
     builtins: BuiltinTypes,
 
+    // Compile-time-only anonymous const-record marker, interned once by `new`.
+    //
+    // Deliberately not part of `BuiltinTypes`: builtin handles look source-visible, while
+    // this marker is never writable or spellable in source.
+    anonymous_const_record: TypeId,
+
     // Cached substituted fields/variants for generic instances.
     // WHAT: eagerly computed when a generic instance is interned so that
     //       fields_for/variants_for can return substituted views without &mut self.
@@ -302,6 +308,7 @@ impl TypeEnvironment {
                 range: TypeId(0),
                 none: TypeId(0),
             },
+            anonymous_const_record: TypeId(0),
             generic_instance_fields: FxHashMap::default(),
             generic_instance_variants: FxHashMap::default(),
             substitution_cache: FxHashMap::default(),
@@ -331,12 +338,26 @@ impl TypeEnvironment {
             none: none_id,
         };
 
+        // Intern the compile-time-only anonymous const-record marker exactly once. It is not
+        // a struct, has no fields, and is never source-writable; complete anonymous const
+        // records share this one module-local TypeId without unifying literal sites.
+        env.anonymous_const_record =
+            env.insert_definition(TypeDefinition::AnonymousConstRecordMarker);
+
         env
     }
 
     /// Returns handles for all seeded builtin types.
     pub fn builtins(&self) -> &BuiltinTypes {
         &self.builtins
+    }
+
+    /// Returns the compile-time-only anonymous const-record marker type.
+    ///
+    /// Every complete anonymous const record in this environment shares this one `TypeId`.
+    /// `fields_for` never returns fields for it and it never lowers to a runtime type.
+    pub fn anonymous_const_record_type(&self) -> TypeId {
+        self.anonymous_const_record
     }
 
     /// Fork a generated-local environment from this completed requester environment.
@@ -365,6 +386,7 @@ impl TypeEnvironment {
             next_generic_parameter_id: self.next_generic_parameter_id,
             next_generic_parameter_list_id: self.next_generic_parameter_list_id,
             builtins: self.builtins,
+            anonymous_const_record: self.anonymous_const_record,
             generic_instance_fields: FxHashMap::default(),
             generic_instance_variants: FxHashMap::default(),
             substitution_cache: FxHashMap::default(),
@@ -730,7 +752,8 @@ impl TypeEnvironment {
             | TypeDefinition::Struct(..)
             | TypeDefinition::Choice(..)
             | TypeDefinition::External(..)
-            | TypeDefinition::GenericParameter(..) => None,
+            | TypeDefinition::GenericParameter(..)
+            | TypeDefinition::AnonymousConstRecordMarker => None,
         }
     }
 
@@ -1174,6 +1197,7 @@ impl TypeEnvironment {
             TypeDefinition::External(..) => TypeKind::External,
             TypeDefinition::GenericParameter(..) => TypeKind::GenericParameter,
             TypeDefinition::GenericInstance(..) => TypeKind::GenericInstance,
+            TypeDefinition::AnonymousConstRecordMarker => TypeKind::AnonymousConstRecordMarker,
         })
     }
 
@@ -1542,6 +1566,7 @@ impl TypeEnvironment {
             | Some(TypeDefinition::Function(..))
             | Some(TypeDefinition::External(..))
             | Some(TypeDefinition::GenericParameter(..))
+            | Some(TypeDefinition::AnonymousConstRecordMarker)
             | None => false,
 
             Some(TypeDefinition::Constructed(..)) => {
@@ -1811,7 +1836,8 @@ impl TypeEnvironment {
 
             TypeDefinition::Constructed(..)
             | TypeDefinition::Function(..)
-            | TypeDefinition::GenericParameter(..) => None,
+            | TypeDefinition::GenericParameter(..)
+            | TypeDefinition::AnonymousConstRecordMarker => None,
         }
     }
 
@@ -1887,7 +1913,9 @@ impl TypeEnvironment {
                 }))
             }
             TypeDefinition::External(ext) => Some(TypeIdentityKey::External(ext.type_id)),
-            TypeDefinition::Function(_) | TypeDefinition::GenericParameter(_) => None,
+            TypeDefinition::Function(_)
+            | TypeDefinition::GenericParameter(_)
+            | TypeDefinition::AnonymousConstRecordMarker => None,
         }
     }
 
@@ -2102,7 +2130,8 @@ impl TypeEnvironment {
             TypeDefinition::Builtin(..)
             | TypeDefinition::Constructed(..)
             | TypeDefinition::External(..)
-            | TypeDefinition::GenericInstance(..) => {}
+            | TypeDefinition::GenericInstance(..)
+            | TypeDefinition::AnonymousConstRecordMarker => {}
         }
     }
 

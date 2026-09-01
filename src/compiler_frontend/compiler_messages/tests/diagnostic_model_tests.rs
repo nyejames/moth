@@ -1543,10 +1543,26 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         (
             CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::ExtensionlessFileValue,
-                location(source_path),
+                location(source_path.clone()),
             ),
             "A file value needs an explicit extension. Write the path with a file extension, or use a dependency clause to bind declarations.",
             "ExtensionlessFileValue",
+        ),
+        (
+            CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                location(source_path.clone()),
+            ),
+            "Each const-record parameter needs a value. Write `name = value`.",
+            "AnonymousRecordFieldNotNamed",
+        ),
+        (
+            CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::NestedAnonymousConstRecord,
+                location(source_path),
+            ),
+            "Declare the inner struct or record first, then use that name as a parameter value.",
+            "NestedAnonymousConstRecord",
         ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);

@@ -94,12 +94,12 @@ impl<'a> HirBuilder<'a> {
         store: &ConstValueStore,
     ) -> Result<(), CompilerError> {
         for row in store.iter_module_constant_views() {
+            self.module_constants_by_name
+                .insert(row.path.clone(), row.id);
             if !row.metadata.hir_visible {
                 continue;
             }
 
-            self.module_constants_by_name
-                .insert(row.path.clone(), row.id);
             let location = row.metadata.location.clone();
             let const_value = self.lower_const_value_for_module_pool(store, row.id)?;
 

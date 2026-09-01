@@ -4910,6 +4910,9 @@ impl ModuleMaterialisationPreparation {
             TypeDefinition::Function(_) => Err(CompilerError::compiler_error(
                 "Materialisation nominal member cannot contain a function type",
             )),
+            TypeDefinition::AnonymousConstRecordMarker => Ok(
+                MaterialisationTypeBlueprint::Canonical(CanonicalTypeIdentity::AnonymousConstRecord),
+            ),
         }
     }
 
@@ -5625,6 +5628,12 @@ fn intern_generated_canonical_type(
                 "Generated request retained an unresolved generic parameter",
             ));
         }
+
+        // The anonymous const-record marker interns back to this environment's one
+        // compile-time-only marker TypeId; it has no origin to resolve.
+        CanonicalTypeIdentity::AnonymousConstRecord => {
+            type_environment.anonymous_const_record_type()
+        }
     };
     type_environment.register_canonical_identity(identity.clone(), type_id)?;
     Ok(type_id)
@@ -6333,7 +6342,8 @@ fn requester_type_id_for_canonical_identity(
         | CanonicalTypeIdentity::FallibleCarrier(_)
         | CanonicalTypeIdentity::GenericInstance(_)
         | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
-        | CanonicalTypeIdentity::GenericParameter(_) => Err(CompilerError::compiler_error(
+        | CanonicalTypeIdentity::GenericParameter(_)
+        | CanonicalTypeIdentity::AnonymousConstRecord => Err(CompilerError::compiler_error(
             "Generated evidence target has no requester-local canonical type handle",
         )),
         CanonicalTypeIdentity::SourceNominal(_) => Err(CompilerError::compiler_error(

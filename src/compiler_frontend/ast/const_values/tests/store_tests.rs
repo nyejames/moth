@@ -1,8 +1,9 @@
-//! Unit tests for the store's structural string payload.
+//! Unit tests for the store's structural string and record payloads.
 //!
 //! These protect folded-string invariants that external output cannot inspect: plain text keeps
 //! the compact fast path, piece-bearing strings survive `fold_value` in authored piece order,
-//! and the text-only accessor refuses to flatten structure.
+//! and the text-only accessor refuses to flatten structure. Record tests protect authored field
+//! order, field locations, and the duplicate-name construction invariant.
 
 use super::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
@@ -317,4 +318,93 @@ fn the_text_only_accessor_refuses_pieces() {
 
     // No piece may flatten to text through the accessor while the URL context is unresolved.
     assert_eq!(store.string_value(id), None);
+}
+
+// ------------------------------------
+//  Record fields
+// ------------------------------------
+
+/// Builds one record-typed declaration whose fields carry the given authored locations.
+fn record_declaration(
+    path: &str,
+    fields: Vec<Declaration>,
+    string_table: &mut StringTable,
+) -> Declaration {
+    Declaration {
+        id: InternedPath::from_single_str(path, string_table),
+        value: Expression::struct_instance(
+            InternedPath::from_single_str("Record", string_table),
+            fields,
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+            true,
+            None,
+            TypeEnvironment::default().builtins().none,
+        ),
+    }
+}
+
+fn int_field(name: &str, location: SourceLocation, string_table: &mut StringTable) -> Declaration {
+    Declaration {
+        id: InternedPath::from_single_str(name, string_table),
+        value: Expression::int(7, location, ValueMode::ImmutableOwned),
+    }
+}
+
+#[test]
+fn record_fields_keep_authored_order_and_locations() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::default();
+    let alpha_location = SourceLocation::default();
+
+    let declaration = record_declaration(
+        "meta",
+        vec![
+            int_field("alpha", alpha_location.clone(), &mut string_table),
+            int_field("beta", SourceLocation::default(), &mut string_table),
+        ],
+        &mut string_table,
+    );
+
+    let store = ConstValueStore::from_test_declarations(vec![declaration], &type_environment)
+        .expect("a two-field record is representable in the store");
+    let id = store
+        .value_for_path(&InternedPath::from_single_str("meta", &mut string_table))
+        .expect("the defining path indexes the store");
+
+    let Some(ConstValuePayload::Record(fields)) = store.payload(id) else {
+        panic!("expected a stored record payload");
+    };
+
+    // Authored field order survives the store, and each field's location is the location of
+    // its field expression.
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name.name(), Some(string_table.intern("alpha")));
+    assert_eq!(fields[0].location, alpha_location);
+    assert_eq!(fields[1].name.name(), Some(string_table.intern("beta")));
+}
+
+#[test]
+fn duplicate_record_field_name_is_a_construction_error() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::default();
+
+    let declaration = record_declaration(
+        "meta",
+        vec![
+            int_field("name", SourceLocation::default(), &mut string_table),
+            int_field("name", SourceLocation::default(), &mut string_table),
+        ],
+        &mut string_table,
+    );
+
+    let mut store = ConstValueStore::default();
+    let error = store
+        .try_insert_test_declaration(declaration, &type_environment)
+        .expect_err("duplicate record field names must fail store construction");
+    assert!(
+        error.msg.contains("duplicate field names"),
+        "unexpected error: {}",
+        error.msg
+    );
 }

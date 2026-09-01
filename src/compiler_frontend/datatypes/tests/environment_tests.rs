@@ -1644,3 +1644,38 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
         );
     }
 }
+
+#[test]
+fn anonymous_const_record_marker_is_interned_once_and_is_not_a_struct() {
+    let env = TypeEnvironment::new();
+    let table = StringTable::new();
+
+    let marker = env.anonymous_const_record_type();
+
+    assert!(matches!(
+        env.get(marker),
+        Some(TypeDefinition::AnonymousConstRecordMarker)
+    ));
+    assert_eq!(env.anonymous_const_record_type(), marker);
+    assert_eq!(
+        env.type_kind(marker),
+        Some(crate::compiler_frontend::datatypes::queries::TypeKind::AnonymousConstRecordMarker)
+    );
+    assert!(env.fields_for(marker).is_none());
+    assert!(env.struct_definition_for(marker).is_none());
+    assert!(!env.is_const_record(marker));
+    assert_eq!(display_type(marker, &env, &table), "anonymous const record");
+}
+
+#[test]
+fn generated_fork_shares_the_anonymous_const_record_marker() {
+    let env = TypeEnvironment::new();
+    let marker = env.anonymous_const_record_type();
+
+    let fork = env.fork_for_generated();
+    assert_eq!(fork.anonymous_const_record_type(), marker);
+    assert!(matches!(
+        fork.get(marker),
+        Some(TypeDefinition::AnonymousConstRecordMarker)
+    ));
+}

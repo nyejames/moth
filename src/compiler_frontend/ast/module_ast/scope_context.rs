@@ -489,6 +489,11 @@ pub struct ScopeContext {
 
     // Control flow state.
     pub loop_depth: usize,
+
+    /// True while parsing a field value of an anonymous const record.
+    ///
+    /// Nested `|...|` literals are rejected so pipe counting stays unambiguous.
+    pub(crate) inside_anonymous_const_record: bool,
 }
 
 impl Clone for ScopeContext {
@@ -521,6 +526,7 @@ impl Clone for ScopeContext {
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth: self.loop_depth,
+            inside_anonymous_const_record: self.inside_anonymous_const_record,
         }
     }
 }
@@ -735,6 +741,7 @@ impl ScopeContext {
             generic_template_validation: false,
             generic_function_instantiation_stack: Vec::new(),
             loop_depth: 0,
+            inside_anonymous_const_record: false,
         }
     }
 
@@ -797,6 +804,7 @@ impl ScopeContext {
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth,
+            inside_anonymous_const_record: self.inside_anonymous_const_record,
         }
     }
 
@@ -838,6 +846,7 @@ impl ScopeContext {
             generic_template_validation: false,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth: 0,
+            inside_anonymous_const_record: false,
         };
 
         // Share the top-level declaration table (cheap Rc clone); reset locals to params only.
@@ -873,6 +882,7 @@ impl ScopeContext {
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth: self.loop_depth,
+            inside_anonymous_const_record: self.inside_anonymous_const_record,
         }
     }
 
@@ -913,6 +923,7 @@ impl ScopeContext {
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth: self.loop_depth,
+            inside_anonymous_const_record: self.inside_anonymous_const_record,
         }
     }
 
@@ -952,6 +963,7 @@ impl ScopeContext {
                 .generic_function_instantiation_stack
                 .clone(),
             loop_depth: parent.loop_depth,
+            inside_anonymous_const_record: parent.inside_anonymous_const_record,
         }
     }
 }

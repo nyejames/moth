@@ -704,6 +704,7 @@ define_stable_reason_keys! {
     &DeferredFeatureReason::DeclaredRegion => "deferred_feature.declared_region",
     &DeferredFeatureReason::CheckedBlock => "deferred_feature.checked_block",
     &DeferredFeatureReason::AsyncBlock => "deferred_feature.async_block",
+    &DeferredFeatureReason::RuntimeAnonymousRecord => "deferred_feature.runtime_anonymous_record",
     },
 
     InvalidPageMetadataReason => {
@@ -716,6 +717,8 @@ define_stable_reason_keys! {
     &InvalidExpressionReason::UnresolvedStackShape => "invalid_expression.unresolved_stack_shape",
     &InvalidExpressionReason::MothFileHasNoValue => "invalid_expression.moth_file_has_no_value",
     &InvalidExpressionReason::ExtensionlessFileValue => "invalid_expression.extensionless_file_value",
+    &InvalidExpressionReason::AnonymousRecordFieldNotNamed => "invalid_expression.anonymous_record_field_not_named",
+    &InvalidExpressionReason::NestedAnonymousConstRecord => "invalid_expression.nested_anonymous_const_record",
     },
 
     InvalidStandaloneStatementReason => {

@@ -8,14 +8,30 @@ Implement anonymous compile-time records as a small field-access-only value surf
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/anonymous-const-records-plan.md
-STATUS: active
-CURRENT_SLICE: Phase 0 - refresh const-record parsing, folding, projection and interface owners
-LAST_GOOD_COMMIT: none until the first implementation slice is accepted
+STATUS: complete
+CURRENT_SLICE: final review accepted
+LAST_GOOD_COMMIT: closeout in this commit
 BRANCH: main
 IMPLEMENTATION_SCOPE: AST constant expressions, folded values, const-record field projection, public folded interfaces
+BASELINE_VALIDATE: passed at fabafbb88 (0 failures)
+BOUNDARY: GO with folded-record field authority. No second evaluator. No per-site runtime TypeId. TIR does not cross folded values. Fingerprints planned, not implemented.
 ```
 
 Keep this block concise. Git history is the implementation record.
+
+## Phase 0 freeze
+
+Anonymous const records are compile-time member groups, not types. Field names, order, locations and values live on `ConstValuePayload::Record` and `PublicFoldedValue::Record`. `.field` uses `ConstValueStore::field_value` and the existing HIR store-backed path in `hir_expression/places.rs`. Do not intern a `TypeDefinition` or hidden nominal `TypeId` to answer field access.
+
+Complete anonymous records carry `ConstRecordState::ConstRecord` and must not lower to runtime HIR (`StructConstruct`, bindings, arguments, returns). `hir_statement/declarations.rs` `resolve_const_struct_id` stays struct-backed only.
+
+`Expression.type_id` and `ConstValueMetadata.type_id` stay total. A complete anonymous record uses one module-local compile-time-only `TypeDefinition` marker interned once per `TypeEnvironment`. It is not a struct, has no fields or methods, is not source-writable, does not unify literal sites, and is never lowered. Semantic field types live on field values.
+
+Public identity for an exported anonymous const record is `CanonicalTypeIdentity::AnonymousConstRecord`. Nested records are nested `PublicFoldedValue::Record` values only. `PublicFoldedField` carries `type_identity` projected from the field value's store metadata so import can materialize without `fields_for`. Nested anonymous fields project to `AnonymousConstRecord`; nested named structs project to their source nominal identity. Import restores `ConstRecordState::ConstRecord` for anonymous records and never calls `fields_for` on the marker type. Ordinary folded struct defaults keep today's struct `TypeId` path. `PublicFoldedValue::Record` alone does not imply const-record status.
+
+One const evaluator: `ast/const_eval` (`constant_fold`, `fold_compile_time_expression`) plus `ConstValueStore::insert_expression`. Additional owners: `expressions/eval_expression/evaluator.rs`, `const_values/resolver.rs`, `hir/constants.rs`, `build_system/resource_unions.rs`. Expression `|` is `TokenKind::TypeParameterBracket` and is currently unexpected.
+
+Phase 3 must replace the eager whole-record clone in `reference_expression_from_declaration` with borrowed or store-backed single-field projection. Phase 4 must reject imported complete records in runtime use and cover nested imported projection.
 
 ## Hard prerequisites
 
@@ -40,11 +56,13 @@ This plan must complete before grouped project config, build configuration value
 Anonymous const records use ordinary expression syntax in a compile-time receiving context:
 
 ```moth
+inner #= |
+    enabled = true,
+|
+
 metadata #= |
     channel = "alpha",
-    nested = |
-        enabled = true,
-    |,
+    nested = inner,
 |
 
 channel #= metadata.channel
@@ -55,7 +73,7 @@ Rules:
 - `|...|` in expression position forms an anonymous const record only when the receiving context requires a compile-time value.
 - Fields are named, ordered and unique.
 - Every field initializer must fully fold.
-- Nested anonymous const records are allowed.
+- Nested anonymous const records are allowed by declaring the child record first and naming it as a parameter value. Do not nest one `|...|` list inside another.
 - The record is a compile-time member group, not a runtime value or structural source type.
 - Field projection may participate in later constant folding.
 - The complete record cannot be assigned to a runtime binding, passed, returned, stored in a runtime aggregate or used through a receiver method.
@@ -126,7 +144,8 @@ Review gate: verify one folded value owner and no parallel config-only record re
 ### Phase 2: Parse expression-position record literals
 
 - Recognise `|...|` only when expression parsing owns a compile-time receiving context.
-- Reuse existing field declaration syntax where it matches without routing through named struct declaration parsing.
+- `|...|` is shared parameters syntax with structs and functions. A const record requires a value for every parameter and does not declare a constructable type.
+- Do not parse a nested `|...|` list inside another. Declare the child struct or record first, then name it as a parameter value.
 - Reject positional fields, duplicate names, missing values, malformed separators and unterminated records with structured diagnostics.
 - Keep parameter lists, struct declarations, choice payloads, receiver signatures and template grammar on their existing owners.
 - Reject runtime-context anonymous record literals with a targeted deferred/unsupported diagnostic until the runtime follow-up plan lands.

@@ -123,6 +123,10 @@ fn display_definition(
                 .collect();
             format!("{base_name} of {}", args.join(", "))
         }
+
+        // The marker is a compile-time member group, not a struct; diagnostics must not
+        // render it as one.
+        TypeDefinition::AnonymousConstRecordMarker => "anonymous const record".to_owned(),
     }
 }
 

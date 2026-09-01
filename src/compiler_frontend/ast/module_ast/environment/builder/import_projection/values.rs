@@ -267,6 +267,30 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
             ExpressionKind::Collection(items)
         }
         PublicFoldedValue::Record(fields) => {
+            // Anonymous const records keep their field facts on the folded values: the
+            // compile-time marker type has no field definitions, so import projects the folded
+            // fields directly and restores the compile-time member-group state instead of a
+            // runtime struct instance.
+            if expected_type_id
+                == materialiser
+                    .type_environment()
+                    .anonymous_const_record_type()
+            {
+                let projected_fields = materialize_public_anonymous_record_fields(
+                    materialiser,
+                    fields,
+                    string_table,
+                    location,
+                )?;
+
+                return Ok(Expression::anonymous_const_record(
+                    projected_fields,
+                    location.clone(),
+                    ValueMode::ImmutableReference,
+                    expected_type_id,
+                ));
+            }
+
             let definitions = materialiser
                 .type_environment()
                 .fields_for(expected_type_id)
@@ -425,6 +449,41 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
             )?,
         });
     }
+    Ok(projected)
+}
+
+/// Materializes one imported anonymous const record's ordered fields.
+///
+/// WHAT: interns each folded field name into the consumer string table and each field's
+///       canonical type identity into the consumer type environment, then recursively
+///       materializes the field value against that consumer-local type.
+/// WHY: the anonymous const-record marker type has no `fields_for` definitions, so the folded
+///      fields are the only field authority and nested anonymous records re-enter this same
+///      recursive projection.
+fn materialize_public_anonymous_record_fields<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
+    fields: &[PublicFoldedField],
+    string_table: &mut StringTable,
+    location: &SourceLocation,
+) -> Result<Vec<Declaration>, CompilerError> {
+    let mut projected = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        let field_type_id =
+            materialiser.intern_canonical_type(&field.type_identity, string_table)?;
+
+        projected.push(Declaration {
+            id: InternedPath::from_single_str(&field.name, string_table),
+            value: materialize_public_folded_value(
+                materialiser,
+                &field.value,
+                field_type_id,
+                string_table,
+                location,
+            )?,
+        });
+    }
+
     Ok(projected)
 }
 

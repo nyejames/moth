@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -57,6 +58,7 @@ struct FieldMemberResolution<'a> {
     resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
     receiver_is_const_record: bool,
     template_ir_store: Option<&'a Rc<RefCell<TemplateIrStore>>>,
+    scope_context: Option<&'a ScopeContext>,
 }
 
 // --------------------------
@@ -95,32 +97,10 @@ fn expression_is_compile_time_constant(
         })?
         .is_compile_time_value())
 }
-
-fn const_inline_field_value(
-    receiver_node: &AstNode,
-    receiver_type_id: TypeId,
-    field_name: StringId,
-    type_environment: &TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&FxHashMap<InternedPath, Vec<Declaration>>>,
+fn clone_inlined_const_field(
+    field_value: &Expression,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Option<Expression>, ExpressionParseError> {
-    if let Some(field_value) =
-        const_inline_field_value_from_receiver(receiver_node, field_name, template_ir_store)?
-    {
-        return Ok(Some(field_value));
-    }
-
-    let field_value = const_field_value(
-        receiver_type_id,
-        field_name,
-        type_environment,
-        resolved_struct_fields_by_path,
-    );
-
-    let Some(field_value) = field_value else {
-        return Ok(None);
-    };
-
     if !expression_is_compile_time_constant(field_value, template_ir_store)? {
         return Ok(None);
     }
@@ -130,36 +110,169 @@ fn const_inline_field_value(
     Ok(Some(inlined_expression))
 }
 
+fn const_inline_field_value(
+    receiver_node: &AstNode,
+    receiver_type_id: TypeId,
+    field_name: StringId,
+    type_environment: &TypeEnvironment,
+    resolved_struct_fields_by_path: Option<&FxHashMap<InternedPath, Vec<Declaration>>>,
+    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    scope_context: Option<&ScopeContext>,
+) -> Result<Option<Expression>, ExpressionParseError> {
+    if let Some(field_value) =
+        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context)
+    {
+        return clone_inlined_const_field(&field_value, template_ir_store);
+    }
+
+    let Some(field_value) = const_field_value(
+        receiver_type_id,
+        field_name,
+        type_environment,
+        resolved_struct_fields_by_path,
+    ) else {
+        return Ok(None);
+    };
+
+    clone_inlined_const_field(field_value, template_ir_store)
+}
+
+#[cfg(test)]
 fn const_inline_field_value_from_receiver(
     receiver_node: &AstNode,
     field_name: StringId,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    scope_context: Option<&ScopeContext>,
 ) -> Result<Option<Expression>, ExpressionParseError> {
-    let receiver_value = match &receiver_node.kind {
-        NodeKind::ExpressionStatement(expression) => expression,
-        NodeKind::VariableDeclaration(declaration) => &declaration.value,
-        _ => return Ok(None),
-    };
-
-    let ExpressionKind::StructInstance(fields) = &receiver_value.kind else {
-        return Ok(None);
-    };
-
-    let Some(field) = fields
-        .iter()
-        .find(|field| field.id.name() == Some(field_name))
+    let Some(field_value) =
+        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context)
     else {
         return Ok(None);
     };
-    let field_value = field.value.to_owned();
+    clone_inlined_const_field(&field_value, template_ir_store)
+}
 
-    if !expression_is_compile_time_constant(&field_value, template_ir_store)? {
-        return Ok(None);
+fn receiver_value_expression(receiver_node: &AstNode) -> Option<&Expression> {
+    match &receiver_node.kind {
+        NodeKind::ExpressionStatement(expression) => Some(expression),
+        NodeKind::VariableDeclaration(declaration) => Some(&declaration.value),
+        _ => None,
     }
+}
 
-    let mut inlined_expression = field_value;
-    inlined_expression.value_mode = ValueMode::ImmutableOwned;
-    Ok(Some(inlined_expression))
+fn with_const_record_declaration<T>(
+    path: &InternedPath,
+    scope_context: Option<&ScopeContext>,
+    visit: impl FnOnce(&Declaration) -> Option<T>,
+) -> Option<T> {
+    let scope = scope_context?;
+    if let Some(declaration) = scope.top_level_declarations.get_by_path(path) {
+        return visit(declaration);
+    }
+    let name = path.name()?;
+    visit(scope.get_reference(&name)?.as_declaration())
+}
+
+struct ConstRecordFieldFacts {
+    type_id: TypeId,
+    diagnostic_type: DataType,
+    is_const_record: bool,
+}
+
+fn const_record_field_facts(
+    receiver_value: &Expression,
+    field_name: StringId,
+    scope_context: Option<&ScopeContext>,
+) -> Option<ConstRecordFieldFacts> {
+    let field_value = match &receiver_value.kind {
+        ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields } => fields
+            .iter()
+            .find(|field| field.id.name() == Some(field_name))
+            .map(|field| &field.value)?,
+        ExpressionKind::Reference(path) => {
+            return with_const_record_declaration(path, scope_context, |declaration| {
+                const_record_field_facts(&declaration.value, field_name, scope_context)
+            });
+        }
+        ExpressionKind::FieldAccess { base, field } => {
+            let projected = clone_const_record_field(base, *field, scope_context)?;
+            return const_record_field_facts(&projected, field_name, scope_context);
+        }
+        _ => return None,
+    };
+
+    Some(ConstRecordFieldFacts {
+        type_id: field_value.type_id,
+        diagnostic_type: field_value.diagnostic_type.clone(),
+        is_const_record: field_value.is_const_record_value(),
+    })
+}
+
+fn clone_const_record_field_from_receiver(
+    receiver_node: &AstNode,
+    field_name: StringId,
+    scope_context: Option<&ScopeContext>,
+) -> Option<Expression> {
+    clone_const_record_field(
+        receiver_value_expression(receiver_node)?,
+        field_name,
+        scope_context,
+    )
+}
+
+fn clone_const_record_field(
+    receiver_value: &Expression,
+    field_name: StringId,
+    scope_context: Option<&ScopeContext>,
+) -> Option<Expression> {
+    match &receiver_value.kind {
+        ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields } => fields
+            .iter()
+            .find(|field| field.id.name() == Some(field_name))
+            .map(|field| field.value.to_owned()),
+        ExpressionKind::Reference(path) => {
+            with_const_record_declaration(path, scope_context, |declaration| {
+                clone_const_record_field(&declaration.value, field_name, scope_context)
+            })
+        }
+        ExpressionKind::FieldAccess { base, field } => {
+            let projected = clone_const_record_field(base, *field, scope_context)?;
+            clone_const_record_field(&projected, field_name, scope_context)
+        }
+        _ => None,
+    }
+}
+
+fn resolved_projected_field(
+    field_name: StringId,
+    field_type_id: TypeId,
+    diagnostic_type: DataType,
+    field_value_is_const_record: bool,
+    type_environment: &TypeEnvironment,
+    receiver_is_const_record: bool,
+    const_inline_value: Option<Expression>,
+) -> ResolvedFieldMember {
+    let field_type_is_struct = matches!(
+        type_environment.get(field_type_id),
+        Some(TypeDefinition::Struct(_))
+    );
+    let const_record_state =
+        if field_value_is_const_record || (receiver_is_const_record && field_type_is_struct) {
+            ConstRecordState::ConstRecord
+        } else {
+            ConstRecordState::RuntimeValue
+        };
+
+    ResolvedFieldMember {
+        field_name,
+        type_id: field_type_id,
+        diagnostic_type,
+        value_mode: ValueMode::ImmutableOwned,
+        const_record_state,
+        const_inline_value,
+    }
 }
 
 fn resolve_field_member(
@@ -173,7 +286,49 @@ fn resolve_field_member(
         resolved_struct_fields_by_path,
         receiver_is_const_record,
         template_ir_store,
+        scope_context,
     } = input;
+
+    let projected_field = receiver_value_expression(receiver_node)
+        .and_then(|receiver| const_record_field_facts(receiver, field_name, scope_context));
+
+    let const_inline_value = if let Some(template_ir_store) = template_ir_store {
+        const_inline_field_value(
+            receiver_node,
+            receiver_type_id,
+            field_name,
+            type_environment,
+            resolved_struct_fields_by_path,
+            template_ir_store,
+            scope_context,
+        )?
+    } else {
+        None
+    };
+
+    if let Some(inlined_expression) = const_inline_value {
+        return Ok(Some(resolved_projected_field(
+            field_name,
+            inlined_expression.type_id,
+            inlined_expression.diagnostic_type.clone(),
+            inlined_expression.is_const_record_value(),
+            type_environment,
+            receiver_is_const_record,
+            Some(inlined_expression),
+        )));
+    }
+
+    if let Some(field_facts) = projected_field {
+        return Ok(Some(resolved_projected_field(
+            field_name,
+            field_facts.type_id,
+            field_facts.diagnostic_type,
+            field_facts.is_const_record,
+            type_environment,
+            receiver_is_const_record,
+            None,
+        )));
+    }
 
     // Try canonical TypeEnvironment first; fall back to AST-owned struct shells
     // when the struct was registered with an empty field list during early
@@ -199,23 +354,6 @@ fn resolve_field_member(
         resolved_struct_fields_by_path,
     );
 
-    let const_inline_value = if let Some(template_ir_store) = template_ir_store {
-        // Const records need full declaration values for field inlining. The
-        // TypeEnvironment owns semantic field types, while the resolved struct
-        // field side table owns foldable default expressions. Prefer the
-        // already-inlined receiver instance so const records preserve authored
-        // constructor values such as `HtmlDefaults(color = "green")`.
-        const_inline_field_value(
-            receiver_node,
-            receiver_type_id,
-            field_name,
-            type_environment,
-            resolved_struct_fields_by_path,
-            template_ir_store,
-        )?
-    } else {
-        None
-    };
     let field_value_is_const_record = const_field_value
         .map(Expression::is_const_record_value)
         .unwrap_or(false);
@@ -239,7 +377,7 @@ fn resolve_field_member(
         diagnostic_type: diagnostic_type_spelling(field_type_id, type_environment),
         value_mode: ValueMode::ImmutableOwned,
         const_record_state,
-        const_inline_value,
+        const_inline_value: None,
     }))
 }
 
@@ -307,6 +445,7 @@ pub(super) fn parse_field_member_access_typed(
             resolved_struct_fields_by_path: scope_context.resolved_struct_fields_by_path.as_deref(),
             receiver_is_const_record,
             template_ir_store: template_ir_store.as_ref(),
+            scope_context: Some(scope_context),
         })?
     };
 
@@ -327,7 +466,8 @@ pub(super) fn parse_field_member_access_typed(
         .into());
     }
 
-    let result_expression = if let Some(inlined_expression) = field.const_inline_value {
+    let result_expression = if let Some(mut inlined_expression) = field.const_inline_value {
+        inlined_expression.location = member_location.clone();
         inlined_expression
     } else {
         increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);

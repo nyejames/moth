@@ -644,9 +644,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Constants and compile-time folding</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, external constant, config, and diagnostics coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, anonymous const-record, external constant, config, and diagnostics coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend</td>
- <td style="padding: 0.1em 0.5em; "> Top-level compile-time constants such as <code>name #= value</code> must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values.</td>
+ <td style="padding: 0.1em 0.5em; "> Top-level compile-time constants such as <code>name #= value</code> must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values. <code>|...|</code> in a compile-time receiving context is an anonymous const record: every parameter needs a value, the list does not declare a constructable type, and nested lists are declared first then named. Exported and imported folded records are supported.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

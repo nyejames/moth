@@ -418,7 +418,7 @@ Rules:
     custom = greet(name = "Rob", punctuation = "?")
 ]
 
-Parameters use `|...|`. No parameters use `||`. Omit `->` when there are no success values.
+Parameters use `|...|`, the same list syntax as structs and const records. Context decides what the list becomes. No parameters use `||`. Omit `->` when there are no success values.
 Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults.
 Host functions and compiler-owned builtin members are positional-only.
 
@@ -691,7 +691,7 @@ Range loop:
     person.age += 1
 ]
 
-Structs are nominal. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.
+Structs use the same `|...|` parameters syntax as functions and const records. The list declares a nominal constructable type. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.
 
 A receiver method is a top-level function whose first parameter is `this`:
 
@@ -726,16 +726,10 @@ Methods specialised to one concrete instance are invalid.
 
 ### Runtime anonymous records
 
-[codeblock, $code("moth"):
-    point = |
-        x = 10,
-        y = 20,
-    |
+Runtime `|...|` records are deferred. Today a pipe list in a runtime receiving
+context reports a deferred-feature diagnostic. Compile-time `|...|` records are
+the field-access-only const records in **Anonymous const records** below.
 
-    x = point.x
-]
-
-Each literal site creates a distinct hidden nominal type. It supports local binding, fields, ordinary access and `copy`, but has no source-visible type name, constructor, methods or conformance. It cannot enter signatures, returns, aliases, public surfaces, named aggregate fields or trait evidence. The first implementation also rejects collection/map storage and generic arguments. Wider local storage is unsettled.
 
 ## Choices
 
@@ -828,20 +822,33 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
 
 ### Anonymous const records
 
-An anonymous record in a compile-time receiving context is a field-access-only const value:
+`|...|` is parameters syntax. In a compile-time receiving context it becomes a
+const record: every parameter needs a value, and the list does not declare a
+constructable type.
 
 [codeblock, $code("moth"):
-    metadata #= |
-        channel = "alpha",
-        nested = |
-            enabled = true,
-        |,
+    Size = |
+        width Int,
+        height Int,
     |
 
-    channel #= metadata.channel
+    size #= Size(8, 4)
+
+    labels #= |
+        first = "a",
+        second = "b",
+    |
+
+    nested #= |
+        size = size,
+        first = labels.first,
+    |
 ]
 
-Every field must fully fold. Const records may nest and may be exported when every reachable field is representable in the public folded-value vocabulary. The complete record is not a runtime value: it cannot be passed, returned, stored in runtime data or used through receiver methods.
+Do not nest one `|...|` list inside another. Declare a child struct or record
+first, then name it as a parameter value. Every parameter value must fold.
+The complete record is not a runtime value: it cannot be passed, returned,
+stored in runtime data or used through receiver methods.
 
 A fully folded named struct constant may also act as a data-only const record.
 

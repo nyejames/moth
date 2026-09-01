@@ -18,3 +18,8 @@ Read its fields during compilation or use one field in runtime code:
 
 The complete const record is not an ordinary runtime object. Use its fields
 instead.
+
+An anonymous `| name = value |` const record uses the same `|...|` parameters
+syntax as structs and functions. Every parameter needs a value, and the list
+does not create a constructable type. Declare a child struct or record first,
+then name it as a parameter. Do not nest one `|...|` list inside another.

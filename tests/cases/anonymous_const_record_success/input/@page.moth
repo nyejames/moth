@@ -1,0 +1,10 @@
+empty #= | |
+labels #= | first = "a", second = "b" |
+first #= labels.first
+inner #= | x = 3 |
+nested #= | inner = inner |
+x_value #= nested.inner.x
+label #String = cast 42
+
+io.line([: runtime-field=[labels.first] runtime-nested=[nested.inner.x]])
+[: const record label: [label] first: [first] x: [x_value]]

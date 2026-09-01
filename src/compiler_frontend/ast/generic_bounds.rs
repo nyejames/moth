@@ -188,7 +188,8 @@ fn validate_type_recursive(
             | TypeDefinition::Struct(..)
             | TypeDefinition::Choice(..)
             | TypeDefinition::External(..)
-            | TypeDefinition::GenericParameter(..),
+            | TypeDefinition::GenericParameter(..)
+            | TypeDefinition::AnonymousConstRecordMarker,
         )
         | None => {}
     }

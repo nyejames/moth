@@ -188,7 +188,9 @@ fn classify_expression(
             }
             Ok(None)
         }
-        ExpressionKind::StructInstance(fields) | ExpressionKind::ChoiceConstruct { fields, .. } => {
+        ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields }
+        | ExpressionKind::ChoiceConstruct { fields, .. } => {
             for field in fields {
                 if let Some(effect) = classify_expression(&field.value, template_ir_store, state)? {
                     return Ok(Some(effect));

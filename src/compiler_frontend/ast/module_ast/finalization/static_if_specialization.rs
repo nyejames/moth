@@ -355,7 +355,9 @@ impl StaticIfSpecializer<'_> {
                     self.specialize_expression(&mut entry.value, environment)?;
                 }
             }
-            ExpressionKind::StructDefinition(fields) | ExpressionKind::StructInstance(fields) => {
+            ExpressionKind::StructDefinition(fields)
+            | ExpressionKind::StructInstance(fields)
+            | ExpressionKind::AnonymousConstRecord { fields } => {
                 for field in fields {
                     self.specialize_expression(&mut field.value, environment)?;
                 }

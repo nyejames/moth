@@ -504,9 +504,17 @@ fn constant_record_owns_recursive_const_record_fields() {
         value: outer_instance,
     }];
 
+    // Both nested nominals resolve to source origins: the outer constant's own type and the
+    // nested field's identity both project through the same canonical projection owner.
     let outer_origin = struct_origin("Outer");
-    let nominal_origins =
-        nominal_origins_map(vec![("Outer", outer_origin.clone())], &mut string_table);
+    let inner_origin = struct_origin("Inner");
+    let nominal_origins = nominal_origins_map(
+        vec![
+            ("Outer", outer_origin.clone()),
+            ("Inner", inner_origin.clone()),
+        ],
+        &mut string_table,
+    );
 
     let root = constant_root("nested", outer_type_id, &mut string_table);
     let records = build_constant_records(
@@ -1025,4 +1033,95 @@ fn text_is_available_for_a_piece_list_that_carries_only_text() {
     // Availability must match `require_concrete_text`: only a Resource or SiteRoot piece withholds
     // text, so a piece list carrying only text concatenates in authored order.
     assert_eq!(projected.into_text(), Some("docs/intro.html".to_owned()));
+}
+
+#[test]
+fn folded_record_fields_carry_type_identity_from_field_metadata() {
+    use crate::compiler_frontend::canonical_type_identity::{
+        CanonicalBuiltinType, CanonicalTypeIdentity,
+    };
+
+    let mut string_table = StringTable::new();
+    let env = TypeEnvironment::new();
+
+    // A nested anonymous const record uses the compile-time-only marker type.
+    let marker = env.anonymous_const_record_type();
+
+    let enabled_fields = vec![Declaration {
+        id: InternedPath::from_single_str("enabled", &mut string_table),
+        value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+    }];
+    let nested_record = Expression::new(
+        ExpressionKind::StructInstance(enabled_fields),
+        SourceLocation::default(),
+        marker,
+        DataType::None,
+        ValueMode::ImmutableOwned,
+    );
+
+    let fields = vec![
+        Declaration {
+            id: InternedPath::from_single_str("year", &mut string_table),
+            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+        },
+        Declaration {
+            id: InternedPath::from_single_str("flags", &mut string_table),
+            value: nested_record,
+        },
+    ];
+    let record = Expression::new(
+        ExpressionKind::StructInstance(fields),
+        SourceLocation::default(),
+        marker,
+        DataType::None,
+        ValueMode::ImmutableOwned,
+    );
+
+    let value_path = InternedPath::from_single_str("meta", &mut string_table);
+    let module_constants = vec![Declaration {
+        id: value_path,
+        value: record,
+    }];
+
+    let nominal_origins = nominal_origins_map(vec![], &mut string_table);
+    let root = constant_root("meta", marker, &mut string_table);
+    let records = build_constant_records(
+        vec![root],
+        vec![constant_binding("meta")],
+        &module_constants,
+        &nominal_origins,
+        &env,
+        &string_table,
+    )
+    .expect("an anonymous const record folds to the public vocabulary");
+
+    let PublicDeclarationSemantics::Constant(semantics) = &records[0].semantics else {
+        panic!("expected constant semantics");
+    };
+
+    // The record's own identity projects from the marker; each field's identity projects
+    // from that field value's store metadata TypeId.
+    assert_eq!(
+        semantics.type_identity,
+        CanonicalTypeIdentity::AnonymousConstRecord
+    );
+    let PublicFoldedValue::Record(folded_fields) = &semantics.folded_value else {
+        panic!("expected a folded record");
+    };
+
+    assert_eq!(folded_fields.len(), 2);
+
+    // The scalar field projects to its builtin identity.
+    assert_eq!(folded_fields[0].name, "year");
+    assert_eq!(
+        folded_fields[0].type_identity,
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+    );
+
+    // The nested anonymous record field projects to the payload-free marker identity.
+    assert_eq!(folded_fields[1].name, "flags");
+    assert_eq!(
+        folded_fields[1].type_identity,
+        CanonicalTypeIdentity::AnonymousConstRecord
+    );
 }

@@ -3,6 +3,7 @@
 //! WHAT: routes one token at a time through expression-position parsing.
 //! WHY: keeps delimiter/grammar ownership explicit while specialized helpers own detailed token families.
 
+use super::anonymous_const_record::parse_anonymous_const_record_expression;
 use super::error::ExpressionParseError;
 use super::eval_expression::evaluate_expression;
 use super::expression::{Expression, ExpressionKind, Operator};
@@ -41,7 +42,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidBuiltinCallReason, InvalidCastReason,
+    CompilerDiagnostic, DeferredFeatureReason, InvalidBuiltinCallReason, InvalidCastReason,
     InvalidControlFlowStatementReason, InvalidExpressionReason, InvalidTemplateStructureReason,
     TypeMismatchContext,
 };
@@ -397,6 +398,15 @@ pub(super) fn dispatch_expression_token(
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
+    // A following `name =` starts the next const-record parameter, not a second operand.
+    if context.inside_anonymous_const_record
+        && matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_)))
+        && matches!(token, TokenKind::Symbol(_))
+        && token_stream.peek_next_token() == Some(&TokenKind::Assign)
+    {
+        return Ok(ExpressionTokenStep::Break);
+    }
+
     // Reject definite adjacency before semantic name, call or constructor parsing.
     if is_value_operand_start_token(&token) {
         reject_adjacent_operand(state.expression, &token_stream.current_location())?;
@@ -804,17 +814,52 @@ pub(super) fn dispatch_expression_token(
         .into()),
 
         TokenKind::TypeParameterBracket => {
-            if let Some(error) =
-                check_expression_common_mistake(token_stream, state.expression.is_empty())
-            {
-                return Err(error.into());
+            // A complete operand precedes `|`: there is no binary `|` operator. Runtime
+            // `||` is the C-family `or` mistake; nested record literals are rejected.
+            if matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_))) {
+                if !context.kind.is_constant_context()
+                    && let Some(error) =
+                        check_expression_common_mistake(token_stream, state.expression.is_empty())
+                {
+                    return Err(error.into());
+                }
+                return Ok(ExpressionTokenStep::Break);
             }
 
-            Err(CompilerDiagnostic::unexpected_token(
-                TokenKind::TypeParameterBracket,
-                token_stream.current_location(),
-            )
-            .into())
+            if context.inside_anonymous_const_record {
+                return Err(CompilerDiagnostic::invalid_expression(
+                    InvalidExpressionReason::NestedAnonymousConstRecord,
+                    token_stream.current_location(),
+                )
+                .into());
+            }
+
+            if context.kind.is_constant_context() {
+                let record = parse_anonymous_const_record_expression(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                )?;
+
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    state.expression,
+                    state.allow_boundary_catch,
+                    record,
+                )?;
+
+                Ok(ExpressionTokenStep::Continue)
+            } else {
+                Err(CompilerDiagnostic::deferred_feature_reason(
+                    DeferredFeatureReason::RuntimeAnonymousRecord,
+                    token_stream.current_location(),
+                )
+                .into())
+            }
         }
 
         TokenKind::AddAssign => Err(CompilerDiagnostic::unexpected_token(
@@ -915,7 +960,11 @@ fn dispatch_newline(
         token_stream.previous_token()
     };
     if state.consume_closing_parenthesis
-        || (previous_token.continues_expression() && !matches!(previous_token, TokenKind::End))
+        || (previous_token.continues_expression()
+            && !matches!(
+                previous_token,
+                TokenKind::End | TokenKind::TypeParameterBracket
+            ))
     {
         token_stream.skip_newlines();
         return Ok(ExpressionTokenStep::Continue);

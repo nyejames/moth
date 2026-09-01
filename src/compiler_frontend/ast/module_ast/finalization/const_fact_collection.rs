@@ -529,7 +529,9 @@ impl<'a> ConstFactCollector<'a> {
                 }
             }
 
-            ExpressionKind::StructDefinition(fields) | ExpressionKind::StructInstance(fields) => {
+            ExpressionKind::StructDefinition(fields)
+            | ExpressionKind::StructInstance(fields)
+            | ExpressionKind::AnonymousConstRecord { fields } => {
                 for field in fields {
                     self.walk_expression_for_body_local(&field.value, env)?;
                 }

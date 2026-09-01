@@ -120,9 +120,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .copied()
                 .ok_or_else(|| {
                     CompilerError::compiler_error(format!(
-                        "Imported canonical generic parameter {parameter:?} has no projected consumer-local parameter"
+                        "Imported canonical generic parameter {:?} has no consumer-local TypeId",
+                        parameter
                     ))
                 })?,
+
+            // The anonymous const-record marker interns back to this environment's one
+            // compile-time-only marker TypeId; it has no origin to resolve.
+            CanonicalTypeIdentity::AnonymousConstRecord => {
+                self.type_environment.anonymous_const_record_type()
+            }
         };
 
         self.type_environment

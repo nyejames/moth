@@ -56,7 +56,10 @@ pub fn classify_hir_type(type_id: TypeId, type_environment: &TypeEnvironment) ->
         | TypeDefinition::Constructed(..)
         | TypeDefinition::External(..)
         | TypeDefinition::GenericInstance(..)
-        | TypeDefinition::GenericParameter(..) => HirTypeClass::HeapAllocated,
+        | TypeDefinition::GenericParameter(..)
+        // The compile-time-only anonymous const-record marker never lowers to a runtime
+        // value; the conservative heap class keeps backend tables total.
+        | TypeDefinition::AnonymousConstRecordMarker => HirTypeClass::HeapAllocated,
 
         TypeDefinition::Function(..) => HirTypeClass::Function,
     }

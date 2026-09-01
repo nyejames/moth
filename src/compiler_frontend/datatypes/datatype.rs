@@ -721,6 +721,9 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
             }
         }
 
+        // The compile-time-only anonymous const-record marker has no source spelling, so
+        // the diagnostic reverse bridge keeps the same `None` placeholder as function types.
+        Some(TypeDefinition::AnonymousConstRecordMarker) => DataType::None,
         None => DataType::None,
     }
 }

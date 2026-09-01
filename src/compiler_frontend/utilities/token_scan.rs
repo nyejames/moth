@@ -143,6 +143,7 @@ pub(crate) enum OpenConstruct {
     CollectionOrMap,
     CatchBlock,
     ValueIfBlock,
+    AnonymousRecord,
 }
 
 impl OpenConstruct {
@@ -153,7 +154,70 @@ impl OpenConstruct {
             OpenConstruct::CollectionOrMap => "}",
             OpenConstruct::CatchBlock => ";",
             OpenConstruct::ValueIfBlock => ";",
+            OpenConstruct::AnonymousRecord => "|",
         }
+    }
+}
+
+/// True when `|` at `pipe_index` opens `| |` or `| name =` / `| name ,` record syntax.
+///
+/// Catch bindings (`|err|`) and struct shells (`| name Type |`) stay false so those
+/// owners keep their existing pipe grammars.
+pub(crate) fn pipe_opens_anonymous_record(tokens: &[Token], pipe_index: usize) -> bool {
+    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
+    let skip_newlines = |mut cursor: usize| {
+        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
+            cursor += 1;
+        }
+        cursor
+    };
+
+    let mut cursor = skip_newlines(pipe_index + 1);
+    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
+        return true;
+    }
+
+    if !matches!(kind_at(cursor), Some(TokenKind::Symbol(_))) {
+        return false;
+    }
+
+    cursor = skip_newlines(cursor + 1);
+    matches!(
+        kind_at(cursor),
+        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordPipeAction {
+    Open,
+    Close,
+    Ignore,
+}
+
+/// Classify a `|` as a record opener, closer, or a pipe owned by another grammar.
+///
+/// Parentheses, collections and templates own inner pipes. A top-level `|` after the
+/// opening pipe closes this parameter list so the parser can report a missing value
+/// or a nested `|...|` list from the tokens it actually sees.
+fn classify_record_pipe(
+    tokens: &[Token],
+    pipe_index: usize,
+    record_pipe_depth: usize,
+    nesting_is_top_level: bool,
+) -> RecordPipeAction {
+    if !nesting_is_top_level {
+        return RecordPipeAction::Ignore;
+    }
+
+    if record_pipe_depth == 0 && pipe_opens_anonymous_record(tokens, pipe_index) {
+        return RecordPipeAction::Open;
+    }
+
+    if record_pipe_depth > 0 {
+        RecordPipeAction::Close
+    } else {
+        RecordPipeAction::Ignore
     }
 }
 
@@ -253,20 +317,32 @@ pub(crate) fn collect_declaration_initializer_tokens(
     let mut inline_value_if_missing_else_depth = 0usize;
     let mut initializer_closed_by_statement_block = false;
     let mut open_constructs = Vec::new();
-
+    // Anonymous const records that start the initializer own `|...|` newlines and commas.
+    // Catch/receiver pipes such as `|err|` must not enter that region.
+    let mut record_pipe_depth = 0usize;
+    let mut last_closed_record_pipe = false;
     while token_stream.index < token_stream.length {
         if initializer_closed_by_statement_block {
             break;
         }
 
         let token_kind = token_stream.current_token_kind().clone();
-        let at_top_level =
-            depth.is_top_level() && catch_block_depth == 0 && value_if_block_depth == 0;
+        let inside_record_region = record_pipe_depth > 0;
+        let at_top_level = depth.is_top_level()
+            && catch_block_depth == 0
+            && value_if_block_depth == 0
+            && !inside_record_region;
 
         let continues_multiline_expression = if matches!(token_kind, TokenKind::Newline) {
-            let prev_continues = collected
-                .last()
-                .is_some_and(|token: &Token| token.kind.continues_expression());
+            let prev_continues = if last_closed_record_pipe {
+                // A closing record pipe ends the record value. Catch/receiver pipes still
+                // continue because `|` is a continues_expression token.
+                false
+            } else {
+                collected
+                    .last()
+                    .is_some_and(|token: &Token| token.kind.continues_expression())
+            };
             let next_non_newline = token_stream
                 .tokens
                 .iter()
@@ -304,7 +380,7 @@ pub(crate) fn collect_declaration_initializer_tokens(
             break;
         }
 
-        if matches!(token_kind, TokenKind::Eof) && !at_top_level {
+        if matches!(token_kind, TokenKind::Eof) && (!at_top_level || inside_record_region) {
             let expected_delimiter = match innermost_open_construct(&open_constructs) {
                 Some(open_construct) => {
                     Some(string_table.get_or_intern(open_construct.expected_delimiter().to_owned()))
@@ -396,7 +472,33 @@ pub(crate) fn collect_declaration_initializer_tokens(
             TokenKind::TemplateClose => {
                 close_open_construct(&mut open_constructs, OpenConstruct::Template);
             }
+            TokenKind::TypeParameterBracket => {
+                match classify_record_pipe(
+                    &token_stream.tokens,
+                    token_stream.index,
+                    record_pipe_depth,
+                    depth.is_top_level(),
+                ) {
+                    RecordPipeAction::Open => {
+                        open_constructs.push(OpenConstruct::AnonymousRecord);
+                        record_pipe_depth = record_pipe_depth.saturating_add(1);
+                        last_closed_record_pipe = false;
+                    }
+                    RecordPipeAction::Close => {
+                        close_open_construct(&mut open_constructs, OpenConstruct::AnonymousRecord);
+                        record_pipe_depth = record_pipe_depth.saturating_sub(1);
+                        last_closed_record_pipe = true;
+                    }
+                    RecordPipeAction::Ignore => last_closed_record_pipe = false,
+                }
+            }
             _ => {}
+        }
+        if !matches!(
+            token_kind,
+            TokenKind::TypeParameterBracket | TokenKind::Newline
+        ) {
+            last_closed_record_pipe = false;
         }
         depth.step(&token_kind);
 
@@ -409,19 +511,32 @@ pub(crate) fn collect_declaration_initializer_tokens(
 
 pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens) -> bool {
     let mut depth = NestingDepth::default();
+    let mut record_pipe_depth = 0usize;
     let mut index = token_stream.index;
+    let tokens = &token_stream.tokens;
 
     while index < token_stream.length {
-        let token_kind = &token_stream.tokens[index].kind;
-        let at_top_level = depth.is_top_level();
+        let token_kind = &tokens[index].kind;
 
-        // A top-level comma activates multi-bind parsing before a following newline can end the
-        // statement. The multi-bind owner then consumes only comma-promised continuation lines.
-        if at_top_level && matches!(token_kind, TokenKind::Comma) {
+        if matches!(token_kind, TokenKind::TypeParameterBracket) {
+            match classify_record_pipe(tokens, index, record_pipe_depth, depth.is_top_level()) {
+                RecordPipeAction::Open => {
+                    record_pipe_depth = record_pipe_depth.saturating_add(1);
+                }
+                RecordPipeAction::Close => {
+                    record_pipe_depth = record_pipe_depth.saturating_sub(1);
+                }
+                RecordPipeAction::Ignore => {}
+            }
+        }
+
+        if record_pipe_depth == 0 && depth.is_top_level() && matches!(token_kind, TokenKind::Comma)
+        {
             return true;
         }
 
-        if at_top_level
+        if record_pipe_depth == 0
+            && depth.is_top_level()
             && matches!(
                 token_kind,
                 TokenKind::Newline | TokenKind::End | TokenKind::Eof

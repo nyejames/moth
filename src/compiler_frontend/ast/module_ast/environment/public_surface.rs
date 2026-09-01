@@ -292,7 +292,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         match self.type_environment.get(type_id) {
             Some(TypeDefinition::Builtin(..))
             | Some(TypeDefinition::External(..))
-            | Some(TypeDefinition::GenericParameter(..)) => true,
+            | Some(TypeDefinition::GenericParameter(..))
+            // The compile-time-only anonymous const-record marker is public folded-value
+            // vocabulary, not a source-private nominal.
+            | Some(TypeDefinition::AnonymousConstRecordMarker) => true,
 
             Some(TypeDefinition::Struct(definition)) => {
                 self.source_path_is_public_from_root_file(&definition.path, public_root_file)

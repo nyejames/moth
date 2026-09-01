@@ -1130,6 +1130,7 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
 
         ExpressionKind::StructInstance(fields)
         | ExpressionKind::StructDefinition(fields)
+        | ExpressionKind::AnonymousConstRecord { fields }
         | ExpressionKind::ChoiceConstruct { fields, .. } => {
             for field in fields {
                 discard_inactive_assertion_messages_in_expression(&mut field.value);
@@ -1528,7 +1529,9 @@ fn normalize_expression_templates_with_context(
             }
         }
 
-        ExpressionKind::StructDefinition(arguments) | ExpressionKind::StructInstance(arguments) => {
+        ExpressionKind::StructDefinition(arguments)
+        | ExpressionKind::StructInstance(arguments)
+        | ExpressionKind::AnonymousConstRecord { fields: arguments } => {
             for argument in arguments {
                 normalize_expression_templates_with_context(
                     &mut argument.value,

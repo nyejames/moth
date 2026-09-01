@@ -454,6 +454,15 @@ impl<'a> HirBuilder<'a> {
                 })
             }
 
+            ExpressionKind::AnonymousConstRecord { .. } => {
+                // INVARIANT: anonymous const records are compile-time values. Runtime use is
+                // rejected at parse time and folding consumes the record, so whole-record
+                // runtime lowering should never be requested.
+                return_hir_transformation_error!(
+                    "HIR invariant: anonymous const record reached runtime HIR lowering; field access should select a member before HIR generation",
+                    self.hir_error_location(&expr.location)
+                );
+            }
             ExpressionKind::StructInstance(args) => {
                 // INVARIANT: const-record runtime use should have been rejected in AST.
                 // If a const record reaches HIR struct lowering, push validation earlier
@@ -736,6 +745,7 @@ impl<'a> HirBuilder<'a> {
                     || self.expression_needs_current_block_lowering(end)
             }
             ExpressionKind::StructInstance(fields)
+            | ExpressionKind::AnonymousConstRecord { fields }
             | ExpressionKind::ChoiceConstruct { fields, .. } => fields
                 .iter()
                 .any(|field| self.expression_needs_current_block_lowering(&field.value)),

@@ -447,7 +447,9 @@ fn debug_validate_expression_type_id_with_context(
             }
         }
 
-        ExpressionKind::StructDefinition(fields) | ExpressionKind::StructInstance(fields) => {
+        ExpressionKind::StructDefinition(fields)
+        | ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields } => {
             debug_validate_declarations_type_ids(fields, context);
         }
 

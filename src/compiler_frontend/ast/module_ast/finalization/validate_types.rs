@@ -314,6 +314,7 @@ fn validate_expression(
         // Struct and choice constructors.
         ExpressionKind::StructDefinition(fields)
         | ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields }
         | ExpressionKind::ChoiceConstruct { fields, .. } => validate_declarations(fields, context),
 
         // Range expressions.

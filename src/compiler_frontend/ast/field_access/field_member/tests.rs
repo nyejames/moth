@@ -85,7 +85,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         scope: InternedPath::from_single_str("scope", &mut string_table),
     };
 
-    let inlined = const_inline_field_value_from_receiver(&receiver, field_name, &registry)
+    let inlined = const_inline_field_value_from_receiver(&receiver, field_name, &registry, None)
         .expect("effective TIR classification should succeed")
         .expect("receiver-authored const field should inline");
 
@@ -181,6 +181,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         &type_environment,
         Some(&resolved_fields),
         &registry,
+        None,
     )
     .expect("effective TIR classification should succeed")
     .expect("resolved const default should inline");

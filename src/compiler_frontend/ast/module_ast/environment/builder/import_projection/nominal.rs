@@ -80,7 +80,8 @@ fn collect_canonical_type_origins(
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
-        | CanonicalTypeIdentity::GenericParameter(_) => {}
+        | CanonicalTypeIdentity::GenericParameter(_)
+        | CanonicalTypeIdentity::AnonymousConstRecord => {}
         CanonicalTypeIdentity::SourceNominal(origin) => {
             origins.insert(origin.clone());
         }
@@ -116,6 +117,7 @@ fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSe
         }
         PublicFoldedValue::Record(fields) => {
             for field in fields {
+                collect_canonical_type_origins(&field.type_identity, origins);
                 collect_folded_type_origins(&field.value, origins);
             }
         }
@@ -126,6 +128,7 @@ fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSe
         } => {
             collect_canonical_type_origins(type_identity, origins);
             for field in fields {
+                collect_canonical_type_origins(&field.type_identity, origins);
                 collect_folded_type_origins(&field.value, origins);
             }
         }

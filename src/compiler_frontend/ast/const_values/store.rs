@@ -130,10 +130,18 @@ pub(crate) struct ConstValueMetadata {
 }
 
 /// A named field in a folded record or choice payload.
+///
+/// WHAT: keeps authored field order, the folded value id, and the field's declaration
+/// location. `location` preserves declaration provenance for diagnostics after folding;
+/// it is not remapped because the store is consumed before the module-wide string remap.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValueField {
     pub(crate) name: InternedPath,
     pub(crate) value: ConstValueId,
+    /// Field initializer location for later diagnostic projection. Public folded
+    /// values remain location-free, so this is unread until Phase 3 field diagnostics.
+    #[allow(dead_code)]
+    pub(crate) location: SourceLocation,
 }
 
 /// A folded `String` value: plain text or an ordered sequence of structural pieces.
@@ -240,8 +248,13 @@ pub(crate) struct ConstValueRowView<'a> {
     pub(crate) metadata: &'a ConstValueMetadata,
 }
 
+/// One folded field visited with the semantic type of its value node.
+///
+/// WHAT: pairs the authored field name with the value's store metadata `TypeId` so public
+/// projection can project each field's canonical identity without a second lookup.
 pub(crate) struct ConstValueFieldVisit<'a, T> {
     pub(crate) name: &'a InternedPath,
+    pub(crate) type_id: TypeId,
     pub(crate) value: T,
 }
 
@@ -269,37 +282,115 @@ impl ConstValueStore {
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<Self, ConstValueStoreError> {
         let mut store = Self::default();
+        let mut pending: Vec<_> = resolved_module_constants.iter().collect();
 
-        for declaration_id in resolved_module_constants.iter() {
-            let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Resolved module-constant ID had no declaration-table row.",
-                )
-            })?;
+        while !pending.is_empty() {
+            let mut deferred = Vec::new();
+            let mut progress = false;
 
-            let value = store.insert_expression(
-                &declaration.value,
-                Some(&declaration.id),
-                type_environment,
-                template_builder,
-            )?;
-            store.rows.push(ConstValueRow {
-                path: declaration.id.clone(),
-                value,
-            });
-            if store
-                .values_by_path
-                .insert(declaration.id.clone(), value)
-                .is_some()
-            {
+            for declaration_id in pending {
+                let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Resolved module-constant ID had no declaration-table row.",
+                    )
+                })?;
+
+                if Self::waits_for_const_record_target(&declaration.value, &store) {
+                    deferred.push(declaration_id);
+                    continue;
+                }
+
+                let value = store.insert_expression(
+                    &declaration.value,
+                    Some(&declaration.id),
+                    type_environment,
+                    template_builder,
+                )?;
+                store.rows.push(ConstValueRow {
+                    path: declaration.id.clone(),
+                    value,
+                });
+                if store
+                    .values_by_path
+                    .insert(declaration.id.clone(), value)
+                    .is_some()
+                {
+                    return Err(CompilerError::compiler_error(
+                        "ConstValueStore received duplicate module-constant declaration paths.",
+                    )
+                    .into());
+                }
+                progress = true;
+            }
+
+            if !deferred.is_empty() && !progress {
                 return Err(CompilerError::compiler_error(
-                    "ConstValueStore received duplicate module-constant declaration paths.",
+                    "module constant reference reached ConstValueStore before its target folded",
                 )
                 .into());
             }
+
+            pending = deferred;
         }
 
         Ok(store)
+    }
+
+    fn waits_for_const_record_target(expression: &Expression, store: &Self) -> bool {
+        match &expression.kind {
+            ExpressionKind::Reference(path) => {
+                expression.is_const_record_value() && !store.values_by_path.contains_key(path)
+            }
+            ExpressionKind::AnonymousConstRecord { fields }
+            | ExpressionKind::StructInstance(fields) => fields
+                .iter()
+                .any(|field| Self::waits_for_const_record_target(&field.value, store)),
+            ExpressionKind::Collection(items) => items
+                .iter()
+                .any(|item| Self::waits_for_const_record_target(item, store)),
+            _ => false,
+        }
+    }
+
+    fn insert_record_fields(
+        &mut self,
+
+        fields: &[Declaration],
+        type_environment: &TypeEnvironment,
+        template_builder: &mut impl FnMut(
+            Option<&InternedPath>,
+            &crate::compiler_frontend::ast::templates::template::Template,
+        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
+    ) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
+        let mut field_index_by_name: FxHashMap<StringId, usize> = FxHashMap::default();
+        let mut stored_fields = Vec::with_capacity(fields.len());
+
+        for field in fields {
+            let value =
+                self.insert_expression(&field.value, None, type_environment, template_builder)?;
+            let name = field.id.name().ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "ConstValueStore record field declaration has no interned field name.",
+                )
+            })?;
+            if field_index_by_name
+                .insert(name, stored_fields.len())
+                .is_some()
+            {
+                return Err(CompilerError::compiler_error(
+                    "ConstValueStore received a record with duplicate field names.",
+                )
+                .into());
+            }
+
+            stored_fields.push(ConstValueField {
+                name: field.id.clone(),
+                value,
+                location: field.value.location.clone(),
+            });
+        }
+
+        Ok(stored_fields)
     }
 
     fn insert_expression(
@@ -312,6 +403,25 @@ impl ConstValueStore {
             &Template,
         ) -> Result<ConstTemplateValue, ConstValueStoreError>,
     ) -> Result<ConstValueId, ConstValueStoreError> {
+        if let ExpressionKind::Reference(path) = &expression.kind
+            && expression.is_const_record_value()
+        {
+            let target = self.values_by_path.get(path).copied().ok_or_else(|| {
+                ConstValueStoreError::from(CompilerError::compiler_error(format!(
+                    "module constant reference {:?} reached ConstValueStore before its target folded",
+                    path
+                )))
+            })?;
+            let cloned = self.values.get(target.index()).cloned().ok_or_else(|| {
+                ConstValueStoreError::from(CompilerError::compiler_error(
+                    "ConstValueStore alias target was not allocated in the value graph.",
+                ))
+            })?;
+            let id = ConstValueId(self.values.len() as u32);
+            self.values.push(cloned);
+            return Ok(id);
+        }
+
         let (payload, value_kind, hir_visible, provenance) = match &expression.kind {
             ExpressionKind::Int(value) => (
                 ConstValuePayload::Int(*value),
@@ -364,24 +474,22 @@ impl ConstValueStore {
                 )
             }
             ExpressionKind::StructInstance(fields) => {
-                let fields = fields
-                    .iter()
-                    .map(|field| {
-                        Ok(ConstValueField {
-                            name: field.id.clone(),
-                            value: self.insert_expression(
-                                &field.value,
-                                None,
-                                type_environment,
-                                template_builder,
-                            )?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, ConstValueStoreError>>()?;
+                let stored_fields =
+                    self.insert_record_fields(fields, type_environment, template_builder)?;
                 (
-                    ConstValuePayload::Record(fields),
+                    ConstValuePayload::Record(stored_fields),
                     ConstValueKind::Composite,
                     true,
+                    None,
+                )
+            }
+            ExpressionKind::AnonymousConstRecord { fields } => {
+                let stored_fields =
+                    self.insert_record_fields(fields, type_environment, template_builder)?;
+                (
+                    ConstValuePayload::Record(stored_fields),
+                    ConstValueKind::Composite,
+                    false,
                     None,
                 )
             }
@@ -401,6 +509,7 @@ impl ConstValueStore {
                                 type_environment,
                                 template_builder,
                             )?,
+                            location: field.value.location.clone(),
                         })
                     })
                     .collect::<Result<Vec<_>, ConstValueStoreError>>()?;
@@ -514,6 +623,21 @@ impl ConstValueStore {
         self.value(id).map(|value| &value.metadata)
     }
 
+    /// The semantic type of one field's folded value node.
+    ///
+    /// Field values are pushed into the graph before the field that references them, so a
+    /// miss is a construction invariant violation rather than a lookup miss.
+    fn field_value_type_id(&self, id: ConstValueId) -> Result<TypeId, CompilerError> {
+        self.value(id)
+            .map(|value| value.metadata.type_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "ConstValueStore field value id {:?} is outside the module value graph.",
+                    id
+                ))
+            })
+    }
+
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
         self.value(id).map(|value| &value.payload)
     }
@@ -615,6 +739,7 @@ impl ConstValueStore {
                     .map(|field| {
                         Ok(ConstValueFieldVisit {
                             name: &field.name,
+                            type_id: self.field_value_type_id(field.value)?,
                             value: self.fold_value(field.value, visitor)?,
                         })
                     })
@@ -631,6 +756,7 @@ impl ConstValueStore {
                     .map(|field| {
                         Ok(ConstValueFieldVisit {
                             name: &field.name,
+                            type_id: self.field_value_type_id(field.value)?,
                             value: self.fold_value(field.value, visitor)?,
                         })
                     })
@@ -736,8 +862,8 @@ impl ConstValueStore {
                     .map(|item| self.expression_for_store_value(*item, template_builder))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
-            ConstValuePayload::Record(fields) => ExpressionKind::StructInstance(
-                fields
+            ConstValuePayload::Record(fields) => {
+                let projected = fields
                     .iter()
                     .map(|field| {
                         Ok(Declaration {
@@ -746,8 +872,13 @@ impl ConstValueStore {
                                 .expression_for_store_value(field.value, template_builder)?,
                         })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?,
-            ),
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                if value.metadata.hir_visible {
+                    ExpressionKind::StructInstance(projected)
+                } else {
+                    ExpressionKind::AnonymousConstRecord { fields: projected }
+                }
+            }
             ConstValuePayload::Choice {
                 nominal_path,
                 tag,

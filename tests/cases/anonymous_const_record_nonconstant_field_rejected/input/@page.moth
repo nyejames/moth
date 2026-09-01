@@ -1,0 +1,5 @@
+load || -> Int:
+    return 1
+;
+
+bad #= | x = load() |

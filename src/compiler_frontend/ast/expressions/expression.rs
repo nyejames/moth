@@ -1109,6 +1109,40 @@ impl Expression {
         )
     }
 
+    /// Constructs an anonymous compile-time record expression.
+    ///
+    /// WHAT: carries ordered named fields resolved to the module-local compile-time marker
+    ///       type, with provenance merged from every field value.
+    /// WHY: the marker type and `ConstRecordState::ConstRecord` keep the record a member
+    ///      group rather than a runtime struct value.
+    pub fn anonymous_const_record(
+        fields: Vec<Declaration>,
+        location: SourceLocation,
+        value_mode: ValueMode,
+        record_type_id: TypeId,
+    ) -> Self {
+        let contains_regular_division = fields
+            .iter()
+            .any(|field| field.value.contains_regular_division);
+        let synthetic_interface_provenance = SyntheticInterfaceProvenance::union_all(
+            fields
+                .iter()
+                .map(|field| &field.value.synthetic_interface_provenance),
+        );
+
+        let mut expression = Self::new(
+            ExpressionKind::AnonymousConstRecord { fields },
+            location,
+            record_type_id,
+            DataType::None,
+            value_mode,
+        )
+        .with_regular_division_provenance(contains_regular_division)
+        .with_synthetic_interface_provenance(synthetic_interface_provenance);
+        expression.const_record_state = ConstRecordState::ConstRecord;
+        expression
+    }
+
     /// Constructs a template expression without provisional reactive metadata.
     ///
     /// WHAT: records the template value while leaving
@@ -1316,7 +1350,9 @@ impl Expression {
             }
 
             ExpressionKind::Collection(items) => {
-                if Self::expressions_are_constant_with_template_classifier(
+                if items.iter().any(Expression::is_const_record_value) {
+                    ConstValueKind::NonConst
+                } else if Self::expressions_are_constant_with_template_classifier(
                     items,
                     classify_template,
                 )? {
@@ -1332,6 +1368,17 @@ impl Expression {
             }
 
             ExpressionKind::StructInstance(fields) => {
+                if Self::declarations_are_constant_with_template_classifier(
+                    fields,
+                    classify_template,
+                )? {
+                    ConstValueKind::Composite
+                } else {
+                    ConstValueKind::NonConst
+                }
+            }
+
+            ExpressionKind::AnonymousConstRecord { fields } => {
                 if Self::declarations_are_constant_with_template_classifier(
                     fields,
                     classify_template,
@@ -1373,6 +1420,11 @@ impl Expression {
                 } else {
                     ConstValueKind::NonConst
                 }
+            }
+
+            // Named const records stay compile-time without cloning the whole record.
+            ExpressionKind::Reference(_) if self.is_const_record_value() => {
+                ConstValueKind::Composite
             }
 
             // Everything else is non-const by default.

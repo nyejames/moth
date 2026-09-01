@@ -1,0 +1,8 @@
+inner #= |
+    x = 3,
+|
+
+labels #= |
+    first = "a",
+    inner = inner,
+|

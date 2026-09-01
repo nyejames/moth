@@ -388,11 +388,15 @@ impl<'a> HirBuilder<'a> {
             return Ok(None);
         };
 
-        let ExpressionKind::StructInstance(fields) = &record_expression.kind else {
-            return_hir_transformation_error!(
-                "Const record reached HIR field lowering without struct field data",
-                self.hir_error_location(location)
-            );
+        let fields = match &record_expression.kind {
+            ExpressionKind::StructInstance(fields)
+            | ExpressionKind::AnonymousConstRecord { fields } => fields,
+            _ => {
+                return_hir_transformation_error!(
+                    "Const record reached HIR field lowering without struct field data",
+                    self.hir_error_location(location)
+                );
+            }
         };
 
         let Some(field_declaration) = fields
@@ -413,7 +417,14 @@ impl<'a> HirBuilder<'a> {
 
     fn const_store_value_for_expression(&self, expression: &Expression) -> Option<ConstValueId> {
         match &expression.kind {
-            ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
+            ExpressionKind::Reference(name) => self
+                .module_constants_by_name
+                .get(name)
+                .copied()
+                .or_else(|| {
+                    let declaration = self.local_const_records_by_name.get(name)?;
+                    self.const_store_value_for_expression(&declaration.value)
+                }),
             ExpressionKind::FieldAccess { base, field } => {
                 let base_value_id = self.const_store_value_for_expression(base)?;
                 self.module_const_values.field_value(base_value_id, *field)
@@ -524,7 +535,9 @@ impl<'a> HirBuilder<'a> {
         }
 
         match &expression.kind {
-            ExpressionKind::StructInstance(_) => Ok(Some(expression.to_owned())),
+            ExpressionKind::StructInstance(_) | ExpressionKind::AnonymousConstRecord { .. } => {
+                Ok(Some(expression.to_owned()))
+            }
 
             ExpressionKind::FieldAccess { base, field } => {
                 let Some(field_expression) = self

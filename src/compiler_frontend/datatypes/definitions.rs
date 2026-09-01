@@ -28,6 +28,16 @@ pub enum TypeDefinition {
     Function(FunctionTypeDefinition),
     External(ExternalTypeDefinition),
     GenericParameter(GenericParameterDefinition),
+    /// Compile-time-only marker for one complete anonymous const record.
+    ///
+    /// WHAT: a fieldless, module-local type identity interned once per
+    /// `TypeEnvironment::new`. It is not a struct, has no fields or methods, is not
+    /// source-writable, and is never lowered to a runtime type. Semantic field facts live on
+    /// the folded `ConstValuePayload::Record` values, not on this marker.
+    /// WHY: a complete anonymous const record is a compile-time member group, so field access
+    /// needs one module-local `TypeId` for store metadata and canonical projection without
+    /// manufacturing a runtime nominal type or unifying literal sites by shape.
+    AnonymousConstRecordMarker,
     GenericInstance(GenericInstanceDefinition),
 }
 

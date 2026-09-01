@@ -170,7 +170,9 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
             nested_template(template.tir_reference, loop_binding_paths)
         }
 
-        ExpressionKind::ChoiceConstruct { fields, .. } | ExpressionKind::StructInstance(fields) => {
+        ExpressionKind::ChoiceConstruct { fields, .. }
+        | ExpressionKind::StructInstance(fields)
+        | ExpressionKind::AnonymousConstRecord { fields } => {
             let mut const_evaluable = true;
             for field in fields {
                 const_evaluable &= classify_expression_const_evaluable_with_nested_template(

@@ -35,13 +35,17 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// One owned field inside a const record or choice variant payload.
 ///
-/// WHAT: preserves the authored field name as an owned stable string and the recursively
-/// owned folded value. The name derives from the declaration path's last component while
-/// the donor-local string table is available, so the field survives after donor-local
-/// `StringId` and `InternedPath` identities are unavailable.
+/// WHAT: preserves the authored field name as an owned stable string, the field value's
+/// canonical [`CanonicalTypeIdentity`], and the recursively owned folded value. The name
+/// derives from the declaration path's last component while the donor-local string table is
+/// available, so the field survives after donor-local `StringId` and `InternedPath`
+/// identities are unavailable. The type identity lets import materialize nested values
+/// without donor field declarations: a nested anonymous const record projects to
+/// `AnonymousConstRecord` and a nested named struct to its source nominal identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicFoldedField {
     pub(crate) name: String,
+    pub(crate) type_identity: CanonicalTypeIdentity,
     pub(crate) value: PublicFoldedValue,
 }
 
@@ -236,7 +240,10 @@ impl PublicFoldedValue {
     /// Visit every canonical type identity retained by this folded value.
     ///
     /// Most folded leaves are intrinsically typed by their enclosing declaration. Choice values
-    /// additionally retain their nominal identity, including when nested in records or options.
+    /// additionally retain their nominal identity, and every record/choice payload field
+    /// retains the canonical identity projected from its value's store metadata, so nested
+    /// anonymous const records and named structs stay visible to closure and validation
+    /// walks, including when nested in records or options.
     pub(crate) fn visit_type_identities(&self, visitor: &mut impl FnMut(&CanonicalTypeIdentity)) {
         match self {
             Self::Collection(values) => {
@@ -246,6 +253,7 @@ impl PublicFoldedValue {
             }
             Self::Record(fields) => {
                 for field in fields {
+                    field.type_identity.visit(visitor);
                     field.value.visit_type_identities(visitor);
                 }
             }
@@ -256,6 +264,7 @@ impl PublicFoldedValue {
             } => {
                 type_identity.visit(visitor);
                 for field in fields {
+                    field.type_identity.visit(visitor);
                     field.value.visit_type_identities(visitor);
                 }
             }
@@ -539,8 +548,14 @@ pub(crate) fn convert_const_value_to_folded_value(
                                 "public-interface folded store record field has no resolvable name",
                             )
                         })?;
+                        let type_identity = project_type_id_to_canonical_identity(
+                            field.type_id,
+                            type_environment,
+                            projection_context,
+                        )?;
                         Ok(PublicFoldedField {
                             name: name.to_owned(),
+                            type_identity,
                             value: field.value,
                         })
                     })
@@ -566,8 +581,14 @@ pub(crate) fn convert_const_value_to_folded_value(
                                 "public-interface folded store choice field has no resolvable name",
                             )
                         })?;
+                        let field_type_identity = project_type_id_to_canonical_identity(
+                            field.type_id,
+                            type_environment,
+                            projection_context,
+                        )?;
                         Ok(PublicFoldedField {
                             name: name.to_owned(),
+                            type_identity: field_type_identity,
                             value: field.value,
                         })
                     })
@@ -617,9 +638,19 @@ pub(crate) fn convert_declaration_fields_to_folded_fields(
             })?
             .to_owned();
 
+        let type_identity = project_type_id_to_canonical_identity(
+            field.value.type_id,
+            context.type_environment,
+            context.projection_context,
+        )?;
+
         let value = convert_expression_to_folded_value(&field.value, context)?;
 
-        folded_fields.push(PublicFoldedField { name, value });
+        folded_fields.push(PublicFoldedField {
+            name,
+            type_identity,
+            value,
+        });
     }
     Ok(folded_fields)
 }

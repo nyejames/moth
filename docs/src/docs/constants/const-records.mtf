@@ -38,3 +38,50 @@ Use one folded field when runtime code needs the value.
 Const records preserve their struct-backed field names and types.
 
 They do not introduce structural typing or anonymous runtime record identity.
+
+### Anonymous const records
+
+`|...|` is parameters syntax. Functions, structs and const records all use it
+to name a data shape. Context decides what those parameters become.
+
+A compile-time receiving context turns a parameter list into a const record:
+
+[codeblock, $code("moth"):
+    labels #= |
+        first = "a",
+        second = "b",
+    |
+]
+
+Every parameter must have a value. Types may be inferred from those values.
+The list does not declare a constructable type. A struct uses the same
+`|...|` list to declare a type that constructors can build.
+
+### Nested parameter lists
+
+A parameter list is one `|...|` group. It does not contain another `|...|`
+list. That is the same composition rule as structs and function signatures.
+
+Declare a child struct or const record first, then name it as a parameter
+value:
+
+[codeblock, $code("moth"):
+    Size = |
+        width Int,
+        height Int,
+    |
+
+    size #= Size(8, 4)
+
+    inner #= |
+        x = 3,
+    |
+
+    nested #= |
+        size = size,
+        inner = inner,
+    |
+]
+
+A const record still adds compile-time folding and forbids using the complete
+record as a runtime value. Those rules do not change parameters syntax.

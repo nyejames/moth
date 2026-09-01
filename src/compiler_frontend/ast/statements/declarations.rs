@@ -36,7 +36,8 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidCollectionTypeReason,
-    InvalidDeclarationReason, InvalidFallibleHandlingReason, TypeMismatchContext,
+    InvalidDeclarationReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
+    TypeMismatchContext,
 };
 
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
@@ -61,6 +62,7 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
     parse_expectation_for_type_id,
 };
+use crate::compiler_frontend::utilities::token_scan::pipe_opens_anonymous_record;
 
 /// Body-local declaration parsing shares the AST body error lane.
 ///
@@ -497,9 +499,18 @@ pub fn resolve_declaration_syntax(
 
     // Check the first token before dispatching so we don't wastefully call
     // `create_expression` recursively when the initializer is a struct definition.
+
     let mut parsed_initializer = match initializer_stream.current_token_kind() {
         // Struct Definition
-        TokenKind::TypeParameterBracket => {
+        //
+        // Anonymous const records own `| name = expr |` initializers in both binding modes;
+        // everything else after `|` stays with the struct shell grammar.
+        TokenKind::TypeParameterBracket
+            if !pipe_opens_anonymous_record(
+                &initializer_stream.tokens,
+                initializer_stream.index,
+            ) =>
+        {
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
             let constant_context =
@@ -661,6 +672,22 @@ pub fn resolve_declaration_syntax(
     }
 
     if initializer_stream.current_token_kind() != &TokenKind::Eof {
+        if matches!(
+            initializer_stream.current_token_kind(),
+            TokenKind::TypeParameterBracket
+        ) && matches!(
+            parsed_initializer.kind,
+            ExpressionKind::AnonymousConstRecord { .. }
+        ) {
+            // Extra `|` after a complete record is the usual leftover from an
+            // inline nested `|...|` that the parser already closed.
+            return Err(CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::NestedAnonymousConstRecord,
+                initializer_stream.current_location(),
+            )
+            .into());
+        }
+
         return Err(CompilerDiagnostic::unexpected_token(
             initializer_stream.current_token_kind().to_owned(),
             initializer_stream.current_location(),

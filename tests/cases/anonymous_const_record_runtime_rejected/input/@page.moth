@@ -1,0 +1,4 @@
+load || -> Bool:
+    stats = | |
+    return true
+;

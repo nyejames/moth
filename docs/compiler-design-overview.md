@@ -480,7 +480,8 @@ An exported semantic surface cannot leak:
 - a runtime anonymous-record type
 - a project-context fact prohibited by the active package facade policy
 
-A runtime anonymous record uses a hidden nominal type local to its source site. It cannot escape through an exported signature, field, alias, return, receiver method or trait evidence.
+Runtime anonymous records remain deferred to a separate plan. When they exist, each literal site will use a hidden nominal type local to its source site, and that type must not escape through an exported signature, field, alias, return, receiver method or trait evidence.
+
 
 The compiler also records project-context provenance for executable source and generated functions in per-function link facts. Provenance follows direct value use, compile-time-derived implementation facts and source or generated call edges.
 
