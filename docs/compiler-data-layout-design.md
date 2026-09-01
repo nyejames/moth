@@ -2,12 +2,13 @@
 
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
-> **Status:** Accepted end-state architecture. Implementation is deliberately scheduled after the
-> Compiler Test Suite Hardening plan and before further user-facing diagnostic improvement work.
+> **Status:** Accepted end-state architecture. Implementation is queued after the delivered Compiler
+> Test Suite Hardening work and before further user-facing diagnostic improvement work; diagnostics
+> remain paused until this plan completes.
 >
-> **Initial repository audit anchor:** `d119988861aad9732c19d945eeabeb249a7e5caa`
-> (`docs: start explicit expectation enforcement`). The implementation plan must replace this anchor
-> with the final accepted Test Suite Hardening commit before code changes begin.
+> **Initial repository audit anchor:** `d119988861aad9732c19d945eeabeb249a7e5caa`. The implementation
+> plan records delivered hardening at `03168082d`; it must replace this historical anchor with the
+> final activation baseline before code changes begin.
 
 ## Authority and ownership
 
@@ -1639,8 +1640,6 @@ Implementation of this design requires synchronized changes to:
 - `docs/roadmap/roadmap.md` — sequencing and measured deferrals
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` — dependency and post-layout resume
   capsule
-- `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md` — remove overlapping
-  ownership and point source/token/diagnostic layout work here
 - `index.md` — final module/file map
 
 Generated documentation under `docs/release/**` is rebuilt, never edited directly.

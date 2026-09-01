@@ -8,7 +8,7 @@ Implement anonymous compile-time records as a small field-access-only value surf
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/anonymous-const-records-plan.md
-STATUS: queued
+STATUS: active
 CURRENT_SLICE: Phase 0 - refresh const-record parsing, folding, projection and interface owners
 LAST_GOOD_COMMIT: none until the first implementation slice is accepted
 BRANCH: main

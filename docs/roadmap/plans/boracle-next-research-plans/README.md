@@ -2,35 +2,35 @@
 
 ## Current handoff
 
-Package 1 is complete. Package 2, **Bounded operational oracle**, is complete. This directory is
-historical only and is not a work source. Do not activate package 2. Its implementation uses
-`just boracle` as the default deterministic gate and `just boracle-campaign` as its separate
-measured stress lane. Both are opt-in lanes.
+Package 1 is complete. Package 2, **Bounded operational oracle**, is complete. This directory retains
+their completed handoff and inactive proposal notes for packages 3 through 6. It is not an active
+work source. Do not activate a proposal directly from here; create a current owning plan and
+re-anchor it against the active repository first.
 
 The package 1 blocker was cleared before package 2 began: typed provenance overlap evidence,
 explicit unknown reasons, deterministic reports and composable experiment selection were in the
 `boracle` branch. Package 2 then added the bounded operational oracle and its generated
 differential campaign.
 
-The roadmap currently has no owning implementation plan for packages 3 through 6. Their `queued` entries
-remain historical sequence markers, not active work.
+The roadmap currently has no owning implementation plan for packages 3 through 6. The retained
+proposal notes are design material only, not current implementation work.
 
 `checked-proof-budget-integration.md` records a future open proposal for opt-in deeper analysis and
 the architecture each package should preserve. It is design awareness only, not an implementation
 requirement for checked source syntax.
 
-The completed package 1 plan was deleted from `docs/roadmap/plans/` with its roadmap entry. The copy in this directory is historical only.
-
-The completed package 2 plan was deleted the same way, with its own roadmap entry. Its copy here is marked historical, records the path it used to live at as deleted, and must not be activated.
+The completed package plans are not retained in this directory. Their durable results live in the
+result tables below and the permanent authorities they link; detailed implementation history remains
+recoverable from Git.
 
 | Order | Package | Status | Main result |
-| ----: | --------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| ----: | --------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
 | 1 | Typed provenance relations | complete | Replaces the overloaded origin relation and establishes composable experiments |
 | 2 | Bounded operational oracle | complete | Provides an independent executable check against unsound experimental acceptance |
-| 3 | Conflict-directed relational refinement | queued | Implements the core coarse-solve then targeted-refinement architecture |
-| 4 | Loop generation epochs | queued | Adds iteration-sensitive generations and edge-specific last-use reasoning |
-| 5 | Call summaries and deferred exclusive access | queued | Explores per-result, outcome-sensitive, recursive summaries and reserved exclusive arguments |
-| 6 | Aggregate copy and builtin storage provenance | queued | Models deep-copy topology, fixed projection precision and compiler-known storage effects |
+| 3 | [Conflict-directed relational refinement](./boracle-conflict-directed-relational-refinement-plan.md) | proposed, inactive | Implements the core coarse-solve then targeted-refinement architecture |
+| 4 | [Loop generation epochs](./boracle-loop-generation-epochs-and-edge-last-use-plan.md) | proposed, inactive | Adds iteration-sensitive generations and edge-specific last-use reasoning |
+| 5 | [Call summaries and deferred exclusive access](./boracle-call-summary-and-deferred-exclusive-access-plan.md) | proposed, inactive | Explores per-result, outcome-sensitive, recursive summaries and reserved exclusive arguments |
+| 6 | [Aggregate copy and builtin storage provenance](./boracle-aggregate-copy-and-builtin-storage-provenance-plan.md) | proposed, inactive | Models deep-copy topology, fixed projection precision and compiler-known storage effects |
 
 ### Package 1 result
 

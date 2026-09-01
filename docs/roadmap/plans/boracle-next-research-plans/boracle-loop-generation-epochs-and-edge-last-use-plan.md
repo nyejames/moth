@@ -1,19 +1,19 @@
 # Boracle loop generation epochs and edge-sensitive last-use plan
 
-Status: proposed
+Status: proposed, inactive
 
 Current slice: not started
 
-Blockers: typed provenance evidence and the bounded operational oracle must be complete; conflict-directed refinement should be available for acyclic slices
+Prerequisites: typed provenance evidence and the bounded operational oracle are complete; conflict-directed refinement should be available for acyclic slices; no current implementation owner is active
 
-Next action: activate with a reduced loop corpus that proves where one origin per definition site loses required generation distinctions
+Next action: if approved, create a current owning plan from this note, re-anchor it against the active repository, then collect a reduced loop corpus that proves where one origin per definition site loses required generation distinctions
 
 Not a reproduction: looping sources under `tests/cases/` once failed to replay under the bounded operational oracle, reporting an access that exercised a capability after its end. That was an oracle defect and not a missing generation distinction. The oracle re-exercised capability rows from earlier iterations because an interval did not record why it closed, and those sources replay now that it does. This plan still needs a reduced loop corpus that proves where one origin per definition site loses a required generation distinction, and that corpus does not exist yet.
 
 Repository path:
 
 ```text
-docs/roadmap/plans/boracle-loop-generation-epochs-and-edge-last-use-plan.md
+docs/roadmap/plans/boracle-next-research-plans/boracle-loop-generation-epochs-and-edge-last-use-plan.md
 ```
 
 Canonical authorities:

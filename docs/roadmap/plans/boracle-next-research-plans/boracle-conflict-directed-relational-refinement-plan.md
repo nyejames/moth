@@ -1,17 +1,17 @@
 # Boracle conflict-directed relational refinement plan
 
-Status: proposed
+Status: proposed, inactive
 
 Current slice: not started
 
-Blockers: typed provenance evidence, composable experiments and the bounded operational oracle must be complete
+Prerequisites: typed provenance evidence, composable experiments and the bounded operational oracle are complete; no current implementation owner is active
 
-Next action: activate after those capabilities are available, collect the smallest known false conflicts caused by path correlation loss and freeze reference-mode snapshots
+Next action: if approved, create a current owning plan from this note, re-anchor it against the active repository, then collect the smallest known false conflicts caused by path correlation loss and freeze reference-mode snapshots
 
 Repository path:
 
 ```text
-docs/roadmap/plans/boracle-conflict-directed-relational-refinement-plan.md
+docs/roadmap/plans/boracle-next-research-plans/boracle-conflict-directed-relational-refinement-plan.md
 ```
 
 Canonical authorities:

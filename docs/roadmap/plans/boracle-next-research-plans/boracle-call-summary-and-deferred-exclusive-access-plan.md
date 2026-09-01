@@ -1,17 +1,17 @@
 # Boracle call-summary and deferred exclusive-access research plan
 
-Status: proposed
+Status: proposed, inactive
 
 Current slice: not started
 
-Blockers: typed provenance relations, conflict-directed refinement and the bounded operational oracle must be complete
+Prerequisites: typed provenance relations, conflict-directed refinement and the bounded operational oracle must be complete; no current implementation owner is active
 
-Next action: activate with an inventory of current local, generated, cross-module and external call-summary producers and every HIR multiple-result representation
+Next action: if approved, create a current owning plan from this note, re-anchor it against the active repository, then inventory current local, generated, cross-module and external call-summary producers and every HIR multiple-result representation
 
 Repository path:
 
 ```text
-docs/roadmap/plans/boracle-call-summary-and-deferred-exclusive-access-plan.md
+docs/roadmap/plans/boracle-next-research-plans/boracle-call-summary-and-deferred-exclusive-access-plan.md
 ```
 
 Canonical authorities:

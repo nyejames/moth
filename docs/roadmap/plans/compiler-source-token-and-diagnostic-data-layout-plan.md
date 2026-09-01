@@ -7,15 +7,15 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Queued. Blocked on delivered compiler test-suite hardening and integration coverage - the
-> hardened suite is the semantic safety net this migration is measured against.
+> Queued. Test Suite Hardening and integration coverage were delivered in `03168082d`. This plan
+> remains ordered after the earlier queued implementation work; Phase 0 establishes its baseline at activation.
 >
 > Phase 0 establishes the baseline at activation. Do not record one here.
 
 ## Purpose
 
 Replace Moth's allocation-heavy source, path, token, diagnostic and failure representations with
-one compact data-oriented architecture before further user-facing diagnostic work resumes.
+one compact data-oriented architecture before broad diagnostic representation work resumes.
 
 This is a compiler-wide representation change, not a narrow Clippy patch. It must remove the root
 causes of `clippy::result_large_err`, remove existing boxed-diagnostic workarounds and leave one clear
@@ -37,10 +37,8 @@ compact diagnostic, infrastructure-failure or compiler-bug lanes and the benchma
 has received its own size fix rather than a lint exemption.
 The later migration gate and final validation gate must both prove that the allowances and large-error condition are gone.
 
-The latest test-suite-honesty branch CI run confirms the current handoff: every non-Windows gate
-passed, while the only known failure was the non-blocking Windows leg reporting the remaining
-large-error variants. This is the diagnostics-layout refactor's owned follow-up, not a test-suite
-honesty regression; do not add another local allowance to mask it.
+Test Suite Hardening landed in `03168082d`. Its remaining large-error variants are this plan's
+owned follow-up, not a test-suite regression; do not add another local allowance to mask it.
 
 The implementation must converge on:
 
@@ -57,8 +55,8 @@ The implementation must converge on:
 - separate user-diagnostic, operational-infrastructure and compiler-bug lanes
 - isolated tooling workers that discard failed compiler state
 
-The hardened test suite is the prerequisite semantic safety net. The existing diagnostics-improvement
-plan resumes only after this plan is complete.
+The diagnostics-improvement plan remains paused until this plan is complete. It resumes at its recorded
+Phase 4.1c slice after the layout migration, not during it.
 
 ---
 
@@ -72,9 +70,9 @@ ACTIVE_PLAN:
 
 CURRENT_SLICE:
 - Phase: Activation gate — not active
-- Checklist item: wait for Test Suite Hardening completion, then start Phase 0A
-- Goal: activate from the final hardened-suite commit with no concurrent diagnostic-schema work
-- Non-goals: no Rust migration, no roadmap activation and no diagnostic wording work before the prerequisite completes
+- Checklist item: wait for this plan's turn in the queued implementation chain, then start Phase 0A
+- Goal: activate from current `main` with no concurrent representation migration
+- Non-goals: no Rust migration or representation-schema work before this plan's turn; narrow diagnostics work remains separate
 
 LAST_GOOD_COMMIT:
 - `none` until the first implementation slice is accepted
@@ -129,7 +127,7 @@ RELEVANT_CODE:
 - `xtask/`, `benchmarks/` and `justfile`: existing benchmark engine, cases, evidence and command owners
 
 ACCEPTANCE_CRITERIA:
-- Test Suite Hardening is complete and its final accepted commit is recorded
+- the delivered Test Suite Hardening commit `03168082d` is recorded as the prerequisite
 - every hard layout assertion in `docs/compiler-data-layout-design.md` passes
 - the old source-location, path, token, payload, message and mixed-error models are deleted
 - CI passes Rust 1.95 native/Linux/Windows Clippy without boxing or lint suppression
@@ -146,7 +144,7 @@ DECISIONS_ALREADY_MADE:
 - decision: complete Test Suite Hardening before activating this plan
   - reason: the rewrite depends on explicit diagnostic and integration ownership
   - source/user/date: user interview, 2026-07-19
-- decision: park further diagnostics-improvement implementation behind this plan
+- decision: park the diagnostics-improvement plan behind this migration
   - reason: diagnostic constructors, storage, labels, rendering and type context are replaced here
   - source/user/date: user interview, 2026-07-19
 - decision: evolve existing Stage 0, `CompilerFrontend`, string-delta, diagnostic-bag and renderer owners rather than adding parallel frameworks
@@ -157,7 +155,7 @@ DECISIONS_ALREADY_MADE:
   - source/user/date: user interview, 2026-07-19
 
 BLOCKERS / RISKS:
-- Test Suite Hardening remains active at the planning snapshot
+- earlier queued implementation work in the roadmap must land before activation
 - the activation commit, test counts and worktree topology will change
 - source/span migration touches nearly every frontend stage
 - current boxed diagnostic aliases and style-guide advice are already present and must be removed
@@ -174,8 +172,7 @@ DOCS_IMPACT:
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-NEXT_ACTION:
-- after Test Suite Hardening completes, refresh `main`, record its final commit and execute Phase 0A
+- when the earlier queued chain reaches this plan, refresh `main`, record `03168082d` as the delivered hardening prerequisite and execute Phase 0A
 
 ---
 
@@ -325,34 +322,23 @@ before the first implementation phase that freezes reports.
 
 ## Roadmap, matrix and overlapping-plan edits
 
-### When this plan and the architecture document are added
+### Current roadmap state
 
-Keep Test Suite Hardening as the active plan. Add this plan as explicitly blocked next work and park
-the diagnostics plan behind it:
+Test Suite Hardening was delivered in `03168082d` and is no longer an active plan. This plan
+remains queued after the earlier implementation chain. The diagnostics plan is paused until this
+plan completes; this plan owns the source/token/diagnostic representation migration and must not
+be activated alongside another migration of the same representation.
 
-```text
-Active implementation work
-- Test Suite Hardening
-
-Blocked next implementation work
-- Compiler source, token and diagnostic data layout
-  - blocked until Test Suite Hardening completes
-- Compiler diagnostics improvements
-  - parked behind the data-layout plan
-```
-
-Adapt wording to the current roadmap conventions, but preserve this serialization. Do not list the
-data-layout and diagnostics plans as concurrently active.
+Adapt wording to the current roadmap conventions, but preserve the queued order and one owner for
+the representation migration.
 
 ### At activation
 
-- [ ] move Test Suite Hardening out of active work using the current completion convention
-- [ ] make this the sole active implementation plan
-- [ ] record the exact final hardening commit in this plan and the benchmark report
-- [ ] update the diagnostics plan capsule to `parked`, preserving its last accepted commit and exact semantic resume slice
-- [ ] prohibit new old-model diagnostic payload work while parked
-- [ ] update the frontend optimisation plan to delegate source/path/token/diagnostic layout here
-- [ ] keep unrelated scope-frame, arena and semantic-invariant work in its existing plan
+- [ ] make this the sole active source/token/diagnostic representation migration
+- [ ] record the delivered hardening commit `03168082d` in this plan and the benchmark report
+- [ ] confirm the diagnostics plan remains paused until this representation migration completes
+- [ ] prohibit old-model diagnostic payload work while this plan is active
+- [ ] keep unrelated scope-frame, arena and semantic-invariant work deferred in the roadmap
 
 ### Progress matrix
 
@@ -376,7 +362,6 @@ The following edits are authorized in their owning phases:
 - `docs/src/developer-docs/style-guide/style-guide.mtf`: compact-record rules and removal of boxed large-error advice
 - `docs/src/developer-docs/style-guide/testing.mtf`: layout/property/schema/render-equivalence/failure-worker test ownership
 - `docs/src/developer-docs/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
-- `docs/roadmap/plans/frontend-arena-semantic-invariant-optimization-plan.md`: remove overlapping ownership and stale failure rules
 - `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`: park, then refresh against the final schema APIs
 - `docs/src/docs/progress/@page.moth`: only when current support wording changes
 - `benchmarks/README.md` and `CONTRIBUTING.md`: document the alternate data-layout benchmark case list/command if that surface is added
@@ -425,7 +410,6 @@ Reuse the existing warmup, measurement, observation and history machinery rather
 `frontend_bench`. A diagnosed case returns timing/counter evidence instead of becoming a runner
 failure. An infrastructure failure or compiler bug still aborts the run. Reuse hardened canonical case
 inputs where they provide a stable workload. Do not treat benchmark cases as correctness coverage.
-Narrow the conflicting blanket rule in the frontend optimisation plan in the same slice.
 
 ### Performance policy
 
@@ -485,13 +469,12 @@ anticipated cross-phase cases.
 
 ### Summary, reasoning and context
 
-Activate only after Test Suite Hardening has completed and merged. This phase replaces stale repository
-facts, parks overlapping work and records the exact baseline before representation changes make
-comparison impossible. It changes no compiler semantics.
+Activate when this plan reaches the queued implementation order after the delivered hardening prerequisite and earlier queued work. This phase replaces stale repository facts, parks overlapping work and
+records the exact baseline before representation changes make comparison impossible. It changes no compiler semantics.
 
 ### Slice 0A — Activate from the final hardening commit
 
-- [ ] confirm test-suite hardening and integration coverage is delivered
+- [ ] confirm the delivered hardening prerequisite at `03168082d`
 - [ ] confirm the parent worktree is clean and inventory all worker worktrees
 - [ ] create or reuse one dedicated implementation worktree according to current repository policy
 - [ ] record the activation baseline and inventory what changed under the owners below
@@ -501,11 +484,10 @@ comparison impossible. It changes no compiler semantics.
 ### Slice 0B — Serialize roadmap ownership
 
 - [ ] apply the activation roadmap order defined above
-- [ ] park the diagnostics plan at its exact accepted semantic resume point
-- [ ] update the frontend optimisation plan to remove overlapping source/path/token/diagnostic ownership
+- [ ] confirm the diagnostics plan remains paused until this representation migration completes
 - [ ] add `docs/compiler-data-layout-design.md` to task-specific `AGENTS.md` reading
 - [ ] update the design document's audit anchor, implementation map, deterministic source-registration barriers and lookup-only frozen-context example to the refreshed repo
-- [ ] do not edit the progress matrix unless current support changed during hardening
+- [ ] do not edit the progress matrix unless current support changes during activation or migration
 - [ ] build documentation and inspect all plan/authority links
 
 ### Slice 0C — Produce the migration inventory
@@ -561,8 +543,8 @@ Inventory:
 
 ### Phase 0 exit criteria
 
-- [ ] this plan is the sole active owner after hardening
-- [ ] diagnostics work is parked cleanly
+- [ ] this plan is the sole active owner of the source/token/diagnostic representation migration
+- [ ] diagnostics work remains paused cleanly behind this migration
 - [ ] every stale snapshot fact is refreshed
 - [ ] migration and failure-site inventories are complete
 - [ ] baseline correctness, layout, memory, timing and CI evidence is recorded
@@ -1277,7 +1259,6 @@ For each experiment:
 - [ ] finalize `docs/compiler-data-layout-design.md` with selected constants and final file map
 - [ ] update compiler and build-system authorities to the implemented ownership/failure model
 - [ ] update `AGENTS.md`, style, testing and validation guidance
-- [ ] update the frontend optimisation plan to retain only non-overlapping work
 - [ ] update `index.md` and module-level docs/comments
 - [ ] review language and memory authorities; change only stale implementation references
 - [ ] rebuild generated documentation and inspect changed routes/diff

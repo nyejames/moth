@@ -10,28 +10,31 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 # Plans
 
 ## Active implementation work
+- [Anonymous const records](./plans/anonymous-const-records-plan.md) — Active; begin Phase 0 owner refresh
 
 ## Queued implementation chain
 
-- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
-- [Anonymous const records](./plans/anonymous-const-records-plan.md)
 - [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
 - [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - Improve the `tmp/test_brackets.mtf` error example.
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md)
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
+## Independent queued implementation work
+
+- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md) — Queued independently; activate under Active implementation work when implementation starts
+
 The roadmap order is the implementation sequence. Individual plans may state their immediate blockers, but they do not redefine the full chain.
 
 The package dependency plan is design-gated. Its implementation remains blocked until its declaration, alias, resolver and future package-manager boundaries are reviewed and accepted.
 
-Diagnostics may continue independently. The queued implementation chain remains ordered by hard dependency.
+Compiler diagnostics improvements are paused until the diagnostics and tokens layout plan completes; their position immediately after that plan makes the dependency explicit. The queued implementation chain remains ordered by hard dependency.
 
 Do not mark a plan active unless its own status block says it is active.
 
@@ -78,9 +81,12 @@ keys, imported-constant/directive invalidation, incremental template prerequisit
 parallel folding and cross-owner backend string-assembly investigation. It requires profiles and a
 complete semantic key/invalidation model before any cache or scheduling implementation.
 
-The final TIR completion plan remains the historical architecture source. Broad arena and invariant
-work remains in the
-[frontend optimisation plan](./plans/frontend-arena-semantic-invariant-optimization-plan.md).
+The final TIR completion plan remains the historical architecture source. The initial frontend arena
+and semantic-invariant optimisation programme is complete; its evidence remains in
+`benchmarks/frontend-optimization-results.md`, and the progress matrix continues to report the
+implemented surface as `Partial`. The remaining expression-scratch and HIR/borrow-fact
+compaction investigations are deferred until profiling shows material pressure and have no current
+implementation plan. Create a focused plan only when that evidence exists.
 
 ## Code-block highlighting follow-ups
 

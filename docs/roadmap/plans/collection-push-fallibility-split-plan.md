@@ -19,6 +19,7 @@ Refresh this block after every accepted slice and before compaction. Do not cont
 ```text
 ACTIVE_PLAN:
 - `docs/roadmap/plans/collection-push-fallibility-split-plan.md`
+STATUS: queued
 
 CURRENT_SLICE:
 - Phase: Phase 0 - refresh, preserve local work and establish the baseline
@@ -860,11 +861,9 @@ Complete roadmap closeout edits before the final gates so validation covers the 
 
 - [ ] Mark all completed checklist items
 - [ ] Set the context capsule status and next action to final audit
-- [ ] Remove this plan from `Active implementation work`
-- [ ] Add it under `Completed` with its final title
-- [ ] Record the accepted implementation commit and docs commit in the capsule
-- [ ] Record any deliberately deferred follow-up and its owner
-- [ ] Do not delete implementation history from the plan
+- [ ] Record accepted implementation and docs commits in the completion commit and evidence
+- [ ] Record any deliberately deferred follow-up and its owner in the roadmap or owning authority
+- [ ] Delete this plan in the completion commit, per roadmap convention; do not add a `Completed` section
 
 ## 3B - Search for obsolete paths and semantic drift
 

@@ -1,17 +1,17 @@
 # Boracle aggregate copy and builtin storage provenance plan
 
-Status: proposed
+Status: proposed, inactive
 
 Current slice: not started
 
-Blockers: typed provenance relations and the bounded operational oracle must be complete; per-result call provenance should be available before storage operations return detached values
+Prerequisites: typed provenance relations and the bounded operational oracle must be complete; per-result call provenance should be available before storage operations return detached values; no current implementation owner is active
 
-Next action: activate with an inventory of aggregate projection kinds, builtin collection and map effects and current copy-graph assumptions
+Next action: if approved, create a current owning plan from this note, re-anchor it against the active repository, then inventory aggregate projection kinds, builtin collection and map effects and current copy-graph assumptions
 
 Repository path:
 
 ```text
-docs/roadmap/plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md
+docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md
 ```
 
 Canonical authorities:

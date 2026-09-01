@@ -36,10 +36,10 @@ Future diagnostic coverage needed for:
 ## Current state
 
 ACTIVE_PLAN: `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`
-STATUS: active
+STATUS: paused
 CURRENT_SLICE: Phase 4.1b+d complete; 4.1c (multiple-success return-shape reason) remains
 LAST_ACCEPTED_COMMIT: `d7fb3654f` (Phase 4.1d)
-WORKTREE: not refreshed during this documentation-only tidy; record the current branch, HEAD and `git status --short` before Phase 4.1c
+WORKTREE: main @ `e56dba9da` was clean before this documentation tidy; no linked worktrees (the boracle tree matched main and its detached shell was pruned; this tidy intentionally changes roadmap docs)
 REQUIRED_RELOADS: startup files, this plan and current source/diff
 RELEVANT_CONTEXT_NOW:
 - docs: access-and-aliasing and assignment contracts distinguish immutable root bindings from assignment-target syntax; no general documentation edits are allowed
@@ -55,11 +55,11 @@ VALIDATION_STATE:
 - Phase 3.2a parent probes: `p.x = 99` (immutable root) renders `ImmutableFieldRoot` naming field `x` and root `p`; `value = 200` (immutable direct) renders `ImmutableBinding` with ordinary `=` guidance and no `~`; `Point(1,2).x = 5` (temporary) renders `TemporaryNotAssignable`; mutable `p ~= Point(1,2)` + `p.x = 99` compiles cleanly
 - Phase 3.2a `just validate`: passed cross-target Clippy, 3,609 Rust tests, 1,777 integration cases, docs check and 28 benchmark cases
 DOCS_IMPACT: diagnostics-plan tracking only; general design and language docs remain unchanged unless they explicitly name a diagnostic being changed
-BLOCKERS_OR_OPEN_DECISIONS: none
+BLOCKERS_OR_OPEN_DECISIONS: paused until the compiler source, token and diagnostic data layout plan completes
 DELEGATION_DECISION: Ollama - explicitly required for every implementation worker slice
 NEXT_WORKER_ORDER: Ollama only for implementation slices
-STOP_REASON: none
-NEXT_RESUME_ACTION: launch Phase 4.1c (multiple-success return-shape reason + ScopeContext boundary fact), then Phase 4.2
+STOP_REASON: paused by the roadmap dependency; no implementation work resumes until the layout plan completes
+NEXT_RESUME_ACTION: after the layout plan completes, launch Phase 4.1c (multiple-success return-shape reason + ScopeContext boundary fact), then Phase 4.2
 ## Confirmed design decisions
 
 - Quoted strings support exactly these escapes:
@@ -1391,8 +1391,8 @@ Use focused subsystem tests for:
 
 Do not update general design docs, language docs, the progress matrix or generated documentation
 as part of this plan. A narrow documentation edit is allowed only when the file explicitly names
-the exact diagnostic being changed and would otherwise become inaccurate. The active roadmap plan
-continues to record slice state and confirmed implementation findings.
+the exact diagnostic being changed and would otherwise become inaccurate. This plan continues to record
+slice state and confirmed implementation findings while it is paused.
 
 ## Final validation
 
