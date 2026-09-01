@@ -1,0 +1,330 @@
+-- Example composition for docs/src/developer-docs/compiler-design/@page.moth.
+-- The reusable layout and styling come from @diagrams.
+
+@diagrams diagram,
+    stage,
+    node,
+    branch,
+    lane,
+    detail,
+    island,
+    fanout
+
+compiler_pipeline #= [diagram:
+    [$insert("label"): Moth compiler and build pipeline]
+    [$insert("caption"): Each box links to the walkthrough page that expands that stage. Side branches show important internal work without lengthening the main pipeline.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./starting-a-build/]
+            [$insert("eyebrow"): Entry]
+            [$insert("title"): Command and project bootstrap]
+            build, dev or check selects the builder, profile and tooling overlays.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./starting-a-build/]
+                    Typed CLI inputs
+                ]
+                [detail:
+                    [$insert("href"): ./starting-a-build/]
+                    config.moth folding
+                ]
+                [detail:
+                    [$insert("href"): ./starting-a-build/]
+                    Capability surface
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./project-graphs-and-modules/]
+            [$insert("eyebrow"): Stage 0 + preparation]
+            [$insert("title"): Source discovery and preparation]
+            Build the canonical source index while compiler-owned preparation exposes structural dependencies and file references.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./project-graphs-and-modules/]
+                    Source index
+                ]
+                [detail:
+                    [$insert("href"): ./tokenization/]
+                    Tokenization
+                ]
+                [detail:
+                    [$insert("href"): ./declarations-dependencies-and-ordering/]
+                    Header syntax preparation
+                ]
+                [detail:
+                    [$insert("href"): ./project-graphs-and-modules/]
+                    File-reference worklist
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./declarations-dependencies-and-ordering/]
+            [$insert("eyebrow"): Stages 2b-3]
+            [$insert("title"): Interface binding and declaration order]
+            Once providers are ready, bind retained dependency syntax and topologically order local declarations.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./project-graphs-and-modules/]
+                    Completed provider interfaces
+                ]
+                [detail:
+                    [$insert("href"): ./declarations-dependencies-and-ordering/]
+                    Interface binding
+                ]
+                [detail:
+                    [$insert("href"): ./declarations-dependencies-and-ordering/]
+                    Local ordering
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./ast-semantics-and-types/]
+            [$insert("eyebrow"): Stage 4]
+            [$insert("title"): AST semantics]
+            Resolve types, fold constants and templates, specialise static control flow and commit generated requests.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./ast-semantics-and-types/]
+                    Type checking
+                ]
+                [detail:
+                    [$insert("href"): ./compile-time-semantics/]
+                    Constant folding
+                ]
+                [detail:
+                    [$insert("href"): ./templates-and-tir/]
+                    TIR and templates
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./hir/]
+            [$insert("eyebrow"): Stage 5]
+            [$insert("title"): HIR lowering and validation]
+            Lower the active typed program into backend-neutral executable control flow.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./hir/]
+                    Typed AST to HIR
+                ]
+                [detail:
+                    [$insert("href"): ./hir/]
+                    CFG and invariant validation
+                ]
+                [detail:
+                    [$insert("href"): ./diagnostics/]
+                    Structured diagnostics
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./borrow-validation-and-drops/]
+            [$insert("eyebrow"): Stage 6]
+            [$insert("title"): Borrow validation]
+            Prove legal shared and exclusive access, future use and optional transfer candidates.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./borrow-validation-and-drops/]
+                    Places and overlap
+                ]
+                [detail:
+                    [$insert("href"): ./borrow-validation-and-drops/]
+                    Last-use facts
+                ]
+                ]
+
+                [island:
+                    [$insert("href"): ./borrow-validation-and-drops/]
+                    [$insert("title"): Boracle reference solver]
+                    Research and differential validation only, outside the production pipeline.
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./memory-management-and-gc/]
+            [$insert("eyebrow"): Analysis]
+            [$insert("title"): Lifetime topology]
+            Build allocation families, retention facts and backend-neutral lifetime requirements.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./memory-management-and-gc/]
+                    Allocation families
+                ]
+                [detail:
+                    [$insert("href"): ./memory-management-and-gc/]
+                    Retained edges
+                ]
+                [detail:
+                    [$insert("href"): ./memory-management-and-gc/]
+                    Intervals and frontiers
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./module-artefacts-and-reuse/]
+            [$insert("eyebrow"): Boundary]
+            [$insert("title"): Immutable module artefacts]
+            Publish successful module semantics, generated sidecars, link facts and reuse fingerprints.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./linking-entries-and-reachability/]
+            [$insert("eyebrow"): Link planning]
+            [$insert("title"): Entries and reachable unions]
+            Select active roots, instantiate project lifecycles and validate the complete linked topology.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./linking-entries-and-reachability/]
+                    Entry roots
+                ]
+                [detail:
+                    [$insert("href"): ./linking-entries-and-reachability/]
+                    Reachability
+                ]
+                [detail:
+                    [$insert("href"): ./memory-management-and-gc/]
+                    Complete lifetime topology
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./target-planning-and-validation/]
+            [$insert("eyebrow"): Physical planning]
+            [$insert("title"): Target and memory planning]
+            Partition functions, validate target contracts and produce one validated memory plan per physical variant.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Internal flow]
+                [lane:
+                [detail:
+                    [$insert("href"): ./target-planning-and-validation/]
+                    Target affinity
+                ]
+                [detail:
+                    [$insert("href"): ./target-planning-and-validation/]
+                    Target validation
+                ]
+                [detail:
+                    [$insert("href"): ./memory-management-and-gc/]
+                    ValidatedMemoryPlan
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./backend-lowering/]
+            [$insert("eyebrow"): Backends]
+            [$insert("title"): Backend lowering]
+            Lower each selected physical variant without reopening source semantics.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Output paths]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./backend-lowering/]
+                    JavaScript
+                ]
+                [detail:
+                    [$insert("href"): ./backend-lowering/]
+                    WebAssembly
+                ]
+                [detail:
+                    [$insert("href"): ./html-assembly-and-output/]
+                    HTML runtime glue
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./html-assembly-and-output/]
+            [$insert("eyebrow"): Output]
+            [$insert("title"): HTML assembly and output ownership]
+            Assemble documents and runtime assets, validate output paths, write manifests and clean stale artefacts.
+        ]
+    ]
+]

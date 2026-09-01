@@ -17,11 +17,65 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use crate::compiler_frontend::utilities::token_scan::pipe_opens_anonymous_record;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
+
+/// True when `|` at `pipe_index` opens a value record rather than a struct shell.
+///
+/// A compile-time receiving context (`#=`) treats every `|...|` initializer as a const
+/// record, including empty and malformed lists. Ordinary `=` keeps empty `| |` and
+/// `| name Type |` as struct shells, and only `| name =` / `| name ,` as records.
+pub(crate) fn pipe_opens_value_record(
+    tokens: &[Token],
+    pipe_index: usize,
+    compile_time: bool,
+) -> bool {
+    if compile_time {
+        return true;
+    }
+
+    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
+    let skip_newlines = |mut cursor: usize| {
+        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
+            cursor += 1;
+        }
+        cursor
+    };
+
+    let mut cursor = skip_newlines(pipe_index + 1);
+    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
+        return false;
+    }
+
+    if !matches!(kind_at(cursor), Some(TokenKind::Symbol(_))) {
+        return false;
+    }
+
+    cursor = skip_newlines(cursor + 1);
+    matches!(
+        kind_at(cursor),
+        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+    )
+}
+
+fn looks_like_nested_record_literal(tokens: &[Token], pipe_index: usize) -> bool {
+    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
+    let skip_newlines = |mut cursor: usize| {
+        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
+            cursor += 1;
+        }
+        cursor
+    };
+
+    let cursor = skip_newlines(pipe_index + 1);
+    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
+        return true;
+    }
+
+    pipe_opens_value_record(tokens, pipe_index, false)
+}
 
 /// Parse one anonymous const record from `| name = value, ... |` syntax.
 ///
@@ -30,8 +84,8 @@ use rustc_hash::FxHashMap;
 /// EXIT INVARIANT: the stream is positioned on the token after the closing `|`.
 ///
 /// WHAT: parses named, ordered, unique `field = expression` entries with an optional trailing
-/// comma and returns the record expression. Nested `|...|` field values parse through the
-/// ordinary expression parser in the same constant context.
+/// comma and returns the record expression. Nested `|...|` field values are rejected; declare
+/// the child first and name it.
 /// WHY: this is the single anonymous-record grammar owner. Struct shells (`field Type`),
 /// choice payloads and signature member lists keep their own parsers.
 pub(super) fn parse_anonymous_const_record_expression(
@@ -181,7 +235,7 @@ fn parse_record_field(
     }
 
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-        if pipe_opens_anonymous_record(&token_stream.tokens, token_stream.index) {
+        if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::NestedAnonymousConstRecord,
                 token_stream.current_location(),

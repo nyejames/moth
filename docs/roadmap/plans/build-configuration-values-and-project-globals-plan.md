@@ -16,12 +16,10 @@ conditional-compilation system.
 ## Current-state capsule
 
 ```text
-ACTIVE_PLAN: docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh CLI, config-field, header-contract and synthetic-interface owners
-LAST_GOOD_COMMIT: none until the first implementation slice is accepted
-BRANCH: main
-IMPLEMENTATION_SCOPE: CLI, config folding, header syntax, Stage 0 contract barrier, synthetic project interface
+BLOCKERS: grouped project config and recursive schemas
+NEXT_ACTION: start after the project-config plan completes
 ```
 
 Keep this block concise. Git history is the implementation record.
@@ -31,8 +29,8 @@ Keep this block concise. Git history is the implementation record.
 - accepted canonical module Phase 5 closeout
 - anonymous const records, folded and projected through public interfaces
 - grouped project config and recursive builder schemas
-- Stage 4 static Bool `if` specialisation, selecting one branch before HIR
-- stable public-interface provenance and package-boundary ownership
+- existing Stage 4 static Bool `if` specialisation: both branches validate, then a known Bool selects executable work before HIR
+- stable public-interface provenance and package-boundary ownership, including `SyntheticInterfaceClass::ProjectContext`
 
 This plan must complete before entry-local config blocks.
 
@@ -95,6 +93,25 @@ project #= |
 |
 ```
 
+Not every direct `project` field may carry `#Config`. Structural fields that determine identity or
+source discovery are fixed-only. The project schema carries that policy:
+
+```rust
+enum ProjectFieldConfigPolicy {
+    FixedOnly,
+    Configurable,
+}
+```
+
+At minimum:
+
+- `name` -> `FixedOnly`
+- `entry_root` -> `FixedOnly`
+
+`version` may be `Configurable` because it does not change graph topology. Ordinary project metadata
+may be configurable when its semantic use permits it. `#Config` parsing does not special-case field
+names; the schema policy does.
+
 ### Source contract
 
 ```moth
@@ -114,9 +131,10 @@ Accepted contract types are:
 
 No other scalar, aggregate, nominal, generic or path type may be a `#Config` contract.
 
-A direct project contract may appear only on a direct field of `project`. A source contract is a
+A direct project contract may appear only on a direct `Configurable` field of `project`. A source contract is a
 module-wide top-level compile-time declaration. `#Config` is invalid:
 
+- on `FixedOnly` project fields, including `name` and `entry_root`
 - on nested project fields
 - in builder or tooling sections
 - inside an entry-local `config:` block
@@ -141,7 +159,7 @@ if analytics:
 ;
 ```
 
-The constant-evaluation and static-control-flow plan owns the general rule:
+Stage 4 static Bool specialisation already owns this rule:
 
 - both authored branches complete syntax, name, visibility, type and generic-evidence validation
 - a known Bool selects one branch before HIR
@@ -347,10 +365,16 @@ HIR category, dependency symbol class or new visibility rule.
 
 ## `ProjectGlobalsInterface`
 
-The folded project record produces an immutable synthetic interface at `@project` containing:
+The folded project record produces an immutable synthetic interface at `@project`. Do not introduce a
+`ProjectValue`, `ProjectRecordValue` or parallel recursive tree. Reuse the existing donor-independent
+folded-value vocabulary (scalars, structural strings, collections, options, records and canonical
+field types). If the current module name is too interface-specific, factor a more neutral owner
+rather than duplicating the value model.
+
+The interface contains:
 
 - stable field identities
-- folded backend-neutral values
+- folded backend-neutral values from that existing vocabulary
 - source locations
 - field-level fingerprints
 - member-level project-context provenance
@@ -396,6 +420,7 @@ source or changing a dependency's public package semantics.
 - no `-D`, `--define`, JSON or aggregate command input
 - no build-input aliasing
 - no runtime `Config` wrapper or source-visible `Config` type
+- no `#Config` on `FixedOnly` project fields such as `name` and `entry_root`
 - no nested project `#Config` fields
 - no `#Config` in builder/tooling sections or entry-local `config:` blocks
 - no `#Config if` syntax
@@ -406,6 +431,7 @@ source or changing a dependency's public package semantics.
 - no contract-directed reparsing of CLI values
 - no user-defined input literal, cast or coercion system
 - no second constant evaluator before AST
+- no parallel `@project` value or provenance identity system
 
 ## Implementation phases
 
@@ -453,10 +479,30 @@ conversion or defaulting path exists.
 
 ### Phase 3: Implement direct project `#Config`
 
-- Allow `#Config of T` only on direct `project` fields.
-- Reject nested project, builder and tooling occurrences.
+- Allow `#Config of T` only on direct `Configurable` `project` fields.
+- Reject `FixedOnly` fields, including `name` and `entry_root`, plus nested project, builder and tooling occurrences.
 - Treat `#Config` as a declaration qualifier whose semantic type is `T`, not as a generic type.
 - Resolve explicit input, builder global, default or missing diagnostics while config folds.
+- The build system supplies typed values and policy; the compiler config service owns integration into Moth folding. Do not compile config AST, inspect `#Config` afterwards, then mutate folded values from build-system code. The handoff is:
+
+```text
+CLI/programmatic input parser
+-> typed BuildConfigInputSet
+
+builder capability surface
+-> typed primitive globals
+
+ConfigCompilationRequest {
+    ...
+    build_config_inputs: &BuildConfigInputSet,
+    builder_globals: ...
+}
+
+compiler config service
+-> resolves #Config declarations during AST constant resolution
+-> returns ordinary folded values
+```
+
 - Apply exact primitive compatibility plus concrete-to-matching-optional promotion only.
 - Keep fixed direct fields separate from configured fields so fixed values block later overrides.
 - Preserve field locations, resolution origin, fingerprints and configuration provenance.
@@ -475,6 +521,10 @@ conversion or defaulting path exists.
 ### Phase 5: Build the project-wide contract barrier
 
 - Collect contracts from the selected semantic graph before any module AST uses them.
+- `build` / `dev` collect contracts from canonical selected semantic sources.
+- `check` collects those canonical contracts plus each check-only unit's contracts for checking that unit.
+- Check-only contracts do not modify canonical module interfaces or backend roots.
+- Unknown CLI input validation for `check` considers all contracts that `check` actually analyses.
 - Validate same-name compatibility once in deterministic source order.
 - Resolve one value per config name through the accepted order.
 - Compare already-typed explicit values with contract types without reparsing command text.
@@ -501,8 +551,11 @@ Review gate: there is one static-control-flow owner and it has no knowledge of `
 
 ### Phase 7: Implement `ProjectGlobalsInterface`
 
-- Build stable field identities from project identity and field path.
-- Project folded values, locations, fingerprints and provenance.
+- Activate `SyntheticInterfaceClass::ProjectContext` as a production producer.
+- Reuse `SyntheticInterfaceMemberIdentity` and sorted/deduplicated `SyntheticInterfaceProvenance`.
+- Remove the associated future-producer dead-code allowances.
+- Do not create another `ProjectGlobalId` or provenance representation unless it is a thin typed wrapper over the same identity.
+- Project existing folded values, locations, fingerprints and provenance. Do not invent a parallel recursive project-value tree.
 - Register the reserved `@project` synthetic interface in Stage 0 visibility.
 - Bind explicit source dependencies through the ordinary dependency-binding boundary.
 - Track dependencies at field granularity.
@@ -548,6 +601,7 @@ Stop for review when:
 - CLI value typing depends on loading a source contract
 - a second primitive, numeric or quoted-literal parser is proposed
 - `#Config` begins changing provider graphs, declarations or exports
+- `name` or `entry_root` becomes configurable
 - a config-specific `if`, reachability or HIR path is proposed
 - an inactive branch skips frontend syntax/name/type validation
 - builder values expose target, operating-system, architecture or backend identity
@@ -587,14 +641,18 @@ Cover:
 ### Contract and boundary behaviour
 
 - required and defaulted project fields
+- `name` and `entry_root` reject `#Config`
 - fixed project field authority
 - source contract compatibility and conflicts
 - restricted source defaults
 - unknown explicit inputs
+- `check` analyses check-only unit contracts without mutating canonical interfaces
+- unknown CLI inputs for `check` consider every contract `check` analyses
 - module-wide-only declaration placement
 - build/check/dev parity
 - dev rebuild retention and targeted invalidation
 - `@project` explicit dependency and collisions
+- `@project` reuses existing folded values and `ProjectContext` provenance identities
 - field- and config-name-level fingerprints and dependencies
 - no direct re-export
 - facade provenance rejection
@@ -642,6 +700,7 @@ Verify:
 - both static branches remain frontend-valid while inactive executable work is absent downstream
 - no platform or backend identity enters Moth source through builder globals
 - `@project` is immutable, explicit and permanently reserved
+- `@project` reuses existing folded values and synthetic-interface provenance
 - project and dependency configuration namespaces remain isolated
 - private configuration provenance cannot leak through package facades
 - package dependency declarations remain outside this plan

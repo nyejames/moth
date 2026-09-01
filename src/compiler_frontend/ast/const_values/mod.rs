@@ -15,6 +15,7 @@
 //! - Explicit `#` constants keep their existing top-level dependency/sorting
 //!   semantics; this module does not replace that path.
 
+pub(crate) mod body_local;
 pub(crate) mod facts;
 pub(crate) mod resolver;
 pub(crate) mod store;

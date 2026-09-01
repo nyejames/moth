@@ -179,33 +179,71 @@ struct ConstRecordFieldFacts {
     is_const_record: bool,
 }
 
+fn const_record_root_and_field_path(
+    receiver_value: &Expression,
+    field_name: StringId,
+) -> (&Expression, Vec<StringId>) {
+    let mut fields = vec![field_name];
+    let mut current = receiver_value;
+    while let ExpressionKind::FieldAccess { base, field } = &current.kind {
+        fields.push(*field);
+        current = base;
+    }
+    fields.reverse();
+    (current, fields)
+}
+
+fn with_const_record_field<T>(
+    receiver_value: &Expression,
+    field_name: StringId,
+    scope_context: Option<&ScopeContext>,
+    visit: impl FnOnce(&Expression) -> T,
+) -> Option<T> {
+    let (root, fields) = const_record_root_and_field_path(receiver_value, field_name);
+    project_const_record_fields(root, &fields, scope_context, visit)
+}
+
+fn project_const_record_fields<T>(
+    current: &Expression,
+    fields: &[StringId],
+    scope_context: Option<&ScopeContext>,
+    visit: impl FnOnce(&Expression) -> T,
+) -> Option<T> {
+    if fields.is_empty() {
+        return Some(visit(current));
+    }
+
+    match &current.kind {
+        ExpressionKind::StructInstance(record_fields)
+        | ExpressionKind::AnonymousConstRecord {
+            fields: record_fields,
+        } => {
+            let field_value = record_fields
+                .iter()
+                .find(|field| field.id.name() == Some(fields[0]))
+                .map(|field| &field.value)?;
+            project_const_record_fields(field_value, &fields[1..], scope_context, visit)
+        }
+        ExpressionKind::Reference(path) => {
+            with_const_record_declaration(path, scope_context, |declaration| {
+                project_const_record_fields(&declaration.value, fields, scope_context, visit)
+            })
+        }
+        _ => None,
+    }
+}
+
 fn const_record_field_facts(
     receiver_value: &Expression,
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
 ) -> Option<ConstRecordFieldFacts> {
-    let field_value = match &receiver_value.kind {
-        ExpressionKind::StructInstance(fields)
-        | ExpressionKind::AnonymousConstRecord { fields } => fields
-            .iter()
-            .find(|field| field.id.name() == Some(field_name))
-            .map(|field| &field.value)?,
-        ExpressionKind::Reference(path) => {
-            return with_const_record_declaration(path, scope_context, |declaration| {
-                const_record_field_facts(&declaration.value, field_name, scope_context)
-            });
+    with_const_record_field(receiver_value, field_name, scope_context, |field_value| {
+        ConstRecordFieldFacts {
+            type_id: field_value.type_id,
+            diagnostic_type: field_value.diagnostic_type.clone(),
+            is_const_record: field_value.is_const_record_value(),
         }
-        ExpressionKind::FieldAccess { base, field } => {
-            let projected = clone_const_record_field(base, *field, scope_context)?;
-            return const_record_field_facts(&projected, field_name, scope_context);
-        }
-        _ => return None,
-    };
-
-    Some(ConstRecordFieldFacts {
-        type_id: field_value.type_id,
-        diagnostic_type: field_value.diagnostic_type.clone(),
-        is_const_record: field_value.is_const_record_value(),
     })
 }
 
@@ -214,35 +252,12 @@ fn clone_const_record_field_from_receiver(
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
 ) -> Option<Expression> {
-    clone_const_record_field(
+    with_const_record_field(
         receiver_value_expression(receiver_node)?,
         field_name,
         scope_context,
+        Expression::to_owned,
     )
-}
-
-fn clone_const_record_field(
-    receiver_value: &Expression,
-    field_name: StringId,
-    scope_context: Option<&ScopeContext>,
-) -> Option<Expression> {
-    match &receiver_value.kind {
-        ExpressionKind::StructInstance(fields)
-        | ExpressionKind::AnonymousConstRecord { fields } => fields
-            .iter()
-            .find(|field| field.id.name() == Some(field_name))
-            .map(|field| field.value.to_owned()),
-        ExpressionKind::Reference(path) => {
-            with_const_record_declaration(path, scope_context, |declaration| {
-                clone_const_record_field(&declaration.value, field_name, scope_context)
-            })
-        }
-        ExpressionKind::FieldAccess { base, field } => {
-            let projected = clone_const_record_field(base, *field, scope_context)?;
-            clone_const_record_field(&projected, field_name, scope_context)
-        }
-        _ => None,
-    }
 }
 
 fn resolved_projected_field(

@@ -143,7 +143,7 @@ pub(crate) enum OpenConstruct {
     CollectionOrMap,
     CatchBlock,
     ValueIfBlock,
-    AnonymousRecord,
+    PipeList,
 }
 
 impl OpenConstruct {
@@ -154,38 +154,9 @@ impl OpenConstruct {
             OpenConstruct::CollectionOrMap => "}",
             OpenConstruct::CatchBlock => ";",
             OpenConstruct::ValueIfBlock => ";",
-            OpenConstruct::AnonymousRecord => "|",
+            OpenConstruct::PipeList => "|",
         }
     }
-}
-
-/// True when `|` at `pipe_index` opens `| |` or `| name =` / `| name ,` record syntax.
-///
-/// Catch bindings (`|err|`) and struct shells (`| name Type |`) stay false so those
-/// owners keep their existing pipe grammars.
-pub(crate) fn pipe_opens_anonymous_record(tokens: &[Token], pipe_index: usize) -> bool {
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
-    let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
-        }
-        cursor
-    };
-
-    let mut cursor = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
-        return true;
-    }
-
-    if !matches!(kind_at(cursor), Some(TokenKind::Symbol(_))) {
-        return false;
-    }
-
-    cursor = skip_newlines(cursor + 1);
-    matches!(
-        kind_at(cursor),
-        Some(TokenKind::Assign) | Some(TokenKind::Comma)
-    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,29 +166,58 @@ enum RecordPipeAction {
     Ignore,
 }
 
-/// Classify a `|` as a record opener, closer, or a pipe owned by another grammar.
-///
-/// Parentheses, collections and templates own inner pipes. A top-level `|` after the
-/// opening pipe closes this parameter list so the parser can report a missing value
-/// or a nested `|...|` list from the tokens it actually sees.
-fn classify_record_pipe(
+fn classify_pipe_list(
     tokens: &[Token],
     pipe_index: usize,
-    record_pipe_depth: usize,
+    pipe_list_depth: usize,
     nesting_is_top_level: bool,
+    allow_value_first: bool,
 ) -> RecordPipeAction {
     if !nesting_is_top_level {
         return RecordPipeAction::Ignore;
     }
 
-    if record_pipe_depth == 0 && pipe_opens_anonymous_record(tokens, pipe_index) {
-        return RecordPipeAction::Open;
-    }
-
-    if record_pipe_depth > 0 {
+    if pipe_list_depth == 0 && pipe_opens_member_list(tokens, pipe_index, allow_value_first) {
+        RecordPipeAction::Open
+    } else if pipe_list_depth > 0 {
         RecordPipeAction::Close
     } else {
         RecordPipeAction::Ignore
+    }
+}
+
+/// True when `|` at `pipe_index` opens a balanced `|...|` member list.
+///
+/// Empty lists (`| |`) and lists whose first member is a name, `this`, or a value
+/// literal stay pipe regions, including malformed first members. Catch bindings
+/// (`|err|`) and option captures (`|name|`) stay outside so `|` keeps continuing
+/// the surrounding expression.
+fn pipe_opens_member_list(tokens: &[Token], pipe_index: usize, allow_value_first: bool) -> bool {
+    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
+    let skip_newlines = |mut cursor: usize| {
+        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
+            cursor += 1;
+        }
+        cursor
+    };
+
+    let mut cursor = skip_newlines(pipe_index + 1);
+    match kind_at(cursor) {
+        Some(TokenKind::TypeParameterBracket) => true,
+        Some(TokenKind::Symbol(_) | TokenKind::This) => {
+            cursor = skip_newlines(cursor + 1);
+            !matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket))
+        }
+        Some(
+            TokenKind::NumericLiteral(_)
+            | TokenKind::StringSliceLiteral(_)
+            | TokenKind::RawStringLiteral(_)
+            | TokenKind::CharLiteral(_)
+            | TokenKind::BoolLiteral(_)
+            | TokenKind::NoneLiteral
+            | TokenKind::Path(_),
+        ) => allow_value_first,
+        Some(_) | None => false,
     }
 }
 
@@ -317,8 +317,8 @@ pub(crate) fn collect_declaration_initializer_tokens(
     let mut inline_value_if_missing_else_depth = 0usize;
     let mut initializer_closed_by_statement_block = false;
     let mut open_constructs = Vec::new();
-    // Anonymous const records that start the initializer own `|...|` newlines and commas.
-    // Catch/receiver pipes such as `|err|` must not enter that region.
+    // A top-level `|...|` list owns newlines and commas until its closing pipe.
+    // Nested parentheses, collections and templates still own inner pipes.
     let mut record_pipe_depth = 0usize;
     let mut last_closed_record_pipe = false;
     while token_stream.index < token_stream.length {
@@ -473,19 +473,22 @@ pub(crate) fn collect_declaration_initializer_tokens(
                 close_open_construct(&mut open_constructs, OpenConstruct::Template);
             }
             TokenKind::TypeParameterBracket => {
-                match classify_record_pipe(
+                match classify_pipe_list(
                     &token_stream.tokens,
                     token_stream.index,
                     record_pipe_depth,
                     depth.is_top_level(),
+                    collected
+                        .iter()
+                        .all(|token| matches!(token.kind, TokenKind::Newline)),
                 ) {
                     RecordPipeAction::Open => {
-                        open_constructs.push(OpenConstruct::AnonymousRecord);
+                        open_constructs.push(OpenConstruct::PipeList);
                         record_pipe_depth = record_pipe_depth.saturating_add(1);
                         last_closed_record_pipe = false;
                     }
                     RecordPipeAction::Close => {
-                        close_open_construct(&mut open_constructs, OpenConstruct::AnonymousRecord);
+                        close_open_construct(&mut open_constructs, OpenConstruct::PipeList);
                         record_pipe_depth = record_pipe_depth.saturating_sub(1);
                         last_closed_record_pipe = true;
                     }
@@ -514,12 +517,19 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
     let mut record_pipe_depth = 0usize;
     let mut index = token_stream.index;
     let tokens = &token_stream.tokens;
+    let mut seen_non_newline = false;
 
     while index < token_stream.length {
         let token_kind = &tokens[index].kind;
 
         if matches!(token_kind, TokenKind::TypeParameterBracket) {
-            match classify_record_pipe(tokens, index, record_pipe_depth, depth.is_top_level()) {
+            match classify_pipe_list(
+                tokens,
+                index,
+                record_pipe_depth,
+                depth.is_top_level(),
+                !seen_non_newline,
+            ) {
                 RecordPipeAction::Open => {
                     record_pipe_depth = record_pipe_depth.saturating_add(1);
                 }
@@ -545,6 +555,9 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &FileTokens
             break;
         }
 
+        if !matches!(token_kind, TokenKind::Newline) {
+            seen_non_newline = true;
+        }
         depth.step(token_kind);
         index += 1;
     }

@@ -134,6 +134,10 @@ impl<'a> HirValidator<'a> {
 
                 Ok(())
             }
+            Some(TypeDefinition::AnonymousConstRecordMarker) => Err(self.error_with_hir(
+                "compile-time-only anonymous const-record marker reached executable HIR".to_owned(),
+                anchor,
+            )),
             Some(_) => Ok(()),
             None => Err(self.error_with_hir(format!("Unknown HIR type id {type_id:?}"), anchor)),
         }

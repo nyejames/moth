@@ -178,7 +178,9 @@ pub(crate) fn lower_type_to_abi(
     context: &WasmLirLoweringContext<'_>,
     type_id: TypeId,
 ) -> WasmAbiType {
-    match classify_hir_type(type_id, context.type_environment) {
+    match classify_hir_type(type_id, context.type_environment)
+        .unwrap_or_else(|error| panic!("{}", error.msg))
+    {
         HirTypeClass::Unit => WasmAbiType::Void,
         HirTypeClass::Bool | HirTypeClass::Char => WasmAbiType::I32,
         HirTypeClass::Int => WasmAbiType::I64,

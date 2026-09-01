@@ -15,6 +15,7 @@ use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertio
 use super::public_const_templates::const_template_value_from_projection;
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::body_local::insert_body_local_const_records;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
@@ -165,6 +166,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 &self.environment.type_environment,
                 &mut template_builder,
             )
+            .and_then(|mut store| {
+                insert_body_local_const_records(
+                    &mut store,
+                    &emitted.ast,
+                    &self.environment.type_environment,
+                    &mut template_builder,
+                )?;
+                Ok(store)
+            })
         }
         .map_err(|error| {
             self.const_value_store_error_messages(error, &emitted.warnings, string_table)

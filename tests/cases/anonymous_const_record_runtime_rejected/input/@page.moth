@@ -1,4 +1,4 @@
 load || -> Bool:
-    stats = | |
+    stats = | count = 1 |
     return true
 ;

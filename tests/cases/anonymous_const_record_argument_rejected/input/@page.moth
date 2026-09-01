@@ -1,0 +1,7 @@
+use_label | value String | -> String:
+    return value
+;
+
+labels #= | first = "a" |
+
+io.line(use_label(labels))

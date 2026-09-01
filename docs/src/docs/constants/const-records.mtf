@@ -41,8 +41,8 @@ They do not introduce structural typing or anonymous runtime record identity.
 
 ### Anonymous const records
 
-`|...|` is parameters syntax. Functions, structs and const records all use it
-to name a data shape. Context decides what those parameters become.
+`|...|` is Moth's pipe-delimited member-list syntax. Context decides whether its
+entries are function parameters, typed struct fields or named const-record values.
 
 A compile-time receiving context turns a parameter list into a const record:
 

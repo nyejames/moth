@@ -40,6 +40,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 
+use crate::compiler_frontend::ast::expressions::anonymous_const_record::pipe_opens_value_record;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
@@ -62,7 +63,6 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
     parse_expectation_for_type_id,
 };
-use crate::compiler_frontend::utilities::token_scan::pipe_opens_anonymous_record;
 
 /// Body-local declaration parsing shares the AST body error lane.
 ///
@@ -503,12 +503,13 @@ pub fn resolve_declaration_syntax(
     let mut parsed_initializer = match initializer_stream.current_token_kind() {
         // Struct Definition
         //
-        // Anonymous const records own `| name = expr |` initializers in both binding modes;
-        // everything else after `|` stays with the struct shell grammar.
+        // Compile-time `| name = expr |` and empty `#= | |` are const records. Ordinary
+        // empty `| |` and `| name Type |` stay with the struct shell grammar.
         TokenKind::TypeParameterBracket
-            if !pipe_opens_anonymous_record(
+            if !pipe_opens_value_record(
                 &initializer_stream.tokens,
                 initializer_stream.index,
+                declaration_syntax.binding_mode.is_compile_time(),
             ) =>
         {
             // Struct field defaults must be compile-time foldable, so they are parsed

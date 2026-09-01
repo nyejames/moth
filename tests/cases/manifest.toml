@@ -12389,3 +12389,52 @@ path = "anonymous_const_record_collection_element_rejected"
 tags = ["const-records"]
 contract = "language.constants.anonymous_const_record_collection_element_rejected"
 role = "primary"
+
+[[case]]
+id = "anonymous_const_record_body_local_empty_struct_success"
+path = "anonymous_const_record_body_local_empty_struct_success"
+tags = ["const-records"]
+contract = "language.constants.body_local_empty_struct_shell"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_multiline_positional_rejected"
+path = "anonymous_const_record_multiline_positional_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_multiline_positional_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_multiline_missing_comma_rejected"
+path = "anonymous_const_record_multiline_missing_comma_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_multiline_missing_comma_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_argument_rejected"
+path = "anonymous_const_record_argument_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_argument_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_return_rejected"
+path = "anonymous_const_record_return_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_return_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_receiver_rejected"
+path = "anonymous_const_record_receiver_rejected"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_receiver_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_catch_value_block_success"
+path = "anonymous_const_record_catch_value_block_success"
+tags = ["const-records"]
+contract = "language.constants.anonymous_const_record_catch_value_block_projection"
+role = "primary"

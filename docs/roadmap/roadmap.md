@@ -10,7 +10,8 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 # Plans
 
 ## Active implementation work
-- [Anonymous const records](./plans/anonymous-const-records-plan.md) — Active; begin Phase 0 owner refresh
+
+None.
 
 ## Queued implementation chain
 

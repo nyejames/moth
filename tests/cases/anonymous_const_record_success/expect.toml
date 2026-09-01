@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["const record label: 42 first: a x: 3", "runtime-field=a runtime-nested=3"]
+rendered_output_contains = ["const record label: 42 first: a also: a x: 3", "runtime-field=a runtime-nested=3"]

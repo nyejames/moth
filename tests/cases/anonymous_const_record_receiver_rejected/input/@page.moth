@@ -1,0 +1,10 @@
+Point = |
+    x Int = 0,
+|
+
+length |this Point| -> Int:
+    return this.x
+;
+
+origin #= Point()
+io.line(origin.length())

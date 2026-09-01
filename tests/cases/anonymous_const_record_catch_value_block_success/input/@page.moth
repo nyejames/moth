@@ -1,0 +1,17 @@
+load || -> String, Error!:
+    return! Error("failed")
+;
+
+show || -> String:
+    value = load() catch:
+        fallback #= |
+            text = "fallback",
+        |
+
+        then fallback.text
+    ;
+
+    return value
+;
+
+io.line([: catch-record=[show()]])

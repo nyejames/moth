@@ -553,3 +553,79 @@ fn innermost_open_construct_prioritizes_depth_over_statement_blocks() {
         "parenthesis inside a catch or value-if is innermost"
     );
 }
+
+#[test]
+fn declaration_initializer_tokens_keep_a_multiline_pipe_list_together() {
+    let mut string_table = StringTable::new();
+    let field_a = string_table.intern("a");
+    let field_b = string_table.intern("b");
+    let next_statement = string_table.intern("next");
+    let mut stream = stream_from_kinds(
+        vec![
+            TokenKind::TypeParameterBracket,
+            TokenKind::Newline,
+            TokenKind::Symbol(field_a),
+            TokenKind::Assign,
+            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
+            TokenKind::Newline,
+            TokenKind::Symbol(field_b),
+            TokenKind::Assign,
+            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
+            TokenKind::Newline,
+            TokenKind::TypeParameterBracket,
+            TokenKind::Newline,
+            TokenKind::Symbol(next_statement),
+            TokenKind::Eof,
+        ],
+        &mut string_table,
+    );
+
+    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+        .expect("a multiline pipe list should scan as one initializer");
+    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
+
+    assert!(
+        collected_kinds.contains(&TokenKind::Symbol(field_b)),
+        "the scanner must not stop at the newline between record fields"
+    );
+    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+}
+
+#[test]
+fn declaration_initializer_tokens_keep_a_malformed_multiline_pipe_list_together() {
+    let mut string_table = StringTable::new();
+    let field_b = string_table.intern("b");
+    let next_statement = string_table.intern("next");
+    let mut stream = stream_from_kinds(
+        vec![
+            TokenKind::TypeParameterBracket,
+            TokenKind::Newline,
+            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
+            TokenKind::Comma,
+            TokenKind::Newline,
+            TokenKind::Symbol(field_b),
+            TokenKind::Assign,
+            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
+            TokenKind::Newline,
+            TokenKind::TypeParameterBracket,
+            TokenKind::Newline,
+            TokenKind::Symbol(next_statement),
+            TokenKind::Eof,
+        ],
+        &mut string_table,
+    );
+
+    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+        .expect("a malformed multiline pipe list should still scan as one initializer");
+    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
+
+    assert!(
+        collected_kinds.contains(&TokenKind::Symbol(field_b)),
+        "the scanner must not stop at the comma after a malformed first pipe-list member"
+    );
+    assert!(
+        !collected_kinds.contains(&TokenKind::Symbol(next_statement)),
+        "the closing pipe must end the initializer before the next statement"
+    );
+    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+}

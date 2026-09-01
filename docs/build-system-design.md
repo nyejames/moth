@@ -163,13 +163,15 @@ Short shape:
 ```moth
 default_channel #= "alpha"
 
+project_metadata #= |
+    channel = default_channel,
+|
+
 project #= |
     name = "moth_docs",
     version #Config of String = "0.1.0",
     entry_root = "src",
-    metadata = |
-        channel = default_channel,
-    |,
+    metadata = project_metadata,
 |
 
 html #= |

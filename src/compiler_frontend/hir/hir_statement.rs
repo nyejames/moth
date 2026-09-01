@@ -239,6 +239,8 @@ impl<'a> HirBuilder<'a> {
 
             NodeKind::LexicalScope { body } => self.lower_lexical_scope(body, &node.location),
 
+            NodeKind::StructDefinition(_, _) => Ok(()),
+
             NodeKind::RangeLoop {
                 bindings,
                 range,

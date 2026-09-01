@@ -15,7 +15,7 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, SourceLocation};
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -173,7 +173,6 @@ pub struct HirBuilder<'a> {
     pub(super) fields_by_struct_and_name: FxHashMap<(StructId, InternedPath), FieldId>,
     pub(super) module_constants_by_name: FxHashMap<InternedPath, ConstValueId>,
     pub(super) module_const_values: ConstValueStore,
-    pub(super) local_const_records_by_name: FxHashMap<InternedPath, Declaration>,
 
     // === Fast ID -> arena index maps ===
     pub(super) block_index_by_id: FxHashMap<BlockId, usize>,
@@ -276,7 +275,6 @@ impl<'a> HirBuilder<'a> {
             fields_by_struct_and_name: FxHashMap::default(),
             module_constants_by_name: FxHashMap::default(),
             module_const_values: ConstValueStore::default(),
-            local_const_records_by_name: FxHashMap::default(),
 
             block_index_by_id: FxHashMap::default(),
             function_index_by_id: FxHashMap::default(),
@@ -684,7 +682,6 @@ impl<'a> HirBuilder<'a> {
 
         self.current_function = Some(function_id);
         self.locals_by_name.clear();
-        self.local_const_records_by_name.clear();
         self.loop_targets.clear();
         self.set_current_block(entry_block, location)
     }
@@ -694,7 +691,6 @@ impl<'a> HirBuilder<'a> {
         self.current_block = None;
         self.current_region = None;
         self.locals_by_name.clear();
-        self.local_const_records_by_name.clear();
         self.loop_targets.clear();
         self.entry_fragment_vec_local = None;
     }

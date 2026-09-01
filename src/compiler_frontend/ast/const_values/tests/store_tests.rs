@@ -11,11 +11,13 @@ use super::{
 };
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
 use crate::compiler_frontend::paths::resource_identity::{
@@ -406,5 +408,48 @@ fn duplicate_record_field_name_is_a_construction_error() {
         error.msg.contains("duplicate field names"),
         "unexpected error: {}",
         error.msg
+    );
+}
+
+#[test]
+fn const_record_aliases_share_the_target_root() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::default();
+    let meta = InternedPath::from_single_str("meta", &mut string_table);
+    let alias = InternedPath::from_single_str("also", &mut string_table);
+
+    let target = record_declaration(
+        "meta",
+        vec![int_field(
+            "alpha",
+            SourceLocation::default(),
+            &mut string_table,
+        )],
+        &mut string_table,
+    );
+    let alias_declaration = Declaration {
+        id: alias.clone(),
+        value: Expression::reference_with_type_id(
+            meta.clone(),
+            DataType::Inferred,
+            type_environment.anonymous_const_record_type(),
+            SourceLocation::default(),
+            ValueMode::ImmutableOwned,
+            ConstRecordState::ConstRecord,
+        ),
+    };
+
+    let store =
+        ConstValueStore::from_test_declarations(vec![target, alias_declaration], &type_environment)
+            .expect("an alias of a folded record should share the target root");
+
+    let target_id = store.value_for_path(&meta).expect("target path is indexed");
+    let alias_id = store.value_for_path(&alias).expect("alias path is indexed");
+    assert_eq!(target_id, alias_id);
+
+    let alpha = string_table.intern("alpha");
+    assert_eq!(
+        store.field_value(target_id, alpha),
+        store.field_value(alias_id, alpha)
     );
 }

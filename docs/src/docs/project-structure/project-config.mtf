@@ -7,13 +7,15 @@
 [codeblock, $code("moth"):
     default_channel #= "alpha"
 
+    project_metadata #= |
+        channel = default_channel,
+    |
+
     project #= |
         name = "moth_docs",
         version #Config of String = "0.1.0",
         entry_root = "src",
-        metadata = |
-            channel = default_channel,
-        |,
+        metadata = project_metadata,
     |
 
     html #= |
@@ -32,7 +34,7 @@
 - The active builder project section is required, even when empty.
 - Inactive sections are parsed and folded, then discarded.
 - Project and entry schemas are separate with no shared fields.
-- Project fields may contain folded scalar values, optionals, nested anonymous const records, collections and folded template strings.
+- Project fields may contain folded scalar values, optionals, collections, templates-as-strings and nested anonymous const records. Nested records are declare-first: a `|...|` list does not contain another `|...|` list.
 - Builder sections use backend-neutral folded values and cannot declare `#Config`.
 - Output settings are builder-owned.
 

@@ -93,9 +93,11 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         store: &ConstValueStore,
     ) -> Result<(), CompilerError> {
+        for (path, id) in store.path_value_bindings() {
+            self.module_constants_by_name.insert(path.clone(), id);
+        }
+
         for row in store.iter_module_constant_views() {
-            self.module_constants_by_name
-                .insert(row.path.clone(), row.id);
             if !row.metadata.hir_visible {
                 continue;
             }
@@ -724,12 +726,16 @@ impl<'a> HirBuilder<'a> {
         variable: &Declaration,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
-        // Const records are compile-time member groups, not runtime locals.
-        // This path gracefully skips HIR local creation so field-access lowering
-        // can resolve individual members later. It is not a user diagnostic path.
         if variable.value.is_const_record_value() {
-            self.local_const_records_by_name
-                .insert(variable.id.to_owned(), variable.to_owned());
+            if !self.module_constants_by_name.contains_key(&variable.id) {
+                return_hir_transformation_error!(
+                    format!(
+                        "HIR invariant: body-local const record '{}' reached HIR without a folded store binding",
+                        self.symbol_name_for_diagnostics(&variable.id)
+                    ),
+                    self.hir_error_location(location)
+                );
+            }
             return Ok(());
         }
 

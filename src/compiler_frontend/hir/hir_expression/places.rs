@@ -27,7 +27,6 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
-use rustc_hash::FxHashSet;
 
 use super::LoweredExpression;
 
@@ -347,84 +346,19 @@ impl<'a> HirBuilder<'a> {
             }));
         }
 
-        let mut visited_records = FxHashSet::default();
-        let Some(field_expression) = self.resolve_const_record_field_expression_for_expression(
-            base,
-            field,
-            location,
-            &mut visited_records,
-        )?
-        else {
-            return Ok(None);
-        };
-
-        if field_expression.is_const_record_value() {
+        if base.is_const_record_value() {
             return_hir_transformation_error!(
-                "HIR invariant: const-record field access reached HIR while still producing a record value",
+                "HIR invariant: const-record field access reached HIR without a folded store binding",
                 self.hir_error_location(location)
             );
         }
 
-        let mut lowered = self.lower_expression(&field_expression)?;
-        let region = self.current_region_or_error(location)?;
-        let ty = self.lower_type_id(result_type_id, location)?;
-
-        lowered.value.ty = ty;
-        lowered.value.region = region;
-
-        Ok(Some(lowered))
-    }
-
-    fn resolve_const_record_field_expression_for_expression(
-        &self,
-        expression: &Expression,
-        field: StringId,
-        location: &SourceLocation,
-        visited_records: &mut FxHashSet<InternedPath>,
-    ) -> Result<Option<Expression>, CompilerError> {
-        let Some(record_expression) =
-            self.const_record_expression_for_expression(expression, location, visited_records)?
-        else {
-            return Ok(None);
-        };
-
-        let fields = match &record_expression.kind {
-            ExpressionKind::StructInstance(fields)
-            | ExpressionKind::AnonymousConstRecord { fields } => fields,
-            _ => {
-                return_hir_transformation_error!(
-                    "Const record reached HIR field lowering without struct field data",
-                    self.hir_error_location(location)
-                );
-            }
-        };
-
-        let Some(field_declaration) = fields
-            .iter()
-            .find(|field_declaration| field_declaration.id.name() == Some(field))
-        else {
-            return_hir_transformation_error!(
-                format!(
-                    "Const record field '{}' was not present during HIR field lowering",
-                    self.string_table.resolve(field)
-                ),
-                self.hir_error_location(location)
-            );
-        };
-
-        Ok(Some(field_declaration.value.to_owned()))
+        Ok(None)
     }
 
     fn const_store_value_for_expression(&self, expression: &Expression) -> Option<ConstValueId> {
         match &expression.kind {
-            ExpressionKind::Reference(name) => self
-                .module_constants_by_name
-                .get(name)
-                .copied()
-                .or_else(|| {
-                    let declaration = self.local_const_records_by_name.get(name)?;
-                    self.const_store_value_for_expression(&declaration.value)
-                }),
+            ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
             ExpressionKind::FieldAccess { base, field } => {
                 let base_value_id = self.const_store_value_for_expression(base)?;
                 self.module_const_values.field_value(base_value_id, *field)
@@ -522,80 +456,6 @@ impl<'a> HirBuilder<'a> {
         }
 
         Ok(Some(self.lower_const_store_expression(value_id, location)?))
-    }
-
-    fn const_record_expression_for_expression(
-        &self,
-        expression: &Expression,
-        location: &SourceLocation,
-        visited_records: &mut FxHashSet<InternedPath>,
-    ) -> Result<Option<Expression>, CompilerError> {
-        if !expression.is_const_record_value() {
-            return Ok(None);
-        }
-
-        match &expression.kind {
-            ExpressionKind::StructInstance(_) | ExpressionKind::AnonymousConstRecord { .. } => {
-                Ok(Some(expression.to_owned()))
-            }
-
-            ExpressionKind::FieldAccess { base, field } => {
-                let Some(field_expression) = self
-                    .resolve_const_record_field_expression_for_expression(
-                        base,
-                        *field,
-                        location,
-                        visited_records,
-                    )?
-                else {
-                    return Ok(None);
-                };
-
-                self.const_record_expression_for_expression(
-                    &field_expression,
-                    location,
-                    visited_records,
-                )
-            }
-
-            ExpressionKind::Reference(name) => {
-                if !visited_records.insert(name.to_owned()) {
-                    return_hir_transformation_error!(
-                        format!(
-                            "Cyclic const-record reference detected while lowering '{}'",
-                            self.symbol_name_for_diagnostics(name)
-                        ),
-                        self.hir_error_location(location)
-                    );
-                }
-
-                let Some(declaration) = self.local_const_records_by_name.get(name) else {
-                    if self.module_constants_by_name.contains_key(name) {
-                        return Ok(None);
-                    }
-                    return_hir_transformation_error!(
-                        format!(
-                            "Const record '{}' reached HIR without compile-time record data",
-                            self.symbol_name_for_diagnostics(name)
-                        ),
-                        self.hir_error_location(location)
-                    );
-                };
-
-                self.const_record_expression_for_expression(
-                    &declaration.value,
-                    location,
-                    visited_records,
-                )
-            }
-
-            _ => {
-                return_hir_transformation_error!(
-                    "Const record reached HIR field lowering as a non-record expression",
-                    self.hir_error_location(location)
-                );
-            }
-        }
     }
 
     // WHAT: resolves a function path through the HIR declaration table.

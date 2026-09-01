@@ -23,6 +23,7 @@ use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
     lower_ast_with_metadata, validate_module_for_tests,
 };
+use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{
     ChoiceId, FieldId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
 };
@@ -1268,6 +1269,91 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
         .expect_err("validator should reject unresolved generic parameter in expression types");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
+}
+
+#[test]
+fn validator_rejects_anonymous_const_record_marker_on_local() {
+    let error = validation_error_for_injected_local_type(|_, type_environment| {
+        type_environment.anonymous_const_record_type()
+    });
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("compile-time-only anonymous const-record marker"),
+        "unexpected error: {}",
+        error.msg
+    );
+}
+
+#[test]
+fn validator_rejects_anonymous_const_record_marker_on_expression() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let marker = type_environment.anonymous_const_record_type();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_block = &mut module.blocks[entry_block_index];
+    let value_id = HirValueId(9000);
+    let statement_id = HirNodeId(9000);
+    let location = test_source_location(20);
+    let expression = HirExpression {
+        id: value_id,
+        kind: HirExpressionKind::Int(1),
+        ty: marker,
+        value_kind: ValueKind::Const,
+        region: entry_block.region,
+    };
+    let statement = HirStatement {
+        id: statement_id,
+        kind: HirStatementKind::Expr(expression),
+        location: location.clone(),
+    };
+
+    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_value(&location, value_id, &location);
+    entry_block.statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject the compile-time marker on an expression");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("compile-time-only anonymous const-record marker")
+    );
+}
+
+#[test]
+fn validator_rejects_anonymous_const_record_marker_on_function_return() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let marker = type_environment.anonymous_const_record_type();
+    let start_function = module
+        .start_function
+        .expect("normal test module should have start");
+    module.functions[start_function.0 as usize].return_type = marker;
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject the compile-time marker on a function return");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("compile-time-only anonymous const-record marker")
+    );
+}
+
+#[test]
+fn classify_hir_type_rejects_anonymous_const_record_marker() {
+    let type_environment = TypeEnvironment::new();
+    let error = classify_hir_type(
+        type_environment.anonymous_const_record_type(),
+        &type_environment,
+    )
+    .expect_err("the marker must not classify as a runtime ABI type");
+    assert!(
+        error
+            .msg
+            .contains("compile-time-only anonymous const-record marker")
+    );
 }
 
 #[test]

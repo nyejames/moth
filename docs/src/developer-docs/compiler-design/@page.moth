@@ -1,16 +1,25 @@
 @overview content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_css, theme_head
+@pipeline_diagram compiler_pipeline as compiler_pipeline_diagram
+@diagrams css as diagrams_css
 
 page_title #= "Compiler design: source to page"
 page_description #= "A chronological educational tour of Moth's compiler and build pipeline."
-page_head #= theme_head
+page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
 
 #[section, $md:
     @../ (Developers) / Compiler design
 
-    One chronological route follows a Moth project from source files to generated HTML. Along the way it teaches common compiler terms, Moth's architecture and the design choices that set the language apart.
+    This section of the docs is written to help you understand compiler concepts in general,
+    as well as Moth specific concepts. 
+
+    This is to help break down what Moth does differently, why it does it and how it all fits into the bigger design picture.
 ]
 
 #[section, reference_content]
+
+export:
+    compiler_pipeline #= compiler_pipeline_diagram
+;

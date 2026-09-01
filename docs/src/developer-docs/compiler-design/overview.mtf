@@ -1,14 +1,17 @@
 # From Moth source to a webpage
 
-A compiler turns source text into something a machine can run or display. It does that in stages. Each stage removes one kind of ambiguity and hands a clearer structure to the next.
+We'll follow a small Moth program from files on disk to a generated HTML page. 
 
-This series walks one small Moth project from files on disk to a generated HTML page. If you write Rust, you already know functions, enums, structs and ownership as a user. You may not know terms like *intermediate representation*, *link plan* or *borrow validation* yet. That is fine. Each term shows up when the example needs it.
+If you write Rust, you already know functions, enums, structs and ownership as a user. 
+You may not know terms like *intermediate representation*, *link plan* or *borrow validation* yet. 
 
-These pages teach. They do not define compiler behaviour. Accepted architecture lives in the design documents. Current support lives in the progress matrix. Sequencing lives in the roadmap. When code and design disagree, design wins for this tour.
+Each term shows up when the example needs it and will be explained step by step.
 
-## The project you will carry
+These docs are focused on teaching rather than documenting the compiler's actual implemented behaviour.
 
-Keep this tree in mind for the whole series:
+## The small example project we'll follow
+
+### The file structure
 
 [codeblock, $code("text"):
 compiler_walkthrough/
@@ -18,11 +21,10 @@ compiler_walkthrough/
     └── greeting.moth
 ]
 
-And keep these source shapes stable:
+### The code
 
+`greeting.moth`
 [codeblock, $code("moth"):
--- greeting.moth
-
 greeting_prefix #= "Hello"
 
 greet |name String| -> String:
@@ -30,9 +32,9 @@ greet |name String| -> String:
 ;
 ]
 
-[codeblock, $code("moth"):
--- @page.moth
 
+`@page.moth`
+[codeblock, $code("moth"):
 @greeting greet
 
 visitor = "Priya"
@@ -77,9 +79,12 @@ project tree
 
 Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.
 
-**Diagram placeholder:** Pipeline from project tree to HTML output
+[$note: 
+    This diagram is a bit messed up atm, but can be fixed later when these docs are redrafted.
+    Exported from the main page but defined in diagrams/+package.moth
+]
+[compiler_pipeline]
 
-*Caption: simplified Moth walkthrough, not a universal compiler taxonomy.*
 *Question: which step still looks like source, and which first looks like something a host can run?*
 
 ## Four owners you will meet again

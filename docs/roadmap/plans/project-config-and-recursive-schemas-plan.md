@@ -7,12 +7,10 @@ Replace the transitional flat project config with one grouped, self-contained `c
 ## Current-state capsule
 
 ```text
-ACTIVE_PLAN: docs/roadmap/plans/project-config-and-recursive-schemas-plan.md
 STATUS: queued
-CURRENT_SLICE: Phase 0 - refresh config bootstrap, flat registry, builder schema and output owners
-LAST_GOOD_COMMIT: none until the first implementation slice is accepted
-BRANCH: main
-IMPLEMENTATION_SCOPE: build-system config bootstrap, folded config values, recursive schemas, builder-owned settings
+CURRENT_SLICE: Phase 0 - refresh config bootstrap, folded result boundary, recursive schemas and output owners
+BLOCKERS: anonymous const records delivered; implementation has not started
+NEXT_ACTION: activate this plan and start Phase 0 inventory
 ```
 
 Keep this block concise. Git history is the implementation record.
@@ -37,21 +35,34 @@ This plan must complete before build configuration values, `@project` and entry-
 
 ## Current implementation to replace
 
-The current compiler already tokenises and folds one authored `config.moth`, but validation still consumes flat top-level keys through `ProjectConfigKeyRegistry`. `Config` still owns transitional fields such as `project`, `dev_folder`, `output_folder` and `package_folders`.
+The current compiler already tokenises and folds one authored `config.moth` through the compiler-owned config service `compile_config_source(...)`. Validation still consumes flat top-level keys through `ProjectConfigKeyRegistry`. `Config` still owns transitional fields such as `project`, `dev_folder`, `output_folder` and `package_folders`. The service currently returns a complete `Ast`; that is migration scaffolding, not the final boundary.
 
-Do not rebuild the already-correct single-file parser. Replace the value/schema/storage boundary directly.
+Project-config migration may change the compiler config service's result shape, but build-system code must never regain tokenizer, header, declaration-order or AST orchestration. The accepted ownership is:
+
+```text
+build system
+-> compile_config_source(...)
+   -> tokenizer
+   -> headers
+   -> ordering
+   -> AST/folding
+-> folded config result
+-> build-owned schema validation/application
+```
 
 ## Accepted config design
 
 ```moth
 default_channel #= "alpha"
 
+project_metadata #= |
+    channel = default_channel,
+|
+
 project #= |
     name = "moth_docs",
     entry_root = "src",
-    metadata = |
-        channel = default_channel,
-    |,
+    metadata = project_metadata,
 |
 
 html #= |
@@ -72,10 +83,10 @@ Rules:
 - Only active builder/tooling sections are schema-validated and retained.
 - The active artefact-builder project section is required, even when empty.
 - Project and entry schemas are separate. No field has a shared project/entry scope.
-- Project fields may contain folded scalars, optionals, collections, templates-as-strings and nested anonymous const records.
+- Config schemas may recursively describe record-valued fields. Anonymous const-record literal syntax itself is non-nestable. Record-valued children are declared first and referenced by name.
 - Builder and tooling sections consume backend-neutral folded values.
 - Output settings belong to the active builder section.
-- Named support structs, choices and aliases are not part of config after anonymous const records land.
+- Named support structs, choices and aliases are rejected by the compiler-owned config service's dialect validator, not by build-side schema validation.
 - Package dependency declarations are not implemented here. Until the later package plan is accepted, every config dependency remains rejected before resolution.
 
 ## Recursive schema model
@@ -96,10 +107,23 @@ Requirements:
 - transient field-name indexes built once per validation operation
 - explicit folded value shapes
 - required/default/closed-domain facts on field records
+- schema-node unknown-field policy rather than special-case `if project` branches:
+
+```rust
+enum UnknownFieldPolicy {
+    Allow,
+    Reject,
+}
+```
+
+  - `project` root: `Allow`
+  - active `html` section: `Reject`
+  - active tooling sections: usually `Reject`
+  - nested schema records: whichever their owner specifies
 - no trait-object schema hierarchy
 - no map-of-maps final representation
 - no string-backed catch-all settings store
-- unknown active fields are diagnostics
+- unknown active fields follow the owning node's `UnknownFieldPolicy`
 - inactive sections are folded but not schema-validated
 
 ## Non-goals
@@ -120,14 +144,45 @@ Requirements:
 - Record current revision, branch and worktree state.
 - Inventory config parsing, validation, `ProjectConfigKeyRegistry`, `Config`, builder validation and output-root resolution.
 - Confirm canonical package discovery no longer depends on `package_folders`; stop if that Phase 5 deletion is incomplete.
+- Produce the legacy-key migration table below and use it as the Phase 7 deletion audit.
 - Run baseline validation.
+
+| Current key                           | Final owner                                               |
+| ------------------------------------- | --------------------------------------------------------- |
+| `project` selector                    | delete, command owns builder                              |
+| `name` / `project_name`               | `project.name`                                            |
+| `entry_root`                          | `project.entry_root`                                      |
+| `version`                             | `project.version`                                         |
+| `author`, `license`                   | open project metadata unless another authority needs them |
+| `dev_folder`                          | `html.dev_output`                                         |
+| `output_folder`                       | `html.release_output`                                     |
+| `package_folders`                     | delete                                                    |
+| `template_const_loop_iteration_limit` | explicit compiler-owned project field                     |
+| backend string settings               | typed builder section records                             |
 
 ### Phase 1: Introduce folded config output types
 
+- Replace `CompiledConfigSource { ast, ... }` with a folded declaration boundary that reuses the existing folded-value authority rather than exposing `Ast`, `AstConstFacts`, `ConstValueStore` or `NodeKind` to build-side validation. Conceptually:
+
+```rust
+pub struct CompiledConfigSource {
+    pub declarations: Vec<FoldedConfigDeclaration>,
+    pub authored_scope: InternedPath,
+}
+
+pub struct FoldedConfigDeclaration {
+    pub name: StringId,
+    pub value: ConstValueId,
+    pub location: SourceLocation,
+    pub name_location: SourceLocation,
+}
+```
+
+- Exact types must reuse the existing const-value / public-folded-value owners rather than duplicate them.
 - Define one `FoldedProjectConfig` boundary containing the validated project record, retained active sections and source locations.
 - Consume anonymous const records directly rather than converting them into strings.
 - Preserve inactive folded sections only until active-schema selection completes, then discard them.
-- Keep config AST and const facts inside bootstrap.
+- Keep tokenizer, header, ordering and AST work inside `compile_config_source`; build-side schema validation consumes folded data only.
 
 Review gate: verify no second config language or duplicate folded-value model exists.
 
@@ -141,11 +196,13 @@ Review gate: verify no second config language or duplicate folded-value model ex
 
 ### Phase 3: Validate the grouped project record
 
+- Require a directory project to author `config.moth`. Absence is a structured config diagnostic. Single-file synthetic compilation keeps its separate policy.
 - Require exactly one authored `project` const record.
 - Validate `project.name`, `entry_root` and future compiler-owned fields through the project schema.
-- Allow additional folded project metadata outside the compiler-owned closed field set.
+- Allow additional folded project metadata outside the compiler-owned closed field set through `UnknownFieldPolicy::Allow` on the project root.
 - Preserve field locations and deterministic field order.
 - Reject implicit sibling field scope. Reusable values must be earlier helper constants.
+- Reject nested `|...|` literals; record-valued children must be declared first and referenced by name.
 
 ### Phase 4: Validate builder and tooling sections
 
@@ -181,7 +238,7 @@ Delete:
 - `project #= "html"`
 - global `dev_folder` and `output_folder`
 - `package_folders` and `/lib` defaults
-- named config support structs, choices and aliases
+- named config support structs, choices and aliases from the compiler config dialect validator
 - old compatibility diagnostics and wrappers
 
 Do not retain a legacy mode.
@@ -198,6 +255,7 @@ Do not retain a legacy mode.
 Pause for review when:
 
 - package resolution appears necessary during config folding
+- build-system code sequences tokenizer, header, declaration-order or AST stages
 - a second config AST/folder scan is proposed
 - active and inactive sections require separate parsers
 - a schema abstraction exists only to preserve the flat registry API
@@ -209,9 +267,12 @@ Pause for review when:
 Cover:
 
 - required grouped `project` record
+- directory project without `config.moth` is a structured diagnostic
+- single-file synthetic compilation keeps its separate policy
 - project name and entry-root validation
 - private helper ordering
-- nested anonymous const records
+- declare-first record-valued children; nested `|...|` literals rejected
+- open `project` metadata vs closed active builder/tooling sections
 - active section validation
 - inactive section folding without schema validation
 - missing active builder section
@@ -221,6 +282,7 @@ Cover:
 - output-root defaults and validation
 - rejection of dependency declarations, named support types and legacy flat keys
 - no config HIR or source graph
+- build-side validation never inspects compiler AST internals
 
 ## Validation
 

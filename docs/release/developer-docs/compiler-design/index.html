@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:empty {
+    display: none;
+}
+
+.moth-flow__details:not(:empty)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:not(:empty)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:not(:empty)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:not(:empty)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -426,20 +776,16 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Developers</a> / Compiler design</p><p>One chronological route follows a Moth project from source files to generated HTML. Along the way it teaches common compiler terms, Moth&#39;s architecture and the design choices that set the language apart.</p></section>
-<section class="container"><h1>From Moth source to a webpage</h1><p>A compiler turns source text into something a machine can run or display. It does that in stages. Each stage removes one kind of ambiguity and hands a clearer structure to the next.</p><p>This series walks one small Moth project from files on disk to a generated HTML page. If you write Rust, you already know functions, enums, structs and ownership as a user. You may not know terms like <em>intermediate representation</em>, <em>link plan</em> or <em>borrow validation</em> yet. That is fine. Each term shows up when the example needs it.</p><p>These pages teach. They do not define compiler behaviour. Accepted architecture lives in the design documents. Current support lives in the progress matrix. Sequencing lives in the roadmap. When code and design disagree, design wins for this tour.</p><h2>The project you will carry</h2><p>Keep this tree in mind for the whole series:</p><pre style=""><code class='codeblock'>compiler_walkthrough/
+<section class="container"><p><a href="../">Developers</a> / Compiler design</p><p>This section of the docs is written to help you understand compiler concepts in general, as well as Moth specific concepts. </p><p>This is to help break down what Moth does differently, why it does it and how it all fits into the bigger design picture.</p></section>
+<section class="container"><h1>From Moth source to a webpage</h1><p>We&#39;ll follow a small Moth program from files on disk to a generated HTML page. </p><p>If you write Rust, you already know functions, enums, structs and ownership as a user.  You may not know terms like <em>intermediate representation</em>, <em>link plan</em> or <em>borrow validation</em> yet. </p><p>Each term shows up when the example needs it and will be explained step by step.</p><p>These docs are focused on teaching rather than documenting the compiler&#39;s actual implemented behaviour.</p><h2>The small example project we&#39;ll follow</h2><h3>The file structure</h3><pre style=""><code class='codeblock'>compiler_walkthrough/
 ├── config.moth
 └── src/
     ├── @page.moth
-    └── greeting.moth</code></pre><p>And keep these source shapes stable:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- greeting.moth</span>
-
-greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span>
+    └── greeting.moth</code></pre><h3>The code</h3><p><code>greeting.moth</code></p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span>
 
 <span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>greeting_prefix<span class='moth-code-delimiter'>]</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>]</span>
-<span class='moth-code-delimiter'>;</span></code></pre><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- @page.moth</span>
-
-<span class='moth-code-string'>@greeting</span> <span class='moth-code-nominal'>greet</span>
+<span class='moth-code-delimiter'>;</span></code></pre><br><p><code>@page.moth</code></p><pre style=""><code class='codeblock'><span class='moth-code-string'>@greeting</span> <span class='moth-code-nominal'>greet</span>
 
 visitor <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>
 
@@ -462,7 +808,419 @@ visitor <span class='moth-code-operator'>=</span> <span class='moth-code-string'
 -&gt; project/link lifetime topology validation
 -&gt; deterministic target assignment
 -&gt; JavaScript and Wasm outputs
--&gt; HTML, runtime assets and output manifest</code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><p><strong>Diagram placeholder:</strong> Pipeline from project tree to HTML output</p><p><em>Caption: simplified Moth walkthrough, not a universal compiler taxonomy.</em> <em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li><a href="./what-a-compiler-does">01. What a compiler does</a></li><li><a href="./moth-design-choices">02. Why Moth makes different choices</a></li><li><a href="./starting-a-build">03. Starting a build</a></li><li><a href="./project-graphs-and-modules">04. Project graphs and modules</a></li><li><a href="./tokenization">05. Tokenization</a></li><li><a href="./declarations-dependencies-and-ordering">06. Declarations, dependencies and ordering</a></li><li><a href="./ast-semantics-and-types">07. AST semantics and types</a></li><li><a href="./compile-time-semantics">08. Compile-time semantics</a></li><li><a href="./templates-and-tir">09. Templates and TIR</a></li><li><a href="./diagnostics">10. Diagnostics</a></li><li><a href="./hir">11. HIR</a></li><li><a href="./memory-management-and-gc">12. Memory topology and lowering</a></li><li><a href="./borrow-validation-and-drops">13. Borrow validation and drops</a></li><li><a href="./module-artefacts-and-reuse">14. Module artefacts and reuse</a></li><li><a href="./linking-entries-and-reachability">15. Linking, entries and reachability</a></li><li><a href="./target-planning-and-validation">16. Target planning and validation</a></li><li><a href="./backend-lowering">17. Backend lowering</a></li><li><a href="./html-assembly-and-output">18. HTML assembly and output</a></li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued or active implementation:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/developer-docs/language/overview.mtf</code> for language surface</li><li><code>docs/src/developer-docs/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/@page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
+-&gt; HTML, runtime assets and output manifest</code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><br><p><figure class="moth-flow" aria-label=" Moth compiler and build pipeline">
+        <div class="moth-flow__pipeline">
+            
+
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./starting-a-build/">
+        <span class="moth-flow__eyebrow"> Entry</span>
+        <span class="moth-flow__title"> Command and project bootstrap</span>
+        <span class="moth-flow__description">
+
+
+build, dev or check selects the builder, profile and tooling overlays.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./starting-a-build/">
+        
+Typed CLI inputs
+</a>
+<a class="moth-flow__detail" href=" ./starting-a-build/">
+        
+config.moth folding
+</a>
+<a class="moth-flow__detail" href=" ./starting-a-build/">
+        
+Capability surface
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./project-graphs-and-modules/">
+        <span class="moth-flow__eyebrow"> Stage 0 + preparation</span>
+        <span class="moth-flow__title"> Source discovery and preparation</span>
+        <span class="moth-flow__description">
+
+
+Build the canonical source index while compiler-owned preparation exposes structural dependencies and file references.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./project-graphs-and-modules/">
+        
+Source index
+</a>
+<a class="moth-flow__detail" href=" ./tokenization/">
+        
+Tokenization
+</a>
+<a class="moth-flow__detail" href=" ./declarations-dependencies-and-ordering/">
+        
+Header syntax preparation
+</a>
+<a class="moth-flow__detail" href=" ./project-graphs-and-modules/">
+        
+File-reference worklist
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./declarations-dependencies-and-ordering/">
+        <span class="moth-flow__eyebrow"> Stages 2b-3</span>
+        <span class="moth-flow__title"> Interface binding and declaration order</span>
+        <span class="moth-flow__description">
+
+
+Once providers are ready, bind retained dependency syntax and topologically order local declarations.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./project-graphs-and-modules/">
+        
+Completed provider interfaces
+</a>
+<a class="moth-flow__detail" href=" ./declarations-dependencies-and-ordering/">
+        
+Interface binding
+</a>
+<a class="moth-flow__detail" href=" ./declarations-dependencies-and-ordering/">
+        
+Local ordering
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Stage 4</span>
+        <span class="moth-flow__title"> AST semantics</span>
+        <span class="moth-flow__description">
+
+
+Resolve types, fold constants and templates, specialise static control flow and commit generated requests.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./ast-semantics-and-types/">
+        
+Type checking
+</a>
+<a class="moth-flow__detail" href=" ./compile-time-semantics/">
+        
+Constant folding
+</a>
+<a class="moth-flow__detail" href=" ./templates-and-tir/">
+        
+TIR and templates
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./hir/">
+        <span class="moth-flow__eyebrow"> Stage 5</span>
+        <span class="moth-flow__title"> HIR lowering and validation</span>
+        <span class="moth-flow__description">
+
+
+Lower the active typed program into backend-neutral executable control flow.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./hir/">
+        
+Typed AST to HIR
+</a>
+<a class="moth-flow__detail" href=" ./hir/">
+        
+CFG and invariant validation
+</a>
+<a class="moth-flow__detail" href=" ./diagnostics/">
+        
+Structured diagnostics
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./borrow-validation-and-drops/">
+        <span class="moth-flow__eyebrow"> Stage 6</span>
+        <span class="moth-flow__title"> Borrow validation</span>
+        <span class="moth-flow__description">
+
+
+Prove legal shared and exclusive access, future use and optional transfer candidates.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./borrow-validation-and-drops/">
+        
+Places and overlap
+</a>
+<a class="moth-flow__detail" href=" ./borrow-validation-and-drops/">
+        
+Last-use facts
+</a>
+</div>
+
+<aside class="moth-flow__island">
+    <a class="moth-flow__island-link" href=" ./borrow-validation-and-drops/">
+            <span class="moth-flow__island-title"> Boracle reference solver</span>
+            <span class="moth-flow__island-description">
+
+Research and differential validation only, outside the production pipeline.</span>
+        </a>
+    </aside>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./memory-management-and-gc/">
+        <span class="moth-flow__eyebrow"> Analysis</span>
+        <span class="moth-flow__title"> Lifetime topology</span>
+        <span class="moth-flow__description">
+
+
+Build allocation families, retention facts and backend-neutral lifetime requirements.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./memory-management-and-gc/">
+        
+Allocation families
+</a>
+<a class="moth-flow__detail" href=" ./memory-management-and-gc/">
+        
+Retained edges
+</a>
+<a class="moth-flow__detail" href=" ./memory-management-and-gc/">
+        
+Intervals and frontiers
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./module-artefacts-and-reuse/">
+        <span class="moth-flow__eyebrow"> Boundary</span>
+        <span class="moth-flow__title"> Immutable module artefacts</span>
+        <span class="moth-flow__description">
+
+
+Publish successful module semantics, generated sidecars, link facts and reuse fingerprints.</span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./linking-entries-and-reachability/">
+        <span class="moth-flow__eyebrow"> Link planning</span>
+        <span class="moth-flow__title"> Entries and reachable unions</span>
+        <span class="moth-flow__description">
+
+
+Select active roots, instantiate project lifecycles and validate the complete linked topology.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./linking-entries-and-reachability/">
+        
+Entry roots
+</a>
+<a class="moth-flow__detail" href=" ./linking-entries-and-reachability/">
+        
+Reachability
+</a>
+<a class="moth-flow__detail" href=" ./memory-management-and-gc/">
+        
+Complete lifetime topology
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./target-planning-and-validation/">
+        <span class="moth-flow__eyebrow"> Physical planning</span>
+        <span class="moth-flow__title"> Target and memory planning</span>
+        <span class="moth-flow__description">
+
+
+Partition functions, validate target contracts and produce one validated memory plan per physical variant.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Internal flow</div>
+        
+<div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./target-planning-and-validation/">
+        
+Target affinity
+</a>
+<a class="moth-flow__detail" href=" ./target-planning-and-validation/">
+        
+Target validation
+</a>
+<a class="moth-flow__detail" href=" ./memory-management-and-gc/">
+        
+ValidatedMemoryPlan
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./backend-lowering/">
+        <span class="moth-flow__eyebrow"> Backends</span>
+        <span class="moth-flow__title"> Backend lowering</span>
+        <span class="moth-flow__description">
+
+
+Lower each selected physical variant without reopening source semantics.</span>
+    </a>
+
+
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Output paths</div>
+        
+<div class="moth-flow__fanout">
+    <a class="moth-flow__detail" href=" ./backend-lowering/">
+        
+JavaScript
+</a>
+<a class="moth-flow__detail" href=" ./backend-lowering/">
+        
+WebAssembly
+</a>
+<a class="moth-flow__detail" href=" ./html-assembly-and-output/">
+        
+HTML runtime glue
+</a>
+</div>
+</div>
+</div>
+</section>
+
+    <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./html-assembly-and-output/">
+        <span class="moth-flow__eyebrow"> Output</span>
+        <span class="moth-flow__title"> HTML assembly and output ownership</span>
+        <span class="moth-flow__description">
+
+
+Assemble documents and runtime assets, validate output paths, write manifests and clean stale artefacts.</span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Each box links to the walkthrough page that expands that stage. Side branches show important internal work without lengthening the main pipeline.
+</figcaption>
+</figure></p><p><em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li><a href="./what-a-compiler-does">01. What a compiler does</a></li><li><a href="./moth-design-choices">02. Why Moth makes different choices</a></li><li><a href="./starting-a-build">03. Starting a build</a></li><li><a href="./project-graphs-and-modules">04. Project graphs and modules</a></li><li><a href="./tokenization">05. Tokenization</a></li><li><a href="./declarations-dependencies-and-ordering">06. Declarations, dependencies and ordering</a></li><li><a href="./ast-semantics-and-types">07. AST semantics and types</a></li><li><a href="./compile-time-semantics">08. Compile-time semantics</a></li><li><a href="./templates-and-tir">09. Templates and TIR</a></li><li><a href="./diagnostics">10. Diagnostics</a></li><li><a href="./hir">11. HIR</a></li><li><a href="./memory-management-and-gc">12. Memory topology and lowering</a></li><li><a href="./borrow-validation-and-drops">13. Borrow validation and drops</a></li><li><a href="./module-artefacts-and-reuse">14. Module artefacts and reuse</a></li><li><a href="./linking-entries-and-reachability">15. Linking, entries and reachability</a></li><li><a href="./target-planning-and-validation">16. Target planning and validation</a></li><li><a href="./backend-lowering">17. Backend lowering</a></li><li><a href="./html-assembly-and-output">18. HTML assembly and output</a></li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued or active implementation:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/developer-docs/language/overview.mtf</code> for language surface</li><li><code>docs/src/developer-docs/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/@page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

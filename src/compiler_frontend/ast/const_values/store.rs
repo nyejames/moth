@@ -138,8 +138,9 @@ pub(crate) struct ConstValueMetadata {
 pub(crate) struct ConstValueField {
     pub(crate) name: InternedPath,
     pub(crate) value: ConstValueId,
-    /// Field initializer location for later diagnostic projection. Public folded
-    /// values remain location-free, so this is unread until Phase 3 field diagnostics.
+    /// Field initializer location for diagnostic projection after folding. Public folded
+    /// values remain location-free. Store tests read this; production diagnostics still
+    /// project from the value-node location.
     #[allow(dead_code)]
     pub(crate) location: SourceLocation,
 }
@@ -336,6 +337,47 @@ impl ConstValueStore {
         Ok(store)
     }
 
+    /// Bind a body-local const record by its qualified declaration path.
+    ///
+    /// WHAT: folds the record into the shared value graph without creating a module-constant
+    /// row. HIR looks the value up by path; public projection never sees it.
+    pub(crate) fn insert_body_local_binding(
+        &mut self,
+        declaration: &Declaration,
+        type_environment: &TypeEnvironment,
+        template_builder: &mut impl FnMut(
+            Option<&InternedPath>,
+            &Template,
+        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
+    ) -> Result<(), ConstValueStoreError> {
+        if Self::waits_for_const_record_target(&declaration.value, self) {
+            return Err(CompilerError::compiler_error(format!(
+                "body-local const record {:?} reached ConstValueStore before its target folded",
+                declaration.id
+            ))
+            .into());
+        }
+
+        let value = self.insert_expression(
+            &declaration.value,
+            Some(&declaration.id),
+            type_environment,
+            template_builder,
+        )?;
+        if self
+            .values_by_path
+            .insert(declaration.id.clone(), value)
+            .is_some()
+        {
+            return Err(CompilerError::compiler_error(
+                "ConstValueStore received duplicate body-local const-record paths.",
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
     fn waits_for_const_record_target(expression: &Expression, store: &Self) -> bool {
         match &expression.kind {
             ExpressionKind::Reference(path) => {
@@ -412,14 +454,14 @@ impl ConstValueStore {
                     path
                 )))
             })?;
-            let cloned = self.values.get(target.index()).cloned().ok_or_else(|| {
-                ConstValueStoreError::from(CompilerError::compiler_error(
+            // Aliases share the target root. Distinct `ConstValueId`s would clone the field
+            // vector without alias-local metadata; path identity lives on `values_by_path`.
+            if self.values.get(target.index()).is_none() {
+                return Err(ConstValueStoreError::from(CompilerError::compiler_error(
                     "ConstValueStore alias target was not allocated in the value graph.",
-                ))
-            })?;
-            let id = ConstValueId(self.values.len() as u32);
-            self.values.push(cloned);
-            return Ok(id);
+                )));
+            }
+            return Ok(target);
         }
 
         let (payload, value_kind, hir_visible, provenance) = match &expression.kind {
@@ -644,6 +686,13 @@ impl ConstValueStore {
 
     pub(crate) fn value_for_path(&self, path: &InternedPath) -> Option<ConstValueId> {
         self.values_by_path.get(path).copied()
+    }
+
+    /// Every path binding in the store, including body-local const records.
+    pub(crate) fn path_value_bindings(
+        &self,
+    ) -> impl Iterator<Item = (&InternedPath, ConstValueId)> {
+        self.values_by_path.iter().map(|(path, id)| (path, *id))
     }
 
     /// Iterate module-constant rows as complete borrowed views.

@@ -11,7 +11,7 @@
 </em></p>
 
 <p>⚠️ This project is in early Alpha ⚠️</p>
-<p>⚠️ Better diagnostics, backend stability and more optimisation will come in time ⚠️</p> 
+<p>⚠️ The language is still stabilising and working towards the full Wasm backend implementation ⚠️</p> 
 
 <p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. </p>
 
@@ -152,19 +152,7 @@ See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about th
 <br>
 <li>
     <ul>
-        <a href="./docs/compiler-design-overview.md">Compiler design</a>
-    </ul>
-</li>
-<br>
-<li>
-    <ul>
-        <a href="./docs/build-system-design.md">Build-system design</a>
-    </ul>
-</li>
-<br>
-<li>
-    <ul>
-        <a href="https://nyejames.github.io/moth/developer-docs/memory-management/">Memory management</a>
+        <a href="https://nyejames.github.io/moth/developer-docs/memory-management/">Memory management design docs</a>
     </ul>
 </li>
 <br>
