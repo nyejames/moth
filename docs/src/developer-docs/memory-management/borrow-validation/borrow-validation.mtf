@@ -55,7 +55,24 @@ Every analysed place is normalised to a semantic place with explicit projections
 
 Value origins and preliminary provenance identify where a value came from and which place or result may be observed. Alias bindings carry those facts rather than creating independent copies. Root tracking is analysis metadata, not source-visible reference identity.
 
-Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
+- **uninitialized:** local has no valid value.
+- **slot:** local may own independent storage.
+- **alias:** local observes roots owned elsewhere.
+- **slot + alias:** conservative control-flow result where either shape may arrive.
+
+These are analysis lattice states. They are not Moth source types and do not directly prescribe one backend runtime representation.
+
+## Access roots and aliases
+
+Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.
+
+Production Stage 6 still checks conflicts against overlapping storage roots; the feature-gated
+Boracle reference solver instead evaluates typed `OriginRelations` provenance.
+
+Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
+that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
+exclusive capability may be elided remains an explicit experimental question; the reference
+baseline keeps that capability conservative until canonical semantics adopt the stronger rule.
 
 - A shared alias blocks overlapping mutation only until its last potential use on the relevant path.
 - An unused shared alias doesn't block later mutation.
@@ -76,8 +93,8 @@ Shared and exclusive aliases use non-lexical, control-flow-sensitive activity.
 
 These points are locked accepted design and are independent of the solver used to derive them.
 
-1. Last-use analysis produces path-sensitive future-use and last-use classifications for the stable downstream handoff.
-2. Alias activity is path-sensitive and non-lexical.
+1. Last-use analysis produces path-sensitive future-use and last-use classifications for the stable downstream handoff and is central to memory precision.
+2. Alias activity is path-sensitive and non-lexical for shared aliases and exclusive aliases with reachable holder uses; the reference baseline remains conservative for an issued but never-used exclusive capability while elision is experimental.
 3. Branches are analysed independently.
 4. Loops use fixed-point future-use reasoning.
 5. A transfer is legal only when every relevant path proves that the transferred value has no later source use.

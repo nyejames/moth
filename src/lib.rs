@@ -43,6 +43,10 @@ pub const ENABLED_FEATURES: &[&str] = &[
     "show_codegen",
     #[cfg(feature = "show_borrow_checker")]
     "show_borrow_checker",
+    #[cfg(feature = "boracle")]
+    "boracle",
+    #[cfg(feature = "boracle_campaign")]
+    "boracle_campaign",
 ];
 
 mod compiler_tests {
@@ -72,6 +76,8 @@ mod backends {
 }
 
 pub mod projects {
+    #[cfg(feature = "boracle")]
+    pub(crate) mod boracle;
     pub mod check;
     pub mod cli;
     pub(crate) mod command_status;

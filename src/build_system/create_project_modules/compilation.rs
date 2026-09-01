@@ -5,6 +5,10 @@
 use crate::{timing_scope, timing_scope_attributed};
 
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::module_compilation::BoracleModuleInput;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, GeneratedFunctionDelta, KnownGeneratedFunctions,
     ModuleCompilationContext, ModuleCompilationOutcome, ModuleSemanticResult,
@@ -183,8 +187,77 @@ pub(crate) fn compile_single_file_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    let mut resource_inputs = ResourceInputRegistry::new();
+    match compile_single_file_frontend_with_target(
+        config,
+        build_profile,
+        style_directives,
+        builder_surface,
+        extension,
+        string_table,
+        SingleFileFrontendTarget::Normal,
+    )? {
+        SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
+        #[cfg(feature = "boracle")]
+        SingleFileFrontendResult::Boracle(_) => Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "normal single-file compilation unexpectedly returned a Boracle payload",
+            ),
+            string_table,
+        )),
+    }
+}
 
+#[cfg(feature = "boracle")]
+pub(crate) fn compile_single_file_boracle_frontend(
+    config: &Config,
+    build_profile: FrontendBuildProfile,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    extension: &OsStr,
+    string_table: &mut StringTable,
+) -> Result<BoracleModuleInput, CompilerMessages> {
+    match compile_single_file_frontend_with_target(
+        config,
+        build_profile,
+        style_directives,
+        builder_surface,
+        extension,
+        string_table,
+        SingleFileFrontendTarget::Boracle,
+    )? {
+        SingleFileFrontendResult::Boracle(input) => Ok(*input),
+        SingleFileFrontendResult::Project(_) => Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "Boracle source compilation unexpectedly returned a complete project payload",
+            ),
+            string_table,
+        )),
+    }
+}
+
+enum SingleFileFrontendResult {
+    Project(Box<ProjectFrontendCompilation>),
+    #[cfg(feature = "boracle")]
+    Boracle(Box<BoracleModuleInput>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SingleFileFrontendTarget {
+    Normal,
+    #[cfg(feature = "boracle")]
+    Boracle,
+}
+
+fn compile_single_file_frontend_with_target(
+    config: &Config,
+    build_profile: FrontendBuildProfile,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    extension: &OsStr,
+    string_table: &mut StringTable,
+    target: SingleFileFrontendTarget,
+) -> Result<SingleFileFrontendResult, CompilerMessages> {
+    let mut resource_inputs = ResourceInputRegistry::new();
     // 1. Verify standard Moth file extension.
     //
     // A non-UTF-8 extension is an unrepresentable filesystem input. Reject it before
@@ -455,23 +528,47 @@ pub(crate) fn compile_single_file_frontend(
         provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &builder_surface.builder_runtime_packages,
     };
+    let semantic = prepared.semantic;
 
     timing_scope_attributed!(
         timing_guard_frontend_module_semantic_total,
         crate::timing::TimingMetric::FrontendModuleSemanticTotal,
         timing_module_context,
     );
+    #[cfg(feature = "boracle")]
+    if target == SingleFileFrontendTarget::Boracle {
+        #[cfg(feature = "timers")]
+        let boracle_result = compile_module_for_boracle(
+            &compile_context,
+            semantic,
+            generated_store.known_generated(),
+            timing_module_context,
+        );
+        #[cfg(not(feature = "timers"))]
+        let boracle_result = compile_module_for_boracle(
+            &compile_context,
+            semantic,
+            generated_store.known_generated(),
+        );
+        #[cfg(feature = "timers")]
+        timing_guard_frontend_module_semantic_total.finish();
+        #[cfg(feature = "timers")]
+        timing_guard_boundary_compile.finish();
+        return boracle_result.map(|input| SingleFileFrontendResult::Boracle(Box::new(input)));
+    }
+    #[cfg(not(feature = "boracle"))]
+    let _ = target;
     #[cfg(feature = "timers")]
     let semantic_result = compile_module(
         &compile_context,
-        prepared.semantic,
+        semantic,
         generated_store.known_generated(),
         timing_module_context,
     );
     #[cfg(not(feature = "timers"))]
     let semantic_result = compile_module(
         &compile_context,
-        prepared.semantic,
+        semantic,
         generated_store.known_generated(),
     );
     #[cfg(feature = "timers")]
@@ -518,6 +615,7 @@ pub(crate) fn compile_single_file_frontend(
                 CompletedSourcePackageRegistry::new(),
                 resource_inputs,
             )
+            .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table));
         }
         Err(error) => {
@@ -581,6 +679,7 @@ pub(crate) fn compile_single_file_frontend(
         CompletedSourcePackageRegistry::new(),
         resource_inputs,
     )
+    .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 

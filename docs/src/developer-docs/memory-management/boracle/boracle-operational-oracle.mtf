@@ -1,0 +1,1057 @@
+# Boracle operational oracle
+
+Boracle's operational oracle is a bounded executor for normalized `BorrowProblem` input. This document is its permanent design authority. It gives one explicit executable meaning to every normalized event the oracle executes, states the dynamic state the oracle owns and fixes the exact rules by which an execution reports conflicts, refusals and truncation.
+
+The reference solver this oracle deliberately differs from is specified in `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`.
+
+## Purpose and locked constraints
+
+The oracle is a second, deliberately different executable semantics for a normalized `BorrowProblem`. It executes concrete events with concrete dynamic value generations and concrete control flow. It exists to find likely soundness defects, precision candidates, malformed normalized inputs and minimal counterexamples.
+
+It is not the production checker, not a second source compiler and not a lifetime, retained-edge, allocator or drop model.
+
+The locked constraints are:
+
+- It consumes `BorrowProblem` only. It never parses source or walks arbitrary HIR.
+- It never calls static origin-flow, loan-liveness or static conflict-decision helpers to decide runtime legality. The off-limits static surfaces are listed below.
+- Bounded execution is evidence, never proof for unbounded loops.
+- A truncated state space yields `RuntimeConflict` if an enumerated path finds a definite conflict; otherwise it is `Inconclusive` and is never reported as safe.
+
+### Off-limits static surfaces
+
+Every definition in `boracle/origins.rs` and `boracle/loans.rs`, public or private, is off limits for deciding runtime legality. That includes `OriginSolver::solve` and the private flow engine, every `OriginSolution` accessor and classifier, `LoanSolver::solve` and `LoanSolver::solve_with_liveness`, every `LoanSolution` accessor, the private `EventGraph` liveness and reachability helpers, the loan derivation helpers and the place and origin overlap helpers. `OriginRelations::query_overlap` is off limits for the same reason, because it is the static origin-overlap owner. These names are illustrative. The boundary is the modules, not the list.
+
+`debug_dump` presentation helpers are not legality logic and stay reusable.
+
+The boundary binds the oracle, not everything that uses it. A layer that compares the two results is not the oracle and legitimately reads both sides, so it lives outside the oracle module rather than inside it. `boracle/differential.rs` compares the reference rule set against the experiments, and `boracle/reducer.rs` shrinks a disagreement while preserving its classification. Both read both sides and both sit at the `boracle` level.
+
+The source audit enforces this direction rather than leaving it to review, and it enforces the module boundary rather than a sample of names. The `oracle-static-solver-independence` rule fails when a production file under `boracle/oracle/` either names a tabled static-solver item or reaches one of the static-solver modules through a module path. The table covers the importable items of `origins.rs`, `relations.rs`, `loans.rs`, `report.rs`, `service.rs` and the shared `last_use` vocabulary, the two differential comparators, and the loans-private `EventGraph`, which is listed so that widening its visibility surfaces as a boundary violation rather than as an ordinary tweak. The path rule covers the `origins`, `relations`, `loans`, `last_use`, `report` and `service` modules in single, braced and fully qualified import forms, so an item missing from the table is still caught when it arrives through its module. The rule carries no exemption for any production file, which is why the reducer moved out instead of being carved out. Test sources under `oracle/tests/` stay exempt because a test may legitimately drive both sides, and the comparison layer is exempt by location rather than by carve-out, because it sits at the `boracle` level outside the oracle directory.
+
+### Normalized input versus solver output
+
+The problem's own `Loan` rows are normalized input. The oracle may read them at `LoanIssue` and `LoanKill` events. The static solver's `LoanFact` rows are solver output and are off limits. The oracle may also read static `ValueOriginId` rows as normalized input data, but it derives runtime aliasing from places and dynamic state, never from static origin sets.
+
+The oracle reads an origin row only where an event's meaning depends on it. There are three such places: the projection element of an `EventKind::Projection`, the provenance of a `CallEffect` result, and the `OriginKind::Parameter` test that, together with the destination binding's `mutable` flag, recognises a mutable parameter's entry write. The reference decides that same case from the same two fields (`origins.rs:1430-1442`). Every other origin row is inert static data the oracle never reads, `OriginKind::Join` among them. Runtime aliasing comes from places and dynamic state.
+
+One structural predicate is shared deliberately. `Place::overlap` in `problem/places.rs` answers whether two interned place paths can denote the same storage path, by comparing roots and then projection prefixes. It reads no loan, no liveness, no access kind and no capability, so it decides no legality question. The oracle calls it to find the holders a slot replacement retires, and the reference reaches the same predicate through its own `holder_kills` wrapper. Both sides therefore inherit any defect in it, and the differential cannot catch such a defect. That is accepted rather than overlooked: place structure is a fact of the normalized input both sides read, and a second syntactic copy inside the oracle would add no independence while allowing the two copies to drift apart. The independence rule is about legality reasoning, which the oracle decides from dynamic node identity and access kinds.
+
+## Dynamic state model
+
+The oracle owns one dynamic generation identity space and three state types:
+
+[codeblock, $code("rust"):
+    struct DynamicOriginId(u32);
+
+    enum RuntimePlaceState {
+        Unavailable,
+        Slot { current: DynamicOriginId },
+        Alias {
+            target: DynamicOriginId,
+            path: Box<[ProjectionElem]>,
+            access: AccessKind,
+        },
+    }
+
+    struct RuntimeAggregate {
+        children: BTreeMap<ProjectionElem, DynamicOriginId>,
+    }
+
+    struct RuntimeCapability {
+        kind: AccessKind,
+        target: DynamicOriginId,
+        path: Box<[ProjectionElem]>,
+        holders: BTreeSet<PlaceId>,
+    }
+]
+
+`DynamicOriginId` is an execution-local dynamic value generation identity. It is issued in strictly increasing order from zero for every generation an execution creates, including one for each distinct reachable source node copied and one for each missing decidable child materialised during descent. It is not a `ValueOriginId` and is never derived from one.
+
+`RuntimePlaceState` is the per-`PlaceId` state:
+
+- `Unavailable`: never initialized on this execution, or retired by scope exit.
+- `Slot { current }`: the place owns storage currently holding that generation.
+- `Alias { target, path, access }`: the place refers to a node reached from `target` by `path`.
+
+Every place starts `Unavailable`.
+
+`RuntimeAggregate` records the child edges of one aggregate node: an ordered map from `ProjectionElem` to the child `DynamicOriginId`.
+
+`RuntimeCapability` is a live capability: its `AccessKind`, its target node, its projection path and the `BTreeSet<PlaceId>` of holder places.
+
+Two deliberate refinements relative to the plan's conceptual sketch:
+
+- The sketch shows `Alias { target, access }` without a path. This contract adds `path` because aliases in this IR are place-to-place and a place carries a projection path.
+- The sketch carries a `usable` flag on the capability. This contract replaces it with an exact interval on a completed execution. The conflict decision section gives the reason.
+
+## Concrete states instead of static modes
+
+The static analysis has a three-value binding mode lattice of slot, alias and mixed. The oracle does not reuse it and does not reconstruct it.
+
+On a concrete execution a place is exactly one of `Unavailable`, `Slot` or `Alias` at every event. `Mixed` is purely a static join artefact and is never observed by an execution. The oracle removes the need for a mixed mode by choosing one concrete predecessor instead of merging.
+
+There is no join step, so nothing has to be chosen at a join. A block's entry state is exactly the state its executed predecessor produced. An execution never selects between predecessor states and never widens them. Enumeration replaces the choice: distinct predecessors are distinct executions, each carrying its own independent runtime state.
+
+Write semantics follow from the concrete state:
+
+- A definition write to a `Slot` place replaces the slot generation with the one its event defines, and retires the capabilities held by places that structurally overlap it. A direct alias, a projection and `RebindValue::AliasFromPlace` adopt a node they resolved from their source. Every other value-producing writer allocates a new `DynamicOriginId`, including a call `AliasParams` result, which takes its own fresh generation and carries its relationship to the arguments as provenance capabilities instead. The reference agrees: its result arm replaces the generation with `one_origin(result.origin)` rather than the argument origins.
+- A definition write to an `Alias` place is a write through the alias, whether its access is `Exclusive` or `Shared`. It mutates the aliased storage, creates no new generation and retires nothing.
+- A non-defining write is a mutation. It performs the access check and changes no generation.
+
+Generations identify storage for aliasing purposes, not values. Mutation through an exclusive alias therefore keeps the generation identity, which is what makes the owner and the alias agree that they touch the same storage.
+
+## Provenance events set state, access events check legality
+
+For every destination except a call result the builder emits the definition write before the
+provenance event that gives that destination its meaning. The definition access checks the target
+and the provenance event applies the destination-role transition below. No provenance writer may
+install a role without consulting this owner.
+
+A call result is the one reversed case. The builder emits the granular argument events, then the
+`CallEffect`, and only then the confirming definition write for the result place. A definition write
+that targets the result place of a `CallEffect` already executed at this call confirms the generation
+that effect defined and never replaces it. Without that rule the trailing write would allocate a
+second generation and discard the one every provenance capability was issued against.
+
+That confirmation is bound to the generation the effect installed. Any other event that retires or
+replaces the result place first is malformed and the oracle rejects it, so a pending entry can never
+outlive the generation it was registered against.
+
+The oracle does not fork executions for provenance alternatives, and it no longer needs to. A result
+place takes the value-producing row whatever its provenance names, so its role never depends on the
+arguments. `AliasParams` therefore issues one shared provenance capability per index, matching the
+reference loop at `loans.rs:487-515`, and no index count is unsupported. An empty index list is
+malformed input rejected during problem validation.
+
+### Destination role transitions
+
+The installed concrete role is a function of the destination's current concrete state and the
+event kind:
+
+[table:
+    [th:
+        [: **Current state**]
+        [: **Event**]
+        [: **Result**]
+    ]
+
+    [td:
+        [: `Unavailable`]
+        [: direct alias declaration: `Alias`, `AliasFromPlace`, `ExclusiveAlias` or
+        `ExclusiveAliasFromPlace`, or the entry `Fresh` that seeds a mutable parameter]
+        [: direct aliases become `Alias` with the event's access, while the entry `Fresh`
+        installs an exclusive alias, because a `Fresh` event carries no access kind]
+    ]
+
+    [td:
+        [: `Unavailable`]
+        [: any value-producing event: `Fresh`, `Copy`, `Aggregate`, `Projection`,
+        `RebindValue::Fresh`, `RebindValue::AliasFromPlace`, call `Fresh` or call `AliasParams`]
+        [: the event-defined `Slot`]
+    ]
+
+    [td:
+        [: `Slot`]
+        [: any definition]
+        [: replace the slot's represented generation, remain `Slot`, and retire the capabilities
+        held by every place that structurally overlaps the destination, covered projections
+        included]
+    ]
+
+    [td:
+        [: `Alias`, shared and exclusive alike]
+        [: any definition]
+        [: write through to the referent, preserve the `Alias`, create no generation and retire
+        nothing]
+    ]
+]
+
+Every row that installs or replaces a generation retires the capabilities held by places that structurally overlap the destination, covered projections included. That applies to both `Unavailable` rows as well as the `Slot` row, because a projection of a place can hold a capability before the place itself holds any state. Only the alias write-through row retires nothing, and that row is the reason retirement is keyed on write-through rather than on alias production. Matching only the destination's exact place would leave a capability held by a covered projection live after its storage had been replaced, and a later use of that stale capability reports a conflict that cannot happen.
+
+The table has no conflict row, because the role transition itself never diagnoses. A defining
+access cannot conflict with a loan in the reference, since `access_conflict_overlap` returns no
+overlap whenever `access.definition` holds (`loans.rs:266-269`), so a definition landing on an
+aliased destination is a write-through rather than a diagnosis.
+
+That statement is about the transition, not about the paired access. The reference computes an
+access row's `definition` flag as `use_row.definition && !origins.is_write_through_use(use_id)`
+(`loans.rs:227-234`), so the paired access of a write-through is deliberately reclassified as an
+ordinary mutation and stays conflict-checked. The oracle mirrors that rule, which is why a
+write-through through a mutable parameter can still report its defining write as the witness. Role
+selection and access legality are separate decisions, and only the first has no conflict outcome.
+
+The alias row draws no distinction between a shared and an exclusive alias, because the reference
+draws none. `is_alias_only` tests a single `BindingMode::Alias` (`origins.rs:1414-1416`) and the
+alias arms return a write-through for any alias-backed destination (`origins.rs:1064-1069` and
+`1106-1111`).
+
+Retirement is keyed on write-through rather than on alias production. `holder_kills` returns false
+for a write-through event and otherwise ends any holder its destination overlaps
+(`loans.rs:790-805`), and its `Access` arm ends a holder for a defining write only when that write
+is not a write-through. So a slot replacement ends the destination's prior holders, a write-through
+leaves them live to be exercised by a later covered use, and a defining write with no paired
+provenance event still ends a covered holder.
+
+Capability issuance follows the selected row for the same reason. A write-through ignores the
+incoming source, so issuing a capability against that source would name a target the destination is
+not aliased to, and a later read of the destination would extend it into a conflict that cannot
+happen. The reference issues nothing there either, because `derive_alias_loans` accepts only
+initial aliases and `derive_provenance_loans` accepts only slot rebinds. So an installed alias
+issues the event's capability and a write-through issues none.
+
+A slot rebind is the one alias case that still carries a relationship. The reference emits a shared
+provenance capability when an alias-valued event replaces a slot, even where the syntax is exclusive,
+because the destination stays slot-backed and only its represented value has changed. The oracle
+emits the same shared capability, and takes its target from the assigned source rather than the
+destination's current union, because a CFG join can leave the destination an alias-backed
+alternative whose origins have nothing to do with this assignment.
+
+Projection and `AliasParams` destinations take the value-producing row like any other, matching
+`replace_generation(.., BindingMode::Slot, ..)` in the reference's projection arm
+(`origins.rs:1206-1213`) and result arm (`origins.rs:1367-1370`).
+
+Taking that row costs nothing now, because the relationship those destinations used to carry in
+their role is carried by a capability instead. Every arm of `derive_provenance_loans` that the
+oracle executes has an executing counterpart: a slot rebind, a projection, one capability per
+aggregate field and one per `AliasParams` index. All are shared, whatever the syntax says, and all
+are additive, which is why a result with several named arguments needs no alternatives and no
+inconclusive outcome. The reference also derives provenance loans for a
+`CallResultProvenance::Alias` and for an `Unknown` result (`loans.rs:516-553`). The oracle reaches
+neither, because it refuses both shapes first and reports a typed reason, per the unsupported
+shapes section. Those two arms are the exact provenance gap between the two sides.
+
+An aggregate field is held by the projected child place, falling back to the destination when the
+problem declares no such child, matching the reference's `projection_place` lookup and its
+`unwrap_or`. Holding the child rather than the root is what keeps a later write to one field from
+retiring the capabilities of its siblings.
+
+These capabilities fire on a write-through as well. Only the alias arms are gated on the selected
+role, because only they name the incoming source. Aggregating or calling into an established alias
+writes through to the referent, and the referent's fields genuinely do alias the field sources, so
+suppressing the capability there would report safety over a real conflict.
+
+### Mutable parameter entry
+
+At function entry the builder emits one `Fresh` event with an `OriginKind::Parameter` origin for
+each parameter. When that origin kind targets a mutable binding, the oracle seeds an explicit
+`Alias` with `Exclusive` access over a fresh external `DynamicOriginId`. This represents the
+caller-provided storage inside the callee. An immutable parameter keeps the ordinary fresh
+`Slot` representation. The rule mirrors `is_mutable_parameter` in `origins.rs:1430-1442`, which
+checks the parameter origin kind and the destination binding's `mutable` flag.
+
+An uninitialised destination has two rules:
+
+- A definition access (`Use.definition == true`) to an `Unavailable` place is initialization. It is legal, and it installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision. Were the access to install a slot first, every initial alias and projection would reach its writer already slot-backed and the `Unavailable` rows could never fire.
+- Any non-defining access to an `Unavailable` place is malformed normalized input and returns `CompilerError`.
+
+Every normalized event holds one or more roles. An event that both changes state and issues a
+capability appears under both roles:
+
+[table:
+    [th:
+        [: **Role**]
+        [: **Events**]
+    ]
+
+    [td:
+        [: state mutation]
+        [: `Fresh`, `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Copy`, `Projection`, `Rebind`, `Aggregate`, `ScopeExit`, `CallEffect`, `Access` in its definition arm]
+    ]
+
+    [td:
+        [: observation]
+        [: a shared `Access`, meaning a `Read` or `LoanObservation` use]
+    ]
+
+    [td:
+        [: capability issue]
+        [: `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Projection`, `Aggregate`, `CallArgument`, `CallEffect`, `LoanIssue`]
+    ]
+
+    [td:
+        [: capability use]
+        [: `Access`, `CallArgument`, `CallEffect`]
+    ]
+
+    [td:
+        [: capability kill]
+        [: `LoanKill`, `ScopeExit`]
+    ]
+
+    [td:
+        [: control-flow choice]
+        [: `Terminator`]
+    ]
+
+    [td:
+        [: metadata-only event]
+        [: `ReactiveObserve`]
+    ]
+]
+
+Per-event runtime meaning, complete for all 17 `EventKind` variants:
+
+[table:
+    [th:
+        [: **Event**]
+        [: **Runtime meaning**]
+    ]
+
+    [td:
+        [: `Fresh { destination, origin }`]
+        [: the event defines a fresh generation. `destination` follows the transition table and
+        normally becomes `Slot { current: fresh }`. A mutable parameter entry uses the explicit
+        external `Alias` representation described above.]
+    ]
+
+    [td:
+        [: `Alias { source, destination, origins }`]
+        [: a direct alias declaration. `destination` follows the transition table, using
+        `resolve(source)` and the event's `Shared` access. It issues a shared capability held by
+        `destination`. The static `origins` set is ignored. Replacing a slot-backed destination
+        needs the source's resolved node alone, so a source that keeps a residual undecidable path
+        returns typed `UndecidableOverlap`. Installing onto an `Unavailable` destination keeps the
+        residual path in the `Alias` state and needs no refusal.]
+    ]
+
+    [td:
+        [: `AliasFromPlace { source, destination }`]
+        [: identical to `Alias` without a static origin set. Its destination role follows the
+        transition table.]
+    ]
+
+    [td:
+        [: `ExclusiveAlias { source, destination, origins }`]
+        [: a direct alias declaration using `Exclusive` access. Its destination role follows the
+        transition table. The static `origins` set is ignored.]
+    ]
+
+    [td:
+        [: `ExclusiveAliasFromPlace { source, destination }`]
+        [: identical to `ExclusiveAlias` without a static origin set. Its destination role follows
+        the transition table.]
+    ]
+
+    [td:
+        [: `Copy { source, destination, origin }`]
+        [: copy graph reconstruction, see the Copy section. `destination` follows the transition
+        table with the copied root as the event-defined slot generation.]
+    ]
+
+    [td:
+        [: `Projection { source, destination, origin }`]
+        [: `destination` follows the transition table as a value-producing event, so an
+        `Unavailable` destination installs a `Slot` and an established slot is replaced. It issues a
+        shared capability held by `destination`. The projection element comes from the `origin` row.
+        A descent that leaves a residual undecidable path returns typed `UndecidableOverlap` before
+        the transition and the capability, because a slot cannot carry that path.]
+    ]
+
+    [td:
+        [: `Rebind { destination, value }`]
+        [: `RebindValue::Fresh` follows the transition table with a fresh slot generation. On a
+        destination that is not alias-backed, `RebindValue::AliasFromPlace(place)` is
+        value-producing too, taking the slot generation of `resolve(place)` and returning typed
+        `UndecidableOverlap` when that resolution keeps a residual undecidable path. On an
+        alias-backed destination it instead checks the source's availability, writes through to
+        the existing referent and returns before resolving the source place, so it adopts no
+        resolved node and refuses no residual path. `RebindValue::Alias(origins)` is unsupported
+        and returns typed `Inconclusive`, see the unsupported-shapes section.]
+    ]
+
+    [td:
+        [: `Aggregate { destination, origin, fields }`]
+        [: see the Aggregates section]
+    ]
+
+    [td:
+        [: `ScopeExit { bindings }`]
+        [: see the scope exit section]
+    ]
+
+    [td:
+        [: `ReactiveObserve { place }`]
+        [: metadata only. Recorded in the trace. No capability, no access check and no conflict. The place must be initialized.]
+    ]
+
+    [td:
+        [: `CallArgument { call, index, argument }`]
+        [: a call argument access and capability, see the Calls section]
+    ]
+
+    [td:
+        [: `Terminator { kind }`]
+        [: control flow only, no state effect]
+    ]
+
+    [td:
+        [: `CallEffect(effect)`]
+        [: completes the call's argument capabilities, then binds the optional result. The
+        completion advances every still-open argument interval to this event and records each
+        closing `call_effect_index`, even when `effect.result` is `None`. See the Calls section]
+    ]
+
+    [td:
+        [: `Access { use_id }`]
+        [: the legality check, see the evaluation-order section. A defining write also retires the capabilities held by places that structurally overlap its own, including covered projections, unless that write is a write-through or the confirming definition for a pending call result. The confirmation is the defining write that still finds the exact generation the `CallEffect` installed, and any intervening event that retires or replaces the result place is rejected as malformed, so no later access can claim this exemption. A confirming definition retires nothing, because it replaces no generation and its call has just issued the result's provenance capabilities, which would otherwise end at the very event that confirms them. That retirement is the one state change an access performs on places. An access also performs exercise and confirmation bookkeeping outside place state: exercising a capability advances its `last_exercised` index, and a confirming definition removes the pending-result entry it consumed. Both take part in the cycle-detection snapshot.]
+    ]
+
+    [td:
+        [: `LoanIssue { loan }`]
+        [: issues a capability from the problem's `Loan` row: `loan.kind` as the kind, target `resolve(loan.place)` and holders `loan.holders`. `loan.uses` and `loan.kills` are never used to decide the interval.]
+    ]
+
+    [td:
+        [: `LoanKill { loan, reason }`]
+        [: ends that loan's live capability interval at this event. A loan with no live capability on the executed path is malformed and returns `CompilerError`. An attempt to end a capability more than once also returns `CompilerError`.]
+    ]
+]
+
+Terminator events carry one of the nine terminator kinds:
+
+[table:
+    [th:
+        [: **Terminator**]
+        [: **Runtime meaning**]
+    ]
+
+    [td:
+        [: `Jump { target }`]
+        [: one successor]
+    ]
+
+    [td:
+        [: `Branch { targets }`]
+        [: one execution per target, ascending `BlockId` order]
+    ]
+
+    [td:
+        [: `Return`]
+        [: the execution ends normally]
+    ]
+
+    [td:
+        [: `ReturnSuccess`]
+        [: the execution ends normally]
+    ]
+
+    [td:
+        [: `ReturnError`]
+        [: the execution ends normally]
+    ]
+
+    [td:
+        [: `Break { target }`]
+        [: one successor, exactly like `Jump`]
+    ]
+
+    [td:
+        [: `Continue { target }`]
+        [: one successor, exactly like `Jump`]
+    ]
+
+    [td:
+        [: `RuntimeFailure`]
+        [: the execution ends as an explicit failure exit]
+    ]
+
+    [td:
+        [: `AssertFailure`]
+        [: the execution ends as an explicit failure exit]
+    ]
+]
+
+Recoverable success and error arms become distinct executions because they are distinct terminators or distinct branch targets. The oracle never merges them.
+
+The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `CompilerError`. The builder normally makes the destination place the source place extended by that element. The oracle does not depend on it, because `emit_projection_write` targets an unrelated destination place.
+
+The parameter entry rule above applies to the builder's explicit parameter `Fresh` events. It
+does not add a separate normalized event or capability.
+
+## Evaluation order and access resolution
+
+Event order inside a block is the block's `events` array order. Program points may be shared by several events and point ordinals are never used to order execution. Same-statement ordering therefore follows normalized event order exactly.
+
+Dynamic state is keyed by `PlaceId`, and a place is a root binding plus a projection path, so `x` and `x.f` are distinct places. Only the place an event names receives state from that event. Resolution therefore starts from the most specific place that has state:
+
+1. Form the candidates for the accessed place: the accessed place itself, then each shorter place sharing its root with a prefix of its projection path, down to the bare root place. A candidate the problem never interned has no state and is skipped.
+2. Choose the longest candidate whose state is not `Unavailable`. An alias stored at `s.f` therefore takes precedence over the slot state of `s`.
+3. If the chosen state is `Slot { current }`, start at node `current`. If it is `Alias { target, path, access }`, start at node `target` with `path`. In both cases append the projection elements the accessed place carries beyond the chosen candidate.
+4. Descend: while the current node has an aggregate child edge for the next projection element, move to that child node and consume the element. When descent needs the child of a node under a decidable projection element and no aggregate child edge is recorded, the oracle creates one fresh node, records the child edge and continues the descent. Materialisation is idempotent, so a second resolution of the same position yields the same node, two places that select one position share one node, and a repeated child alias stays observable as aliasing. A materialised node counts against the per-execution generation-creation bound like any other node. The bound counts generations the execution creates, not generations that remain reachable. An undecidable element is never materialised and escalates under the overlap rules below.
+5. The result is a `RuntimeAccessTarget { node, path }` where `path` is the unconsumed remainder.
+
+When no candidate has state the accessed place is uninitialized. A definition access is then legal as initialization and installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision, per the uninitialised-destination rules above. Any other access is malformed normalized input and returns `CompilerError`.
+
+The access kind comes from `UseKind`: `Read` and `LoanObservation` are `Shared`, `Write` is `Exclusive`. `LoanObservation` behaves exactly like a read.
+
+Dynamic node overlap is decided by the oracle's own comparison and never by a static helper. Two targets with different nodes are disjoint. With the same node, compare remaining paths element by element over the common length. The element rules are:
+
+- Equal elements continue the comparison.
+- `Field(a)` against `Field(b)` with `a != b` is disjoint.
+- `FixedIndex(a)` against `FixedIndex(b)` with `a != b` is disjoint. Concrete distinct indexes are genuinely distinguishable on a concrete execution. This is more precise than the static structural comparison, which buckets unequal projection kinds as conservative.
+- A difference in projection kind, such as `Field(_)` against `FixedIndex(_)` in either order, is undecidable. The two paths describe one position in two ways and nothing in the normalized problem reconciles them.
+- Any difference involving `DynamicIndex`, `CollectionElement` or `MapEntry` is undecidable, because the normalized problem carries no concrete index, element or key identity.
+- If one path is a prefix of the other the targets overlap.
+
+Undecidable is not a legality answer. The lazy rule applies only in the completed execution interval scan. There it records `UndecidableOverlap` when a pair has overlapping intervals and conflicting kinds, then returns `Inconclusive` only if no proven conflict is found.
+
+It does not apply to a writer that must store the resolved node. `Slot` state holds a generation and nothing else, so a residual undecidable path cannot be carried: storing the base node alone would make the destination compare EQUAL to the whole base node and manufacture a definite overlap out of an undecidable one, which is a false conflict rather than a lost precision. Every such writer therefore returns `UndecidableOverlap` immediately, before issuing capabilities or considering conflicts, carrying the resolved target as its left operand and the same node with an empty path as its right. Those writers are `Copy`, `Aggregate`, `Projection`, `RebindValue::AliasFromPlace` and a direct alias replacing a slot-backed destination.
+
+A direct alias onto an `Unavailable` destination is the exception, because `Alias` state holds a target node AND a path, so it represents the residual faithfully and needs no refusal.
+
+## Conflict decision: exact interval on a completed execution
+
+This is the most important contract decision. The plan's sketch carries a forward `usable` flag on the capability. A forward-only flag has two possible meanings and both are wrong here.
+
+Keeping a capability usable until an explicit kill makes the oracle strictly stricter than reference mode for every shared capability, so ordinary correct programs that reference mode already accepts would be reported as runtime conflicts and the high-severity soundness lane would fill with false alarms. Deciding usability from a future last use is not something a forward step can know. The replacement is therefore not a judgement call. It is the only shape that can agree with use-driven reference liveness.
+
+Placed against reference-mode liveness, the interval model is precise. It coincides with reference mode for shared capabilities that are exercised as ordinary uses and for exclusive capabilities that are exercised at least once. The never-exercised exclusive capability is one divergence, which reference mode deliberately over-approximates and which the `dead-exclusive-loan` experiment flips to use-driven. That coincidence depends on exercise being defined by place coverage. Matching only exact holder places would end intervals early and would break it. The coincidence also carries a recorded exception: the deferred shared-alias gap, where a terminal defining write exercises the shared alias capability by holder coverage while the reference omits that use and leaves the shared loan dead, because the write never receives the write-through marking. That gap is recorded in the reference gaps section of `boracle-reference-solver.mtf`.
+
+The oracle therefore executes one concrete path in a single forward pass that owns all dynamic state. The direct rule can stop that pass at a conflicting access, while the interval rule inspects the exact recorded trace only after a path completes. A truncated path has no completed suffix for the interval rule, so it is `Inconclusive` and never receives an interval conflict decision.
+
+Definitions on one completed execution, indexed by executed event position:
+
+- An access exercises capability `C` when the accessing place is one of `C.holders` or is covered
+  by one of them, unless a retired-holder or superseding-instance rule below excludes it. A place
+  is covered by a holder when both share the same root binding and the holder's projection path is
+  a prefix of the accessing place's path. An access through a descendant of a holder therefore
+  exercises that holder's capability, which is how the reference engine matches uses to loans. A
+  defining write that is not a write-through also extends the exercised set before its access is
+  recorded: every capability whose runtime target is not proven disjoint from the write's target
+  joins it, even when no holder covers the written place. The reference never conflict-checks a
+  defining access, and the interval scan skips every capability the exercised set names, so
+  without this defining-write cover the four interval conditions below would predict definition
+  conflicts and refusals the executor deliberately suppresses. The cover marks the access record
+  only and extends no interval.
+- A capability ended by `ScopeExit` is not exercised when every holder covering the access has
+  retired. If a surviving holder also covers the access, the access still exercises the capability
+  and a post-end access returns `CompilerError`.
+- A capability ended by `LoanKill` is not exercised when a later dynamic instance of the same loan has a later capability identity, the same `CapabilitySource::Loan` value, a runtime target with proven `DynamicOverlap::Overlap` against the accessed place's runtime target and a holder that covers the accessed place. Without those source, target and coverage conditions, the ended capability is exercised and the post-end access returns `CompilerError`.
+- `C`'s interval is the inclusive event-index range `issue ..= last`, where `issue` is the index of its issuing event and `last` is the index of the last access that exercises `C`. A capability never exercised has the degenerate interval `issue ..= issue`.
+- An explicit end truncates the interval: a `LoanKill` for that loan, or a `ScopeExit` retiring a holder place. If an access exercises a capability after its explicit end the problem is malformed and the oracle returns `CompilerError`.
+- A call argument capability's interval extends to the `CallEffect` event of its call unless an earlier explicit end truncates it first, see the Calls section.
+
+Two rules produce a runtime conflict.
+
+The direct rule is checked in the forward pass. An access whose kind is `Exclusive` conflicts when
+its chosen candidate state is `Alias` with `Shared` access AND the same access exercised a shared
+capability whose runtime target is not disjoint from the resolved referent. The first such
+capability is the reported witness. Overlap rather than equality is the right relation because
+holder coverage includes descendants: an access through a covered projection of the alias exercises
+the alias's capability while resolving to a longer path, so demanding an exact target match would
+drop that conflict and the interval scan would then skip the capability precisely because the
+access exercised it. The oracle reports the conflict at the conflicting access, stops the execution
+there before the write mutates state and records the prefix through that access as the replayable
+witness. This is the write through a shared alias case.
+
+The witness carries both targets because they can differ. `access_target` is the access's own
+resolved target and matches the trace row recorded at that event, while `capability_target` is the
+capability's own target and matches the capability the trace snapshots. A prefix overlap separates
+them, so each must stay independently checkable against the trace.
+
+A pending call result needs no exclusion here. While its entry is live the result place stays
+slot-backed, so the rule's `Alias` precondition cannot hold, and every event that would change that
+state first is rejected as malformed input.
+
+The candidate state alone cannot decide it. Holder retirement ends capabilities without touching
+place state, so an `Alias` state can outlive the only capability it names, and a write through a
+retired alias exercises nothing and is legal. Requiring the witness among the capabilities this
+access exercised keeps one notion of a live capability in the oracle: the exercise step already
+applies explicit ends, retired holders, kill subsumption and call-argument withholding, so its
+result is the live set and the direct rule reads it rather than recomputing it.
+
+The interval rule is checked on the trace of a completed path because an interval's end is the last exercising access and is not known until the path finishes. For an access `A` at index `i` with kind `K_A` on target `T_A`, and a capability `C` with kind `K_C`, target `T_C` and interval `s ..= e`, there is a conflict when all hold:
+
+- `A` does not exercise `C`
+- `s <= i <= e`
+- `T_A` overlaps `T_C`
+- at least one of `K_A` and `K_C` is `Exclusive`
+
+A proven overlap conflict outranks an undecidable pair. The interval scan retains the first
+`UndecidableOverlap` reason in deterministic iteration order and keeps scanning later accesses and
+capabilities. It reports that reason only when no definite conflict appears anywhere in the
+completed execution.
+
+A conflict is existential evidence: one conflicting access is enough to report it, even from a prefix. Safety is universal: `CompleteSafe` requires every enumerated execution to finish without a conflict on a completed untruncated path.
+
+The consequences are the useful part:
+
+- Two shared capabilities on one node never conflict, so many shared aliases are safe.
+- Interleaved use of a shared alias and an exclusive alias conflicts at the exclusive access, not at the alias creation.
+- Sequential non-overlapping borrows do not conflict, because the earlier interval has already ended.
+- A write through an exclusive alias never conflicts with its own exclusive capability, because the writing place exercises that capability. The interval scan still compares the write against every other live capability it did not exercise, so an overlapping shared capability spanning the write still conflicts.
+- An old alias survives a rebinding of the owner and becomes disjoint from the new generation, because the alias captured the old node.
+- A copy result is independent of its source because the copy creates a new graph.
+
+One consequence touches an unsettled accepted rule. A capability that is never exercised has a degenerate interval and therefore conflicts with nothing. The oracle is consequently use-driven about never-used exclusive capabilities, which agrees with the `dead-exclusive-loan` experiment and disagrees with conservative reference mode. This is one liveness divergence between the interval model and reference mode. The other is the deferred shared-alias gap above, where the oracle keeps a terminal defining write's shared alias capability live while reference mode leaves the loan dead. This one is an operational position, chosen because nothing observes storage through a capability that is never exercised. It settles nothing about the reference question and it does not promote the experiment. The later comparison layer must attribute disagreements of this shape to the known dead exclusive capability family and to the recorded shared-alias gap rather than reporting them as new discoveries.
+
+## Copy
+
+`copy` creates a new dynamic graph that preserves internal alias topology.
+
+An alias-backed destination skips all of that: `Copy` performs only a non-materialising
+availability check on the source, applies the alias write-through row and returns, so source
+resolution, graph reconstruction and the residual-path refusal below apply only when the
+destination is not alias-backed.
+
+When the destination is not alias-backed, resolve the source target through the evaluation-order descent. If resolution leaves any non-empty path, `Copy` returns typed `UndecidableOverlap` immediately. It does not copy the selected node or issue capabilities. The refusal carries the resolved target as its left operand and the same node with an empty path as its right operand.
+
+Only an empty-path source proceeds. Walk every node reachable from its root through aggregate child edges. Create exactly one fresh node per distinct reachable source node and record the correspondence in a map. Rebuild each child edge between corresponding nodes.
+
+Because the correspondence is a map keyed by source node, two child edges that shared one source node still share one result node. Internal sharing is preserved and the result graph is disjoint from the source graph.
+
+The destination follows the transition table with the copied root as the event-defined slot generation. This step is reached only when the destination is not alias-backed and source resolution leaves an empty path.
+
+## Aggregates
+
+`Aggregate { destination, origin, fields }` branches on the destination's row. An alias-backed
+destination writes through with no aggregate construction, and otherwise the event creates one
+fresh outer node and gives it to the transition table as the event-defined slot generation.
+
+An alias-backed destination first checks every field source is available without materialising
+state, then applies the alias write-through row, which allocates no outer generation and records
+no aggregate children. It still resolves each field source through descent and refuses a residual
+undecidable field path the same way before the event completes.
+
+On a destination that is not alias-backed, each field source is resolved through descent. If any
+resolved source retains a non-empty path, `Aggregate` returns typed `UndecidableOverlap`
+immediately. It does not create the aggregate outer node or issue a capability. The refusal
+carries the resolved source target as its left operand and the same node with an empty path as
+its right operand. Otherwise record an aggregate child edge from the outer node under
+`projection` to the resolved node.
+
+Two fields whose source places resolve to the same node therefore share one child node. If descent materialises that node, materialisation is idempotent, so resolving the same position again yields the same node. This is what makes a repeated child alias inside one aggregate observable as aliasing. Sibling children under distinct `Field` or distinct `FixedIndex` projections stay disjoint by the overlap rules of the evaluation-order section. A field whose source place is `Unavailable` is malformed and returns `CompilerError`.
+
+Two fields resolving to DIFFERENT nodes under one repeated projection are a different matter in the arm that records children. The children map keys on the projection alone, so keeping both is impossible and keeping the later one would detach the earlier child from every later observation of that position. The reference has semantics for the shape either way: its aggregate arm extends the projected place's alternatives with every repeated field's origins, so the projected slot ends up holding the union (`origins.rs:1253-1322`). The runtime graph holds one node per position and cannot represent that union, so the repeat returns typed `Inconclusive`. This applies to an identified `Field` or `FixedIndex` exactly as it does to a keyless domain. A keyless domain has no key to tell its children apart and an identified position would need the union, and neither is representable here.
+
+Aggregate construction is not an access to the child, so it performs no access check there. The arm that records children issues one shared provenance capability per field, held by the projected child place, because the child genuinely aliases the field source. An alias-backed destination that writes through issues those same capabilities after resolving its fields, even though it records no children. Accesses that reach a child through the parent resolve to the child node by the descent in the evaluation-order section.
+
+## Calls
+
+Under current reference semantics there is no reservation concept in the normalized IR. The oracle does not invent one and specifies the current interval instead.
+
+Construction validation guarantees granular `CallArgument` events whenever a call has arguments, and rejects a `CallEffect` that carries arguments without them. The `CallEffect` event therefore never performs argument accesses itself.
+
+Each granular event performs its access at its own event with `argument.access`, and issues a capability held by `argument.place` with that kind and target. Every such capability's interval reaches the `CallEffect` event of the same call, because the call holds its arguments for the call's duration, and it ends there, unless an earlier explicit end truncates it first. In that ordinary case the effect is both a floor and a ceiling: the interval reaches the effect even with no use in between, and no later access can carry it further. An explicit end that precedes the effect wins both ways: the interval keeps the truncated floor, and the effect still closes the invocation so no later access can carry it further. The reference draws the same boundary by setting `until_event` to the call end event, after which `loan_live_at_event` includes that barrier and stops.
+
+An access to the argument place after the effect is legal and does not exercise the expired capability. Without the ceiling such an access would drag the interval across an intervening write and report a conflict that cannot happen, which is a false soundness failure rather than a false safe result.
+
+Two arguments of one call with incompatible kinds on overlapping targets therefore conflict at the later of the two granular argument events, where the earlier argument's still-open interval meets the later argument's access. Extending the interval to the `CallEffect` event keeps the capability open across the call itself. That is the call argument interval under current semantics and it yields one truthful witness per call.
+
+Two rules keep the exercise records of sibling arguments and repeated invocations apart, and neither reopens an ended interval. While an invocation is still open, it withholds its own argument capabilities from its sibling argument accesses, so no sibling access consumes a capability that belongs to its sibling. Withholding is bookkeeping separation, not a legality carve-out: because the later argument does not exercise the earlier argument's withheld capability, the completed interval scan still compares that pair and reports the conflict of the preceding paragraph at the later granular argument event. Once that invocation records its `CallEffect`, its argument capabilities are closed for good, and a later invocation of the same static call is a distinct dynamic instance with capabilities of its own. An access between two invocations therefore exercises neither: the earlier instance ended at its effect and the later instance has not been issued yet. A conflict at that point must come from another capability that is genuinely live across the call, such as a loan the caller holds, which is what makes the ceiling safe rather than merely convenient.
+
+`CallEffect` completion binds the result place from `CallResult` and `CallResultProvenance`:
+
+[table:
+    [th:
+        [: **Provenance**]
+        [: **Runtime meaning**]
+    ]
+
+    [td:
+        [: `Fresh`]
+        [: the result follows the transition table with a fresh event-defined generation. An
+        `Unavailable` result therefore installs a `Slot` holding that generation, and the trailing
+        confirming definition preserves it]
+    ]
+
+    [td:
+        [: `AliasParams(indexes)`]
+        [: the result follows the transition table with its own fresh generation, exactly as the
+        `Fresh` arm does, and issues one shared provenance capability per index. Every index count is
+        supported. An empty list is malformed input rejected during validation]
+    ]
+
+    [td:
+        [: `Alias(origins)`]
+        [: unsupported: a static origin set with no source place cannot be resolved to a concrete node]
+    ]
+
+    [td:
+        [: `Unknown(reason)`]
+        [: unsupported: the result may alias anything, carrying the `CallResultUnknownReason` through]
+    ]
+]
+
+Both supported arms install a generation only when the result place is not already alias-backed. When it is, the alias write-through row applies: the call writes through to the referent and defines no generation, so there is nothing for the trailing definition to confirm. That trailing write therefore stays a plain write-through definition and remains conflict-checked under the direct rule, rather than becoming a pending confirmation.
+
+A pending confirmation is registered only for a result that installs or replaces a slot at a place with no projections. A projected result place can never be confirmed, because the builder emits call results into a local's root place and validation rejects a projected defining write, so registering one could only leave an entry that never clears.
+
+That confirmation is bound to the generation the effect installed. It is exempt from holder retirement, and it needs no exemption from the direct rule because a slot-backed place cannot satisfy that rule's `Alias` precondition. Any other event that retires or replaces the result place before the confirming write is malformed input, so a pending entry can never outlive the generation it was registered against.
+
+The oracle never forks executions for a provenance alternative. It does not need to for
+`AliasParams`, because the result's role is independent of its arguments and each index contributes
+its own capability. Branch targets are the only execution forks.
+
+## Unsupported shapes and malformed input
+
+Unsupported normalized shapes return typed `Inconclusive`. They never become implicit success:
+
+- `RebindValue::Alias(origins)`: a static origin set with no source place.
+- `CallResultProvenance::Alias(origins)`: same reason.
+- `CallResultProvenance::Unknown(reason)`: carry the `CallResultUnknownReason`.
+- An undecidable projection comparison that would change a conflict outcome, per the evaluation-order section.
+- A writer whose resolved source keeps a residual undecidable path where the destination can store only a node, reported as `UndecidableOverlap` before anything is installed. This covers `Copy`, `Aggregate`, `Projection`, `RebindValue::AliasFromPlace` and a direct alias replacing a slot-backed destination. A direct alias onto an `Unavailable` destination is not affected, because `Alias` state carries the path.
+- Every bound truncation, per the bounds section.
+- An aggregate storing two distinct nodes under one repeated projection, reported as `RepeatedProjectionChild`. The children map holds one node per position, and the reference instead unions every repeated field's origins into the projected slot, which this graph cannot represent. Two fields resolving to the SAME node stay supported, because that is one shared child rather than a collision, and it is what makes a repeated child alias observable. Modelling a position that holds several nodes belongs to the aggregate and builtin storage package.
+- A `Loan` row naming several DISTINCT holders, reported as `MultiHolderLoan`. The runtime ends a capability once, so a partly retired capability would report safe for an access its surviving holders do not cover. There is no reference semantics to mirror: the static solver accepts such a row but applies its `uses` and `kills` capability-wide rather than per holder, so per-holder retirement would be invented rather than checked. Nothing in production emits one, since HIR extraction publishes an empty explicit loan table and every derived loan fact and generated row carries exactly one holder. The count is over distinct places, because validation does not require holder uniqueness and a repeated place collapses to one holder with nothing to retire twice, so a row naming one place twice reaches a real outcome.
+
+Malformed or impossible normalized input returns `CompilerError`:
+
+- A non-defining access to an `Unavailable` place.
+- A `ReactiveObserve` whose place is uninitialized.
+- An `EventKind::Projection` whose `origin` row is not `OriginKind::Projection`.
+- An access that exercises a capability after its explicit end.
+- A `LoanKill` for a loan with no live capability on the executed path.
+- An attempt to end a capability more than once.
+- A `LoanIssue` whose loan place or holders cannot be resolved. This is checked before the holder-count refusal and without materialising dynamic state, so a malformed row keeps its error lane rather than being reported as an unsupported shape.
+- Any value-producing event whose dynamic source is `Unavailable` on the executed path. This covers an `Aggregate` field source, an `Alias` or `ExclusiveAlias` source, a `Copy` source, a `Projection` source, a `RebindValue::AliasFromPlace` source and an `AliasParams` result argument. Each `PlaceId` resolves, so the general cross-reference bullet below does not cover these: what fails is the execution state, and a writer cannot take provenance from a place that holds no value yet.
+- A `CallResultProvenance::AliasParams` naming an argument index the call does not have, or naming none at all.
+- A `CallEffect` result origin that is not an `OriginKind::CallResult` for that call. Construction validation already rejects this, so the oracle only re-checks it.
+- An event that retires or replaces the result place of a pending call result before its confirming write: a definition or provenance event at that place, or a `ScopeExit` covering its binding. The pending entry is bound to the exact generation the `CallEffect` installed, so the oracle rejects the interference rather than leaving a stale entry that could exempt an access its confirmation no longer covers.
+- Any event cross-reference that cannot resolve, even where construction validation would already have rejected it. The oracle re-checks rather than assuming.
+
+This mirrors the existing lane split. `CompilerError` is the internal malformed-input lane and never a user diagnostic. The oracle creates no user-facing diagnostics at all.
+
+## Scope exit and unreachable control flow
+
+`ScopeExit { bindings }` retires every place rooted at a listed binding: the state becomes `Unavailable`. Retirement ends the interval of each still-live capability held by such a place, while a capability that already carries an explicit end keeps that earlier endpoint, and only an already holder-retired capability accumulates further retired holders.
+
+The IR expresses scope exit in two structural positions, before a terminal block's terminator and inside a synthesized edge block before a jump. Both behave identically: a binding retires once per entry to its scope.
+
+Retiring a place does not destroy nodes. The oracle models no allocator, no deallocation and no drop, so an alias that captured a node keeps referring to that node.
+
+Unreachable control flow needs no special rule and that is the point. Enumeration only follows edges taken by executed terminators, so a block unreachable from entry never executes, never issues a capability and never keeps one live. This satisfies the standing requirement that unreachable blocks create no live loans or future uses. It does so structurally rather than by a separate unreachability analysis.
+
+## Bounds, truncation and outcomes
+
+Loops are not marked in the IR. Back edges are ordinary edges, so the oracle bounds execution by observed behaviour rather than by loop structure.
+
+The bounds are all deterministic with small defaults suitable for the ordinary opt-in lane:
+
+- executions enumerated before the bound stops further frame expansion, 256
+- maximum executed events per execution, 4096
+- maximum entries per block per execution, 8, which is how a back edge is bounded without identifying it
+- maximum dynamic generations created per execution, 4096
+
+Those four numbers are the default lane's exact guarantee. A caller may raise or lower any of them, and a result that completes under one setting completes identically under a larger one, because a bound only refuses further work and never changes a transition.
+
+The generation bound counts the generations an execution creates and never the generations still reachable from it. A reachable count would need a sweep over places, aggregates and capabilities, and the oracle models no allocator, no deallocation and no drop. Counting creations bounds the state space just as well and needs no such sweep.
+
+A closed cycle that makes no progress is detected as a repeated dynamic state at the same block entry and reported as its own limit reason rather than being silently truncated.
+
+A closed cycle is checked before every bound, so a repeated state is reported as a cycle rather than as whichever bound happens to be exhausted. The execution bound is therefore a stop on further frame expansion, not a cap on the recorded count: a frame dropped as a closed cycle is counted without consulting the bound, so the recorded count can exceed the limit while the outcome stays inconclusive unless another enumerated path reports a definite runtime conflict.
+
+Repetition compares the whole dynamic state, so the cycle reason is reported only for a cycle whose body leaves that state inert. Several components advance monotonically with execution progress. The capability table and its next identifier grow, the generation counters grow, and each capability records the absolute index at which it was last exercised. A cycle whose body issues a capability, creates a generation or exercises a live capability therefore never repeats a state exactly, and it is reported as an exhausted bound instead. Both reasons are inconclusive, so this is a conservative outcome rather than a false safe, and narrowing it would need a state abstraction the oracle deliberately does not have.
+
+The outcome vocabulary, kept from the plan:
+
+[codeblock, $code("rust"):
+    enum OracleOutcome {
+        CompleteSafe {
+            executions: usize,
+            trace: ExecutionTrace,
+        },
+        RuntimeConflict { trace: ExecutionTrace },
+        Inconclusive {
+            reason: OracleLimitReason,
+            explored: usize,
+            completed_executions: usize,
+        },
+    }
+]
+
+- `CompleteSafe { executions, trace }`: every enumerated execution finished and no conflict was found. This is only ever reported when nothing truncated. `trace` is the first complete conflict-free execution, retained as a replayable representative; later safe paths are counted but not retained.
+- `RuntimeConflict { trace }`: a definite conflict was found. For the direct rule, `trace` is the replayable prefix through the conflicting access. For the interval rule, it is the completed execution trace. A definite conflict is existential, so it takes precedence over truncation on another sibling path.
+- `Inconclusive { reason, explored, completed_executions }`: at least one path truncated and no definite conflict was found, so the result is never safe. `reason` is typed, `explored` counts executed events, and `completed_executions` reports complete conflict-free paths actually observed before or alongside truncation. Inconclusive reports do not retain a safe trace.
+
+`OracleLimitReason` is a typed enum, never rendered prose, carrying the IR reason values it wraps. Any truncation of any relevant path prevents `CompleteSafe` and produces `Inconclusive` only when no definite conflict is found. Changing a bound must never change a complete result, only whether a result is complete.
+
+The oracle result is a third result kind. It is neither a reference rule set nor an experiment, so it never becomes an alternate rule-set name and never turns an experimental acceptance into a reference acceptance. Reports carry the rule-set identity and experiment set they were compared against.
+
+## Disagreement workflow
+
+A differential report pairs one static rule selection with the bounded oracle result. The
+comparison executes the operational oracle once for the normalized problem, then compares that
+outcome with the static report for the reference selection and with each legality-changing
+experiment separately against the reference rule set. The reference selection uses
+`boracle-reference-v1` with no experiment. Each experiment gets its own comparison rather than
+joining several experiments into one rule selection.
+
+The comparison class and its severity come from `OracleComparisonClass` and
+`OracleComparisonSeverity`:
+
+[table:
+    [th:
+        [: **Class**]
+        [: **Meaning**]
+        [: **Severity**]
+    ]
+
+    [td:
+        [: `Agreement`]
+        [: the static acceptance matches the bounded result, either acceptance with
+        `CompleteSafe` or rejection with `RuntimeConflict`]
+        [: `OracleComparisonSeverity::Informational`]
+    ]
+
+    [td:
+        [: `StaticAcceptedRuntimeConflict`]
+        [: the static selection accepts while the bounded oracle reports `RuntimeConflict`]
+        [: `OracleComparisonSeverity::SoundnessFailure`]
+    ]
+
+    [td:
+        [: `StaticRejectedBoundedSafe`]
+        [: the static selection rejects while the bounded oracle reports `CompleteSafe`]
+        [: `OracleComparisonSeverity::PrecisionCandidate`]
+    ]
+
+    [td:
+        [: `OracleInconclusive`]
+        [: the bounded oracle reports `Inconclusive`, regardless of the static verdict]
+        [: `OracleComparisonSeverity::Informational`]
+    ]
+
+    [td:
+        [: `MalformedProblem`]
+        [: `BorrowProblem::new` rejects the normalized parts before an oracle outcome or static
+        report exists]
+        [: `OracleComparisonSeverity::MalformedInput`]
+    ]
+
+    [td:
+        [: `ExperimentOnlyAcceptedDifference`]
+        [: an experiment accepts while the reference rejects and the bounded oracle reports
+        `CompleteSafe`]
+        [: `OracleComparisonSeverity::Informational`]
+    ]
+]
+
+`OracleComparisonSeverity::SoundnessFailure` is the only severity for which
+`OracleComparisonSeverity::is_required_failure()` returns `true`. `StaticAcceptedRuntimeConflict`
+therefore demands a response. Reproduce the trace, reduce the normalized problem and compare the
+static derivation with the operational rule. If the trace follows this document, fix the static
+checker. If the trace exposes a violation in the operational implementation, fix the oracle and
+rerun the comparison before changing the checker. The class alone does not prove which
+implementation contains the defect.
+
+`StaticRejectedBoundedSafe` is the only class with `PrecisionCandidate` severity. Record it as a
+possible static precision improvement, not as a defect or unbounded proof.
+A precision disagreement replays from the normalized problem, its bounds and the first complete
+conflict-free execution trace retained by `CompleteSafe`.
+`ExperimentOnlyAcceptedDifference` records an accepted experiment result and does not promote that
+experiment into the reference rule-set. `Agreement` records evidence. `OracleInconclusive` records
+no safety result, so inspect its limit reason and observed completed-execution count or rerun with
+bounds that answer the question.
+`MalformedProblem` sends the developer back to the input builder, generator or fixture that
+supplied invalid parts. If a validation gap lets malformed input reach execution, correct that
+oracle boundary too.
+
+Use this command against a real Moth source file:
+
+[codeblock, $code("bash"):
+    cargo run --features boracle -- boracle ./tmp/example.moth --dump differential
+]
+
+The parser accepts these dump sections: `problem`, `origins`, `relations`, `precision`, `loans`,
+`last-use`, `conflicts`, `witnesses` and `differential`. The only accepted experiment name today
+is `dead-exclusive-loan`. Add `--experiment dead-exclusive-loan` to a non-differential dump when
+you want that selected rule set. Do not add `--experiment` to a differential dump. The
+differential service enumerates the reference selection and every legality-changing experiment
+itself, then rejects a separately selected experiment instead of silently ignoring it. The
+rejection names the selected experiment: `Boracle differential dump compares every
+legality-changing experiment and cannot also select experiments 'dead-exclusive-loan'`.
+
+The differential report is returned as a `String` for direct test failure output or CLI output.
+The CLI prints it to stdout. No report file is written to a final path.
+
+## Reduction workflow
+
+The generator declares its shape space with these constants:
+
+[codeblock, $code("rust"):
+    const DIGIT_COUNT: u32 = 11;
+    const DIGIT_RADIX: u32 = 2;
+    pub(crate) const GENERATED_SHAPE_COUNT: u32 = 1_u32 << DIGIT_COUNT;
+]
+
+`GENERATED_SHAPE_COUNT` declares 2,048 deterministic shapes because `DIGIT_COUNT` supplies eleven
+binary digits. `ShapeDigits::from_seed` selects a shape with `seed % GENERATED_SHAPE_COUNT`.
+`generated_problem(seed, cyclic)` selects the seed-derived shape, applies the retained `cyclic`
+flag to its control-flow construction and retains the raw `seed`, the `cyclic` flag and the
+complete normalized `BorrowProblem` in `GeneratedProblem`. The input can therefore be recreated
+from its retained selectors and rows. The eleven digits vary block shape, branch shape, back-edge
+shape, fresh origins, aliases, copies, projections, aggregates, calls, cleanup and conflict, where
+cleanup covers loan kills and scope exits.
+
+The conflict digit decides whether the issued loan dies inside its issuing block. With the digit
+clear the loan is killed there, which keeps its interval degenerate and the shape conflict-free.
+With it set the kill is omitted and a later access pair exercises the still-live loan, so the shape
+carries a genuine conflict that the reference solver finds as well. The 1,024 shapes that predate
+this digit are exactly its clear half and are unchanged.
+
+The back-edge digit selects the cycle route rather than a terminator kind. The oracle executes
+`Jump`, `Break` and `Continue` through one path, so varying the enum alone would add no behaviour.
+A cyclic block one instead branches to either its own back edge or a second block that re-enters it,
+and in both cases the branch also reaches a terminal block. A cyclic problem therefore offers both a
+cycling route and a completing route, so bounded enumeration produces complete executions instead of
+only truncating.
+
+Seeds beyond the declared shape space repeat a shape because the generator takes that modulo.
+Campaigns wider than the declared space therefore stay deliberately outside the default lane
+rather than masquerading as new default shapes.
+
+The reducer runs `ReductionPass::ALL` in this declared order:
+
+[codeblock, $code("rust"):
+    ReductionPass::RemoveUnreachableBlocks,
+    ReductionPass::RemoveEvents,
+    ReductionPass::RemoveUsesAndLoans,
+    ReductionPass::RemoveEdges,
+    ReductionPass::SimplifyProjections,
+    ReductionPass::ReduceOrigins,
+    ReductionPass::ReduceBindings,
+    ReductionPass::ReplaceCallsWithSimplerEffects,
+    ReductionPass::LowerLoopBounds,
+]
+
+The order belongs to the reproducible output contract. The reducer tries candidates in that order,
+keeps lowering candidates within a pass while they succeed and repeats the full order until no
+pass makes progress.
+
+Before `try_candidate` accepts a candidate, it requires a strictly smaller `ReductionSize` and
+non-zero execution bounds. It then validates and compares the candidate. Three retained values
+must match exactly:
+
+- the differential class vector `comparison_classes`
+- the per-comparison static verdict vector `static_accepts`
+- the bounded outcome identity `oracle_outcome`
+
+Those three fields have these types:
+
+[codeblock, $code("rust"):
+    comparison_classes: Box<[OracleComparisonClass]>,
+    static_accepts: Box<[bool]>,
+    oracle_outcome: OracleOutcomeIdentity,
+]
+
+`OracleOutcomeIdentity` keeps the `CompleteSafe`, `RuntimeConflict` or `Inconclusive` identity and
+keeps the exact `OracleLimitReason` for `Inconclusive`. A candidate that fails validation, changes
+any vector or changes that identity gets rejected.
+
+The reducer deliberately does not preserve runtime-conflict trace contents. It also does not
+preserve the `executions` count in `CompleteSafe` or the `explored` count in `Inconclusive`.
+Finally, it does not preserve row identity. `remap_parts` densely renumbers bindings, points,
+blocks, places, origins, loans, uses, calls and events after removals. Trace contents and counts
+can change when rows and paths disappear, so these values do not define the semantic result that
+the reducer keeps.
+
+Exact limit-reason identity has one consequence that can look like a reduction defect. A
+`OracleLimitReason::BlockEntryBound { block, limit }` carries the exhausted limit, so lowering
+`max_block_entries` changes the identity and rejects that candidate. Other bounds can still lower
+when the same reason survives. A bound whose reason names a different limit can therefore remain
+at its original value while other bounds decrease. That stuck bound follows from the exact
+identity gate.
+
+`reduce_problem` rejects a zero bound at entry through `validate_bounds`, before it filters or
+executes candidates. The returned `CompilerError` uses the exact message for the zero component:
+
+[codeblock, $code("text"):
+    Boracle reducer requires max_executions to be greater than zero
+    Boracle reducer requires max_executed_events to be greater than zero
+    Boracle reducer requires max_block_entries to be greater than zero
+    Boracle reducer requires max_dynamic_generations to be greater than zero
+]
+
+After reaching a minimal result, `render_fixture_skeleton` renders a hand-authored fixture
+skeleton. The returned text defines `fn reduced_boracle_problem() -> (BorrowProblem, OracleBounds)`,
+constructs `BorrowProblem::new(BorrowProblemParts { ... })` with the normalized bindings, points,
+blocks, edges, entry, exits, places, origins, loans, uses, calls and events, then constructs
+`OracleBounds::new(...)` and returns the pair. It emits synthetic or empty source metadata where
+the renderer allows it and states that HIR locals, regions and binding, point and event source
+provenance are omitted. The skeleton is for inspection and hand authoring. It is not proven to
+compile. The reducer tests inspect its text shape and row cardinality without compiling the
+emitted source.
+
+Reduction is a test-time facility today. `reduce_problem` is called by reducer tests and by the
+generated differential campaign only when a required generated failure occurs. The current
+generated corpus has no such failure, so that campaign path has compile/type coverage but no
+end-to-end execution coverage. `render_fixture_skeleton` is used by the reducer implementation
+and its tests. The differential service fixes `OracleBounds::default()` without exposing bound
+flags, so no command reduces a problem. A developer reduces one by calling `reduce_problem` from a
+test with the bounds the reduced result must preserve. The roadmap records a reachable reduction
+workflow as deferred work with no owning plan.
+
+A confirmed semantic discovery becomes durable only after a developer inspects the reduced
+normalized input, the static reports and the runtime trace against the language contract. The
+developer classifies the result as a Boracle defect, production bug, input-builder bug, current
+alpha limitation, accepted experimental difference or unsettled semantic question. The developer
+then turns the confirmed result into a hand-authored fixture in the durable semantic corpus.
+
+No generated shape has produced a confirmed static-versus-oracle disagreement, and a generated
+differential campaign measures that rather than assuming it. The campaign classifies every shape in
+the declared space, in both cyclic modes, through the same comparison layer, and it fails when any
+comparison carries a required-failure severity. Its measured distribution over 8,192 comparisons is
+6,144 `Agreement`, 2,048 `OracleInconclusive` and zero of every other class. Split by mode, all
+4,096 acyclic comparisons are `Agreement`, while the cyclic half is 2,048 `Agreement` and 2,048
+`OracleInconclusive`.
+
+The campaign is not vacuous. It pins 2,048 generated problems whose oracle outcome carries a
+runtime-conflict witness, so both solvers exercise their conflict paths and agree, and 1,024 cyclic
+problems that reach a complete execution through their terminal route rather than truncating. The
+remaining cyclic half is `OracleInconclusive` because its oracle execution stops at
+`OracleLimitReason::BlockEntryBound` rather than `OracleLimitReason::EventBound`. The campaign pins
+each mode's class distribution and both coverage counts exactly, so a change that silently swaps,
+reclassifies or empties any of them fails.
+
+Agreement on a conflict is still agreement, so generation has added no case to the durable corpus
+yet. A disagreement remains the only thing that would.
+
+The campaign runs about 61 seconds, which is far longer than the whole default gate, so it lives
+in its own opt-in lane behind the `boracle_campaign` feature:
+
+[codeblock, $code("bash"):
+    just boracle-campaign
+]
+
+`just boracle` keeps the oracle's execution, generator, reducer and metamorphic-property tests.
+The campaign stays out of it deliberately, and the feature-lane registry owns that separation.
+
+## Boundary confirmations
+
+- The oracle stays inside the borrow-validation boundary. It assigns no lifetime owners, decides no retained edges, selects no physical memory strategy, emits no drops and executes no backend code.
+- It does not open callee HIR. Calls execute normalized call effects only.
+- It remains feature-gated with Boracle and adds no external dependency.
+- Dynamic generations are an aliasing device for one bounded execution. They are not allocations, not lifetimes and not retained edges.
+- `Binding.region` is a lexical scope identity from HIR and is never treated as a borrow region or confused with a dynamic generation.
+
+## Module layout
+
+The module layout is:
+
+[codeblock, $code("text"):
+    src/compiler_frontend/analysis/borrow_checker/boracle/
+    |-- differential.rs
+    |-- reducer.rs
+    `-- oracle/
+        |-- mod.rs
+        |-- state.rs
+        |-- execute.rs
+        |-- paths.rs
+        |-- calls.rs
+        |-- conflicts.rs
+        |-- traces.rs
+        |-- generator.rs
+        `-- tests/
+]
+
+Every file in this layout exists. The generator produces deterministic bounded problems from a retained seed and belongs to the oracle, because it reads no static result. The reducer and the differential layer both read both sides, so both sit one level out. The reducer's tests stay under `oracle/tests/` because they consume the oracle fixtures there, and the independence rule exempts test sources.
+
+See the Reduction workflow section for generator and reducer behaviour.
+
+## Related reading for the operational oracle
+
+- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
+- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/compiler-design-overview.md`
+- `docs/src/developer-docs/style-guide/testing.mtf`

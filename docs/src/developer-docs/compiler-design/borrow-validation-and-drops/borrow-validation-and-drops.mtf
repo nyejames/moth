@@ -16,7 +16,10 @@ Analysis reasons about **places**, **storage roots** and **alias root sets**. A 
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred.** Reading or binding an existing value creates a shared read-only alias. It does not implicitly copy.
 
-Shared and exclusive aliases use **non-lexical**, control-flow-sensitive activity. A shared alias blocks overlapping mutation only until its last potential use on the relevant path. An unused shared alias does not block later mutation.
+Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
+that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
+exclusive capability may be elided remains an explicit experimental question; the reference
+baseline keeps that capability conservative until canonical semantics adopt the stronger rule.
 
 ## Data-flow facts
 

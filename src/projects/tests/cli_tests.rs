@@ -13,6 +13,10 @@ use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::Flag;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection,
+};
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -30,6 +34,8 @@ use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
 #[cfg(feature = "timers")]
 use crate::timing::start_benchmark_collection;
+#[cfg(feature = "boracle")]
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 #[cfg(feature = "timers")]
@@ -573,6 +579,90 @@ fn check_command_rejects_multiple_paths() {
     let error = get_command(&args(&["check", "a.moth", "b.moth"]))
         .expect_err("multiple check paths should fail");
     assert!(error.contains("at most one path"));
+}
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_parses_typed_dump_and_repeated_experiments() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let command = get_command(&args(&[
+        "boracle",
+        "main.moth",
+        "--dump",
+        "witnesses",
+        "--experiment",
+        "dead-exclusive-loan",
+        "--experiment",
+        "dead-exclusive-loan",
+    ]))
+    .expect("boracle command should parse");
+    assert_eq!(
+        command,
+        Command::Boracle {
+            path: String::from("main.moth"),
+            dump: BoracleDump::Witnesses,
+            rule_selection: BoracleRuleSelection {
+                reference_rule_set: BoracleReferenceRuleSet::V1,
+                experiments: BTreeSet::from([BoracleExperiment::DeadExclusiveLoan]),
+            },
+        }
+    );
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_defaults_to_empty_experiment_set() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let command =
+        get_command(&args(&["boracle", "main.moth"])).expect("boracle command should parse");
+    assert_eq!(
+        command,
+        Command::Boracle {
+            path: String::from("main.moth"),
+            dump: BoracleDump::Problem,
+            rule_selection: BoracleRuleSelection::default(),
+        }
+    );
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_requires_source_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let error =
+        get_command(&args(&["boracle"])).expect_err("Boracle command should require a source path");
+    assert!(error.contains("requires one source path"));
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_rejects_unknown_experiment() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let error = get_command(&args(&["boracle", "main.moth", "--experiment", "unknown"]))
+        .expect_err("unknown Boracle experiment should fail");
+    assert!(error.contains("Unknown Boracle experiment"));
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_rejects_comma_separated_experiments() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let error = get_command(&args(&[
+        "boracle",
+        "main.moth",
+        "--experiment",
+        "dead-exclusive-loan,dead-exclusive-loan",
+    ]))
+    .expect_err("comma-separated Boracle experiments should fail");
+    assert!(error.contains("Unknown Boracle experiment"));
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_cli_rejects_unknown_dump() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let error = get_command(&args(&["boracle", "main.moth", "--dump", "unknown"]))
+        .expect_err("unknown Boracle dump should fail");
+    assert!(error.contains("Invalid value for --dump"));
 }
 
 #[test]

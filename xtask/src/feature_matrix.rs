@@ -1,8 +1,8 @@
-//! Feature-lane matrix: one executed command per feature-gated test owner.
+//! Feature-lane matrix: one owned command per feature-gated test owner.
 //!
-//! WHAT: owns the curated feature lanes, runs each lane's package-scoped test command, and proves
-//!       that every Cargo feature the workspace declares is named by a lane and that every feature
-//!       name a `cfg` attribute mentions is a declared feature.
+//! WHAT: owns the curated feature lanes, runs each standard lane's package-scoped test command,
+//!       and proves that every Cargo feature the workspace declares is named by a lane and that
+//!       every feature name a `cfg` attribute mentions is a declared feature.
 //! WHY:  a feature-gated test that no command runs is not a test, and a `cfg` on a misspelled
 //!       feature name is a test that can never compile. Neither appears as a failure anywhere, so
 //!       both need a gate that reads the tree instead of a hand-maintained list in prose.
@@ -14,8 +14,8 @@
 //! the way a lane claims it does.
 //!
 //! # What this module owns
-//! - The lane table: which feature sets are executed, and what each lane uniquely covers
-//! - The per-lane test command and the complete outcome table
+//! - The lane table: which feature sets are covered, and what each lane uniquely covers
+//! - The per-lane owned command and the standard-lane outcome table
 //! - Declared-feature and `cfg`-name coverage, and the machine-readable coverage report
 //!
 //! # What this module does NOT own
@@ -40,9 +40,9 @@ pub const COVERAGE_REPORT_PATH: &str = "target/test-reports/feature_lane_coverag
 ///
 /// This is a separate file from the coverage map on purpose. The coverage report answers "does
 /// every declared feature have a lane", which `feature-lane-check` can answer without running
-/// anything; this one answers "what happened when each lane ran", which only `feature-matrix`
-/// can. One file carrying both would have to claim outcomes it did not measure whenever the
-/// cheap command wrote it.
+/// anything; this one answers "what happened when each standard lane ran", which only
+/// `feature-matrix` can. One file carrying both would have to claim outcomes it did not measure
+/// whenever the cheap command wrote it.
 pub const MATRIX_RESULTS_REPORT_PATH: &str = "target/test-reports/feature_matrix_results.json";
 
 /// Schema version of the coverage report.
@@ -50,21 +50,22 @@ pub const MATRIX_RESULTS_REPORT_PATH: &str = "target/test-reports/feature_matrix
 /// Bump whenever a field is added, removed or re-meant, so a consumer can reject a report it
 /// cannot read instead of silently misreading it.
 ///
-/// Schema 2 added the completion state, build features and thread count of the run identity, and
-/// moved lane outcomes out into the separate matrix-results report.
-pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 2;
+/// Schema 3 separates standard and opt-in lane ownership and records each lane's class and owned
+/// command.
+pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 3;
 
 /// Schema version of the lane-outcome report.
-pub const MATRIX_RESULTS_SCHEMA_VERSION: u32 = 1;
+pub const MATRIX_RESULTS_SCHEMA_VERSION: u32 = 2;
 
 /// Cargo target directory the matrix builds into.
 ///
-/// A matrix run compiles the compiler crate under every lane's feature set. Sharing the developer's
-/// default target directory is correct for Cargo but leaves the tree's most recent build being
-/// whichever lane finished last, which silently changes what a following `cargo test` runs.
+/// A matrix run compiles the compiler crate under every standard lane's feature set. Sharing the
+/// developer's default target directory is correct for Cargo but leaves the tree's most recent
+/// build being whichever lane finished last, which silently changes what a following `cargo test`
+/// runs.
 const MATRIX_TARGET_DIR: &str = "target/feature-matrix";
 
-/// One executed feature configuration.
+/// One feature lane configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureLane {
     /// Stable lane name used by reports and by the summary table.
@@ -73,8 +74,28 @@ pub struct FeatureLane {
     pub package: &'static str,
     /// Features enabled for `package`, in declaration order.
     pub features: &'static [&'static str],
+    /// Whether this lane is part of the standard matrix or owned by an opt-in command.
+    pub kind: FeatureLaneKind,
     /// What only this lane covers. Reviewed when a lane is added, removed or merged.
     pub owns: &'static str,
+}
+
+/// How a feature lane is selected by the repository's developer gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeatureLaneKind {
+    /// The standard feature matrix executes this lane's generated Cargo command.
+    Standard,
+    /// A separate developer command owns this lane.
+    OptIn { command: &'static str },
+}
+
+impl FeatureLaneKind {
+    fn report_name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::OptIn { .. } => "opt_in",
+        }
+    }
 }
 
 impl FeatureLane {
@@ -87,6 +108,14 @@ impl FeatureLane {
         }
         line.push_str(" -- --format terse");
         line
+    }
+
+    /// The command that owns execution of this lane in reports.
+    fn owned_command(&self) -> String {
+        match self.kind {
+            FeatureLaneKind::Standard => self.command_line(),
+            FeatureLaneKind::OptIn { command } => command.to_string(),
+        }
     }
 }
 
@@ -106,7 +135,7 @@ impl fmt::Display for FeatureLane {
     }
 }
 
-/// The curated lane matrix, in execution order.
+/// The curated lane table, in deterministic report order.
 ///
 /// The union of the `moth` lanes' features is exactly the set of features `Cargo.toml` declares;
 /// `run_feature_lane_check` fails when that stops being true, in either direction. `xtask` declares
@@ -117,36 +146,42 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         name: "default",
         package: "moth",
         features: &[],
+        kind: FeatureLaneKind::Standard,
         owns: "the shipped configuration and every `cfg(not(feature = ...))` branch",
     },
     FeatureLane {
         name: "timers",
         package: "moth",
         features: &["timers"],
+        kind: FeatureLaneKind::Standard,
         owns: "the timing collector, boundary identities and command/build timing tests",
     },
     FeatureLane {
         name: "detailed-timers",
         package: "moth",
         features: &["detailed_timers"],
+        kind: FeatureLaneKind::Standard,
         owns: "AST substage timings and the detailed-only summary shape",
     },
     FeatureLane {
         name: "counters",
         package: "moth",
         features: &["benchmark_counters"],
+        kind: FeatureLaneKind::Standard,
         owns: "counter-only builds, where counters record without a timing collector",
     },
     FeatureLane {
         name: "timers-counters",
         package: "moth",
         features: &["timers", "benchmark_counters"],
+        kind: FeatureLaneKind::Standard,
         owns: "collector-backed counters and the counter summary carried by a timing session",
     },
     FeatureLane {
         name: "scoped-blocks",
         package: "moth",
         features: &["checked_blocks", "async_blocks"],
+        kind: FeatureLaneKind::Standard,
         owns: "the deferred-feature diagnostics for `checked:` and `async:` blocks",
     },
     FeatureLane {
@@ -161,13 +196,33 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
             "show_codegen",
             "show_borrow_checker",
         ],
+        kind: FeatureLaneKind::Standard,
         owns: "the developer stage-dump branches, which no other lane compiles",
     },
     FeatureLane {
         name: "xtask",
         package: "xtask",
         features: &[],
+        kind: FeatureLaneKind::Standard,
         owns: "the benchmark, profiling and process-runner tests in the xtask package",
+    },
+    FeatureLane {
+        name: "boracle",
+        package: "moth",
+        features: &["boracle"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just boracle",
+        },
+        owns: "the deterministic Boracle developer gate",
+    },
+    FeatureLane {
+        name: "boracle-campaign",
+        package: "moth",
+        features: &["boracle", "boracle_campaign"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just boracle-campaign",
+        },
+        owns: "the measured generated Boracle differential stress campaign",
     },
 ];
 
@@ -222,20 +277,210 @@ pub struct CfgSite {
 pub struct FeatureCoverage {
     pub feature: String,
     pub package: String,
-    /// Lanes that enable the feature, in matrix order. Empty is a hard finding.
-    pub lanes: Vec<String>,
+    /// Standard lanes that enable the feature, in matrix order.
+    pub standard_lanes: Vec<String>,
+    /// Opt-in lanes that enable the feature, in matrix order.
+    pub opt_in_lanes: Vec<String>,
     /// Files whose `cfg` attributes name the feature, in path order.
     pub cfg_sites: Vec<CfgSite>,
     /// `cfg_sites` entries that also own `#[test]` functions.
     pub test_owner_files: usize,
 }
 
-/// One executed lane, as reported.
+#[derive(Debug, Default)]
+struct LaneCoverage {
+    standard_lanes: Vec<String>,
+    opt_in_lanes: Vec<String>,
+}
+
+impl LaneCoverage {
+    fn is_empty(&self) -> bool {
+        self.standard_lanes.is_empty() && self.opt_in_lanes.is_empty()
+    }
+}
+
+/// Validate the repository command that owns each opt-in lane.
+fn validate_opt_in_lane_ownership(
+    workspace_root: &Path,
+    findings: &mut Vec<String>,
+) -> Result<(), String> {
+    let justfile_path = workspace_root.join("justfile");
+    let justfile = fs::read_to_string(&justfile_path)
+        .map_err(|error| format!("failed to read '{}': {error}", justfile_path.display()))?;
+
+    for lane in FEATURE_LANES
+        .iter()
+        .filter(|lane| matches!(lane.kind, FeatureLaneKind::OptIn { .. }))
+    {
+        if let Err(finding) = validate_opt_in_lane(lane, &justfile) {
+            findings.push(finding);
+        }
+    }
+
+    Ok(())
+}
+
+/// Check one opt-in lane's fixed `just <recipe>` owner against the repository Justfile.
+fn validate_opt_in_lane(lane: &FeatureLane, justfile: &str) -> Result<(), String> {
+    let FeatureLaneKind::OptIn { command } = lane.kind else {
+        return Ok(());
+    };
+
+    if lane.features.is_empty() {
+        return Err(format!(
+            "opt-in lane '{}' has no feature to validate",
+            lane.name
+        ));
+    }
+
+    let Some(recipe_name) = command.strip_prefix("just ") else {
+        return Err(format!(
+            "opt-in lane '{}' owner '{}' is not a `just <recipe>` command",
+            lane.name, command
+        ));
+    };
+    if recipe_name.is_empty() || recipe_name.chars().any(char::is_whitespace) {
+        return Err(format!(
+            "opt-in lane '{}' owner '{}' has an invalid recipe name",
+            lane.name, command
+        ));
+    }
+
+    let Some(recipe_body) = just_recipe_body(justfile, recipe_name) else {
+        return Err(format!(
+            "opt-in lane '{}' owner '{}' does not define a recipe in justfile",
+            lane.name, command
+        ));
+    };
+
+    let expected_features = lane.features.join(",");
+    if !recipe_body.iter().any(|line| {
+        cargo_test_feature_argument(line, lane.package)
+            .is_some_and(|features| features == expected_features)
+    }) {
+        return Err(format!(
+            "opt-in lane '{}' recipe '{}' does not run Cargo with '--features {}'",
+            lane.name, recipe_name, expected_features
+        ));
+    }
+
+    Ok(())
+}
+
+/// Return the exact feature token from a simple executable Cargo test recipe line.
+fn cargo_test_feature_argument<'a>(line: &'a str, expected_package: &str) -> Option<&'a str> {
+    let command = line
+        .trim_start()
+        .strip_prefix('@')
+        .unwrap_or(line.trim_start());
+    let executable_command = before_shell_comment(command);
+    if executable_command.chars().any(|character| {
+        matches!(
+            character,
+            ';' | '&' | '|' | '>' | '<' | '$' | '`' | '(' | ')'
+        )
+    }) {
+        return None;
+    }
+
+    let tokens: Vec<&str> = executable_command.split_whitespace().collect();
+    if tokens.first().copied() != Some("cargo") || tokens.get(1).copied() != Some("test") {
+        return None;
+    }
+
+    let cargo_tokens: Vec<&str> = tokens
+        .iter()
+        .copied()
+        .take_while(|token| *token != "--")
+        .collect();
+    if cargo_tokens.contains(&"--no-run") {
+        return None;
+    }
+    // Keep ownership proof deliberately canonical. Cargo also accepts attached selector values,
+    // but counting only separated tokens would let an unexamined duplicate through.
+    if cargo_tokens.iter().any(|token| {
+        token.starts_with("--package=")
+            || token.starts_with("--features=")
+            || (token.starts_with("-p") && *token != "-p")
+    }) {
+        return None;
+    }
+
+    let package_options: Vec<usize> = cargo_tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| (*token == "-p" || *token == "--package").then_some(index))
+        .collect();
+    if package_options.len() != 1 {
+        return None;
+    }
+
+    let package_option = package_options[0];
+    if cargo_tokens.get(package_option + 1).copied() != Some(expected_package) {
+        return None;
+    }
+
+    let feature_options: Vec<usize> = cargo_tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| (*token == "--features").then_some(index))
+        .collect();
+    if feature_options.len() != 1 || cargo_tokens.contains(&"--all-features") {
+        return None;
+    }
+
+    let feature_option = feature_options[0];
+    cargo_tokens.get(feature_option + 1).copied()
+}
+
+/// Return the executable part of a simple recipe line before its shell comment.
+fn before_shell_comment(command: &str) -> &str {
+    let mut previous_is_whitespace = true;
+
+    for (index, character) in command.char_indices() {
+        if character == '#' && previous_is_whitespace {
+            return &command[..index];
+        }
+        previous_is_whitespace = character.is_whitespace();
+    }
+
+    command
+}
+
+/// Return the body of one simple, top-level Just recipe in source order.
+fn just_recipe_body<'a>(justfile: &'a str, recipe_name: &str) -> Option<Vec<&'a str>> {
+    let header = format!("{recipe_name}:");
+    let mut lines = justfile.lines();
+
+    while let Some(line) = lines.next() {
+        if line != header {
+            continue;
+        }
+
+        let mut body = Vec::new();
+        for line in lines {
+            let is_top_level_recipe = !line.is_empty()
+                && !line.starts_with(' ')
+                && !line.starts_with('\t')
+                && line.ends_with(':');
+            if is_top_level_recipe {
+                break;
+            }
+            body.push(line);
+        }
+        return Some(body);
+    }
+
+    None
+}
+
+/// One lane and its owned command, as reported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LaneReport {
     pub name: String,
     pub package: String,
     pub features: Vec<String>,
+    pub lane_kind: String,
     pub command: String,
     pub owns: String,
 }
@@ -283,9 +528,9 @@ pub struct LaneResult {
 
 /// The machine-readable outcome table of one `feature-matrix` run.
 ///
-/// Written before the first lane starts and rewritten after each lane finishes, so an interrupted
-/// matrix leaves the lanes it did measure plus `completed: false`, rather than a stale table from
-/// a previous run.
+/// Written before the first standard lane starts and rewritten after each standard lane finishes,
+/// so an interrupted matrix leaves the lanes it did measure plus `completed: false`, rather than a
+/// stale table from a previous run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MatrixResultsReport {
     pub schema_version: u32,
@@ -331,15 +576,15 @@ pub fn run_feature_lane_check() -> Result<(), String> {
     ))
 }
 
-/// Validate coverage, then run every lane and report the complete outcome table.
+/// Validate coverage, then run every standard lane and report the complete outcome table.
 ///
 /// Lanes keep running after a failure. A matrix exists to show which configurations are broken,
 /// and stopping at the first one hides the rest.
 ///
 /// Two reports are written, because there are two separate facts. The coverage map is finished
 /// before any lane starts and is complete at that point. The outcome table is only complete when
-/// the last lane has run, so it starts as `Pending` for every lane and is rewritten as each one
-/// resolves.
+/// the last standard lane has run, so it starts as `Pending` for every standard lane and is
+/// rewritten as each one resolves.
 pub fn run_feature_matrix() -> Result<(), String> {
     let workspace_root = workspace_root()?;
     let coverage_run = ReportRunIdentity::started("feature-matrix", None);
@@ -358,10 +603,11 @@ pub fn run_feature_matrix() -> Result<(), String> {
         ));
     }
 
+    let standard_lanes: Vec<&FeatureLane> = standard_execution_lanes().collect();
     let mut results = MatrixResultsReport {
         schema_version: MATRIX_RESULTS_SCHEMA_VERSION,
         run: ReportRunIdentity::started("feature-matrix", None),
-        lanes: FEATURE_LANES
+        lanes: standard_lanes
             .iter()
             .map(|lane| LaneResult {
                 lane: lane_report(lane),
@@ -371,7 +617,7 @@ pub fn run_feature_matrix() -> Result<(), String> {
     };
     write_matrix_results(&workspace_root, &results)?;
 
-    for (index, lane) in FEATURE_LANES.iter().enumerate() {
+    for (index, lane) in standard_lanes.iter().enumerate() {
         println!("\n=== feature lane: {lane} ===");
         println!("{}", lane.command_line());
 
@@ -390,7 +636,7 @@ pub fn run_feature_matrix() -> Result<(), String> {
 
     let failures = results.failures();
     println!("\n=== feature matrix summary ===");
-    println!("lanes run: {}", FEATURE_LANES.len());
+    println!("standard lanes run: {}", standard_lanes.len());
     println!("lanes passed: {}", results.passed());
     println!("lanes failed: {}", failures.len());
     if failures.is_empty() {
@@ -401,10 +647,17 @@ pub fn run_feature_matrix() -> Result<(), String> {
         println!("  {}: {}", failure.lane.name, describe(&failure.result));
     }
     Err(format!(
-        "{} of {} feature lanes failed",
+        "{} of {} standard feature lanes failed",
         failures.len(),
-        FEATURE_LANES.len()
+        standard_lanes.len()
     ))
+}
+
+/// Lanes executed by the standard feature matrix, in the curated table's order.
+fn standard_execution_lanes() -> impl Iterator<Item = &'static FeatureLane> {
+    FEATURE_LANES
+        .iter()
+        .filter(|lane| matches!(lane.kind, FeatureLaneKind::Standard))
 }
 
 /// How a resolved lane outcome reads in the summary table.
@@ -476,6 +729,8 @@ fn build_coverage_report(
     let mut undeclared: Vec<CfgSite> = Vec::new();
     let mut findings: Vec<String> = Vec::new();
 
+    validate_opt_in_lane_ownership(workspace_root, &mut findings)?;
+
     for (package, manifest_relative, source_relative) in PACKAGE_SOURCES {
         let manifest_path = workspace_root.join(manifest_relative);
         let manifest = fs::read_to_string(&manifest_path)
@@ -487,8 +742,8 @@ fn build_coverage_report(
         let sites = scan_cfg_features(workspace_root, &workspace_root.join(source_relative))?;
 
         for feature in &declared {
-            let lanes = lanes_enabling(package, feature);
-            if lanes.is_empty() {
+            let lane_coverage = lanes_enabling(package, feature);
+            if lane_coverage.is_empty() {
                 findings.push(format!(
                     "feature '{feature}' is declared by package '{package}' but no lane enables it"
                 ));
@@ -498,7 +753,8 @@ fn build_coverage_report(
             features.push(FeatureCoverage {
                 feature: feature.clone(),
                 package: (*package).to_string(),
-                lanes,
+                standard_lanes: lane_coverage.standard_lanes,
+                opt_in_lanes: lane_coverage.opt_in_lanes,
                 cfg_sites,
                 test_owner_files,
             });
@@ -550,36 +806,51 @@ fn lane_report(lane: &FeatureLane) -> LaneReport {
             .iter()
             .map(|name| (*name).to_string())
             .collect(),
-        command: lane.command_line(),
+        lane_kind: lane.kind.report_name().to_string(),
+        command: lane.owned_command(),
         owns: lane.owns.to_string(),
     }
 }
 
-/// Lanes that enable `feature` for `package`, in matrix order.
-fn lanes_enabling(package: &str, feature: &str) -> Vec<String> {
-    FEATURE_LANES
+/// Lanes that enable `feature` for `package`, split by execution class in matrix order.
+fn lanes_enabling(package: &str, feature: &str) -> LaneCoverage {
+    let mut coverage = LaneCoverage::default();
+
+    for lane in FEATURE_LANES
         .iter()
         .filter(|lane| lane.package == package && lane.features.contains(&feature))
-        .map(|lane| lane.name.to_string())
-        .collect()
+    {
+        let lane_names = match lane.kind {
+            FeatureLaneKind::Standard => &mut coverage.standard_lanes,
+            FeatureLaneKind::OptIn { .. } => &mut coverage.opt_in_lanes,
+        };
+        lane_names.push(lane.name.to_string());
+    }
+
+    coverage
 }
 
 /// Print the feature-to-lane mapping in report order.
 fn print_coverage(report: &CoverageReport) {
     println!("=== feature lanes ===");
     for lane in &report.lanes {
-        println!("  {:<16} {}", lane.name, lane.command);
+        println!("  {:<16} {:<8} {}", lane.name, lane.lane_kind, lane.command);
     }
 
     println!("\n=== feature coverage ===");
     for feature in &report.features {
-        let lanes = if feature.lanes.is_empty() {
-            "NO LANE".to_string()
+        let standard_lanes = if feature.standard_lanes.is_empty() {
+            "NONE".to_string()
         } else {
-            feature.lanes.join(", ")
+            feature.standard_lanes.join(", ")
+        };
+        let opt_in_lanes = if feature.opt_in_lanes.is_empty() {
+            "NONE".to_string()
+        } else {
+            feature.opt_in_lanes.join(", ")
         };
         println!(
-            "  {:<20} {:<8} lanes: {lanes:<28} cfg files: {:>2} (test owners: {})",
+            "  {:<20} {:<8} standard: {standard_lanes:<24} opt-in: {opt_in_lanes:<20} cfg files: {:>2} (test owners: {})",
             feature.feature,
             feature.package,
             feature.cfg_sites.len(),

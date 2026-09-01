@@ -11,12 +11,18 @@ use crate::build_system::output::{
 use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::analysis::borrow_checker::{
+    BoracleDump, BoracleExperiment, BoracleRuleSelection,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
 };
 use crate::finish_command_timing;
+#[cfg(feature = "boracle")]
+use crate::projects::boracle::run_boracle;
 use crate::projects::check::{self, CheckOptions};
 use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
@@ -26,6 +32,7 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use saying::say;
 use std::path::{Path, PathBuf};
+
 use std::time::{Duration, Instant};
 use std::{env, process};
 
@@ -50,6 +57,13 @@ enum Command {
         path: String,
         terse: bool,
     }, // Runs frontend-only compilation without writing artefacts
+
+    #[cfg(feature = "boracle")]
+    Boracle {
+        path: String,
+        dump: BoracleDump,
+        rule_selection: BoracleRuleSelection,
+    }, // Runs the internal, unstable reference-solver source service
 
     // Runs a hot reloading dev server that can be accessed in the browser
     // Will only support HTML projects for now
@@ -113,6 +127,22 @@ pub fn start_cli() -> process::ExitCode {
                 Command::Check { path, terse } => {
                     check::run_check(&path, CheckOptions { terse })
                 }
+
+                #[cfg(feature = "boracle")]
+                Command::Boracle {
+                    path,
+                    dump,
+                    rule_selection,
+                } => match run_boracle(&path, dump, rule_selection) {
+                    Ok(report) => {
+                        print!("{report}");
+                        CommandStatus::Success
+                    }
+                    Err(messages) => {
+                        print_compiler_messages(messages);
+                        CommandStatus::Failure
+                    }
+                },
 
                 Command::Dev {
                     path,
@@ -437,6 +467,9 @@ fn get_command(args: &[String]) -> Result<Command, String> {
 
         Some("check") => parse_check_command(args),
 
+        #[cfg(feature = "boracle")]
+        Some("boracle") => parse_boracle_command(args),
+
         Some("dev") => parse_dev_command(args),
 
         Some("tests") => parse_tests_command(args),
@@ -665,6 +698,78 @@ fn parse_check_command(args: &[String]) -> Result<Command, String> {
     Ok(Command::Check { path, terse })
 }
 
+#[cfg(feature = "boracle")]
+fn parse_boracle_command(args: &[String]) -> Result<Command, String> {
+    let mut path = String::new();
+    let mut dump = BoracleDump::Problem;
+    let mut rule_selection = BoracleRuleSelection::default();
+    let mut dump_seen = false;
+    let mut index = 1usize;
+
+    while let Some(arg) = args.get(index) {
+        match arg.as_str() {
+            "--dump" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(String::from("Missing value for --dump."));
+                };
+                if value.starts_with("--") || value.trim().is_empty() {
+                    return Err(String::from("Missing value for --dump."));
+                }
+                if dump_seen {
+                    return Err(String::from("Boracle command accepts --dump at most once."));
+                }
+                dump = value
+                    .parse()
+                    .map_err(|error: String| format!("Invalid value for --dump: {error}"))?;
+                dump_seen = true;
+                index += 2;
+            }
+            "--experiment" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(String::from("Missing value for --experiment."));
+                };
+                if value.starts_with("--") || value.trim().is_empty() {
+                    return Err(String::from("Missing value for --experiment."));
+                }
+                let experiment = value
+                    .parse::<BoracleExperiment>()
+                    .map_err(|error: String| format!("Invalid value for --experiment: {error}"))?;
+                rule_selection.experiments.insert(experiment);
+                index += 2;
+            }
+            _ if arg.starts_with("--") => {
+                return Err(format!(
+                    "Unknown boracle flag: '{arg}'. Supported flags are --dump <problem|origins|relations|precision|loans|last-use|conflicts|witnesses|differential> and --experiment <dead-exclusive-loan>."
+                ));
+            }
+            _ => {
+                if path.is_empty() {
+                    path = arg.to_owned();
+                    index += 1;
+                } else {
+                    return Err(String::from(
+                        "Boracle command accepts at most one path argument.",
+                    ));
+                }
+            }
+        }
+    }
+
+    if path.trim().is_empty() {
+        return Err(String::from("Boracle command requires one source path."));
+    }
+
+    rule_selection
+        .validate()
+        .map_err(|error| format!("Invalid Boracle rule selection: {error}"))?;
+
+    Ok(Command::Boracle {
+        path,
+        dump,
+        rule_selection,
+    })
+}
+
 fn parse_dev_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut options = DevServerOptions::default();
@@ -769,6 +874,8 @@ fn print_help() {
     say!(Green Bold "\nCommands:");
     say!("  build [path]      - Builds a project");
     say!("  check [path]      - Runs frontend-only diagnostics (no artifacts)");
+    #[cfg(feature = "boracle")]
+    say!("  boracle <path>    - Internal unstable reference-solver analysis");
     say!("  dev [path]        - Runs the hot reloading dev server");
     say!("  new html [path] [--force] - Creates an HTML project scaffold");
     say!("  tests [options]     - Runs or lists the integration test suite");
@@ -787,6 +894,14 @@ fn print_help() {
     say!("  --terse                (compact summary and one-line failure diagnostics)");
     say!("\nCheck command options:");
     say!("  --terse                (compact one-line diagnostics)");
+    #[cfg(feature = "boracle")]
+    {
+        say!("\nBoracle command options (internal and unstable):");
+        say!(
+            "  --dump <section>       (problem, origins, relations, precision, loans, last-use, conflicts, witnesses, differential)"
+        );
+        say!("  --experiment <name>    (repeatable; dead-exclusive-loan)");
+    }
     say!("\nNew command options:");
     say!("  --force                (allows replacing existing scaffold files)");
     say!("\nDev command options:");

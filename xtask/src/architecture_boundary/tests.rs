@@ -209,3 +209,210 @@ fn a_name_embedded_in_a_longer_identifier_is_not_a_hit() {
         .is_empty()
     );
 }
+
+#[test]
+fn reports_a_static_solver_name_in_a_production_oracle_file() {
+    let findings = audit_architecture_boundary_fragment(
+        "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/state.rs",
+        "use crate::boracle::OriginSolver;\n",
+    );
+
+    assert_eq!(findings.len(), 1, "unexpected findings: {findings:?}");
+    assert_eq!(findings[0].0, BoundaryRule::OracleStaticSolverIndependence);
+    assert!(
+        findings[0].1.contains("OriginSolver"),
+        "the finding should name what it found: {}",
+        findings[0].1
+    );
+    assert!(
+        findings[0].1.contains("comparison-layer reducer"),
+        "the finding should name the required comparison-layer owner: {}",
+        findings[0].1
+    );
+}
+
+#[test]
+fn reports_every_new_static_solver_name_in_a_production_oracle_file() {
+    let names = [
+        "AccessDecision",
+        "ConflictWitness",
+        "ExclusiveLoanLiveness",
+        "OriginFact",
+        "OriginTrace",
+        "OriginTraceRule",
+        "BoracleReport",
+        "ReactiveObservation",
+    ];
+
+    for name in names {
+        let findings = audit_architecture_boundary_fragment(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/paths.rs",
+            &format!("use crate::boracle::{name};\n"),
+        );
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "unexpected findings for {name}: {findings:?}"
+        );
+        assert_eq!(findings[0].0, BoundaryRule::OracleStaticSolverIndependence);
+        assert!(
+            findings[0].1.contains(name),
+            "the finding should name what it found: {}",
+            findings[0].1
+        );
+    }
+}
+
+#[test]
+fn accepts_the_unrelated_reactive_observe_event_variant() {
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/paths.rs",
+            "let _ = EventKind::ReactiveObserve { place };\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn accepts_a_static_solver_name_in_an_oracle_test_source() {
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/tests/mod.rs",
+            "use crate::boracle::OriginSolver;\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn accepts_a_static_solver_name_in_a_boracle_level_file() {
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/reducer.rs",
+            "use crate::boracle::OriginSolver;\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn reports_every_enumerated_static_solver_name_in_a_production_oracle_file() {
+    let names = [
+        "CopyGraphId",
+        "DisjointReason",
+        "OriginDisjointEvidence",
+        "OriginOverlapDecision",
+        "OriginOverlapEvidence",
+        "OriginRegistration",
+        "OriginRelation",
+        "OriginRelationEvidence",
+        "OriginRelationKind",
+        "OriginUnknownEvidence",
+        "PrecisionLossReason",
+        "EventGraph",
+        "FutureUseStatus",
+        "LastUseAnalysis",
+        "LastUseLocation",
+        "LastUseObservation",
+        "LastUseResult",
+        "LastUseSubject",
+        "LastUseWitness",
+        "event_for_use",
+        "BoracleDump",
+        "BoracleExperiment",
+        "BoracleExperimentMetadata",
+        "BoracleFunctionReport",
+        "BoracleModuleReport",
+        "BoracleReferencePromotionStatus",
+        "BoracleReferenceRuleSet",
+        "BoracleRuleSelection",
+        "BoracleServiceOptions",
+        "format_experiment_names",
+        "run_hir_module",
+        "solve_hir_module",
+    ];
+
+    for name in names {
+        let findings = audit_architecture_boundary_fragment(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/paths.rs",
+            &format!("use crate::boracle::{name};\n"),
+        );
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "unexpected findings for {name}: {findings:?}"
+        );
+        assert_eq!(findings[0].0, BoundaryRule::OracleStaticSolverIndependence);
+        assert!(
+            findings[0].1.contains(name),
+            "the finding should name what it found: {}",
+            findings[0].1
+        );
+    }
+}
+
+#[test]
+fn reports_a_static_solver_module_path_import_into_a_production_oracle_file() {
+    // The boundary is the static-solver modules, not the name table: an import through a module
+    // path is a violation even when the imported item is missing from the table.
+    let imports = [
+        "use super::origins::AnUnlistedOriginHelper;\n",
+        "use super::loans::{AnUnlistedLoanHelper, AnotherUnlistedLoanHelper};\n",
+        "use crate::compiler_frontend::analysis::borrow_checker::boracle::relations::AnUnlistedRelationHelper;\n",
+        "use super::super::last_use::AnUnlistedLastUseHelper;\n",
+        "use super::report::AnUnlistedReportHelper;\n",
+        "use super::service::{AnUnlistedServiceHelper, OneMoreUnlistedServiceHelper};\n",
+    ];
+
+    for import in imports {
+        let findings = audit_architecture_boundary_fragment(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/execute.rs",
+            import,
+        );
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "unexpected findings for {import}: {findings:?}"
+        );
+        assert_eq!(findings[0].0, BoundaryRule::OracleStaticSolverIndependence);
+        assert!(
+            findings[0].1.contains("comparison-layer reducer"),
+            "the finding should name the required comparison-layer owner: {}",
+            findings[0].1
+        );
+    }
+}
+
+#[test]
+fn accepts_an_oracle_file_importing_only_the_problem_and_oracle_siblings() {
+    // Oracle imports run through `problem` and the oracle's own siblings; naming no static-solver
+    // module and no solver name stays legal.
+    let source = "use super::state::{CapabilitySource, OracleState};\n\
+                  use super::{OracleBounds, OracleLimitReason, OracleOutcome};\n\
+                  use crate::compiler_frontend::analysis::borrow_checker::problem::BorrowProblem;\n";
+
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/execute.rs",
+            source
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn accepts_the_comparison_layer_importing_the_static_solver_modules() {
+    // `boracle/differential.rs` is the intended cross-side consumer and sits at the `boracle`
+    // level, outside the oracle directory the rule is scoped to.
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/boracle/differential.rs",
+            "use super::{loans, origins, relations};\n"
+        )
+        .is_empty()
+    );
+}

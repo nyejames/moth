@@ -26,6 +26,9 @@ show_eval = []
 show_hir = []
 show_codegen = []
 show_borrow_checker = []
+boracle = []
+# The measured generated differential campaign is an opt-in stress lane kept out of the default Boracle gate.
+boracle_campaign = ["boracle"]
 checked_blocks = []
 async_blocks = []
 

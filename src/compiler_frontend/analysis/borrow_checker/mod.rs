@@ -7,11 +7,20 @@
 //!
 //! This module must not mutate HIR, perform backend ownership lowering, or use diagnostics as
 //! analysis state. External-call access policy belongs in the metadata/transfer owners below.
+//!
+//! This also owns shared future seams:
+//! - `problem`: shared borrow-problem vocabulary for future boracle-style analyses
+//! - `last_use`: shared last-use analysis vocabulary for future boracle-style analyses
+//! - `boracle`: feature-gated Boracle lane entrypoint, currently isolated from the alpha path
 
+#[cfg(feature = "boracle")]
+mod boracle;
 mod diagnostics;
 mod engine;
 mod error;
+mod last_use;
 mod metadata;
+mod problem;
 mod state;
 mod transfer;
 mod types;
@@ -25,6 +34,22 @@ pub(crate) use types::{
     ReactiveInvalidationFact, ReactiveInvalidationKind,
 };
 pub(crate) type BorrowFacts = BorrowAnalysis;
+
+#[cfg(all(feature = "boracle", test))]
+#[allow(unused_imports)]
+pub(crate) use boracle::solve_hir_module;
+#[cfg(feature = "boracle")]
+#[allow(unused_imports)]
+pub(crate) use boracle::{
+    BoracleDump, BoracleExperiment, BoracleExperimentMetadata, BoracleModuleReport,
+    BoracleReferencePromotionStatus, BoracleReferenceRuleSet, BoracleRuleSelection,
+    BoracleServiceOptions, OriginOverlapDecision, run_hir_module,
+};
+#[cfg(feature = "boracle")]
+#[allow(unused_imports)]
+pub(crate) use problem::{
+    AccessKind, CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind,
+};
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;

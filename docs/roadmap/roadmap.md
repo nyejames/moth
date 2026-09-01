@@ -11,8 +11,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Boracle - borrow checker test/reference solver for desiging and validating final borrow checker behaviour](./plans/boracle-reference-solver-implementation-plan.md) - Active in separate worktree
-
 ## Queued implementation chain
 
 - [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
@@ -112,6 +110,21 @@ HTML escaping and add tests for aliases, comments, keywords and the rendered spa
 Stateful Moth template-body-aware highlighting remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
 performs semantic symbol resolution or syntax diagnostics.
+
+## Boracle real-source replay gaps
+
+The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources and left two failures. The current `tests/cases/` corpus has changed since that checkpoint, so later sources are unmeasured and these counts are historical rather than a current sweep. Both recorded failures are problem-extraction defects rather than oracle defects, and both also fail the `problem` dump, so extraction and validation reject them before the oracle runs. The subcommand exists only under the `boracle` feature, so each reproduction below runs as `cargo run --features boracle -- boracle <source> --dump problem`.
+
+- A `match` with guards can produce unsorted branch targets. The source is `tests/cases/result_match_guard_propagation_order/input/@page.moth`, and validation fails with `terminator target blocks references must be strictly sorted and unique: BlockId(12) then BlockId(7)`, so the builder's target mapping does not preserve the ascending unique order that problem validation requires.
+- Runtime reactive `if` metadata can leave a local unresolved. The source is `tests/cases/runtime_if_reactive_metadata_preserved/input/@page.moth`, and extraction fails with `unknown HIR local LocalId(1)`.
+
+## Boracle reduction reachability
+
+`reduce_problem` and `render_fixture_skeleton` are implemented, audited and covered by the reducer tests, and the operational oracle authority documents the pass order, the preserved classification and the rendered fixture skeleton. Nothing outside the tests calls either of them, so a developer who follows the disagreement workflow reduces a problem by writing a test rather than by running a command.
+
+Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()` and exposes no bound flags. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
+
+No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes from its generator and reducer slices, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
 
 ## Genuinely deferred items
 

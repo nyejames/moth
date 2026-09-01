@@ -1306,6 +1306,10 @@ The current alpha checker's abstract-state lattice, `LocalId`-centred root appro
 
 Borrow validation reads validated HIR and writes read-only side tables. It does not rewrite HIR, decide lifetime topology or decide final runtime ownership.
 
+Stage 6 conflict checking still uses conservative storage-root overlap; the feature-gated
+Boracle reference solver separately evaluates typed `OriginRelations` provenance and is not
+the production checker.
+
 Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred affine cleanup responsibility at a proven final-use call site.
 
 Borrow validation may emit preliminary return-root alias evidence for the later lifetime analysis. It does not own final result provenance, retained-edge summaries or topology constraints.

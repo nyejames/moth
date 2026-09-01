@@ -62,6 +62,8 @@ pub enum SourceRule {
     ExternalStageOrchestration,
     /// Production `compiler_frontend` code named build-system or project config state.
     CompilerDependencyOnBuild,
+    /// Production Boracle oracle code named a static-solver owner.
+    OracleStaticSolverIndependence,
     /// A source file could not be read, so no rule could be applied to it.
     UnreadableSource,
 }
@@ -74,6 +76,7 @@ impl SourceRule {
             Self::RemovedLegacyPayloadVariant => "legacy-error-payload-variant",
             Self::ExternalStageOrchestration => "external-stage-orchestration",
             Self::CompilerDependencyOnBuild => "compiler-dependency-on-build",
+            Self::OracleStaticSolverIndependence => "oracle-static-solver-independence",
             Self::UnreadableSource => "unreadable-source",
         }
     }
@@ -241,6 +244,9 @@ fn audit_source_fragment(relative: &str, content: &str) -> Vec<SourceFinding> {
                     }
                     BoundaryRule::CompilerDependencyOnBuild => {
                         SourceRule::CompilerDependencyOnBuild
+                    }
+                    BoundaryRule::OracleStaticSolverIndependence => {
+                        SourceRule::OracleStaticSolverIndependence
                     }
                 },
                 message,

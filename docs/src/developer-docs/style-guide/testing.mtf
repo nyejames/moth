@@ -609,7 +609,8 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 ### Feature and platform lanes
 
 A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a
-lane, and every lane is one executed command:
+lane. Standard lanes run in the feature matrix. Deliberately expensive developer systems may use an
+opt-in lane with its own named command:
 
 [codeblock, $code("bash"):
     just test-feature-matrix
@@ -669,6 +670,20 @@ lane, and every lane is one executed command:
         [: none]
         [: the benchmark, profiling and process-runner tests in the `xtask` package]
     ]
+
+    [td:
+        [: `boracle`]
+        [: `boracle`]
+        [: the reference-solver developer gate, owned by `just boracle` and excluded from the
+        standard matrix]
+    ]
+    [td:
+        [: `boracle-campaign`]
+        [: `boracle`, `boracle_campaign`]
+        [: the measured generated differential campaign, owned by `just boracle-campaign`: 2048
+        deterministic generated shapes per cyclic mode, 4096 problems and 8192 comparisons,
+        classified through the same differential comparison the `boracle` lane uses]
+    ]
 ]
 
 Lanes are package-scoped, and that is not a stylistic choice. Cargo unifies features across one
@@ -688,13 +703,16 @@ The check reads `Cargo.toml` and every `cfg` attribute in `src` and `xtask/src`,
 declared feature has no lane, when a lane names a feature its package does not declare, or when a
 `cfg` names a feature that does not exist. A misspelled feature name in a `cfg` is a test that can
 never compile and never reports, which is why the check reads the tree instead of a list in prose.
-It writes `target/test-reports/feature_lane_coverage.json`, which names, for every feature, the
-lanes that enable it and the files whose `cfg` attributes mention it. That report is a coverage
-map and states no lane outcome, because the check that writes it runs no lane. Running the lanes
-is `just test-feature-matrix`, which writes the outcome for every lane to
-`target/test-reports/feature_matrix_results.json`.
+It writes `target/test-reports/feature_lane_coverage.json`, which names, for every feature, its
+standard lanes, opt-in lanes and the files whose `cfg` attributes mention it. That report is a
+coverage map and states no lane outcome, because the check that writes it runs no lane. Running the
+standard lanes is `just test-feature-matrix`, which writes their outcomes to
+`target/test-reports/feature_matrix_results.json`. The opt-in `boracle` and `boracle-campaign` lanes
+run only through their named `just boracle` and `just boracle-campaign` commands, not through the
+standard lane set.
 
-Adding a Cargo feature means adding it to a lane in the same change. The gate fails otherwise.
+Adding a Cargo feature means adding it to a standard or opt-in lane in the same change. The gate
+fails otherwise.
 
 Platform-gated tests are owned by the platform that has the API:
 

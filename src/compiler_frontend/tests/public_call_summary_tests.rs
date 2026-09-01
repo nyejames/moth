@@ -350,3 +350,24 @@ fn invalid_alias_shape_is_rejected_before_transition() {
         .is_err()
     );
 }
+
+#[test]
+fn empty_alias_params_summary_is_rejected() {
+    let current = summary(
+        vec![parameter(
+            PublicCallParameterAccess::Mutable,
+            PublicCallMutationEffect::NoWrite,
+            PublicCallReactiveEffect::None,
+        )],
+        FunctionReturnAliasSummary::Fresh,
+    );
+    let empty = summary(
+        current.parameters.clone(),
+        FunctionReturnAliasSummary::AliasParams(Vec::new()),
+    );
+
+    assert!(
+        validate_public_call_summary_transition(&current, &empty).is_err(),
+        "public summaries reject empty AliasParams"
+    );
+}

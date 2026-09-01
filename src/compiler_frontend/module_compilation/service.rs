@@ -17,6 +17,8 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, merge_stage_messages,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ModuleDiagnostics};
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::owned_folded_string_from_const_string;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderKind, PreparedHeaderSyntax, bind_module_headers,
@@ -24,6 +26,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::hir::functions::{
     HirFunctionOriginLookup, PrivateFunctionOriginSeed,
 };
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
@@ -68,8 +72,18 @@ use crate::{borrow_log, timed_stage_attributed};
 
 use rustc_hash::FxHashMap;
 use std::path::Path;
+#[cfg(feature = "boracle")]
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+
+/// Validated-HIR payload returned by the internal Boracle compiler service.
+#[cfg(feature = "boracle")]
+pub(crate) struct BoracleModuleInput {
+    pub(crate) hir: HirModule,
+    pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
+    pub(crate) entry_point: PathBuf,
+}
 
 /// Compile one ready module through the canonical local semantic sequence.
 ///
@@ -146,6 +160,7 @@ pub(crate) fn compile_module(
             source_byte_count,
             resolved_file_references,
         },
+        SemanticStageRequest::Complete,
         #[cfg(feature = "timers")]
         timing_context,
     );
@@ -156,7 +171,13 @@ pub(crate) fn compile_module(
     // (an infrastructure failure recovered losslessly from its structured payload). This is
     // the single lossless ownership transfer; graph and render consumers never re-classify.
     match compile_result {
-        Ok((module, public_interface, generated_delta, resource_source_associations)) => {
+        Ok(SemanticStageOutput::Complete(output)) => {
+            let CompleteSemanticStage {
+                module,
+                public_interface,
+                generated_delta,
+                resource_source_associations,
+            } = *output;
             let string_table = compiler.string_table;
             Ok(ModuleCompilationOutcome::Success(Box::new(
                 ModuleSemanticResult {
@@ -168,6 +189,10 @@ pub(crate) fn compile_module(
                 },
             )))
         }
+        #[cfg(feature = "boracle")]
+        Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
+            "normal module compilation unexpectedly stopped at the Boracle prefix",
+        )),
         Err(messages) => {
             // The failing stage already cloned the live `compiler.string_table` into the
             // messages, so the diagnosed payload carries every render identity produced so
@@ -180,11 +205,96 @@ pub(crate) fn compile_module(
     }
 }
 
+/// Compile one prepared module through validated HIR for the internal Boracle service.
+///
+/// This is a separate compiler service because Boracle intentionally stops before alpha borrow
+/// acceptance, generated convergence and backend-facing module assembly. Normal module
+/// compilation therefore has no Boracle outcome to handle.
+#[cfg(feature = "boracle")]
+pub(crate) fn compile_module_for_boracle(
+    context: &ModuleCompilationContext<'_>,
+    prepared: PreparedModuleInput,
+    known_generated: KnownGeneratedFunctions<'_>,
+    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
+) -> Result<BoracleModuleInput, CompilerMessages> {
+    let entry_file_path = prepared
+        .entry_file_path()
+        .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?
+        .to_path_buf();
+    let entry_file_path = entry_file_path.as_path();
+
+    let PreparedModuleInput {
+        active_root_file_id,
+        source_module_origins,
+        prepared_header_syntax,
+        resolved_file_references,
+        string_table,
+        source_files,
+        warnings,
+        source_file_count,
+        source_byte_count,
+    } = prepared;
+    resolved_file_references
+        .validate()
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let active_module_origin = source_module_origins
+        .origin_for(active_root_file_id)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "semantic Boracle compilation: active root file id {} has no module origin",
+                    active_root_file_id.0
+                )),
+                &string_table,
+            )
+        })?
+        .clone();
+
+    let mut compiler = CompilerFrontend::new(
+        context.options.clone(),
+        string_table,
+        context.style_directives.to_owned(),
+        Arc::clone(&context.external_packages),
+        context.project_path_resolver.clone(),
+    );
+    compiler.set_source_files(source_files);
+
+    match run_semantic_stages(
+        &mut compiler,
+        context,
+        known_generated,
+        warnings,
+        SemanticStageInputs {
+            prepared_header_syntax,
+            source_module_origins,
+            active_root_file_id,
+            active_module_origin,
+            entry_file_path,
+            source_file_count,
+            source_byte_count,
+            resolved_file_references,
+        },
+        SemanticStageRequest::Boracle,
+        #[cfg(feature = "timers")]
+        timing_context,
+    ) {
+        Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
+        Ok(SemanticStageOutput::Complete(_)) => Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "Boracle compiler service unexpectedly completed the normal semantic pipeline",
+            ),
+            &compiler.string_table,
+        )),
+        Err(messages) => Err(messages),
+    }
+}
+
 /// Everything one semantic stage run reads from the prepared payload.
 ///
 /// WHAT: the retained syntax and module-local identity facts [`run_semantic_stages`] consumes,
 ///       after the string table and source-file table have moved into the `CompilerFrontend`.
-/// WHY: seven values from one prepared module travel together through the whole stage sequence.
+/// WHY: eight values from one prepared module travel together through the whole stage sequence.
 ///      Naming the bundle keeps `compile_module` readable as setup, one stage run and one
 ///      classification, instead of a parameter list that hides which value came from where.
 struct SemanticStageInputs<'a> {
@@ -199,10 +309,32 @@ struct SemanticStageInputs<'a> {
     resolved_file_references: ResolvedFileReferenceTable,
 }
 
+enum SemanticStageOutput {
+    Complete(Box<CompleteSemanticStage>),
+    #[cfg(feature = "boracle")]
+    Boracle(Box<BoracleModuleInput>),
+}
+
+/// Private request used by the two named compiler services to share the validated-HIR prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticStageRequest {
+    Complete,
+    #[cfg(feature = "boracle")]
+    Boracle,
+}
+
+struct CompleteSemanticStage {
+    module: Module,
+    public_interface: PublicSemanticInterface,
+    generated_delta: GeneratedFunctionDelta,
+    resource_source_associations: Vec<ResourceSourceAssociation>,
+}
+
 /// Run the local semantic sequence for one module, from bound headers to a complete result.
 ///
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
-///       generated completion, returning the three values a success is made of.
+///       generated completion, returning the complete module, public interface, generated delta
+///       and resource-source associations a success is made of.
 /// WHY: every stage in here fails with `CompilerMessages`, which mixes user diagnostics and
 ///      infrastructure failures. Collecting those failures at one `?` boundary lets
 ///      [`compile_module`] classify them exactly once. Keeping the sequence in its own function
@@ -213,16 +345,11 @@ fn run_semantic_stages(
     known_generated: KnownGeneratedFunctions<'_>,
     mut warnings: Vec<CompilerDiagnostic>,
     inputs: SemanticStageInputs<'_>,
+    request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<
-    (
-        Module,
-        PublicSemanticInterface,
-        GeneratedFunctionDelta,
-        Vec<ResourceSourceAssociation>,
-    ),
-    CompilerMessages,
-> {
+) -> Result<SemanticStageOutput, CompilerMessages> {
+    #[cfg(not(feature = "boracle"))]
+    let _ = request;
     let SemanticStageInputs {
         prepared_header_syntax,
         source_module_origins,
@@ -531,6 +658,15 @@ fn run_semantic_stages(
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
+    #[cfg(feature = "boracle")]
+    if request == SemanticStageRequest::Boracle {
+        return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
+            hir: hir_module,
+            external_package_registry: Arc::clone(&compiler.external_package_registry),
+            entry_point: entry_file_path.to_path_buf(),
+        })));
+    }
+
     // 8. Run static analysis (Borrow Checker).
     increment_frontend_counter(FrontendCounter::ConvergenceInitialBaseBorrowPasses);
     let bootstrap_borrow_analysis = timed_stage_attributed!(
@@ -653,32 +789,34 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
-    Ok((
-        Module {
-            executable: ModuleExecutable {
-                hir: hir_module,
-                resource_table,
-                type_environment,
-                borrow_analysis,
+    Ok(SemanticStageOutput::Complete(Box::new(
+        CompleteSemanticStage {
+            module: Module {
+                executable: ModuleExecutable {
+                    hir: hir_module,
+                    resource_table,
+                    type_environment,
+                    borrow_analysis,
+                },
+                link_facts: ModuleLinkFacts {
+                    external_package_registry: Arc::clone(&compiler.external_package_registry),
+                    external_import_candidates,
+                    functions: function_link_facts,
+                },
+                metadata: ModuleCompilerMetadata::from_hir_lowering(
+                    entry_file_path.to_path_buf(),
+                    warnings,
+                    lowering_metadata,
+                    const_top_level_fragments,
+                    root_activity,
+                    materialisation_context,
+                ),
             },
-            link_facts: ModuleLinkFacts {
-                external_package_registry: Arc::clone(&compiler.external_package_registry),
-                external_import_candidates,
-                functions: function_link_facts,
-            },
-            metadata: ModuleCompilerMetadata::from_hir_lowering(
-                entry_file_path.to_path_buf(),
-                warnings,
-                lowering_metadata,
-                const_top_level_fragments,
-                root_activity,
-                materialisation_context,
-            ),
+            public_interface,
+            generated_delta,
+            resource_source_associations,
         },
-        public_interface,
-        generated_delta,
-        resource_source_associations,
-    ))
+    )))
 }
 
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces.

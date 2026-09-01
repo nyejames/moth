@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Checked proof-budget research | Moth</title>
+    <meta name="description" content="Future research into opt-in deep static analysis for difficult borrow proofs.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("../../../styles/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Memory management</a> / Checked proof-budget research</p><p>This page records a future design proposal and the compiler constraints current Boracle work should preserve. It is not accepted source syntax or current compiler behaviour.</p></section>
+<section class="container"><h1>Future checked proof-budget research</h1><h2>Status</h2><p>This is an open design proposal. It is not accepted Moth syntax, current compiler behaviour or a roadmap implementation commitment.</p><p>The working idea is a lexical checked scope that lets the compiler use a much larger deterministic proof budget for difficult static analysis. The current spelling is illustrative:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>checked</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-comment'>-- difficult but safe value and alias relationships</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Current Boracle work should preserve the architectural option without implementing source syntax prematurely.</p><h2>Core contract</h2><p>A future checked scope would change analysis effort, not the language&#39;s safety law.</p><pre style=""><code class='codeblock'>ordinary scope
+    -&gt; mandatory static proof
+    -&gt; normal production proof budget
+
+checked scope
+    -&gt; the same mandatory static proof
+    -&gt; normal production proof budget first
+    -&gt; deeper conflict-directed proof when needed</code></pre><p>The intended invariants are:</p><ul><li>ordinary Moth remains fully statically checked</li><li>checked and ordinary code use the same borrow and lifetime semantics</li><li>checked analysis cannot weaken source evaluation order</li><li>checked analysis cannot make optional transfer mandatory</li><li>checked analysis has no runtime operation or backend representation</li><li>adding checked to already accepted code cannot make it invalid</li><li>exhausting the deep proof budget cannot accept code</li><li>removing checked may lose a difficult proof but cannot change runtime meaning</li></ul><p>This proposal is therefore a proof-budget marker, not a safety mode.</p><h2>Relationship to the production checker</h2><p>The likely production architecture remains tiered:</p><pre style=""><code class='codeblock'>cheap may-analysis
+    |
+    +-- no candidate conflict -&gt; accept
+    |
+    v
+candidate conflict
+    |
+    v
+normal conflict-directed refinement
+    |
+    +-- conflict discharged -&gt; accept
+    |
+    v
+checked proof scope?
+    |
+    +-- no -&gt; preserve the remaining diagnostic
+    |
+    v
+deep refinement
+    |
+    +-- conflict impossible -&gt; accept
+    +-- conflict possible -&gt; report a path-compatible witness
+    +-- proof limit reached -&gt; report inconclusive proof</code></pre><p>The normal path should not pay for deep state exploration when coarse facts already prove legality. A future checked tier may authorise larger conflict slices, more state alternatives, delayed widening or richer predicates only around unresolved obligations.</p><p>The production solver may eventually use compact bitsets, sparse matrices and specialised fast paths. The checked proposal does not prescribe those representations. It only requires the semantic distinction between normal and deep effort to remain possible.</p><h2>Scope as an analysis enclave</h2><p>A checked block is not an isolated function. Values and capabilities can enter the scope, and later observations can occur after it.</p><p>The compiler may inspect predecessor facts and future uses outside the lexical block when the proof needs them. Expensive path splitting should still be authorised by obligations associated with the checked scope rather than silently expanding to the complete module.</p><p>A useful handoff is:</p><pre style=""><code class='codeblock'>normal entry facts
+    -&gt; deep checked analysis
+    -&gt; compact proven exit facts
+    -&gt; normal analysis continues</code></pre><p>Possible exit facts include:</p><ul><li>must-alias and must-disjoint relationships</li><li>exact surviving capability alternatives</li><li>path-specific result provenance</li><li>proof that one loan cannot reach an exit</li><li>edge-specific future-use facts</li></ul><p>The full deep state should not need to remain live through the rest of an otherwise simple function.</p><h2>Deterministic proof budgets</h2><p>Compiler results must not depend on wall-clock time, machine speed, system load or cache state.</p><p>A checked tier should use semantic fuel such as:</p><ul><li>maximum refined states</li><li>maximum compatible path alternatives</li><li>maximum loop-refinement rounds</li><li>maximum tracked predicates</li><li>maximum summary specialisations</li><li>maximum solver obligations if a narrow solver is later adopted</li></ul><p>The exact budgets are implementation policy. Source must not select a numeric budget, timeout or solver algorithm.</p><p>A limit result is explicit and conservative:</p><pre style=""><code class='codeblock'>proof complete and conflict impossible
+    -&gt; accept
+
+proof complete and conflict possible
+    -&gt; reject with witness
+
+proof budget exhausted
+    -&gt; remain unproven
+    -&gt; never accept from absence of a found counterexample</code></pre><p>Diagnostics should eventually distinguish a confirmed conflict from a proof that remained inconclusive within the supported deep tier.</p><h2>Boracle research role</h2><p>Boracle should discover and validate the proof rules before any checked source surface is accepted.</p><p>Each ambitious experiment should be able to report:</p><ul><li>the coarse reference result</li><li>the normal refinement result</li><li>the deep refinement result</li><li>which precision losses triggered refinement</li><li>which effort tier discharged or confirmed the conflict</li><li>deterministic state and obligation counts</li><li>one path-compatible witness or universal discharge proof</li></ul><p>The bounded operational oracle is independent test infrastructure. It can expose likely soundness defects and reduce counterexamples. Complete bounded executions that happen to be safe do not prove an unbounded program safe and can never become the acceptance rule for checked source.</p><p>A strong promotion path is:</p><pre style=""><code class='codeblock'>named Boracle experiment
+    -&gt; adversarial source and normalized corpus
+    -&gt; bounded operational counterexample search
+    -&gt; written static soundness argument
+    -&gt; measured proof cost
+    -&gt; explicit reference-semantics review
+    -&gt; possible future checked-tier capability</code></pre><p>Reference mode and experiment mode must remain distinguishable throughout that process.</p><h2>Candidate deep proof families</h2><p>Current research should leave room for these future checked-tier candidates without promising them:</p><h3>Path correlation</h3><p>Retain more compatible predecessor states so relationships that are true on every execution are not lost to independent unions.</p><h3>Loop generations</h3><p>Delay widening, retain current and prior generation classes and investigate inductive facts that are too costly for the normal tier.</p><p>Bounded unrolling may find counterexamples or suggest invariants. Acceptance still needs a sound fixed point or induction argument.</p><h3>Call-summary refinement</h3><p>Instantiate richer per-result and outcome-sensitive summaries in the caller&#39;s current provenance state. Separate compilation remains mandatory. A checked caller must not open arbitrary dependency HIR as local control flow.</p><h3>Value-sensitive places</h3><p>Use narrow facts such as fixed index inequality, choice discriminants or option presence to prove that accesses cannot overlap. General dynamic-index arithmetic remains outside the normal early research scope.</p><h3>Lifetime and retained-edge consumers</h3><p>Later analyses may reuse proven relationships to shorten inferred regions, improve cleanup frontiers or avoid REC in difficult cases. Borrow validation still does not assign lifetime owners or choose physical memory strategies.</p><h3>Narrow path-feasibility solving</h3><p>A later experiment may ask whether the issue, access and keeping use of one candidate conflict can coexist under simple path predicates. Moth-specific explicit domains should be exhausted before introducing a general solver.</p><h2>Requirements for current Boracle packages</h2><p>Current work does not implement checked syntax. It should preserve these capabilities:</p><ol><li>Coarse analysis remains a complete, readable first stage.</li><li>Refinement is invoked from candidate conflicts rather than every successful function.</li><li>Precision losses and refusal reasons remain typed.</li><li>State and obligation counts remain deterministic and inspectable.</li><li>Normal and deeper refinement limits can be represented separately later.</li><li>A deep proof can publish compact exit facts without becoming lifetime topology.</li><li>Operational-oracle results remain evidence, not proof.</li><li>Cross-module reasoning consumes stable semantic summaries.</li><li>No experiment silently becomes the user-facing fallback checker.</li><li>Production fast paths remain possible even when Boracle uses explicit slow structures.</li></ol><h2>Possible later consumers</h2><p>The first source proposal should focus on borrow legality. A general analysis-effort marker may later inform:</p><ul><li>last-use and optional-transfer precision</li><li>lifetime-region and escape validation</li><li>retained-edge and cleanup-frontier analysis</li><li>proof-driven REC avoidance</li><li>bounds-check elimination</li><li>checked numeric failure elimination</li></ul><p>Each consumer keeps its existing owner and contract. Checked scopes must not collapse these analyses into one opaque solver.</p><h2>Open design questions</h2><p>The proposal still needs evidence and decisions for:</p><ul><li>final source name and syntax</li><li>block-only versus function-level placement</li><li>nested scope composition</li><li>which facts can escape the checked scope</li><li>whether a checked obligation can refine predecessor or successor code</li><li>normal and deep deterministic budget policy</li><li>diagnostic wording for confirmed conflict versus exhausted proof</li><li>which proof families justify source surface area</li><li>whether lifetime analysis should consume the same marker</li><li>whether narrow SMT or SAT queries are useful after custom domains</li><li>interaction with incremental compilation and proof-result fingerprints</li></ul><p>Until those questions are resolved, compiler code should use internal effort or experiment vocabulary rather than a source-visible <code>CheckedBlock</code> semantic category.</p><h2>Hard boundaries</h2><ul><li>Stage 4 would own any future syntax and placement validation.</li><li>HIR would retain ordinary control flow plus compiler-owned proof-scope metadata if needed.</li><li>Borrow validation would read that metadata and continue writing side tables without rewriting HIR.</li><li>Lifetime analysis could consume proven facts later but would keep ownership of topology.</li><li>The build system would schedule the same compiler service and would not sequence refinement stages.</li><li>Backends would receive no runtime checked-block instruction.</li><li>The proposal would not create a public solver switch or project-wide no-cost safety mode.</li></ul><h2>Related reading</h2><ul><li><a href="../borrow-validation">Borrow validation</a></li><li><a href="../boracle">Boracle reference solver</a></li><li><a href="../../../docs/design-scope/#checked-proof-budget-blocks-proposal">Future proposal: checked proof-budget blocks</a></li></ul></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_fixed_capacity(collection) {
+if (Array.isArray(collection)) {
+return null;
+}
+return collection.fixedCapacity;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push(collection, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+const fixedCapacity = __moth_collection_fixed_capacity(collection);
+if (fixedCapacity !== null && items.length >= fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

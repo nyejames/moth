@@ -6,6 +6,10 @@
 
 @deferred-and-outside-scope-basic content as deferred_and_outside_scope_basic
 
+@checked-proof-budget-blocks-proposal content as checked_proof_budget_blocks_proposal
+
+@checked-proof-budget-blocks-proposal-basic content as checked_proof_budget_blocks_proposal_basic
+
 @excluded-language-families content as excluded_language_families
 
 @excluded-language-families-basic content as excluded_language_families_basic
@@ -54,6 +58,16 @@ page_head #= language_theme_head
         [$insert("advanced"):[deferred_and_outside_scope]]
 
         [deferred_and_outside_scope_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):checked-proof-budget-blocks-proposal]
+        [$insert("title"):Future proposal: checked proof-budget blocks]
+        [$insert("advanced"):[checked_proof_budget_blocks_proposal]]
+
+        [checked_proof_budget_blocks_proposal_basic]
     ]
 ]
 

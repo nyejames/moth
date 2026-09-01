@@ -1,0 +1,255 @@
+# Future checked proof-budget research
+
+## Status
+
+This is an open design proposal. It is not accepted Moth syntax, current compiler behaviour or a roadmap implementation commitment.
+
+The working idea is a lexical checked scope that lets the compiler use a much larger deterministic proof budget for difficult static analysis. The current spelling is illustrative:
+
+[codeblock, $code("moth"):
+    checked:
+        -- difficult but safe value and alias relationships
+    ;
+]
+
+Current Boracle work should preserve the architectural option without implementing source syntax prematurely.
+
+## Core contract
+
+A future checked scope would change analysis effort, not the language's safety law.
+
+[codeblock, $code("text"):
+    ordinary scope
+        -> mandatory static proof
+        -> normal production proof budget
+
+    checked scope
+        -> the same mandatory static proof
+        -> normal production proof budget first
+        -> deeper conflict-directed proof when needed
+]
+
+The intended invariants are:
+
+- ordinary Moth remains fully statically checked
+- checked and ordinary code use the same borrow and lifetime semantics
+- checked analysis cannot weaken source evaluation order
+- checked analysis cannot make optional transfer mandatory
+- checked analysis has no runtime operation or backend representation
+- adding checked to already accepted code cannot make it invalid
+- exhausting the deep proof budget cannot accept code
+- removing checked may lose a difficult proof but cannot change runtime meaning
+
+This proposal is therefore a proof-budget marker, not a safety mode.
+
+## Relationship to the production checker
+
+The likely production architecture remains tiered:
+
+[codeblock, $code("text"):
+    cheap may-analysis
+        |
+        +-- no candidate conflict -> accept
+        |
+        v
+    candidate conflict
+        |
+        v
+    normal conflict-directed refinement
+        |
+        +-- conflict discharged -> accept
+        |
+        v
+    checked proof scope?
+        |
+        +-- no -> preserve the remaining diagnostic
+        |
+        v
+    deep refinement
+        |
+        +-- conflict impossible -> accept
+        +-- conflict possible -> report a path-compatible witness
+        +-- proof limit reached -> report inconclusive proof
+]
+
+The normal path should not pay for deep state exploration when coarse facts already prove legality. A future checked tier may authorise larger conflict slices, more state alternatives, delayed widening or richer predicates only around unresolved obligations.
+
+The production solver may eventually use compact bitsets, sparse matrices and specialised fast paths. The checked proposal does not prescribe those representations. It only requires the semantic distinction between normal and deep effort to remain possible.
+
+## Scope as an analysis enclave
+
+A checked block is not an isolated function. Values and capabilities can enter the scope, and later observations can occur after it.
+
+The compiler may inspect predecessor facts and future uses outside the lexical block when the proof needs them. Expensive path splitting should still be authorised by obligations associated with the checked scope rather than silently expanding to the complete module.
+
+A useful handoff is:
+
+[codeblock, $code("text"):
+    normal entry facts
+        -> deep checked analysis
+        -> compact proven exit facts
+        -> normal analysis continues
+]
+
+Possible exit facts include:
+
+- must-alias and must-disjoint relationships
+- exact surviving capability alternatives
+- path-specific result provenance
+- proof that one loan cannot reach an exit
+- edge-specific future-use facts
+
+The full deep state should not need to remain live through the rest of an otherwise simple function.
+
+## Deterministic proof budgets
+
+Compiler results must not depend on wall-clock time, machine speed, system load or cache state.
+
+A checked tier should use semantic fuel such as:
+
+- maximum refined states
+- maximum compatible path alternatives
+- maximum loop-refinement rounds
+- maximum tracked predicates
+- maximum summary specialisations
+- maximum solver obligations if a narrow solver is later adopted
+
+The exact budgets are implementation policy. Source must not select a numeric budget, timeout or solver algorithm.
+
+A limit result is explicit and conservative:
+
+[codeblock, $code("text"):
+    proof complete and conflict impossible
+        -> accept
+
+    proof complete and conflict possible
+        -> reject with witness
+
+    proof budget exhausted
+        -> remain unproven
+        -> never accept from absence of a found counterexample
+]
+
+Diagnostics should eventually distinguish a confirmed conflict from a proof that remained inconclusive within the supported deep tier.
+
+## Boracle research role
+
+Boracle should discover and validate the proof rules before any checked source surface is accepted.
+
+Each ambitious experiment should be able to report:
+
+- the coarse reference result
+- the normal refinement result
+- the deep refinement result
+- which precision losses triggered refinement
+- which effort tier discharged or confirmed the conflict
+- deterministic state and obligation counts
+- one path-compatible witness or universal discharge proof
+
+The bounded operational oracle is independent test infrastructure. It can expose likely soundness defects and reduce counterexamples. Complete bounded executions that happen to be safe do not prove an unbounded program safe and can never become the acceptance rule for checked source.
+
+A strong promotion path is:
+
+[codeblock, $code("text"):
+    named Boracle experiment
+        -> adversarial source and normalized corpus
+        -> bounded operational counterexample search
+        -> written static soundness argument
+        -> measured proof cost
+        -> explicit reference-semantics review
+        -> possible future checked-tier capability
+]
+
+Reference mode and experiment mode must remain distinguishable throughout that process.
+
+## Candidate deep proof families
+
+Current research should leave room for these future checked-tier candidates without promising them:
+
+### Path correlation
+
+Retain more compatible predecessor states so relationships that are true on every execution are not lost to independent unions.
+
+### Loop generations
+
+Delay widening, retain current and prior generation classes and investigate inductive facts that are too costly for the normal tier.
+
+Bounded unrolling may find counterexamples or suggest invariants. Acceptance still needs a sound fixed point or induction argument.
+
+### Call-summary refinement
+
+Instantiate richer per-result and outcome-sensitive summaries in the caller's current provenance state. Separate compilation remains mandatory. A checked caller must not open arbitrary dependency HIR as local control flow.
+
+### Value-sensitive places
+
+Use narrow facts such as fixed index inequality, choice discriminants or option presence to prove that accesses cannot overlap. General dynamic-index arithmetic remains outside the normal early research scope.
+
+### Lifetime and retained-edge consumers
+
+Later analyses may reuse proven relationships to shorten inferred regions, improve cleanup frontiers or avoid REC in difficult cases. Borrow validation still does not assign lifetime owners or choose physical memory strategies.
+
+### Narrow path-feasibility solving
+
+A later experiment may ask whether the issue, access and keeping use of one candidate conflict can coexist under simple path predicates. Moth-specific explicit domains should be exhausted before introducing a general solver.
+
+## Requirements for current Boracle packages
+
+Current work does not implement checked syntax. It should preserve these capabilities:
+
+1. Coarse analysis remains a complete, readable first stage.
+2. Refinement is invoked from candidate conflicts rather than every successful function.
+3. Precision losses and refusal reasons remain typed.
+4. State and obligation counts remain deterministic and inspectable.
+5. Normal and deeper refinement limits can be represented separately later.
+6. A deep proof can publish compact exit facts without becoming lifetime topology.
+7. Operational-oracle results remain evidence, not proof.
+8. Cross-module reasoning consumes stable semantic summaries.
+9. No experiment silently becomes the user-facing fallback checker.
+10. Production fast paths remain possible even when Boracle uses explicit slow structures.
+
+## Possible later consumers
+
+The first source proposal should focus on borrow legality. A general analysis-effort marker may later inform:
+
+- last-use and optional-transfer precision
+- lifetime-region and escape validation
+- retained-edge and cleanup-frontier analysis
+- proof-driven REC avoidance
+- bounds-check elimination
+- checked numeric failure elimination
+
+Each consumer keeps its existing owner and contract. Checked scopes must not collapse these analyses into one opaque solver.
+
+## Open design questions
+
+The proposal still needs evidence and decisions for:
+
+- final source name and syntax
+- block-only versus function-level placement
+- nested scope composition
+- which facts can escape the checked scope
+- whether a checked obligation can refine predecessor or successor code
+- normal and deep deterministic budget policy
+- diagnostic wording for confirmed conflict versus exhausted proof
+- which proof families justify source surface area
+- whether lifetime analysis should consume the same marker
+- whether narrow SMT or SAT queries are useful after custom domains
+- interaction with incremental compilation and proof-result fingerprints
+
+Until those questions are resolved, compiler code should use internal effort or experiment vocabulary rather than a source-visible `CheckedBlock` semantic category.
+
+## Hard boundaries
+
+- Stage 4 would own any future syntax and placement validation.
+- HIR would retain ordinary control flow plus compiler-owned proof-scope metadata if needed.
+- Borrow validation would read that metadata and continue writing side tables without rewriting HIR.
+- Lifetime analysis could consume proven facts later but would keep ownership of topology.
+- The build system would schedule the same compiler service and would not sequence refinement stages.
+- Backends would receive no runtime checked-block instruction.
+- The proposal would not create a public solver switch or project-wide no-cost safety mode.
+
+## Related reading
+
+- @../borrow-validation (Borrow validation)
+- @../boracle (Boracle reference solver)
+- @../../../docs/design-scope/#checked-proof-budget-blocks-proposal (Future proposal: checked proof-budget blocks)

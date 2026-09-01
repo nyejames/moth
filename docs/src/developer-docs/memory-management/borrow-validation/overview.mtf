@@ -12,13 +12,21 @@ Roots, joins, optional transfer safety and facts.
 
 This output contract is solver-independent. The current alpha lattice, root approximation and advisory drop candidates are current scaffolding rather than permanent architecture; a stronger production borrow checker may replace them without changing the contract or source legality.
 
+A future checked proof-budget proposal may let selected lexical scopes authorise substantially deeper conflict-directed analysis. It would preserve the same safety contract and ordinary fast path. It is not accepted syntax or current production behaviour.
+
 ## Main paths
 
 - `src/compiler_frontend/analysis/borrow_checker/`
+- `src/compiler_frontend/analysis/borrow_checker/problem/`
+- `src/compiler_frontend/analysis/borrow_checker/last_use/`
+- `src/compiler_frontend/analysis/borrow_checker/boracle/` (feature-gated developer path)
 
 ## Read next
 
 - `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` for the permanent reference solver and its opt-in developer lane
+- `docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` for the bounded operational oracle that executes a normalized problem and is compared against the reference solver
+- `docs/src/developer-docs/memory-management/checked-proof-budget-research/checked-proof-budget-research.mtf` for the future proof-budget proposal and constraints current research should preserve
 - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6

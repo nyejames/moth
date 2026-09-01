@@ -52,3 +52,5 @@ pub(crate) use options::FrontendOptions;
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};
 pub(crate) use prepared::PreparedModuleInput;
 pub(crate) use service::compile_module;
+#[cfg(feature = "boracle")]
+pub(crate) use service::{BoracleModuleInput, compile_module_for_boracle};

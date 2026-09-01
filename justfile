@@ -85,6 +85,32 @@ test-feature-matrix:
 feature-lane-check:
     cargo run --quiet --package xtask --bin xtask -- feature-lane-check
 
+boracle:
+    @echo "cargo fmt --check"
+    cargo fmt --check
+
+    @echo "clippy: boracle"
+    cargo clippy --target-dir target/boracle-clippy -p moth --all-targets --features boracle -- -D warnings
+
+    @echo "boracle normalized-problem tests"
+    cargo test -p moth --quiet borrow_problem -- --format terse
+
+    @echo "boracle last-use tests"
+    cargo test -p moth --quiet last_use -- --format terse
+
+    @echo "boracle solver, source-service and bounded operational oracle tests"
+    # One filter covers the static solver, the CLI source service and bounded oracle tests for
+    # execution, generation, reduction and metamorphic properties. The measured differential
+    # campaign runs separately in `just boracle-campaign`.
+    cargo test -p moth --quiet --features boracle boracle -- --format terse
+
+boracle-campaign:
+    @echo "clippy: boracle-campaign"
+    cargo clippy --target-dir target/boracle-campaign-clippy -p moth --all-targets --features boracle,boracle_campaign -- -D warnings
+
+    @echo "boracle generated differential campaign tests"
+    cargo test -p moth --quiet --features boracle,boracle_campaign boracle_generated_differential_campaign -- --format terse
+
 # The canonical test-honesty audit.
 #
 # The suite inventory runs first because the audit composes it: `xtask honesty-audit` runs the
@@ -171,4 +197,4 @@ ci-clippy-native:
     cargo clippy -V
 
     @echo "clippy: native host"
-    cargo clippy --target-dir target/ci-clippy-native --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --target-dir target/ci-clippy-native --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks -- -D warnings

@@ -1,16 +1,23 @@
 @boracle-reference-solver content as reference_content
+@boracle-operational-oracle content as operational_content
 @styles navbar, section, theme_head
 
-page_title #= "Boracle reference solver"
-page_description #= "Moth's permanent slow reference borrow solver and borrow-analysis laboratory."
+page_title #= "Boracle"
+page_description #= "Moth's permanent slow reference borrow solver, its borrow-analysis laboratory and the operational contract for its bounded oracle."
 page_head #= theme_head
 
 #[navbar]
 
 #[section, $md:
-    @../ (Memory management) / Boracle reference solver
+    @../ (Memory management) / Boracle
 
     Boracle is a developer-facing reference model of borrow legality, not a language feature and not a production fallback. It exists so borrow reasoning can be inspected, compared and extended outside the production checker.
+
+    This page carries two documents: the reference solver, and the operational contract for the bounded oracle that executes normalized problems.
+
+    @../checked-proof-budget-research (Checked proof-budget research) records how current experiments should preserve room for a future opt-in deep analysis tier without turning Boracle into a public fallback checker.
 ]
 
 #[section, reference_content]
+
+#[section, operational_content]
