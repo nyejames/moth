@@ -229,9 +229,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Collections]
             [: Supported]
-            [: Broad literal, mutation, builtin method, indexing, loop, result, fixed-capacity, AST/HIR, JS helper, and diagnostics coverage.]
+            [: Broad literal, mutation, builtin method, indexing, loop, result, fixed-capacity, fixed overflow and catch, growable handling rejection, AST/HIR, JS helper, and diagnostics coverage.]
             [: JS / HTML]
-            [: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections are distinct semantic types. Fixed capacities accept positive literals or bare visible [$html:<code>#Int</code>] constants. Collection [$html:<code>get</code>], [$html:<code>set</code>], [$html:<code>push</code>], and [$html:<code>remove</code>] are fallible today, and [$html:<code>length</code>] is infallible. The accepted contract makes growable [$html:<code>push</code>] infallible and leaves only fixed [$html:<code>push</code>] fallible; that split remains deferred until the collection-push plan lands.]
+            [: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections are distinct semantic types. Fixed capacities accept positive literals or bare visible [$html:<code>#Int</code>] constants. Growable [$html:<code>push</code>] is infallible, returns no value and rejects [$html:<code>catch</code>] and postfix [$html:<code>!</code>]; allocation exhaustion traps or aborts rather than entering [$html:<code>Error!</code>]. Fixed [$html:<code>push</code>] is fallible only when the collection is full and reuses the existing capacity error. [$html:<code>get</code>], [$html:<code>set</code>] and [$html:<code>remove</code>] stay fallible, and [$html:<code>length</code>] stays infallible. One source spelling resolves push from the receiver's collection shape in the AST, HIR lowers distinct call targets, and the JS runtime exposes separate growable and fixed helpers. HTML-Wasm collection lowering remains deferred and target-rejected.]
         ]
 
         [data:
@@ -629,9 +629,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Collection methods]
             [: Supported]
-            [: Broad JS helper, fallible get/set/push/remove, infallible length, removed indexed-write, bounds, and mutable-receiver coverage.]
+            [: Broad JS helper, split growable and fixed push helpers, fallible get/set/remove and fixed push, infallible growable push and length, growable handling rejection, fixed overflow, removed indexed-write, bounds, and mutable-receiver coverage.]
             [: JS / HTML]
-            [: Collection get, set, push, remove, and length are compiler-owned members. Mutating calls require explicit mutable receiver access, and fallible members require [$html:<code>!</code>] or [$html:<code>catch</code>] handling. One unified fallible push helper still serves both growable and fixed receivers; the accepted infallible growable push remains deferred.]
+            [: Collection get, set, push, remove, and length are compiler-owned members. Mutating calls, including both push forms, require explicit mutable receiver access. One source spelling [$html:<code>push(value)</code>] resolves from the receiver's collection shape: growable push is infallible and rejects [$html:<code>!</code>] or [$html:<code>catch</code>] handling, while fixed push is fallible only when the collection is full and requires [$html:<code>!</code>] or [$html:<code>catch</code>]. The JS runtime exposes separate growable and fixed helpers; HTML-Wasm collection lowering remains deferred.]
         ]
 
         [data:

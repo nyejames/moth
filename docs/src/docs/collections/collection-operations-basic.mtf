@@ -15,8 +15,8 @@ Change a stored item with `set`:
 
 Add and remove items with `push` and `remove`.
 
-Whether `push` can fail depends on the collection. A growable collection always
-has room, so its `push` cannot fail:
+Whether `push` can fail depends on the collection. A growable collection gains
+room as needed, so its `push` cannot fail:
 
 [codeblock, $code("moth"):
     growable ~{Int} = {10, 20}

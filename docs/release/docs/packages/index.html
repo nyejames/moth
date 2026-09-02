@@ -1029,7 +1029,7 @@ internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Project-local source-backed packages are scoped <code>+*.moth</code> support packages discovered structurally from the project source tree. The transitional <code>package_folders</code> config field may still be parsed and stored for migration compatibility, but canonical Stage 0 ignores it and it does not create package roots. The queued Project Config migration removes the field.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>project-root/
+    <p>Project-local source-backed packages are scoped <code>+*.moth</code> support packages discovered structurally from the project source tree. The retired <code>package_folders</code> config field no longer exists and is rejected; structural discovery is the only package-root source.</p><h3>Directory structure</h3><pre style=""><code class='codeblock'>project-root/
 ├── config.moth
 ├── src/
 │   ├── @site.moth
@@ -1417,13 +1417,6 @@ return collection;
 return collection.items;
 }
 
-function __moth_collection_fixed_capacity(collection) {
-if (Array.isArray(collection)) {
-return null;
-}
-return collection.fixedCapacity;
-}
-
 function __moth_collection_is_valid(collection) {
 if (Array.isArray(collection)) {
 return true;
@@ -1472,13 +1465,16 @@ items[index] = value;
 return { tag: "ok", value: null };
 }
 
-function __moth_collection_push(collection, value) {
-if (!__moth_collection_is_valid(collection)) {
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);
-const fixedCapacity = __moth_collection_fixed_capacity(collection);
-if (fixedCapacity !== null && items.length >= fixedCapacity) {
+if (items.length >= collection.fixedCapacity) {
 return __moth_error_result("Fixed collection capacity exceeded", 102);
 }
 items.push(value);

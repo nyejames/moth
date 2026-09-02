@@ -7,13 +7,49 @@
 ///
 /// WHAT: identifies collection operations that are language builtins, not user receiver methods.
 /// WHY: parser and lowering stages need one explicit operation surface for collection semantics.
+///
+/// Growable and fixed push are distinct identities sharing one source member (`push`): the
+/// receiver's canonical collection shape picks exactly one of them. Fixed push has a recoverable
+/// `Error!` path at capacity; growable push has no recoverable `Error!` path, though allocation
+/// exhaustion may still trap or abort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollectionBuiltinOp {
     Get,
     Set,
-    Push,
+    PushGrowable,
+    PushFixed,
     Remove,
     Length,
+}
+
+/// Each collection operation is characterized by static attributes:
+///
+/// - `requires_mutable_receiver`: borrow-checker mutability classification
+/// - `is_fallible`: whether the operation has a recoverable source-visible `Error!` path
+impl CollectionBuiltinOp {
+    /// Whether the receiver must be accessed mutably.
+    pub fn requires_mutable_receiver(self) -> bool {
+        // Operations that modify collection contents.
+        matches!(
+            self,
+            CollectionBuiltinOp::Set
+                | CollectionBuiltinOp::PushGrowable
+                | CollectionBuiltinOp::PushFixed
+                | CollectionBuiltinOp::Remove
+        )
+    }
+
+    /// Whether the operation has a recoverable source-visible `Error!` path and therefore requires
+    /// explicit fallible handling.
+    pub fn is_fallible(self) -> bool {
+        matches!(
+            self,
+            CollectionBuiltinOp::Get
+                | CollectionBuiltinOp::Set
+                | CollectionBuiltinOp::PushFixed
+                | CollectionBuiltinOp::Remove
+        )
+    }
 }
 
 pub(crate) mod casts;

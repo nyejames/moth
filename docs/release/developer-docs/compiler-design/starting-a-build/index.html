@@ -457,7 +457,7 @@ html <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter
              <td style=""><p> Builder</p></td> <td style=""><p> assembles successful artefacts into project-shaped outputs after compilation succeeds and maps stable source semantics to platform-specific artefacts</p></td>
         </tr>
             
-</table><p>The compiler does not wander the filesystem inventing a project. The builder does not re-parse <code>@page.moth</code> to rediscover <code>greet</code>. Each stage trusts the previous owner&#39;s facts. The command/build system owns target intent; source does not observe physical target identity. Builders expose stable capabilities and choose the physical target and artefact form.</p><h2>What can fail here</h2><ul><li>unknown command or unsupported builder capability</li><li>invalid config shape, forbidden config dependency or missing required input</li><li>queued config syntax that still differs from accepted end-state shape</li></ul><p>When the walkthrough mentions config, label <strong>current</strong> versus <strong>accepted</strong> if the progress matrix still shows transitional forms.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> an unrestricted host-language build script that can do anything the host process can do.</p><p><strong>Choice:</strong> command-selected capabilities and typed compile-time config.</p><p><strong>Benefit:</strong> the project contract stays visible and bounded before discovery. Tools can validate schema without executing arbitrary host code.</p><p><strong>Cost:</strong> users lose general host-code build hooks and must fit builder schemas.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> one self-contained <code>config.moth</code> and a specialised <code>ProjectGlobalsInterface</code>.</li><li><strong>Current implementation:</strong> label legacy flat config only where it changes the walkthrough.</li><li><strong>Queued work:</strong> <code>project-config-and-recursive-schemas-plan.md</code>, <code>build-configuration-values-and-project-globals-plan.md</code> and <code>entry-config-blocks-runtime-title-plan.md</code> own the direct split of this surface.</li><li><strong>Deferred or outside scope:</strong> config dependencies and a general Moth build script system.</li></ul><h2>Exit state</h2><p>You leave with a validated command, a capability surface, folded project values and <code>@project</code>. Next: which files become semantic modules, and how a folder becomes a graph.</p></section>
+</table><p>The compiler does not wander the filesystem inventing a project. The builder does not re-parse <code>@page.moth</code> to rediscover <code>greet</code>. Each stage trusts the previous owner&#39;s facts. The command/build system owns target intent; source does not observe physical target identity. Builders expose stable capabilities and choose the physical target and artefact form.</p><h2>What can fail here</h2><ul><li>unknown command or unsupported builder capability</li><li>invalid config shape, forbidden config dependency or missing required input</li><li>queued config syntax that still differs from accepted end-state shape</li></ul><p>When the walkthrough mentions config, label <strong>current</strong> versus <strong>accepted</strong> if the progress matrix still shows transitional forms.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> an unrestricted host-language build script that can do anything the host process can do.</p><p><strong>Choice:</strong> command-selected capabilities and typed compile-time config.</p><p><strong>Benefit:</strong> the project contract stays visible and bounded before discovery. Tools can validate schema without executing arbitrary host code.</p><p><strong>Cost:</strong> users lose general host-code build hooks and must fit builder schemas.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> one self-contained <code>config.moth</code> and a specialised <code>ProjectGlobalsInterface</code>.</li><li><strong>Implemented:</strong> the grouped <code>config.moth</code> contract (one required <code>project</code> record plus active builder sections) is implemented; the legacy flat config shape is deleted. The walkthrough below no longer needs flat-config caveats.</li><li><strong>Queued work:</strong> <code>build-configuration-values-and-project-globals-plan.md</code> and <code>entry-config-blocks-runtime-title-plan.md</code> own the remaining direct split of this surface.</li><li><strong>Deferred or outside scope:</strong> config dependencies and a general Moth build script system.</li></ul><h2>Exit state</h2><p>You leave with a validated command, a capability surface, folded project values and <code>@project</code>. Next: which files become semantic modules, and how a folder becomes a graph.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Previous</a> / <a href="../project-graphs-and-modules">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {
@@ -658,13 +658,6 @@ return collection;
 return collection.items;
 }
 
-function __moth_collection_fixed_capacity(collection) {
-if (Array.isArray(collection)) {
-return null;
-}
-return collection.fixedCapacity;
-}
-
 function __moth_collection_is_valid(collection) {
 if (Array.isArray(collection)) {
 return true;
@@ -713,13 +706,16 @@ items[index] = value;
 return { tag: "ok", value: null };
 }
 
-function __moth_collection_push(collection, value) {
-if (!__moth_collection_is_valid(collection)) {
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);
-const fixedCapacity = __moth_collection_fixed_capacity(collection);
-if (fixedCapacity !== null && items.length >= fixedCapacity) {
+if (items.length >= collection.fixedCapacity) {
 return __moth_error_result("Fixed collection capacity exceeded", 102);
 }
 items.push(value);

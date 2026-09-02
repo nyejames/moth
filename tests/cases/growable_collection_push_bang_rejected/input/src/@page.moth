@@ -1,0 +1,4 @@
+append || -> Error!:
+    values ~{Int} = {}
+    ~values.push(1)!
+;

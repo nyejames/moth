@@ -2,8 +2,10 @@ capacity #Int = 4
 Names as {capacity String}
 
 render_alias || -> String:
-    names Names = {"a"}
-    first = names.get(0) catch:
+    names ~Names = {"a"}
+    ~names.push("b") catch:
+    ;
+    first = names.get(1) catch:
         then ""
     ;
     len = names.length()

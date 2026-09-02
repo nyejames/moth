@@ -179,7 +179,7 @@ fn collection_helpers_use_expected_error_code_for_invalid_receiver() {
     let source = lower_minimal_module("main");
     let get = helper_source(&source, "__moth_collection_get");
     let set = helper_source(&source, "__moth_collection_set");
-    let push = helper_source(&source, "__moth_collection_push");
+    let push = helper_source(&source, "__moth_collection_push_fixed");
     let remove = helper_source(&source, "__moth_collection_remove");
 
     let expected_error = BuiltinErrorCode::CollectionExpectedOrderedCollection;
@@ -278,15 +278,23 @@ fn collection_set_returns_ok_after_write() {
     );
 }
 
-/// Verifies that `__moth_collection_push` returns a fallible carrier on success. [collection]
+/// Verifies that `__moth_collection_push_growable` pushes directly without a fallible carrier. [collection]
 #[test]
-fn collection_push_returns_ok_after_mutation() {
+fn collection_push_growable_pushes_directly_without_carrier() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__moth_collection_push");
+    let push = helper_source(&source, "__moth_collection_push_growable");
 
     assert!(
-        push.contains("items.push(value)") && push.contains("{ tag: \"ok\", value: null }"),
-        "__moth_collection_push must return a fallible-carrier success after pushing"
+        push.contains("collection.push(value);"),
+        "__moth_collection_push_growable must push the value directly onto the growable array"
+    );
+    assert!(
+        !push.contains("{ tag:") && !push.contains("__moth_error_result"),
+        "__moth_collection_push_growable must not build fallible result carriers"
+    );
+    assert!(
+        !push.contains("__moth_collection_is_") && !push.contains("fixedCapacity"),
+        "__moth_collection_push_growable must not validate receivers or consult fixed capacity"
     );
 }
 
@@ -338,68 +346,6 @@ fn collection_length_is_infallible_runtime_helper() {
     assert!(
         length.contains("return items.length;") && !length.contains("{ tag:"),
         "__moth_collection_length must return a plain length value"
-    );
-}
-
-/// Verifies that emitted `__moth_collection_push` calls are plain statements. [collection]
-#[test]
-fn collection_push_call_is_not_wrapped_with_result_propagate() {
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-
-    let push_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionPush;
-
-    let call_statement = statement(
-        1,
-        HirStatementKind::Call {
-            target: CallTarget::External(push_id),
-            args: vec![
-                expression(
-                    1,
-                    HirExpressionKind::Collection(vec![]),
-                    types.collection_int,
-                    RegionId(0),
-                    ValueKind::RValue,
-                ),
-                int_expression(2, 42, types.int, RegionId(0)),
-            ],
-            result: None,
-        },
-        1,
-    );
-
-    let block = HirBlock {
-        id: BlockId(0),
-        region: RegionId(0),
-        locals: vec![],
-        statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
-    };
-
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-
-    let module = build_module(&mut string_table, "main", vec![block], function, &[]);
-
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-    )
-    .expect("JS lowering should succeed");
-
-    assert!(
-        output.source.contains("__moth_collection_push(")
-            && !output
-                .source
-                .contains("__moth_result_propagate(__moth_collection_push("),
-        "__moth_collection_push host call must stay plain"
     );
 }
 
@@ -775,30 +721,6 @@ fn collection_items_extracts_from_fixed_wrapper() {
     );
 }
 
-/// Verifies that `__moth_collection_fixed_capacity` returns null for arrays. [fixed-collection]
-#[test]
-fn collection_fixed_capacity_returns_null_for_arrays() {
-    let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__moth_collection_fixed_capacity");
-
-    assert!(
-        helper.contains("Array.isArray(collection)") && helper.contains("return null;"),
-        "__moth_collection_fixed_capacity must return null for growable arrays"
-    );
-}
-
-/// Verifies that `__moth_collection_fixed_capacity` returns capacity for fixed wrappers. [fixed-collection]
-#[test]
-fn collection_fixed_capacity_returns_capacity_for_fixed() {
-    let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__moth_collection_fixed_capacity");
-
-    assert!(
-        helper.contains("return collection.fixedCapacity;"),
-        "__moth_collection_fixed_capacity must return capacity for fixed wrappers"
-    );
-}
-
 /// Verifies that `__moth_collection_is_valid` accepts arrays. [fixed-collection]
 #[test]
 fn collection_is_valid_accepts_arrays() {
@@ -826,24 +748,27 @@ fn collection_is_valid_accepts_fixed_wrappers() {
     );
 }
 
-/// Verifies that `__moth_collection_push` checks fixed capacity before pushing. [fixed-collection]
+/// Verifies that `__moth_collection_push_fixed` validates the branded wrapper and checks capacity before pushing. [fixed-collection]
 #[test]
-fn collection_push_checks_fixed_capacity() {
+fn collection_push_fixed_checks_capacity_before_pushing() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__moth_collection_push");
+    let push = helper_source(&source, "__moth_collection_push_fixed");
 
     assert!(
-        push.contains("__moth_collection_fixed_capacity(collection)")
-            && push.contains("items.length >= fixedCapacity"),
-        "__moth_collection_push must check fixed capacity before pushing"
+        push.contains("Array.isArray(collection)")
+            && push.contains("!__moth_collection_is_valid(collection)")
+            && push.contains("items.length >= collection.fixedCapacity")
+            && push.contains("items.push(value);")
+            && push.contains("{ tag: \"ok\", value: null }"),
+        "__moth_collection_push_fixed must validate the branded wrapper, check capacity, push, and return the ok carrier"
     );
 }
 
-/// Verifies that `__moth_collection_push` returns capacity exceeded error for fixed collections. [fixed-collection]
+/// Verifies that `__moth_collection_push_fixed` returns capacity exceeded error for fixed collections. [fixed-collection]
 #[test]
-fn collection_push_returns_capacity_exceeded_error() {
+fn collection_push_fixed_returns_capacity_exceeded_error() {
     let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__moth_collection_push");
+    let push = helper_source(&source, "__moth_collection_push_fixed");
 
     let expected_error = BuiltinErrorCode::CollectionFixedCapacityExceeded;
     let expected_message = expected_error.default_message();
@@ -852,7 +777,7 @@ fn collection_push_returns_capacity_exceeded_error() {
 
     assert!(
         push.contains(&expected),
-        "__moth_collection_push must return CollectionFixedCapacityExceeded when full"
+        "__moth_collection_push_fixed must return CollectionFixedCapacityExceeded when full"
     );
 }
 

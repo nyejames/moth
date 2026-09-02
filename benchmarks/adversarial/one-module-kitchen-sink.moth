@@ -101,8 +101,7 @@ build_points || -> {Point}:
     loop 0 to 8 |i|:
         x = i / 1.0
         y = x * x
-        ~points.push(Point(x, y)) catch:
-        ;
+        ~points.push(Point(x, y))
     ;
     return points
 ;

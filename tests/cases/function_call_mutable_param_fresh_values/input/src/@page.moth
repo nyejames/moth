@@ -19,8 +19,7 @@ mutate_template_string |value ~String| -> String:
 ;
 
 mutate_collection |values ~{Int}| -> Int:
-    ~values.push(4) catch:
-    ;
+    ~values.push(4)
     return values.length()
 ;
 

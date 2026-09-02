@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["fixed_collection_alias_success first=a length=1"]
+rendered_output_contains = ["fixed_collection_alias_success first=b length=2"]

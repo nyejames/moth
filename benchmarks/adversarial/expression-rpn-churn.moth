@@ -45,8 +45,7 @@ eval_tokens |tokens {Token}| -> Float:
     loop tokens |token|:
         if token.kind is:
             Push(value) =>
-                ~stack.push(value) catch:
-                ;
+                ~stack.push(value)
             Add =>
                 apply_binary(~stack, "add")
             Sub =>
@@ -84,8 +83,7 @@ apply_binary |stack ~{Float}, op_name String|:
             then 0.0
         ;
         result = compute_binary(a, b, op_name)
-        ~stack.push(result) catch:
-        ;
+        ~stack.push(result)
     ;
 ;
 
@@ -116,50 +114,34 @@ apply_neg |stack ~{Float}|:
         removed = ~stack.remove(0) catch:
             then 0.0
         ;
-        ~stack.push(0.0 - a) catch:
-        ;
+        ~stack.push(0.0 - a)
     ;
 ;
 
 -- Expression: ((3 + 4) * (5 - 2)) / 7
 build_expression_a || -> {Token}:
     tokens ~{Token} = {}
-    ~tokens.push(push(3.0)) catch:
-    ;
-    ~tokens.push(push(4.0)) catch:
-    ;
-    ~tokens.push(add_token()) catch:
-    ;
-    ~tokens.push(push(5.0)) catch:
-    ;
-    ~tokens.push(push(2.0)) catch:
-    ;
-    ~tokens.push(sub_token()) catch:
-    ;
-    ~tokens.push(mul_token()) catch:
-    ;
-    ~tokens.push(push(7.0)) catch:
-    ;
-    ~tokens.push(div_token()) catch:
-    ;
+    ~tokens.push(push(3.0))
+    ~tokens.push(push(4.0))
+    ~tokens.push(add_token())
+    ~tokens.push(push(5.0))
+    ~tokens.push(push(2.0))
+    ~tokens.push(sub_token())
+    ~tokens.push(mul_token())
+    ~tokens.push(push(7.0))
+    ~tokens.push(div_token())
     return tokens
 ;
 
 -- Expression: -(10 + 6) * 2
 build_expression_b || -> {Token}:
     tokens ~{Token} = {}
-    ~tokens.push(push(10.0)) catch:
-    ;
-    ~tokens.push(push(6.0)) catch:
-    ;
-    ~tokens.push(add_token()) catch:
-    ;
-    ~tokens.push(neg_token()) catch:
-    ;
-    ~tokens.push(push(2.0)) catch:
-    ;
-    ~tokens.push(mul_token()) catch:
-    ;
+    ~tokens.push(push(10.0))
+    ~tokens.push(push(6.0))
+    ~tokens.push(add_token())
+    ~tokens.push(neg_token())
+    ~tokens.push(push(2.0))
+    ~tokens.push(mul_token())
     return tokens
 ;
 
@@ -167,11 +149,9 @@ build_expression_b || -> {Token}:
 build_long_expression || -> {Token}:
     tokens ~{Token} = {}
     loop 1 to 20 |i|:
-        ~tokens.push(push(i / 1.0)) catch:
-        ;
+        ~tokens.push(push(i / 1.0))
         if i > 1:
-            ~tokens.push(add_token()) catch:
-            ;
+            ~tokens.push(add_token())
         ;
     ;
     return tokens

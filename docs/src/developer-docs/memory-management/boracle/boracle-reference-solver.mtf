@@ -795,6 +795,7 @@ Boracle should exploit path separation whenever the source cannot observe confli
 Example:
 
 [codeblock, $code("moth"):
+    items ~{String} = {"Priya"}
     shared = items
 
     if condition:

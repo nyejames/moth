@@ -614,7 +614,8 @@ cleanup-frontier analysis
     asks whether a surviving source can recreate a retained edge
 
 REC planning
-    benefits when static liveness avoids counting altogether</code></pre><p>Boracle owns only the reference borrow and last-use answers. Later systems own their own semantic decisions.</p><h2>Branches, joins and path separation</h2><p>Boracle should exploit path separation whenever the source cannot observe conflicting accesses on one execution path.</p><p>Example:</p><pre style=""><code class='codeblock'>shared <span class='moth-code-operator'>=</span> items
+    benefits when static liveness avoids counting altogether</code></pre><p>Boracle owns only the reference borrow and last-use answers. Later systems own their own semantic decisions.</p><h2>Branches, joins and path separation</h2><p>Boracle should exploit path separation whenever the source cannot observe conflicting accesses on one execution path.</p><p>Example:</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>}</span>
+shared <span class='moth-code-operator'>=</span> items
 
 <span class='moth-code-keyword'>if</span> condition<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>shared<span class='moth-code-delimiter'>)</span>
@@ -1106,13 +1107,6 @@ return collection;
 return collection.items;
 }
 
-function __moth_collection_fixed_capacity(collection) {
-if (Array.isArray(collection)) {
-return null;
-}
-return collection.fixedCapacity;
-}
-
 function __moth_collection_is_valid(collection) {
 if (Array.isArray(collection)) {
 return true;
@@ -1161,13 +1155,16 @@ items[index] = value;
 return { tag: "ok", value: null };
 }
 
-function __moth_collection_push(collection, value) {
-if (!__moth_collection_is_valid(collection)) {
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);
-const fixedCapacity = __moth_collection_fixed_capacity(collection);
-if (fixedCapacity !== null && items.length >= fixedCapacity) {
+if (items.length >= collection.fixedCapacity) {
 return __moth_error_result("Fixed collection capacity exceeded", 102);
 }
 items.push(value);

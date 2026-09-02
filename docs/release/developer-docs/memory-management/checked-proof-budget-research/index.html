@@ -675,13 +675,6 @@ return collection;
 return collection.items;
 }
 
-function __moth_collection_fixed_capacity(collection) {
-if (Array.isArray(collection)) {
-return null;
-}
-return collection.fixedCapacity;
-}
-
 function __moth_collection_is_valid(collection) {
 if (Array.isArray(collection)) {
 return true;
@@ -730,13 +723,16 @@ items[index] = value;
 return { tag: "ok", value: null };
 }
 
-function __moth_collection_push(collection, value) {
-if (!__moth_collection_is_valid(collection)) {
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);
-const fixedCapacity = __moth_collection_fixed_capacity(collection);
-if (fixedCapacity !== null && items.length >= fixedCapacity) {
+if (items.length >= collection.fixedCapacity) {
 return __moth_error_result("Fixed collection capacity exceeded", 102);
 }
 items.push(value);

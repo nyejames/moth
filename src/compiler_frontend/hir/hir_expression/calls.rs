@@ -103,23 +103,24 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         op: CollectionBuiltinOp,
         receiver: &Expression,
-        receiver_requires_mutable: bool,
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
-        let mut full_args = Vec::with_capacity(args.len() + 1);
-        if receiver_requires_mutable {
-            full_args.push(Self::mutable_call_argument(receiver.clone(), location));
+        let receiver_argument = if op.requires_mutable_receiver() {
+            Self::mutable_call_argument(receiver.clone(), location)
         } else {
-            full_args.push(Self::shared_call_argument(receiver.clone(), location));
-        }
+            Self::shared_call_argument(receiver.clone(), location)
+        };
+        let mut full_args = Vec::with_capacity(args.len() + 1);
+        full_args.push(receiver_argument);
         full_args.extend(args.iter().cloned());
 
         let id = match op {
             CollectionBuiltinOp::Get => ExternalFunctionId::CollectionGet,
             CollectionBuiltinOp::Set => ExternalFunctionId::CollectionSet,
-            CollectionBuiltinOp::Push => ExternalFunctionId::CollectionPush,
+            CollectionBuiltinOp::PushGrowable => ExternalFunctionId::CollectionPushGrowable,
+            CollectionBuiltinOp::PushFixed => ExternalFunctionId::CollectionPushFixed,
             CollectionBuiltinOp::Remove => ExternalFunctionId::CollectionRemove,
             CollectionBuiltinOp::Length => ExternalFunctionId::CollectionLength,
         };

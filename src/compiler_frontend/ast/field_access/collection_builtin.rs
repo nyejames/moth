@@ -1,6 +1,7 @@
 //! Collection builtin receiver-member parsing.
 //!
-//! WHAT: parses compiler-owned collection members (`get/set/push/remove/length`).
+//! WHAT: parses compiler-owned collection members (`get/set/push/remove/length`). Source `push`
+//! resolves to the growable or fixed identity from the receiver's canonical collection shape.
 //! WHY: collection builtin policy should stay separate from user field/method dispatch.
 
 use super::MemberStepContext;
@@ -41,14 +42,17 @@ const COLLECTION_LENGTH_NAME: &str = "length";
 //  Helpers
 // --------------------------
 
-fn collection_builtin_method_name(
+fn resolve_collection_builtin_op(
     member_name: StringId,
     string_table: &StringTable,
+    fixed_capacity: Option<usize>,
 ) -> Option<CollectionBuiltinOp> {
     match string_table.resolve(member_name) {
         COLLECTION_GET_NAME => Some(CollectionBuiltinOp::Get),
         COLLECTION_SET_NAME => Some(CollectionBuiltinOp::Set),
-        COLLECTION_PUSH_NAME => Some(CollectionBuiltinOp::Push),
+        // One source spelling `push`: the canonical receiver shape picks the identity.
+        COLLECTION_PUSH_NAME if fixed_capacity.is_some() => Some(CollectionBuiltinOp::PushFixed),
+        COLLECTION_PUSH_NAME => Some(CollectionBuiltinOp::PushGrowable),
         COLLECTION_REMOVE_NAME => Some(CollectionBuiltinOp::Remove),
         COLLECTION_LENGTH_NAME => Some(CollectionBuiltinOp::Length),
         _ => None,
@@ -64,16 +68,6 @@ fn fallible_collection_result(
     // first-class `Result` value. HIR consumes this carrier immediately while lowering the
     // handled call into explicit success/error edges.
     vec![type_interner.intern_fallible_carrier(ok_type_id, error_type.type_id)]
-}
-
-fn is_fallible_collection_builtin(builtin: CollectionBuiltinOp) -> bool {
-    matches!(
-        builtin,
-        CollectionBuiltinOp::Get
-            | CollectionBuiltinOp::Set
-            | CollectionBuiltinOp::Push
-            | CollectionBuiltinOp::Remove
-    )
 }
 
 // --------------------------
@@ -96,14 +90,20 @@ pub(super) fn parse_collection_builtin_member_typed(
         scope_context,
     } = context;
 
-    let Some(element_type_id) = type_interner
+    // One canonical shape query classifies the receiver: element type for arguments/results and
+    // fixed capacity for the push identity. Transparent aliases resolve to the same canonical
+    // shape, so they follow the same classification.
+    let Some(collection_shape) = type_interner
         .environment()
-        .collection_element_type(receiver_type_id)
+        .collection_shape(receiver_type_id)
     else {
         return Ok(None);
     };
+    let element_type_id = collection_shape.element_type;
+    let fixed_capacity = collection_shape.fixed_capacity;
 
-    let Some(builtin) = collection_builtin_method_name(member_name, string_table) else {
+    let Some(builtin) = resolve_collection_builtin_op(member_name, string_table, fixed_capacity)
+    else {
         return Ok(None);
     };
     let int_type_id = type_interner.builtins().int;
@@ -119,10 +119,7 @@ pub(super) fn parse_collection_builtin_member_typed(
         .into());
     }
 
-    let mutating_receiver_required = matches!(
-        builtin,
-        CollectionBuiltinOp::Set | CollectionBuiltinOp::Push | CollectionBuiltinOp::Remove
-    );
+    let mutating_receiver_required = builtin.requires_mutable_receiver();
 
     validate_receiver_access(
         receiver_node,
@@ -176,7 +173,7 @@ pub(super) fn parse_collection_builtin_member_typed(
             (args, result_type_ids)
         }
 
-        CollectionBuiltinOp::Push => {
+        CollectionBuiltinOp::PushGrowable => {
             let expected_type_ids = [element_type_id];
             let args = parse_builtin_method_args_typed(
                 token_stream,
@@ -187,6 +184,25 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &member_location,
                 string_table,
             )?;
+            // Growable push has no recoverable source-visible `Error!` path: it needs no error
+            // resolution or fallible carrier and produces no result. A stray `catch`/`!` suffix is
+            // rejected after the postfix chain by the shared non-fallible handling diagnostics.
+            (args, vec![])
+        }
+
+        CollectionBuiltinOp::PushFixed => {
+            let expected_type_ids = [element_type_id];
+            let args = parse_builtin_method_args_typed(
+                token_stream,
+                &member_name_text,
+                &expected_type_ids,
+                scope_context,
+                type_interner,
+                &member_location,
+                string_table,
+            )?;
+            // Fixed push can fail recoverably at capacity, so it keeps the existing fallible
+            // carrier bridge.
             let error_type =
                 resolve_builtin_error_type_typed(scope_context, &member_location, string_table)?;
             let result_type_ids =
@@ -241,11 +257,11 @@ pub(super) fn parse_collection_builtin_member_typed(
         .into());
     }
 
-    // Collection `get`, `set`, `push`, and `remove` produce fallible carriers, so the parser rejects raw
-    // values before HIR can mistake them for ordinary runtime data.
-    if is_fallible_collection_builtin(builtin)
-        && !token_stream_starts_fallible_handling_suffix(token_stream)
-    {
+    // Collection `get`, `set`, fixed `push`, and `remove` have recoverable source-visible `Error!`
+    // paths, so the parser rejects raw values before HIR can mistake them for ordinary runtime
+    // data. Growable push has no recoverable `Error!` path, so a suffix on it never reaches this
+    // check.
+    if builtin.is_fallible() && !token_stream_starts_fallible_handling_suffix(token_stream) {
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::UnhandledFallibleCall,
             Some(member_name),
@@ -260,7 +276,6 @@ pub(super) fn parse_collection_builtin_member_typed(
     let builtin_expression = Expression::collection_builtin_call_with_typed_arguments(
         receiver_expression,
         builtin,
-        mutating_receiver_required,
         normalize_call_arguments(&args),
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),

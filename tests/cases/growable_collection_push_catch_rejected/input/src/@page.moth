@@ -1,0 +1,3 @@
+values ~{Int} = {}
+~values.push(1) catch:
+;

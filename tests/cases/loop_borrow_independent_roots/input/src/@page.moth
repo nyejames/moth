@@ -3,10 +3,8 @@ other ~{Int} = {4, 5}
 copied ~= copy items
 
 loop items |item|:
-    ~other.push(item) catch:
-    ;
-    ~copied.push(item) catch:
-    ;
+    ~other.push(item)
+    ~copied.push(item)
 ;
 
 [:loop_borrow_independent_roots original=[items.length()] other=[other.length()] copied=[copied.length()]]

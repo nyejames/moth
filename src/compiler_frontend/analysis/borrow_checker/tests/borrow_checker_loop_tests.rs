@@ -35,8 +35,7 @@ fn collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() {
     let source = r#"
 items ~{Int} = {1, 2, 3}
 loop items |item|:
-    ~items.push(4) catch:
-    ;
+    ~items.push(4)
 ;
 "#;
     let (ast, mut string_table) = parse_single_file_ast(source);
@@ -52,8 +51,7 @@ loop items |item|:
 fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() {
     let source = r#"
 mutate |values ~{Int}|:
-    ~values.push(4) catch:
-    ;
+    ~values.push(4)
 ;
 items ~{Int} = {1, 2, 3}
 loop items |item|:
@@ -76,8 +74,7 @@ fn collection_loop_mutation_through_iterable_alias_reports_shared_mutable_confli
 items ~{Int} = {1, 2, 3}
 alias ~= items
 loop items |item|:
-    ~alias.push(4) catch:
-    ;
+    ~alias.push(4)
 ;
 "#;
     let (ast, mut string_table) = parse_single_file_ast(source);
@@ -96,8 +93,7 @@ outer ~{Int} = {1, 2, 3}
 inner ~{Int} = {4, 5, 6}
 loop outer |outer_item|:
     loop inner |inner_item|:
-        ~outer.push(7) catch:
-        ;
+        ~outer.push(7)
     ;
 ;
 "#;
@@ -117,8 +113,7 @@ outer ~{Int} = {1, 2, 3}
 inner ~{Int} = {4, 5, 6}
 loop outer |outer_item|:
     loop inner |inner_item|:
-        ~inner.push(7) catch:
-        ;
+        ~inner.push(7)
     ;
 ;
 "#;
@@ -138,8 +133,7 @@ fn collection_loop_mutation_after_exit_is_valid() {
 items ~{Int} = {1, 2, 3}
 loop items |item|:
 ;
-~items.push(4) catch:
-;
+~items.push(4)
 "#,
     );
 }
@@ -151,8 +145,7 @@ fn collection_loop_mutation_of_unrelated_root_is_valid() {
 items ~{Int} = {1, 2, 3}
 other ~{Int} = {4, 5}
 loop items |item|:
-    ~other.push(6) catch:
-    ;
+    ~other.push(6)
 ;
 "#,
     );
@@ -283,8 +276,7 @@ fn collection_loop_mutation_of_source_copy_is_valid() {
 items ~{Int} = {1, 2, 3}
 copied = copy items
 loop copied |item|:
-    ~items.push(4) catch:
-    ;
+    ~items.push(4)
 ;
 "#,
     );
@@ -318,8 +310,7 @@ items ~{String} = {"a"}
 shared = items
 loop 0 to 2 |round|:
     first = shared.get(0) catch then "missing"
-    ~items.push(first) catch:
-    ;
+    ~items.push(first)
 ;
 "#;
     let (ast, mut string_table) = parse_single_file_ast(source);
@@ -344,8 +335,7 @@ else
     if inner:
         inner_marker = 0
     else
-        ~items.push(4) catch:
-        ;
+        ~items.push(4)
     ;
 ;
 value = alias

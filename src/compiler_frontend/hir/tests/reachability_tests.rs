@@ -90,6 +90,47 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
 }
 
 #[test]
+fn reachable_collection_push_ids_remain_distinct() {
+    let growable_push = ExternalFunctionId::CollectionPushGrowable;
+    let fixed_push = ExternalFunctionId::CollectionPushFixed;
+    let growable_location = location_at(10, 4);
+    let fixed_location = location_at(10, 8);
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![
+                call_statement_at(
+                    0,
+                    CallTarget::External(growable_push),
+                    growable_location.clone(),
+                ),
+                call_statement_at(1, CallTarget::External(fixed_push), fixed_location.clone()),
+            ],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+
+    let reachability = collect_test_reachability(
+        &module,
+        &[module
+            .start_function
+            .expect("normal test module should have start")],
+    )
+    .expect("reachability should collect both collection push identities");
+
+    assert_reachability(&reachability, &[0], &[0], &[growable_push, fixed_push]);
+    assert_reachable_external_calls(
+        &reachability,
+        &[
+            (growable_push, HirNodeId(0), growable_location),
+            (fixed_push, HirNodeId(1), fixed_location),
+        ],
+    );
+}
+
+#[test]
 fn user_function_calls_make_transitive_functions_and_external_calls_reachable() {
     let external_function = ExternalFunctionId::Synthetic(200);
     let module = hir_module(
@@ -1315,7 +1356,8 @@ fn external_id_sort_key(id: &ExternalFunctionId) -> String {
         }
         ExternalFunctionId::CollectionGet => "builtin:collection_get".to_owned(),
         ExternalFunctionId::CollectionSet => "builtin:collection_set".to_owned(),
-        ExternalFunctionId::CollectionPush => "builtin:collection_push".to_owned(),
+        ExternalFunctionId::CollectionPushGrowable => "builtin:collection_push_growable".to_owned(),
+        ExternalFunctionId::CollectionPushFixed => "builtin:collection_push_fixed".to_owned(),
         ExternalFunctionId::CollectionRemove => "builtin:collection_remove".to_owned(),
         ExternalFunctionId::CollectionLength => "builtin:collection_length".to_owned(),
         ExternalFunctionId::Synthetic(id) => format!("synthetic:{id}"),

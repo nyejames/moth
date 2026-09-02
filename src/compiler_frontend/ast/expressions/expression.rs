@@ -660,7 +660,6 @@ impl Expression {
     pub(crate) fn collection_builtin_call_with_typed_arguments(
         receiver: Expression,
         op: CollectionBuiltinOp,
-        receiver_requires_mutable: bool,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
@@ -673,7 +672,6 @@ impl Expression {
             ExpressionKind::CollectionBuiltinCall {
                 receiver: Box::new(receiver),
                 op,
-                receiver_requires_mutable,
                 args,
                 result_type_ids,
                 location: location.clone(),
