@@ -1,1 +1,4 @@
-package_folders #= { "packages" }
+project #= |
+    name = "test_project",
+|
+html #= ||

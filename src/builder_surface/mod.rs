@@ -1,11 +1,11 @@
-//! Builder surface: package metadata, config keys, source kinds, and provider registries.
+//! Builder surface: package metadata, config schemas, source kinds, and provider registries.
 //!
 //! WHAT: defines builder surface identity for core packages, builder packages,
-//! source-backed packages, external import providers, config keys and source file kinds.
+//! source-backed packages, external import providers, config schemas and source file kinds.
 //! WHY: separates builder surface definition from frontend parsing and backend
 //! lowering so each stage has one clear responsibility.
 
-pub mod config_key_registry;
+pub mod config_schema;
 pub mod core_packages;
 pub mod definition;
 pub mod external_import_providers;

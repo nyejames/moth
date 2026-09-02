@@ -1,1 +1,4 @@
-package_folders #= "lib"
+project #= |
+    name = "test_project",
+|
+html #= ||

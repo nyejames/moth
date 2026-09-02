@@ -70,7 +70,7 @@ fn unknown_key_renders_authored_key() {
 
     assert_eq!(
         message,
-        "Unknown config key 'custom_key'. `config.moth` currently accepts only known project config keys. Helper declarations are not supported yet.",
+        "Unknown config key 'custom_key'. Top-level names must be `project`, a registered builder or tooling section, or a private helper constant.",
         "UnknownKey should render the exact authored key name"
     );
 }

@@ -1,5 +1,9 @@
-Defaults = |
-    entry_root String = "src",
+defaults #= |
+    entry_root = "src",
 |
 
-entry_root #= Defaults().entry_root
+project #= |
+    name = "test_project",
+    entry_root = defaults.entry_root,
+|
+html #= ||

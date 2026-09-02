@@ -233,7 +233,9 @@ fn dot_resolves_to_current_directory() {
     assert_eq!(resolved.project_dir, current);
     assert_eq!(
         resolved.project_name,
-        current.file_name().unwrap().to_str().unwrap()
+        super::target::package_identifier_from_display_name(
+            current.file_name().unwrap().to_str().unwrap()
+        )
     );
 }
 
@@ -321,23 +323,23 @@ fn project_name_defaults_overrides_or_trims() {
     let temp = tempfile::tempdir().unwrap();
     let current = temp.path().to_path_buf();
 
-    // An empty name defaults to the directory basename.
+    // An empty name defaults to the directory basename, sanitised to a package identifier.
     let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("")]);
     let resolved =
         resolve_project_target(Some(String::from("my-site")), &current, &mut prompt).unwrap();
-    assert_eq!(resolved.project_name, "my-site");
+    assert_eq!(resolved.project_name, "my_site");
 
-    // An explicit name overrides the basename.
+    // An explicit name overrides the basename and is sanitised the same way.
     let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("My Custom Site")]);
     let resolved =
         resolve_project_target(Some(String::from("my-site")), &current, &mut prompt).unwrap();
-    assert_eq!(resolved.project_name, "My Custom Site");
+    assert_eq!(resolved.project_name, "My_Custom_Site");
 
-    // A padded name is trimmed.
+    // A padded name is trimmed, then sanitised.
     let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("  Padded Name  ")]);
     let resolved =
         resolve_project_target(Some(String::from("dir")), &current, &mut prompt).unwrap();
-    assert_eq!(resolved.project_name, "Padded Name");
+    assert_eq!(resolved.project_name, "Padded_Name");
 }
 
 #[test]

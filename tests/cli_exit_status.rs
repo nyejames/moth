@@ -52,6 +52,17 @@ fn write_source(root: &std::path::Path, name: &str, source: &str) -> std::path::
     path
 }
 
+fn write_directory_html_project(root: &Path, page_source: &str) {
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("src should be created");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("config should be written");
+    fs::write(src.join("@page.moth"), page_source).expect("page source should be written");
+}
+
 #[test]
 fn valid_single_file_check_exits_successfully() {
     let root = tempdir().expect("temporary directory should be created");
@@ -94,11 +105,7 @@ fn warning_only_check_exits_successfully() {
 #[test]
 fn valid_project_build_exits_successfully() {
     let root = tempdir().expect("temporary directory should be created");
-    write_source(
-        root.path(),
-        "@page.moth",
-        "#[:<h1>Hello</h1>]\nentry = \".\"\n",
-    );
+    write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
 
     let output = run_moth(&[
         "build",
@@ -150,7 +157,7 @@ fn bare_single_file_build_writes_outputs_in_current_directory() {
 #[test]
 fn invalid_syntax_project_build_exits_with_failure() {
     let root = tempdir().expect("temporary directory should be created");
-    write_source(root.path(), "@page.moth", INVALID_SOURCE);
+    write_directory_html_project(root.path(), INVALID_SOURCE);
 
     let output = run_moth(&[
         "build",
@@ -163,11 +170,7 @@ fn invalid_syntax_project_build_exits_with_failure() {
 #[test]
 fn output_root_write_failure_exits_with_failure_without_benchmark_status() {
     let root = tempdir().expect("temporary directory should be created");
-    write_source(
-        root.path(),
-        "@page.moth",
-        "#[:<h1>Hello</h1>]\nentry = \".\"\n",
-    );
+    write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
     fs::write(root.path().join("dev"), b"occupied output root")
         .expect("output-root collision file should be written");
 
@@ -216,11 +219,7 @@ fn benchmark_status_record_is_emitted_once_for_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=0 warnings=0");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_source(
-        build_root.path(),
-        "@page.moth",
-        "#[:<h1>Hello</h1>]\nentry = \".\"\n",
-    );
+    write_directory_html_project(build_root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
     let build_path = build_root
         .path()
         .to_str()
@@ -242,7 +241,7 @@ fn benchmark_status_record_covers_warning_only_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=0 warnings=3");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_source(build_root.path(), "@page.moth", WARNING_SOURCE);
+    write_directory_html_project(build_root.path(), WARNING_SOURCE);
     let build_path = build_root
         .path()
         .to_str()
@@ -264,7 +263,7 @@ fn benchmark_status_record_covers_diagnosed_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=1 warnings=0");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_source(build_root.path(), "@page.moth", INVALID_SOURCE);
+    write_directory_html_project(build_root.path(), INVALID_SOURCE);
     let build_path = build_root
         .path()
         .to_str()

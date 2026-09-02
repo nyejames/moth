@@ -1,16 +1,19 @@
-entry_root #= "src"
-
--- Private key referencing earlier private key
-output_folder #= "release"
-dev_folder #= "dev"
-
--- Private key referencing explicit key
-project_name #= "test"
-author #= project_name
-
--- Explicit key referencing explicit key
+site_name #= "test"
 version #= "1.0.0"
-license #= version
 
--- Folded template scalar
-html_lang #= [: en]
+-- Explicit key referencing earlier private keys
+project #= |
+    name = site_name,
+    entry_root = "src",
+    version = version,
+    author = site_name,
+    license = version,
+|
+
+html #= |
+    dev_output = "dev",
+    release_output = "release",
+
+    -- Folded template scalar
+    html_lang = [: en],
+|

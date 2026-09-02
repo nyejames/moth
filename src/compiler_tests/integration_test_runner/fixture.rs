@@ -580,6 +580,10 @@ fn resolve_case_entry_path(
         return canonicalize_contained_entry(fixture_root, input_root, "@page.moth");
     }
 
+    if input_root.join("config.moth").is_file() {
+        return Ok(input_root.to_path_buf());
+    }
+
     Err(FixtureLoadError::path_boundary(format!(
         "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide @page.moth.",
         input_root.display(),

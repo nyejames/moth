@@ -1,7 +1,6 @@
-project #= "html"
-
-Label = |
-    text String,
+project #= |
+    name = "test_project",
+    entry_root = "src",
 |
 
 Label must CASTABLE_TO_STRING

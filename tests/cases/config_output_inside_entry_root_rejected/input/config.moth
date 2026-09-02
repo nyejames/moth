@@ -1,2 +1,2 @@
-entry_root #= "src"
-output_folder #= "src/assets"
+project #= | name = "test_project", entry_root = "src" |
+html #= | release_output = "src/assets" |

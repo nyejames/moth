@@ -1,4 +1,4 @@
-Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. The transitional `package_folders` config field may still be parsed and stored for migration compatibility, but canonical Stage 0 ignores it and it does not create package roots. The queued Project Config migration removes the field.
+Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. The retired `package_folders` config field no longer exists and is rejected; structural discovery is the only package-root source.
 
 ### Directory structure
 

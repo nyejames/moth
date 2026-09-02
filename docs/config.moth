@@ -1,14 +1,16 @@
-project #= "html"
-entry_root #= "src"
-dev_folder #= "dev"
-output_folder #= "release"
-page_url_style #= "trailing_slash"
-redirect_index_html #= true
-name #= "html_project"
-version #= "0.1.0"
-author #= ""
-license #= "MIT"
-
-origin #= "/moth"
-html_lang #= "en"
-html_title_postfix #= " | Moth"
+project #= |
+    name = "html_project",
+    entry_root = "src",
+    version = "0.1.0",
+    author = "",
+    license = "MIT",
+|
+html #= |
+    dev_output = "dev",
+    release_output = "release",
+    page_url_style = "trailing_slash",
+    redirect_index_html = true,
+    origin = "/moth",
+    html_lang = "en",
+    html_title_postfix = " | Moth",
+|

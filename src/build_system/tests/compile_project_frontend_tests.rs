@@ -74,7 +74,11 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
         .expect("should write blocked consumer");
     fs::write(
@@ -148,7 +152,11 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
         .expect("should write malformed entry");
 
@@ -210,7 +218,11 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     const PROJECT_NAME: &str = "phase4_demo_project";
     fs::create_dir_all(&dir).expect("should create project directory");
     fs::create_dir_all(&package_root).expect("should create package directory");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package_root.join("@mod.moth"),
@@ -391,7 +403,11 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
 
     let mut config = Config::new(dir.clone());
@@ -632,7 +648,11 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let second_package = dir.join("packages/second");
     fs::create_dir_all(&first_package).expect("should create first package");
     fs::create_dir_all(&second_package).expect("should create second package");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         first_package.join("@mod.moth"),
@@ -707,7 +727,11 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(dir.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(src.join("@page.moth"), "@broken run\nvalue = run()\n")
         .expect("should write blocked project consumer");
     fs::write(
@@ -773,7 +797,11 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         r#"shell #= [:<span>[$slot]</span>]
@@ -827,7 +855,11 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         r#"export:
@@ -1000,7 +1032,11 @@ fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("provider/@mod.moth"),
         r#"identity type T |value T| -> T:
@@ -1147,7 +1183,11 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("provider/@mod.moth"),
         r#"export:
@@ -1249,7 +1289,11 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("facade/provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("facade/provider/@mod.moth"),
         r#"export:
@@ -1691,7 +1735,11 @@ fn provider_created_package_registry_survives_into_module() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
         .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -1747,7 +1795,11 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
@@ -1806,7 +1858,11 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
     fs::write(
         dir.join("other.moth"),
@@ -1889,7 +1945,11 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@html canvas\npage_canvas_id #= canvas\nvalue = 1\n",
@@ -1960,7 +2020,11 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
         .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -2011,7 +2075,11 @@ fn linked_module_js_lowering_is_observed_separately() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let package_root = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@phase6helper helper\nvalue = helper()\n",
@@ -2257,7 +2325,11 @@ fn directory_project_discovers_multiple_entry_modules() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("page/@page.moth"), "x ~= 10\n").expect("should write page");
     fs::write(dir.join("layout/@layout.moth"), "y ~= 20\n").expect("should write layout");
 
@@ -2295,7 +2367,11 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("first")).expect("should create first module dir");
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("first/@a.moth"),
         "Item = |\n    shared Int,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
@@ -2373,7 +2449,11 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js draw as render\n@other run\nvalue = render()\nother_value = run()\n",
@@ -2421,7 +2501,11 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js as drawing\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
@@ -2465,7 +2549,11 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@a/use run_a\n@b/use run_b\nvalue_a = run_a()\nvalue_b = run_b()\n",
@@ -2519,7 +2607,11 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js make_widget, use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
@@ -2558,7 +2650,11 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@a/drawing.js make_widget\n@b/drawing.js use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
@@ -2599,8 +2695,11 @@ fn directory_project_rejects_missing_entry_root() {
     let dir = _temp.path().to_path_buf();
 
     // Config declares an entry_root that does not exist.
-    fs::write(dir.join("config.moth"), "entry_root #= \"nonexistent\"\n")
-        .expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"nonexistent\",\n|\n",
+    )
+    .expect("should write config");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -2665,7 +2764,11 @@ fn html_js_provider_namespace_binding_resolves() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js as drawing\nvalue = drawing.draw()\n",
@@ -2706,7 +2809,11 @@ fn html_js_provider_direct_selection_resolves() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js draw as render\nvalue = render()\n",
@@ -2747,7 +2854,11 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js Widget as Canvas, draw as render\nvalue = render()\n",
@@ -2788,7 +2899,11 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js make_canvas, fill_rect\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
@@ -2830,7 +2945,11 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
@@ -2880,7 +2999,11 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(
         dir.join("@page.moth"),
         "@drawing.js Canvas, get_canvas\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
@@ -2979,7 +3102,11 @@ fn diagnosed_provider_retains_independent_successful_module() {
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
-    fs::write(dir.join("config.moth"), "").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
         .expect("should write blocked consumer");
     fs::write(
@@ -3061,7 +3188,11 @@ fn source_package_warning_retained_by_frontend_outcome() {
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(dir.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),

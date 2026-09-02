@@ -420,14 +420,17 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
-        "@drawing.js draw\nvalue = draw()\n",
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
     )
-    .expect("should write page");
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
+        .expect("should write page");
     fs::write(
-        root.join("drawing.js"),
+        src.join("drawing.js"),
         "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 7; }\n",
     )
     .expect("should write js");
@@ -495,14 +498,20 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@drawing.js get_number\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
     fs::write(
-        root.join("drawing.js"),
+        src.join("drawing.js"),
         "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
@@ -534,14 +543,20 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@drawing.js get_number\nvalue = get_number()\nio.line([: [value]])\n",
     )
     .expect("should write page");
     fs::write(
-        root.join("drawing.js"),
+        src.join("drawing.js"),
         "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int\n */\nexport function getNumber() { return mothOk(7).value; }\n",
     )
     .expect("should write js");
@@ -567,14 +582,20 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@drawing.js get_number\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
     fs::write(
-        root.join("drawing.js"),
+        src.join("drawing.js"),
         "/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return { ok: true, value: 7 }; }\n",
     )
     .expect("should write js");
@@ -598,14 +619,20 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@drawing.js get_number\nunused || -> Int, Error!:\n    return get_number()!\n;\nvalue = 1\n",
     )
     .expect("should write page");
     fs::write(
-        root.join("drawing.js"),
+        src.join("drawing.js"),
         "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
@@ -646,9 +673,15 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         r#"@html canvas, get_canvas_context
 #[canvas:
   [$insert("id"):unused_canvas]
@@ -703,9 +736,15 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -775,9 +814,15 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join("config.moth"), "project #= \"html\"\n").expect("should write config");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("@page.moth"),
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
         "@html get_canvas_context\ndraw || -> String, Error!:\n    context = get_canvas_context(\"game_canvas\")!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -833,7 +878,11 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     let src_dir = root.join("src");
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(src_dir.join("@page.moth"), "value = 1\n").expect("should write homepage");
     fs::write(docs_dir.join("@page.moth"), "value = 2\n").expect("should write docs page");
 

@@ -1,19 +1,17 @@
-**Accepted deferred design.** This page defines the final grouped project-config contract. The current compiler still parses and stores the transitional flat `package_folders` field for migration compatibility, but canonical Stage 0 ignores it. See @../progress (Progress) for current support.
+**Implemented grouped config.** This page defines the grouped project-config contract, and the compiler implements it. `config.moth` authors one grouped `project` record plus builder sections such as `html`. Retired flat keys (`project #= "html"`, `dev_folder`, `output_folder` and `package_folders`) are rejected. Former top-level builder fields such as `origin` no longer configure the builder; unregistered names remain private helpers. Build-configuration [$html:<code>#Config</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] blocks remain queued. See @../progress (Progress) for current support.
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies or package resolution.
 
 ### Canonical config
 
 [codeblock, $code("moth"):
-    default_channel #= "alpha"
-
     project_metadata #= |
-        channel = default_channel,
+        channel = "alpha",
     |
 
     project #= |
         name = "moth_docs",
-        version #Config of String = "0.1.0",
+        version = "0.1.0",
         entry_root = "src",
         metadata = project_metadata,
     |
@@ -27,7 +25,7 @@
 ### Structure
 
 - One required open `project` const record provides stable project identity.
-- `project.name` is required and must be a valid package-style identifier.
+- `project.name` is required and must be a valid Moth project identifier.
 - Private helper constants declared before use are allowed.
 - Top-level builder and tooling section records are allowed.
 - All sections are folded, but only active sections are schema-validated.
@@ -40,9 +38,7 @@
 
 ### Direct project `#Config` fields
 
-A direct primitive or optional field of `project` may declare a build-config contract using `#Config of T`. Nested project fields cannot declare `#Config` contracts. The semantic type remains `T`; direct project fields only may use the qualifier.
-
-Accepted build-configuration value types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
+Queued. A later build-configuration-values plan will let a direct primitive or optional field of `project` declare `#Config of T`. Nested project fields cannot declare `#Config` contracts. The compiler does not accept `#Config` in `config.moth` yet.
 
 See @#build-inputs (Build configuration values) for the full source and CLI contract. See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the build-system authority and `@project` contract.
 

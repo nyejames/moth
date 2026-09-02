@@ -41,14 +41,17 @@ macro_rules! define_stable_reason_keys {
 
 define_stable_reason_keys! {
     InvalidConfigReason => {
-        @delegate(&InvalidConfigReason::InvalidPackageFolder { reason, .. } => reason.stable_reason_key());
         @delegate(&InvalidConfigReason::InvalidOutputFolder { reason, .. } => reason.stable_reason_key());
         &InvalidConfigReason::MissingKey => "invalid_config.missing_key",
+        &InvalidConfigReason::MissingConfigFile => "invalid_config.missing_config_file",
+        &InvalidConfigReason::MissingProjectRecord => "invalid_config.missing_project_record",
+        &InvalidConfigReason::MissingActiveBuilderSection { .. } => "invalid_config.missing_active_builder_section",
         &InvalidConfigReason::DuplicateKey => "invalid_config.duplicate_key",
         &InvalidConfigReason::FunctionUnsupported => "invalid_config.function_unsupported",
         &InvalidConfigReason::TraitDeclarationUnsupported => "invalid_config.trait_declaration_unsupported",
         &InvalidConfigReason::TraitConformanceUnsupported => "invalid_config.trait_conformance_unsupported",
         &InvalidConfigReason::TraitIncompatibilityUnsupported => "invalid_config.trait_incompatibility_unsupported",
+        &InvalidConfigReason::NamedTypeUnsupported => "invalid_config.named_type_unsupported",
         &InvalidConfigReason::MutableBindingUnsupported => "invalid_config.mutable_binding_unsupported",
         &InvalidConfigReason::PlainBindingUnsupported => "invalid_config.plain_binding_unsupported",
         &InvalidConfigReason::UnsupportedStatement => "invalid_config.unsupported_statement",
@@ -57,10 +60,10 @@ define_stable_reason_keys! {
         &InvalidConfigReason::UnsupportedScalarValue => "invalid_config.unsupported_scalar_value",
         &InvalidConfigReason::NotCompileTimeConstant => "invalid_config.not_compile_time_constant",
         &InvalidConfigReason::ValueCouldNotFold => "invalid_config.value_could_not_fold",
-        &InvalidConfigReason::UnsupportedPackageFoldersValue => "invalid_config.unsupported_package_folders_value",
-        &InvalidConfigReason::DuplicatePackageFolder { .. } => "invalid_config.duplicate_package_folder",
         &InvalidConfigReason::EmptyProjectSetting => "invalid_config.empty_project_setting",
         &InvalidConfigReason::UnknownKey { .. } => "invalid_config.unknown_key",
+        &InvalidConfigReason::UnknownRecordField { .. } => "invalid_config.unknown_record_field",
+        &InvalidConfigReason::MissingRequiredRecordField { .. } => "invalid_config.missing_required_record_field",
         &InvalidConfigReason::InvalidConfigValueShape { .. } => "invalid_config.invalid_config_value_shape",
         &InvalidConfigReason::InvalidProjectSettingValue { .. } => "invalid_config.invalid_project_setting_value",
         &InvalidConfigReason::MissingHtmlHomepage { .. } => "invalid_config.missing_html_homepage",
@@ -91,13 +94,6 @@ define_stable_reason_keys! {
     &InvalidOutputFolderReason::InvalidPathComponent => "invalid_config.invalid_output_folder.invalid_path_component",
     &InvalidOutputFolderReason::InsideOrEqualToEntryRoot => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
     &InvalidOutputFolderReason::ResolvesOutsideProjectRoot => "invalid_config.invalid_output_folder.resolves_outside_project_root",
-    },
-
-    InvalidPackageFolderReason => {
-    &InvalidPackageFolderReason::Empty => "invalid_config.invalid_package_folder.empty",
-    &InvalidPackageFolderReason::AbsolutePath => "invalid_config.invalid_package_folder.absolute_path",
-    &InvalidPackageFolderReason::ParentDirectorySegment => "invalid_config.invalid_package_folder.parent_directory_segment",
-    &InvalidPackageFolderReason::NestedPath => "invalid_config.invalid_package_folder.nested_path",
     },
 
     InvalidMutableAccessReason => {

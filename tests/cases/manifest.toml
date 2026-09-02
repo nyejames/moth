@@ -9079,24 +9079,24 @@ contract = "language.config.legacy_package_folder_missing_ignored"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_absolute_path_rejected"
-path = "config_package_folder_absolute_path_rejected"
-tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_absolute_path_rejected"
+id = "config_html_dev_output_absolute_path_rejected"
+path = "config_html_dev_output_absolute_path_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.html_dev_output_absolute_path_rejected"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_dotdot_rejected"
-path = "config_package_folder_dotdot_rejected"
-tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_parent_path_rejected"
+id = "config_html_dev_output_parent_path_rejected"
+path = "config_html_dev_output_parent_path_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.html_dev_output_parent_path_rejected"
 role = "primary"
 
 [[case]]
-id = "config_package_folder_duplicate_rejected"
-path = "config_package_folder_duplicate_rejected"
-tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_duplicate_rejected"
+id = "config_duplicate_html_section_rejected"
+path = "config_duplicate_html_section_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.config.duplicate_html_section_rejected"
 role = "primary"
 
 [[case]]
@@ -9104,13 +9104,6 @@ id = "config_package_folder_missing_default_ignored"
 path = "config_package_folder_missing_default_ignored"
 tags = ["integration", "config", "packages"]
 contract = "language.config.package_folder_missing_default_ignored_acceptance"
-role = "primary"
-
-[[case]]
-id = "config_package_folder_nested_path_rejected"
-path = "config_package_folder_nested_path_rejected"
-tags = ["integration", "config", "packages", "diagnostics"]
-contract = "language.config.package_folder_nested_path_rejected"
 role = "primary"
 
 [[case]]

@@ -1,2 +1,2 @@
-entry_root #= "src"
-dev_folder #= "../dev"
+project #= | name = "test_project", entry_root = "src" |
+html #= | dev_output = "../dev" |

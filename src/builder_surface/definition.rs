@@ -1,11 +1,13 @@
 //! Builder surface definition.
 //!
 //! WHAT: bundles the external packages and source-backed packages that a builder exposes,
-//! along with config keys, import providers and source file kinds.
+//! along with config schemas, import providers and source file kinds.
 //! WHY: builders provide both binding-backed package metadata and source-backed package roots;
 //!      the compiler needs both during different stages.
 
-use crate::builder_surface::config_key_registry::ProjectConfigKeyRegistry;
+use crate::builder_surface::config_schema::{
+    ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
+};
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
@@ -25,7 +27,7 @@ use std::path::PathBuf;
 pub struct BuilderSurface {
     pub binding_packages: ExternalPackageRegistry,
     pub source_packages: SourcePackageRegistry,
-    pub config_keys: ProjectConfigKeyRegistry,
+    pub config_schemas: ConfigSchemas,
     pub external_import_providers: ExternalImportProviderRegistry,
     pub external_import_cache: ExternalImportProviderCache,
     pub external_dependency_resolution_table: ExternalImportResolutionTable,
@@ -41,7 +43,6 @@ pub struct BuilderSurface {
 }
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
-const SUPPORTED_PROJECT_CONFIG_VALUES: &[&str] = &["html"];
 
 impl BuilderSurface {
     /// Builds a builder surface with mandatory compiler core packages and no source-backed packages.
@@ -51,25 +52,10 @@ impl BuilderSurface {
     /// WHY: user-facing optional core packages such as `@core/math` and `@core/text`
     /// must be explicit builder opt-ins.
     pub fn with_mandatory_core() -> Self {
-        let mut config_keys = ProjectConfigKeyRegistry::new();
-
-        // Core config keys are always accepted regardless of backend.
-        config_keys.register_core_closed_string_set("project", SUPPORTED_PROJECT_CONFIG_VALUES);
-        config_keys.register_core_string("entry_root");
-        config_keys.register_core_string("dev_folder");
-        config_keys.register_core_string("output_folder");
-        config_keys.register_core_int("template_const_loop_iteration_limit");
-        config_keys.register_core_string_collection("package_folders");
-        config_keys.register_core_string("name");
-        config_keys.register_core_string("project_name");
-        config_keys.register_core_string("version");
-        config_keys.register_core_string("author");
-        config_keys.register_core_string("license");
-
         Self {
             binding_packages: ExternalPackageRegistry::new(),
             source_packages: SourcePackageRegistry::default(),
-            config_keys,
+            config_schemas: ConfigSchemas::new(compiler_project_record_schema()),
             external_import_providers: ExternalImportProviderRegistry::empty(),
             external_import_cache: ExternalImportProviderCache::new(),
             external_dependency_resolution_table: ExternalImportResolutionTable::new(),
@@ -77,6 +63,13 @@ impl BuilderSurface {
             source_file_kinds: SourceFileKindRegistry::new(),
             implicit_template_scope_source_packages: BTreeSet::new(),
         }
+    }
+
+    /// Seals config schemas after the selected builder and tooling overlays finish registering.
+    pub fn finish_config_registration(&mut self) {
+        self.config_schemas
+            .validate()
+            .expect("builder config schemas are valid");
     }
 
     /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
@@ -113,4 +106,44 @@ impl BuilderSurface {
             .join(BUILTIN_SOURCE_PACKAGES_DIR)
             .join(prefix)
     }
+}
+
+/// The grouped `project #= |...|` record schema with compiler-owned fields only.
+///
+/// WHAT: `name` is required; `entry_root` defaults to `src`; remaining compiler-owned
+///       project fields stay optional. Additional authored metadata is preserved.
+/// WHY: compiler-owned project fields must stay off builder section schemas, and open
+///      metadata must survive for `@project`.
+fn compiler_project_record_schema() -> ConfigSchema {
+    let mut schema = ConfigSchema::new("project record", UnknownFieldPolicy::Preserve);
+    let root = schema.root();
+
+    schema
+        .register_field(root, ConfigSchemaField::string("name").required())
+        .expect("project schema is under construction");
+    schema
+        .register_field(
+            root,
+            ConfigSchemaField::string_with_default("entry_root", "src"),
+        )
+        .expect("project schema is under construction");
+    schema
+        .register_field(root, ConfigSchemaField::string("version"))
+        .expect("project schema is under construction");
+    schema
+        .register_field(root, ConfigSchemaField::string("author"))
+        .expect("project schema is under construction");
+    schema
+        .register_field(root, ConfigSchemaField::string("license"))
+        .expect("project schema is under construction");
+    schema
+        .register_field(
+            root,
+            ConfigSchemaField::int("template_const_loop_iteration_limit"),
+        )
+        .expect("project schema is under construction");
+    schema
+        .validate_and_freeze()
+        .expect("project schema is valid");
+    schema
 }

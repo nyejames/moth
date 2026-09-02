@@ -1,4 +1,8 @@
-project #= "html"
-entry_root #= "."
-dev_folder #= "dev"
-output_folder #= "release"
+project #= |
+    name = "external_js_imports",
+    entry_root = "src",
+|
+html #= |
+    dev_output = "dev",
+    release_output = "release",
+|

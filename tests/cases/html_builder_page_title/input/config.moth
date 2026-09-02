@@ -1,2 +1,7 @@
-html_title_prefix #= "Docs | "
-html_title_postfix #= " | Moth"
+project #= |
+    name = "test_project",
+|
+html #= |
+    html_title_prefix = "Docs | ",
+    html_title_postfix = " | Moth",
+|

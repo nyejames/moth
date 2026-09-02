@@ -85,7 +85,6 @@ fn directory_scope_ignores_legacy_package_folders() {
 
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
-    config.package_folders = vec![PathBuf::from("assets")];
 
     let scope = WatchScope::derive(&root, Some(&config), &output_dir);
 

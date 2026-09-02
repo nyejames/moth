@@ -34,7 +34,7 @@ IMPLEMENTATION_SCOPE: frontend header parsing, AST folding, module metadata, HTM
 - `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - delivered canonical module compilation and scoped packages, for the module graph
-- `docs/roadmap/plans/project-config-and-recursive-schemas-plan.md` for config schemas
+- delivered grouped recursive project and builder config schemas
 - `docs/roadmap/plans/build-configuration-values-and-project-globals-plan.md` for build configuration values and `@project`
 
 ## Accepted entry config design

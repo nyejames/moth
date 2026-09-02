@@ -1,4 +1,4 @@
-entry = "intro.md"
+entry = "src/intro.md"
 
 [backends.html]
 mode = "failure"

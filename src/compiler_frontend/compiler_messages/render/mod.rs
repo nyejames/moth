@@ -42,9 +42,8 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleOperandReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPackageFolderReason, InvalidPageMetadataReason, InvalidTemplateDirectiveReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
-    UnsupportedOperatorCategory,
+    InvalidPageMetadataReason, InvalidTemplateDirectiveReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;

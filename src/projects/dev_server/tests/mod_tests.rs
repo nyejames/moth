@@ -14,6 +14,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
+use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config, ProjectConfigError};
 use std::fs;
 
@@ -141,10 +142,13 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"preview\"\n")
-        .expect("should write config");
+    fs::write(
+        root.join(CONFIG_FILE_NAME),
+        "project #= |\n    name = \"docs\",\n|\nhtml #= |\n    dev_output = \"preview\",\n|\n",
+    )
+    .expect("should write config");
 
-    let builder = ProjectBuilder::new(Box::new(NoopBuilder));
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let resolved = resolve_dev_runtime_paths(&builder, &root, &[])
         .expect("directory output dir should resolve");
 
@@ -183,7 +187,7 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         }
         fs::write(
             root.join(CONFIG_FILE_NAME),
-            "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
         )
         .expect("should write config");
 
@@ -212,9 +216,13 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    fs::write(root.join(CONFIG_FILE_NAME), "dev_folder #= \"\"\n").expect("should write config");
+    fs::write(
+        root.join(CONFIG_FILE_NAME),
+        "html #= |\n    dev_output = \"\",\n|\n",
+    )
+    .expect("should write config");
 
-    let builder = ProjectBuilder::new(Box::new(NoopBuilder));
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let result = resolve_dev_runtime_paths(&builder, &root, &[]);
 
     assert!(

@@ -8,12 +8,14 @@
 //! compiler-owned, so this module composes no frontend stage itself.
 mod validation;
 
+use validation::ConfigApplyError;
 pub(crate) use validation::validate_directory_output_settings;
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::single_source_compilation::{
     ConfigCompilationRequest, compile_config_source,
 };
@@ -46,8 +48,8 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 
 /// Load and validate the project config from `config.moth` before compilation begins (Stage 0).
 ///
-/// Config files are optional. When present this compiles the source through the compiler's config
-/// service, then validates and applies all accepted settings directly to `config`.
+/// Directory projects require `config.moth`. Single-file compilation keeps its separate
+/// no-config policy because `entry_dir` is not a directory.
 pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
@@ -56,6 +58,17 @@ pub fn load_project_config(
     let config_path = config.config_file_path();
 
     if !config_path.exists() {
+        if config.entry_dir.is_dir() {
+            return Err(CompilerMessages::from_diagnostic(
+                config.config_diagnostic(
+                    "config.moth",
+                    InvalidConfigReason::MissingConfigFile,
+                    string_table,
+                ),
+                string_table.clone(),
+            ));
+        }
+
         return validate_directory_output_settings_if_needed(config, string_table);
     }
 
@@ -66,10 +79,11 @@ pub fn load_project_config(
 //  Internal Orchestration
 // -------------------------
 
-/// Compile `config.moth` and extract top-level constant declarations into the `Config` struct.
+/// Compile `config.moth` and apply folded top-level constant declarations to the `Config` struct.
 ///
 /// WHY: config uses normal Moth syntax, so Stage 0 hands the source to the compiler's config
-/// compilation service and then applies a dedicated config-only validation pass to folded values.
+/// compilation service and then applies a dedicated config-only validation pass to the folded
+/// declarations it returns.
 pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
@@ -100,15 +114,21 @@ pub(crate) fn compile_project_config_file(
         string_table,
     )?;
 
-    // 2. Validate and apply the folded AST to the live Config object.
     let mut errors = Vec::new();
-    if let Err(mut validation_errors) = validation::validate_and_apply_config_ast(
+    // 2. Validate and apply the folded declarations to the live Config object.
+    match validation::validate_and_apply_config_declarations(
         config,
         &compiled_config,
-        &services.frontend_surface.config_keys,
+        &services.frontend_surface.config_schemas,
         string_table,
     ) {
-        errors.append(&mut validation_errors);
+        Ok(()) => {}
+        Err(ConfigApplyError::Diagnostics(mut validation_errors)) => {
+            errors.append(&mut validation_errors);
+        }
+        Err(ConfigApplyError::Compiler(error)) => {
+            return Err(CompilerMessages::from_error(error, string_table.clone()));
+        }
     }
 
     // 3. Validate directory output settings after all config values are applied.

@@ -1,2 +1,6 @@
 helper #= "src"
-entry_root #= helper
+project #= |
+    name = "test_project",
+    entry_root = helper,
+|
+html #= ||

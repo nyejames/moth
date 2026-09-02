@@ -1,1 +1,6 @@
-origin #= "/mysite"
+project #= |
+    name = "test_project",
+|
+html #= |
+    origin = "/mysite",
+|

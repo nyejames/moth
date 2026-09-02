@@ -37,11 +37,11 @@ pub fn resolve_project_target(
     let name_input = prompt.ask(&format!(
         "Project name (press Enter to use {default_name}): "
     ))?;
-    let project_name = if name_input.trim().is_empty() {
-        default_name
+    let project_name = package_identifier_from_display_name(if name_input.trim().is_empty() {
+        &default_name
     } else {
-        name_input.trim().to_owned()
-    };
+        name_input.trim()
+    });
 
     Ok(ResolvedProjectTarget {
         project_dir: resolved_dir,
@@ -238,6 +238,41 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
     }
 
     result
+}
+
+/// Convert a directory or prompt name into a `project.name` package identifier.
+///
+/// WHAT: keeps letters, digits and underscores; every other run of characters
+/// becomes one underscore. Names that would start with a digit or be empty
+/// after sanitising get a `project` prefix.
+/// WHY: `config.moth` requires `project.name` to be a valid Moth project identifier,
+/// so `moth new` must not write hyphenated or spaced names that fail the first build.
+pub(super) fn package_identifier_from_display_name(name: &str) -> String {
+    let mut identifier = String::new();
+    let mut pending_separator = false;
+
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            if pending_separator && !identifier.is_empty() {
+                identifier.push('_');
+            }
+            pending_separator = false;
+            identifier.push(character);
+        } else {
+            pending_separator = true;
+        }
+    }
+
+    if identifier.is_empty()
+        || identifier
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+    {
+        identifier.insert_str(0, "project_");
+    }
+
+    identifier
 }
 
 fn is_directory_non_empty(path: &Path) -> bool {

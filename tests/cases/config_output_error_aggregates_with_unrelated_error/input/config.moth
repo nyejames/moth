@@ -1,3 +1,6 @@
-entry_root #= "src"
-dev_folder #= "../dev"
-helper #= "not a supported config key"
+project #= |
+    entry_root = "src",
+|
+html #= |
+    dev_output = "../dev",
+|

@@ -16,7 +16,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
-use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::folded_value::{
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
+};
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
@@ -1065,9 +1067,7 @@ fn wasm_directory_build_preserves_nested_routes() {
 fn builder_rejects_invalid_origin_config() {
     let builder = HtmlProjectBuilder::new();
     let mut config = Config::new(PathBuf::from("."));
-    config
-        .settings
-        .insert(String::from("origin"), String::from("not-a-slash"));
+    config.html_section.origin = Some(String::from("not-a-slash"));
 
     let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
     let messages = match result {
@@ -1089,5 +1089,70 @@ fn builder_rejects_invalid_origin_config() {
             .string_table
             .resolve(*expected)
             .contains("starts with '/'")
+    );
+}
+
+#[test]
+fn html_builder_registers_closed_html_section_schema() {
+    use crate::builder_surface::config_schema::UnknownFieldPolicy;
+
+    let surface = HtmlProjectBuilder::new().frontend_surface();
+    let html_section = surface
+        .config_schemas
+        .project_section("html")
+        .expect("HTML builder registers an html section");
+    assert!(
+        html_section.required,
+        "the HTML builder section is required"
+    );
+    let html = &html_section.schema;
+    let html_root = html.node(html.root());
+    assert_eq!(html_root.unknown_fields, UnknownFieldPolicy::Reject);
+
+    let html_names: Vec<&str> = html_root
+        .field_ids()
+        .iter()
+        .map(|field_id| html.field(*field_id).name)
+        .collect();
+    assert!(
+        html_names.contains(&"origin") && html_names.contains(&"page_url_style"),
+        "HTML section must declare builder-owned fields, got {html_names:?}"
+    );
+
+    let section_field = |name: &str| {
+        html_root
+            .field_ids()
+            .iter()
+            .map(|field_id| html.field(*field_id))
+            .find(|field| field.name == name)
+            .unwrap_or_else(|| panic!("HTML section must declare '{name}', got {html_names:?}"))
+    };
+
+    // The builder owns the output roots on its section, with the accepted defaults.
+    let dev_output = section_field("dev_output");
+    let release_output = section_field("release_output");
+    assert_eq!(
+        dev_output.default,
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(
+            "dev".to_owned()
+        )))
+    );
+    assert_eq!(
+        release_output.default,
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(
+            "release".to_owned()
+        )))
+    );
+
+    let project = surface.config_schemas.project();
+    let project_names: Vec<&str> = project
+        .node(project.root())
+        .field_ids()
+        .iter()
+        .map(|field_id| project.field(*field_id).name)
+        .collect();
+    assert!(
+        !project_names.contains(&"origin") && !project_names.contains(&"page_url_style"),
+        "compiler-owned project schema must not own HTML fields, got {project_names:?}"
     );
 }

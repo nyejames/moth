@@ -16,6 +16,18 @@ pub(crate) fn invalid_config_message(
 
     match reason {
         InvalidConfigReason::MissingKey => "Config constant is missing a key name.".to_owned(),
+        InvalidConfigReason::MissingConfigFile => {
+            "Directory projects require a `config.moth` file at the project root.".to_owned()
+        }
+        InvalidConfigReason::MissingProjectRecord => {
+            "`config.moth` requires exactly one grouped `project` record.".to_owned()
+        }
+        InvalidConfigReason::MissingActiveBuilderSection { section } => {
+            format!(
+                "`config.moth` requires the active builder section '{}', even when it is empty.",
+                string_table.resolve(*section)
+            )
+        }
         InvalidConfigReason::DuplicateKey => {
             if let Some(key_name) = key_name {
                 format!("Duplicate config key '{key_name}' found. Each config key must be unique.")
@@ -40,6 +52,9 @@ pub(crate) fn invalid_config_message(
         }
         InvalidConfigReason::TraitIncompatibilityUnsupported => {
             "`config.moth` does not support trait incompatibility declarations. Use ordinary source files for trait metadata.".to_owned()
+        }
+        InvalidConfigReason::NamedTypeUnsupported => {
+            "`config.moth` cannot project named structs, choices or type aliases as folded values. Declare record-valued helpers as anonymous const records first, then reference them by name.".to_owned()
         }
         InvalidConfigReason::MutableBindingUnsupported => {
             "`config.moth` settings must be immutable constant declarations. Use `name #= value`.".to_owned()
@@ -71,22 +86,22 @@ pub(crate) fn invalid_config_message(
                 "Config value '{key_label}' could not be fully evaluated at compile time. Config declarations cannot depend on runtime evaluation."
             )
         }
-        InvalidConfigReason::UnsupportedPackageFoldersValue => {
-            "Unsupported value in 'package_folders'. Use a string folder name or a collection of string folder names.".to_owned()
-        }
-        InvalidConfigReason::DuplicatePackageFolder { folder } => format!(
-            "Duplicate 'package_folders' entries are not allowed: {}",
-            string_table.resolve(*folder)
-        ),
-        InvalidConfigReason::InvalidPackageFolder { folder, reason } => {
-            invalid_package_folder_message(*folder, *reason, string_table)
-        }
         InvalidConfigReason::EmptyProjectSetting => {
             format!("Config setting '{key_label}' cannot be empty.")
         }
         InvalidConfigReason::UnknownKey { key } => format!(
-            "Unknown config key '{}'. `config.moth` currently accepts only known project config keys. Helper declarations are not supported yet.",
+            "Unknown config key '{}'. Top-level names must be `project`, a registered builder or tooling section, or a private helper constant.",
             string_table.resolve(*key)
+        ),
+        InvalidConfigReason::UnknownRecordField { record, field } => format!(
+            "Unknown field '{}' in config record '{}'.",
+            string_table.resolve(*field),
+            string_table.resolve(*record)
+        ),
+        InvalidConfigReason::MissingRequiredRecordField { record, field } => format!(
+            "Config record '{}' requires field '{}'.",
+            string_table.resolve(*record),
+            string_table.resolve(*field)
         ),
         InvalidConfigReason::InvalidConfigValueShape { expected } => format!(
             "Invalid value shape for config constant '{key_label}'. Expected {}.",
@@ -232,38 +247,6 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*active_builder),
             string_table.resolve(*active_profile),
         ),
-    }
-}
-
-fn invalid_package_folder_message(
-    folder: Option<StringId>,
-    reason: InvalidPackageFolderReason,
-    string_table: &StringTable,
-) -> String {
-    let folder_name = folder.map(|folder| string_table.resolve(folder).to_owned());
-
-    match reason {
-        InvalidPackageFolderReason::Empty => {
-            "Invalid 'package_folders' entry. Package folders cannot be empty.".to_owned()
-        }
-        InvalidPackageFolderReason::AbsolutePath => {
-            let folder_name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
-            format!(
-                "Invalid 'package_folders' entry '{folder_name}'. Package folders must be relative to the project root."
-            )
-        }
-        InvalidPackageFolderReason::ParentDirectorySegment => {
-            let folder_name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
-            format!(
-                "Invalid 'package_folders' entry '{folder_name}'. Parent-directory segments ('..') are not allowed."
-            )
-        }
-        InvalidPackageFolderReason::NestedPath => {
-            let folder_name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
-            format!(
-                "Invalid 'package_folders' entry '{folder_name}'. Package folders must be a single top-level folder name such as \"lib\"."
-            )
-        }
     }
 }
 

@@ -1,2 +1,5 @@
-project #= "html"
-entry_root #= "."
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= ||

@@ -92,8 +92,11 @@ fn config_ast_timers_use_dedicated_identities() {
     let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n")
-        .expect("should write config file");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -141,7 +144,11 @@ fn check_retains_source_package_warning() {
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("+package.moth"),
@@ -195,7 +202,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
         }
         fs::write(
             root.join("config.moth"),
-            "entry_root #= \"src\"\ndev_folder #= \"dev\"\noutput_folder #= \"release\"\n",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"dev\",\n    release_output = \"release\",\n|\n",
         )
         .expect("should write config");
         fs::write(source_root.join("@page.moth"), "#[:<h1>Check</h1>]\n")
@@ -228,15 +235,18 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
 /// Stable source-facing identity for one frontend diagnostic.
 type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 
-/// Create a directory project whose `@page.moth` holds `source`.
-///
-/// WHAT: returns an unmanaged temp project root containing only the authored source file.
-/// WHY: the parity test reuses one project shape for both `execute_check` and `build_project`.
+/// Create a directory project whose `src/@page.moth` holds `source`.
 fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
-
-    fs::write(root.join("@page.moth"), source).expect("should write @page.moth source");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
     (temp, root)
 }
 
@@ -306,17 +316,17 @@ if value is:
         "warning fixture should not produce frontend errors"
     );
 
-    // `check` is a no-artifact overlay: it must not create dev/release/index.html and must leave
-    // the project root holding only the authored source file.
     assert_path_missing(&warning_root.join("dev"));
     assert_path_missing(&warning_root.join("release"));
     assert_path_missing(&warning_root.join("index.html"));
-    assert_eq!(
-        fs::read_dir(&warning_root)
-            .expect("should read warning project root")
-            .count(),
-        1,
-        "check should leave only the authored source file in the project root"
+    let remaining: Vec<_> = fs::read_dir(&warning_root)
+        .expect("should read warning project root")
+        .map(|entry| entry.expect("dirent").file_name())
+        .collect();
+    assert!(
+        remaining.iter().any(|name| name == "config.moth")
+            && remaining.iter().any(|name| name == "src"),
+        "check should leave the authored config and source tree, got {remaining:?}"
     );
 
     let build_warning_result = build_project(

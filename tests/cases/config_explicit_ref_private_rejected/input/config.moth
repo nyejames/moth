@@ -1,2 +1,8 @@
 helper = "src"
-dev_folder #= helper
+
+project #= |
+    name = "test_project",
+|
+html #= |
+    dev_output = helper,
+|

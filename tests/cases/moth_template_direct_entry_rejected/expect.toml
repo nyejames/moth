@@ -1,4 +1,4 @@
-entry = "intro.mtf"
+entry = "src/intro.mtf"
 
 [backends.html]
 mode = "failure"

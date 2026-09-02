@@ -186,7 +186,7 @@ html #= |
 
 The open `project` record is required.
 
-`project.name` is required, must be a valid package-style identifier and provides stable project identity. It is not inferred from the checkout directory.
+`project.name` is required, must be a valid Moth project identifier and provides stable project identity. It is not inferred from the checkout directory.
 
 Compiler-owned project fields are strictly schema-validated. Additional folded metadata is allowed.
 

@@ -1,4 +1,7 @@
-project #= "html"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
 
 DISPLAY_TEXT must:
     display |This| -> String

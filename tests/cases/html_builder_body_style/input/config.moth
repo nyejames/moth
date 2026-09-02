@@ -1,2 +1,7 @@
-entry_root #= "src"
-html_body_style #= "margin: 0;"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= |
+    html_body_style = "margin: 0;",
+|

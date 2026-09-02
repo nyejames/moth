@@ -1,1 +1,4 @@
-project #= "html"
+project #= |
+    name = "test_project",
+|
+html #= ||

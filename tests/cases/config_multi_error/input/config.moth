@@ -1,5 +1,10 @@
-entry_root #= "src"
-entry_root #= "pages"
-dev_folder #= "/invalid/absolute/path"
-output_folder #= "release"
-output_folder #= "dist"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= ||
+project #= |
+    name = "pages_project",
+    entry_root = "pages",
+|
+html #= ||

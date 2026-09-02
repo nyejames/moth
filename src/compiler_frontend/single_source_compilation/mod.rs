@@ -1,15 +1,15 @@
 //! Compiler-owned services for source that folds to values instead of becoming a module.
 //!
 //! WHAT: the two named short compiler paths — project config compilation and direct Moth template
-//!       compilation — each owning its whole stage sequence and stopping at folded AST values.
+//!       compilation — each owning its whole stage sequence and stopping at folded values.
 //! WHY:  both callers legitimately need less than canonical module compilation. Neither exists so
 //!       that build or project code may reach raw stage functions: the compiler sequences
 //!       tokenization, declaration-shell preparation, interface binding, local declaration ordering
 //!       and AST semantics, and hands back only the folded result its caller consumes.
 //!
 //! # What this module owns
-//! - [`config`]: the `config.moth` stage sequence, its dialect surface rules and its authored key
-//!   locations
+//! - [`config`]: the `config.moth` stage sequence, its dialect surface rules and its folded
+//!   declaration output
 //! - [`moth_template`]: the direct `.mtf` stage sequence and the folded `content` constant
 //!
 //! # What this module does NOT own
@@ -24,7 +24,9 @@
 mod config;
 mod moth_template;
 
-pub(crate) use config::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
+pub(crate) use config::{
+    CompiledConfigSource, ConfigCompilationRequest, FoldedConfigDeclaration, compile_config_source,
+};
 pub(crate) use moth_template::{
     MothTemplateCompilationRequest, MothTemplateFileValueBundle, compile_moth_template_source,
 };

@@ -1,3 +1,7 @@
-project #= "html"
-entry_root #= "src"
-output_folder #= "release"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= |
+    release_output = "release",
+|

@@ -173,7 +173,7 @@ fn end_to_end_force_overwrites_scaffold_owned_files_only() {
     assert!(result.is_ok(), "expected success, got: {result:?}");
 
     let config_content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
-    assert!(config_content.contains("name #= "));
+    assert!(config_content.contains("name = \""));
 
     let user_content = fs::read_to_string(project_dir.join("user-file.txt")).unwrap();
     assert_eq!(user_content, "keep me");
@@ -191,23 +191,18 @@ fn creates_full_default_scaffold_and_reports_every_path() {
     // Every scaffold-owned path exists on disk.
     assert!(project_dir.join("config.moth").exists());
     assert!(project_dir.join("src/@page.moth").exists());
-    assert!(project_dir.join("lib").exists());
+    assert!(!project_dir.join("lib").exists());
     assert!(!project_dir.join("dev/.moth_manifest").exists());
     assert!(!project_dir.join("release/.moth_manifest").exists());
     assert!(project_dir.join(".gitignore").exists());
 
-    // The default scaffold creates every path and replaces, updates, or skips nothing.
     assert!(report.created.contains(&PathBuf::from("config.moth")));
+    assert!(report.created.contains(&PathBuf::from("src")));
     assert!(report.created.contains(&PathBuf::from("src/@page.moth")));
-    assert!(report.created.contains(&PathBuf::from("lib")));
+    assert!(!report.created.contains(&PathBuf::from("lib")));
     assert!(report.created.contains(&PathBuf::from(".gitignore")));
     assert!(report.replaced.is_empty());
     assert!(report.updated.is_empty());
-    assert!(report.skipped.is_empty());
-
-    // The lib directory is created empty.
-    let mut entries = fs::read_dir(project_dir.join("lib")).unwrap();
-    assert!(entries.next().is_none());
 }
 
 #[test]
@@ -321,7 +316,7 @@ fn project_name_is_escaped_in_config() {
     write_scaffold(&target, false, &mut prompt).unwrap();
 
     let content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
-    assert!(content.contains(r#"name #= "Say \"hello\"\\back""#));
+    assert!(content.contains(r#"name = "Say \"hello\"\\back","#));
 }
 
 #[test]

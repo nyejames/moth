@@ -1,4 +1,5 @@
 # Moth Roadmap
+
 This is the main todo list and future design / implementation roadmap for Moth.
 
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
@@ -9,14 +10,8 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 # Plans
 
-## Active implementation work
-
-None.
-
-## Queued implementation chain
-
-- [Project config and recursive schemas](./plans/project-config-and-recursive-schemas-plan.md)
 - [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md)
+- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md) — Queued independently; activate under Active implementation work when implementation starts
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
@@ -25,26 +20,15 @@ None.
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
 - [Never return contracts](./plans/never-return-contract-plan.md)
+- Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
-
-## Independent queued implementation work
-
-- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md) — Queued independently; activate under Active implementation work when implementation starts
-
-The roadmap order is the implementation sequence. Individual plans may state their immediate blockers, but they do not redefine the full chain.
-
-The package dependency plan is design-gated. Its implementation remains blocked until its declaration, alias, resolver and future package-manager boundaries are reviewed and accepted.
-
-Compiler diagnostics improvements are paused until the diagnostics and tokens layout plan completes; their position immediately after that plan makes the dependency explicit. The queued implementation chain remains ordered by hard dependency.
-
-Do not mark a plan active unless its own status block says it is active.
 
 ## Adding and maintaining plans
 
 This roadmap owns the order. A plan owns its own work and nothing else.
 
-**Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life; the capability it delivers is durable. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
+**Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
 
 **Do not pin a commit before work starts.** No baseline SHA in a status block. A plan that has not begun has nothing to be a baseline for, and the pin is stale by the time anyone reads it. Establish the baseline when the plan activates and keep it in the working notes, not the committed file. Referring to a specific commit is fine once work is underway or complete, where it records what actually happened.
 
@@ -58,15 +42,11 @@ This roadmap owns the order. A plan owns its own work and nothing else.
 
 # Deferred design and follow-ups
 
-These items are genuinely deferred. They are not current implementation work. Each item links to its owning plan or stays here only when no plan exists yet.
+This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
 
 ## Collector-free memory implementation
 
 Canonical memory design lives under [the memory management design docs](docs/src/developer-docs/memory-management).
-
-The accepted end state is mandatory static lifetime topology with a collector-free release guarantee for backends that advertise full memory control. GC is a permitted representation for an already legal topology on debug profiles and GC-native backends. It is not the semantic correctness baseline and it cannot legalise unproven topology.
-
-Canonical design for source semantics, analysis boundaries, inferred regions, cleanup frontiers, declared regions, Retained Edge Counting, physical memory planning and backend parity lives in the permanent memory, compiler and build-system authorities. No plan is a semantic authority for this work.
 
 Two temporary implementation plans remain in the tree. They are work items awaiting consolidation into one replacement implementation plan, not design authorities:
 
@@ -213,19 +193,6 @@ After the canvas reachability refactor:
 - JS-backed external package APIs
 - Wasm implementations for JS-backed packages such as `@web/canvas`
 - current reachability is artefact-planning correctness, not general JS tree shaking or minification
-
----
-
-# Outside Language Design Scope
-
-These surfaces are intentionally not roadmap items unless the language philosophy is explicitly changed first:
-
-- Dynamic trait values, trait objects, dynamic trait runtime lowering, trait aliases and composition, downcasting and reflection, associated types and constants, inheritance, generic traits and methods, and blanket, conditional, negative or specialized conformance.
-- `HASHABLE`, generic builtin map keys, user-defined builtin map keys, custom hashers and comparers, `Float` map keys, language-level map equality, mutable entry APIs, fixed or capacity maps, and language hashsets.
-- First-class public `Result` values, exceptions, reflection and runtime type IDs, broad type-level programming, higher-kinded types, parameterized aliases, partial type application, and general macro systems.
-- User-defined cast targets, generic cast targets, external opaque cast targets, generic cast traits, and broad return-type-directed conversion.
-- General closures, anonymous function values, generic function values, and higher-order polymorphism. Reactivity is the constrained UI-oriented mechanism intended to cover many closure-heavy UI patterns without adding general function-value semantics.
-- Source-level target, OS, architecture or backend introspection; target-conditioned imports, declarations, exports and implementation branches; builders own target selection and platform-specific lowering, and `#Config` is not an escape hatch for target identity.
 
 ---
 

@@ -131,11 +131,17 @@ impl UnsupportedBackendFeatureReason {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidConfigReason {
     MissingKey,
+    MissingConfigFile,
+    MissingProjectRecord,
+    MissingActiveBuilderSection {
+        section: StringId,
+    },
     DuplicateKey,
     FunctionUnsupported,
     TraitDeclarationUnsupported,
     TraitConformanceUnsupported,
     TraitIncompatibilityUnsupported,
+    NamedTypeUnsupported,
     MutableBindingUnsupported,
     PlainBindingUnsupported,
     UnsupportedStatement,
@@ -144,17 +150,17 @@ pub enum InvalidConfigReason {
     UnsupportedScalarValue,
     NotCompileTimeConstant,
     ValueCouldNotFold,
-    UnsupportedPackageFoldersValue,
-    DuplicatePackageFolder {
-        folder: StringId,
-    },
-    InvalidPackageFolder {
-        folder: Option<StringId>,
-        reason: InvalidPackageFolderReason,
-    },
     EmptyProjectSetting,
     UnknownKey {
         key: StringId,
+    },
+    UnknownRecordField {
+        record: StringId,
+        field: StringId,
+    },
+    MissingRequiredRecordField {
+        record: StringId,
+        field: StringId,
     },
     InvalidConfigValueShape {
         expected: StringId,
@@ -248,16 +254,6 @@ pub enum InvalidOutputFolderReason {
 impl InvalidConfigReason {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         match self {
-            Self::DuplicatePackageFolder { folder } => {
-                *folder = remap.get(*folder);
-            }
-
-            Self::InvalidPackageFolder { folder, .. } => {
-                if let Some(folder) = folder {
-                    *folder = remap.get(*folder);
-                }
-            }
-
             Self::InvalidProjectSettingValue { value, expected } => {
                 *value = remap.get(*value);
                 *expected = remap.get(*expected);
@@ -387,16 +383,29 @@ impl InvalidConfigReason {
                 *key = remap.get(*key);
             }
 
+            Self::UnknownRecordField { record, field }
+            | Self::MissingRequiredRecordField { record, field } => {
+                *record = remap.get(*record);
+                *field = remap.get(*field);
+            }
+
             Self::InvalidConfigValueShape { expected } => {
                 *expected = remap.get(*expected);
             }
 
+            Self::MissingActiveBuilderSection { section } => {
+                *section = remap.get(*section);
+            }
+
             Self::MissingKey
+            | Self::MissingConfigFile
+            | Self::MissingProjectRecord
             | Self::DuplicateKey
             | Self::FunctionUnsupported
             | Self::TraitDeclarationUnsupported
             | Self::TraitConformanceUnsupported
             | Self::TraitIncompatibilityUnsupported
+            | Self::NamedTypeUnsupported
             | Self::MutableBindingUnsupported
             | Self::PlainBindingUnsupported
             | Self::UnsupportedStatement
@@ -405,20 +414,11 @@ impl InvalidConfigReason {
             | Self::UnsupportedScalarValue
             | Self::NotCompileTimeConstant
             | Self::ValueCouldNotFold
-            | Self::UnsupportedPackageFoldersValue
             | Self::EmptyProjectSetting
             | Self::ConfigImportUnsupported
             | Self::FileValuePathUnsupported => {}
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidPackageFolderReason {
-    Empty,
-    AbsolutePath,
-    ParentDirectorySegment,
-    NestedPath,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -1,1 +1,7 @@
-helper #= "not a supported config key"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= |
+    not_a_supported_field = "nope",
+|

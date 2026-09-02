@@ -5,5 +5,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0031"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0031"
-path = "input/@page.moth"
+path = "input/src/@page.moth"
 line = 1

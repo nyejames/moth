@@ -1,2 +1,2 @@
-dev_folder = output_folder
-output_folder = "release"
+helper_a = helper_b
+helper_b = "release"

@@ -18,8 +18,8 @@ conditional-compilation system.
 ```text
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh CLI, config-field, header-contract and synthetic-interface owners
-BLOCKERS: grouped project config and recursive schemas
-NEXT_ACTION: start after the project-config plan completes
+BLOCKERS: none
+NEXT_ACTION: activate this plan and start Phase 0 inventory
 ```
 
 Keep this block concise. Git history is the implementation record.

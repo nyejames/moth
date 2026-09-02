@@ -17,8 +17,7 @@ const GITIGNORE_FILE: &str = ".gitignore";
 /// Relative paths of all scaffold-owned files.
 const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
 
-/// Relative paths of all scaffold-owned directories.
-pub const SCAFFOLD_DIRECTORIES: &[&str] = &["src", "lib", "dev", "release"];
+pub const SCAFFOLD_DIRECTORIES: &[&str] = &["src", "dev", "release"];
 
 /// Run preflight checks before writing anything.
 ///

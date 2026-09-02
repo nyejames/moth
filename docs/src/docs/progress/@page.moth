@@ -596,18 +596,18 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Project config model]
-            [: Partial]
-            [: Targeted flat-config parsing, known-key validation, self-contained dependency-clause rejection and builder-section coverage.]
+            [: Supported]
+            [: Targeted grouped-project-record validation, recursive builder-section schemas, output-root ownership, self-contained dependency-clause rejection and legacy flat-key rejection coverage.]
             [: Frontend / HTML]
-            [: The current compiler supports the transitional flat config shape with parsing and validation implemented. Grouped [$html:<code>project</code>] and builder records are accepted deferred design. [$html:<code>#Config</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued. The transitional [$html:<code>package_folders</code>] field still parses for the queued Project Config migration, but canonical Stage 0 no longer consumes it for package discovery.]
+            [: The compiler accepts the grouped config shape: one required open [$html:<code>project</code>] record plus active builder sections such as [$html:<code>html</code>]. Retired flat keys ([$html:<code>project #= "html"</code>], [$html:<code>dev_folder</code>], [$html:<code>output_folder</code>] and [$html:<code>package_folders</code>]) are rejected. Former top-level builder fields such as [$html:<code>origin</code>] no longer configure the builder; they remain private helpers. [$html:<code>#Config</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] remain separately queued.]
         ]
 
         [data:
             [: Project-local packages]
             [: Partial]
-            [: Targeted structural support-package roots, ignored legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.]
+            [: Targeted structural support-package roots, rejected legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.]
             [: Frontend / HTML]
-            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. Canonical Stage 0 ignores legacy config-driven [$html:<code>package_folders</code>] paths, including the historical default [$html:<code>lib/</code>]; the transitional config field remains only until the queued Project Config migration removes it. Independently registered Builder/Core source packages retain their own package boundaries. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct [$html:<code>@*.moth</code>] or [$html:<code>+*.moth</code>] root with a non-empty cosmetic name. The filename after [$html:<code>@</code>] or [$html:<code>+</code>] has no semantic role and the root's strict [$html:<code>export:</code>] block defines its public surface.]
+            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. The legacy config-driven [$html:<code>package_folders</code>] paths, including the historical default [$html:<code>lib/</code>], are deleted: the retired flat key is rejected and package discovery is purely structural. Independently registered Builder/Core source packages retain their own package boundaries. Each support package's containing directory supplies its name. Stage 0 requires exactly one direct [$html:<code>@*.moth</code>] or [$html:<code>+*.moth</code>] root with a non-empty cosmetic name. The filename after [$html:<code>@</code>] or [$html:<code>+</code>] has no semantic role and the root's strict [$html:<code>export:</code>] block defines its public surface.]
         ]
 
         [data:

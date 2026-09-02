@@ -1,4 +1,8 @@
-project #= "html"
-entry_root #= "."
-dev_folder #= "dev"
-output_folder #= "release"
+project #= |
+    name = "import_external_churn",
+    entry_root = "src",
+|
+html #= |
+    dev_output = "dev",
+    release_output = "release",
+|

@@ -62,16 +62,9 @@ fn defaults_are_applied_when_settings_are_missing() {
 #[test]
 fn parser_accepts_valid_overrides() {
     let mut config = Config::new(PathBuf::from("project"));
-    config
-        .settings
-        .insert(String::from("origin"), String::from("/moth"));
-    config.settings.insert(
-        String::from("page_url_style"),
-        String::from("no_trailing_slash"),
-    );
-    config
-        .settings
-        .insert(String::from("redirect_index_html"), String::from("false"));
+    config.html_section.origin = Some(String::from("/moth"));
+    config.html_section.page_url_style = Some(String::from("no_trailing_slash"));
+    config.html_section.redirect_index_html = Some(false);
 
     let mut string_table = StringTable::new();
     let parsed =
@@ -87,21 +80,15 @@ fn parser_rejects_invalid_origin() {
     let mut string_table = StringTable::new();
 
     // No leading slash.
-    config
-        .settings
-        .insert(String::from("origin"), String::from("moth"));
+    config.html_section.origin = Some(String::from("moth"));
     assert_origin_value_rejection(&config, &mut string_table, "moth");
 
     // Trailing slash on a non-root prefix.
-    config
-        .settings
-        .insert(String::from("origin"), String::from("/moth/"));
+    config.html_section.origin = Some(String::from("/moth/"));
     assert_origin_value_rejection(&config, &mut string_table, "/moth/");
 
     // Empty origin is a separate empty-setting reason.
-    config
-        .settings
-        .insert(String::from("origin"), String::from(""));
+    config.html_section.origin = Some(String::from(""));
     let empty_error =
         parse_html_site_config(&config, &mut string_table).expect_err("empty origin should fail");
     let (key, reason) = invalid_config_payload(&empty_error);
@@ -115,18 +102,14 @@ fn parser_rejects_invalid_origin() {
     );
 
     // Query or fragment characters are rejected as non-path content.
-    config
-        .settings
-        .insert(String::from("origin"), String::from("/?x=1"));
+    config.html_section.origin = Some(String::from("/?x=1"));
     assert_origin_value_rejection(&config, &mut string_table, "/?x=1");
 }
 
 #[test]
 fn parser_rejects_invalid_page_url_style() {
     let mut config = Config::new(PathBuf::from("project"));
-    config
-        .settings
-        .insert(String::from("page_url_style"), String::from("slashy"));
+    config.html_section.page_url_style = Some(String::from("slashy"));
 
     let mut string_table = StringTable::new();
     let error =
@@ -151,41 +134,11 @@ fn parser_rejects_invalid_page_url_style() {
 }
 
 #[test]
-fn parser_rejects_invalid_redirect_index_html() {
-    let mut config = Config::new(PathBuf::from("project"));
-    config
-        .settings
-        .insert(String::from("redirect_index_html"), String::from("yes"));
-
-    let mut string_table = StringTable::new();
-    let error =
-        parse_html_site_config(&config, &mut string_table).expect_err("invalid value should fail");
-    let (key, reason) = invalid_config_payload(&error);
-    assert_eq!(
-        string_table.resolve(key.expect("redirect_index_html key should be present")),
-        "redirect_index_html",
-    );
-    let InvalidConfigReason::InvalidProjectSettingValue { value, expected } = reason else {
-        panic!("expected InvalidProjectSettingValue for invalid redirect_index_html");
-    };
-    assert_eq!(
-        string_table.resolve(*value),
-        "yes",
-        "redirect_index_html rejection should report the exact invalid value",
-    );
-    let expected_values = string_table.resolve(*expected);
-    assert!(expected_values.contains("true"));
-    assert!(expected_values.contains("false"));
-}
-
-#[test]
 fn parser_uses_precise_location_from_setting_locations() {
     use crate::compiler_frontend::compiler_errors::SourceLocation;
 
     let mut config = Config::new(PathBuf::from("project"));
-    config
-        .settings
-        .insert(String::from("origin"), String::from("invalid"));
+    config.html_section.origin = Some(String::from("invalid"));
 
     // Store a precise location for the origin key
     let mut string_table = StringTable::new();
@@ -213,9 +166,7 @@ fn parser_uses_precise_location_from_setting_locations() {
 #[test]
 fn parser_falls_back_to_file_location_when_key_not_in_setting_locations() {
     let mut config = Config::new(PathBuf::from("project"));
-    config
-        .settings
-        .insert(String::from("origin"), String::from("invalid"));
+    config.html_section.origin = Some(String::from("invalid"));
 
     // Don't add the key to setting_locations
 

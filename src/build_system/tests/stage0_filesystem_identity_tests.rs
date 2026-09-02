@@ -191,8 +191,6 @@ mod non_utf8_filesystem_identity {
 
         let mut config = Config::new(root.clone());
         config.entry_root = PathBuf::from("src");
-        config.package_folders = vec![PathBuf::from("packages")];
-        config.has_explicit_package_folders = true;
 
         let mut string_table = StringTable::new();
         let resolver = super::project_roots::build_project_path_resolver(

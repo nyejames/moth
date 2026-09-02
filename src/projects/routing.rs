@@ -36,9 +36,9 @@ impl Default for HtmlSiteConfig {
     }
 }
 
-/// Parse and validate HTML site config keys from the project config map.
+/// Parse and validate HTML site config keys from the typed html builder section.
 ///
-/// WHAT: resolves defaults plus optional overrides from `config.moth`.
+/// WHAT: resolves defaults plus optional overrides authored on the grouped `html` section.
 /// WHY: site configuration must be explicit and strict so all runtime/build tooling stays aligned.
 pub fn parse_html_site_config(
     config: &Config,
@@ -46,7 +46,7 @@ pub fn parse_html_site_config(
 ) -> Result<HtmlSiteConfig, ProjectConfigError> {
     let origin = parse_origin(config, string_table)?;
     let page_url_style = parse_page_url_style(config, string_table)?;
-    let redirect_index_html = parse_redirect_index_html(config, string_table)?;
+    let redirect_index_html = config.html_section.redirect_index_html.unwrap_or(true);
 
     Ok(HtmlSiteConfig {
         origin,
@@ -59,7 +59,7 @@ fn parse_origin(
     config: &Config,
     string_table: &mut StringTable,
 ) -> Result<String, ProjectConfigError> {
-    let Some(raw_value) = config.settings.get("origin") else {
+    let Some(raw_value) = config.html_section.origin.as_deref() else {
         return Ok(String::from("/"));
     };
 
@@ -124,11 +124,11 @@ fn parse_page_url_style(
     config: &Config,
     string_table: &mut StringTable,
 ) -> Result<PageUrlStyle, ProjectConfigError> {
-    let Some(raw_value) = config.settings.get("page_url_style") else {
+    let Some(raw_value) = config.html_section.page_url_style.as_deref() else {
         return Ok(PageUrlStyle::TrailingSlash);
     };
 
-    match raw_value.as_str() {
+    match raw_value {
         "trailing_slash" => Ok(PageUrlStyle::TrailingSlash),
         "no_trailing_slash" => Ok(PageUrlStyle::NoTrailingSlash),
         "ignore" => Ok(PageUrlStyle::Ignore),
@@ -137,27 +137,6 @@ fn parse_page_url_style(
             "page_url_style",
             raw_value,
             "'trailing_slash', 'no_trailing_slash', or 'ignore'",
-            string_table,
-        )),
-    }
-}
-
-fn parse_redirect_index_html(
-    config: &Config,
-    string_table: &mut StringTable,
-) -> Result<bool, ProjectConfigError> {
-    let Some(raw_value) = config.settings.get("redirect_index_html") else {
-        return Ok(true);
-    };
-
-    match raw_value.as_str() {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => Err(config_value_error(
-            config,
-            "redirect_index_html",
-            raw_value,
-            "'true' or 'false'",
             string_table,
         )),
     }

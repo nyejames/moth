@@ -14,17 +14,18 @@ fn escape_moth_string_literal(value: &str) -> String {
 pub fn config_template(project_name: &str) -> String {
     let escaped = escape_moth_string_literal(project_name);
     format!(
-        r#"project #= "html"
-entry_root #= "src"
-dev_folder #= "dev"
-output_folder #= "release"
-page_url_style #= "trailing_slash"
-redirect_index_html #= true
-name #= "{escaped}"
-version #= "0.1.0"
-author #= ""
-license #= "MIT"
-html_lang #= "en"
+        r#"project #= |
+    name = "{escaped}",
+    entry_root = "src",
+    version = "0.1.0",
+    author = "",
+    license = "MIT",
+|
+html #= |
+    page_url_style = "trailing_slash",
+    redirect_index_html = true,
+    html_lang = "en",
+|
 "#
     )
 }

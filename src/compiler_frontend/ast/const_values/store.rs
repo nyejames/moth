@@ -139,9 +139,8 @@ pub(crate) struct ConstValueField {
     pub(crate) name: InternedPath,
     pub(crate) value: ConstValueId,
     /// Field initializer location for diagnostic projection after folding. Public folded
-    /// values remain location-free. Store tests read this; production diagnostics still
-    /// project from the value-node location.
-    #[allow(dead_code)]
+    /// values remain location-free; config projection copies this into a parallel field-source
+    /// table instead of attaching it to [`PublicFoldedValue`].
     pub(crate) location: SourceLocation,
 }
 
@@ -730,6 +729,7 @@ impl ConstValueStore {
     ///
     /// Piece-bearing strings have no final text until the builder resolves each piece's URL
     /// context, so the accessor reports none instead of flattening structure.
+    #[cfg(test)]
     pub(crate) fn string_value(&self, id: ConstValueId) -> Option<StringId> {
         match self.payload(id)? {
             ConstValuePayload::String(ConstStringValue::Text(value)) => Some(*value),

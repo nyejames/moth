@@ -1,2 +1,7 @@
-entry_root #= "src"
-origin #= "/mysite"
+project #= |
+    name = "test_project",
+    entry_root = "src",
+|
+html #= |
+    origin = "/mysite",
+|

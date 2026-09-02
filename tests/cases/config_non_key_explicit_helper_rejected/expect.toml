@@ -1,6 +1,10 @@
 entry = "."
 
 [backends.html]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-CONFIG-0001"]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["Non-Key Explicit Helper Rejected"]

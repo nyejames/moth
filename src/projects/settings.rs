@@ -5,8 +5,10 @@
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
 
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
@@ -54,73 +56,93 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
+/// Typed results of one validated `html #= |...|` builder section.
+///
+/// WHAT: each html section field in its validated form. Fields the record omits stay `None`
+/// unless their schema declares a default, which then stands.
+/// WHY: this struct is the HTML builder settings store; the routing and document-shell readers
+/// consume it directly. Directory HTML projects require the grouped `html` section; omitted
+/// fields still receive schema defaults.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HtmlSectionConfig {
+    /// Output roots owned by the builder section. The section schema's defaults (`dev` and
+    /// `release`) land here whenever a section validated, so output resolution can consume
+    /// them from the typed section.
+    pub dev_output: Option<String>,
+    pub release_output: Option<String>,
+    pub origin: Option<String>,
+    pub page_url_style: Option<String>,
+    pub redirect_index_html: Option<bool>,
+    pub html_lang: Option<String>,
+    pub html_title_prefix: Option<String>,
+    pub html_title_postfix: Option<String>,
+    pub html_favicon: Option<String>,
+    pub html_inject_charset: Option<bool>,
+    pub html_inject_viewport: Option<bool>,
+    pub html_inject_color_scheme: Option<bool>,
+    pub html_inject_core_css: Option<bool>,
+    pub html_body_style: Option<String>,
+}
+
+impl HtmlSectionConfig {
+    /// Directory output roots a directory project uses when its `html` section omits them.
+    /// The html section schema registers the same defaults, so an authored-but-omitted field
+    /// resolves identically.
+    pub const DEFAULT_DEV_OUTPUT: &'static str = "dev";
+    pub const DEFAULT_RELEASE_OUTPUT: &'static str = "release";
+}
+
+/// One additional authored `project` field retained after compiler-owned fields are applied.
+///
+/// WHAT: the field's folded value plus the canonical type and initializer location needed
+///       later by `@project`. Nested record values keep field types on `PublicFoldedField`;
+///       exact nested field-name spans stay deferred.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectMetadataField {
+    pub name: String,
+    pub type_identity: CanonicalTypeIdentity,
+    pub value: PublicFoldedValue,
+    pub location: SourceLocation,
+}
+
 /// WHAT: project configuration loaded from config.moth that controls build behavior.
 /// WHY: config is the control plane for the build system; it must be validated early
 ///      and provide precise error locations for all settings.
-///
-/// Design Principles:
-/// - Config is loaded in Stage 0 before any compilation work begins
-/// - All config keys are validated early so backends can reject invalid settings
-/// - Source locations are tracked for precise error reporting
-/// - Multi-error collection helps developers fix all issues in one iteration
-///
-/// Standard Config Keys:
-/// - `entry_root`: The root directory for source files (default: "")
-/// - `dev_folder`: Output directory for development builds (default: "dev")
-/// - `output_folder`: Output directory for release builds (default: "release")
-/// - `package_folders`: Transitional parsed/stored configuration (default: ["lib"]); canonical Stage 0 ignores it
-/// - `project_name` or `name`: The project name
-/// - `version`: The project version (default: "0.1.0")
-/// - `author`: The project author
-/// - `license`: The project license (default: "MIT")
-///
-/// Custom Keys:
-/// - Backend-specific keys are stored in the `settings` HashMap
-/// - Backends validate their own keys through `BackendBuilder::validate_project_config`
 #[derive(Clone)]
 pub struct Config {
     pub project_name: String,
     pub entry_dir: PathBuf,
     pub entry_root: PathBuf,
-    pub dev_folder: PathBuf,
-    pub release_folder: PathBuf,
-    /// Transitional parsed/stored package-folder configuration. Canonical Stage 0 ignores this field;
-    /// the queued Project Config migration removes it.
-    pub package_folders: Vec<PathBuf>,
-    /// Whether the transitional `package_folders` field was explicitly configured in `config.moth`.
-    pub has_explicit_package_folders: bool,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
     pub version: String,
     pub author: String,
     pub license: String,
-    /// Custom settings for any project builder to use
-    pub settings: HashMap<String, String>,
+
     /// Source locations for each config key, used for precise error reporting
     pub setting_locations: HashMap<String, SourceLocation>,
+
+    /// Validated results of the grouped `html` builder section when one was authored.
+    pub html_section: HtmlSectionConfig,
+
+    /// Additional open `project` fields retained for later `@project` publication.
+    pub(crate) extra_project_fields: Vec<ProjectMetadataField>,
 }
 
 impl Config {
     pub fn new(user_specified_path: PathBuf) -> Self {
         Config {
             entry_dir: user_specified_path,
-            // These Default to the same directory as the project
             entry_root: PathBuf::from(""),
-            dev_folder: PathBuf::from("dev"),
-            release_folder: PathBuf::from("release"),
-
-            // Retained for transitional config storage; canonical Stage 0 ignores this default.
-            package_folders: vec![PathBuf::from("lib")],
-            has_explicit_package_folders: false,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             project_name: String::new(),
             version: String::from("0.1.0"),
             author: String::new(),
             license: String::from("MIT"),
 
-            // Custom settings for any project builder to use
-            settings: HashMap::new(),
             setting_locations: HashMap::new(),
+            html_section: HtmlSectionConfig::default(),
+            extra_project_fields: Vec::new(),
         }
     }
 
@@ -224,17 +246,15 @@ impl Default for Config {
         Config {
             entry_dir: PathBuf::new(),
             entry_root: PathBuf::from("src"),
-            dev_folder: PathBuf::from("dev"),
-            release_folder: PathBuf::from("release"),
-            package_folders: vec![PathBuf::from("lib")],
-            has_explicit_package_folders: false,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             project_name: String::from("html_project"),
             version: String::from("0.1.0"),
             author: String::new(),
             license: String::from("MIT"),
-            settings: HashMap::new(),
+
             setting_locations: HashMap::new(),
+            html_section: HtmlSectionConfig::default(),
+            extra_project_fields: Vec::new(),
         }
     }
 }

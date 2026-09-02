@@ -1,8 +1,8 @@
 //! AST const fact payloads.
 //!
 //! WHAT: defines the shape of const facts recorded for declarations during
-//!       AST finalization and consumed by later stages such as config validation.
-//! WHY: one typed fact shape lets config and HIR share the same resolution
+//!       AST finalization and consumed by later stages such as HIR const facts.
+//! WHY: one typed fact shape lets later stages share the same resolution
 //!      result without each stage inventing its own representation.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -43,6 +43,10 @@ pub struct AstConstDeclarationFact {
 #[derive(Clone, Debug)]
 pub enum AstConstFactValue {
     /// The authored module constant's folded value is owned by the module store.
+    ///
+    /// The store identity remains on the fact so HIR can join store-backed rows. Config
+    /// validation no longer reads it; it consumes owned folded declarations instead.
+    #[allow(dead_code)]
     Stored(ConstValueId),
 
     /// A body-local or inferred declaration keeps its resolver result as advisory metadata.

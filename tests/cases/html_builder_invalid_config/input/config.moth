@@ -1,1 +1,6 @@
-html_inject_core_css #= "maybe"
+project #= |
+    name = "test_project",
+|
+html #= |
+    html_inject_core_css = "maybe",
+|

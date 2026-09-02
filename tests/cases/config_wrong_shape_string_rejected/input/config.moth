@@ -1,1 +1,5 @@
-entry_root #= true
+project #= |
+    name = "test_project",
+    entry_root = true,
+|
+html #= ||

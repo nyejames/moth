@@ -16,6 +16,9 @@ use crate::build_system::build::{
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy};
+use crate::builder_surface::config_schema::{
+    ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
+};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
@@ -51,7 +54,7 @@ use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
 use crate::projects::routing::parse_html_site_config;
-use crate::projects::settings::{Config, ProjectConfigError};
+use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -351,33 +354,87 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .with_test_packages_for_integration();
         }
 
+        builder_surface.finish_config_registration();
         builder_surface
     }
 }
 
 impl HtmlProjectBuilder {
-    /// Register HTML-backend-specific config keys into the builder surface's key registry.
-    ///
-    /// WHY: Stage 0 config loading must know which keys are valid before backend semantic
-    /// validation runs. Keeping registration here keeps HTML-specific meaning out of the core.
     fn register_html_config_keys(builder_surface: &mut BuilderSurface) {
-        let registry = &mut builder_surface.config_keys;
+        let mut html_schema = ConfigSchema::new("html section", UnknownFieldPolicy::Reject);
+        Self::register_html_fields(&mut html_schema);
 
-        // Routing / site keys
-        registry.register_backend_string("origin");
-        registry.register_backend_string("page_url_style");
-        registry.register_backend_bool("redirect_index_html");
+        let html_root = html_schema.root();
+        html_schema
+            .register_field(
+                html_root,
+                ConfigSchemaField::string_with_default(
+                    "dev_output",
+                    HtmlSectionConfig::DEFAULT_DEV_OUTPUT,
+                ),
+            )
+            .expect("html schema is under construction");
+        html_schema
+            .register_field(
+                html_root,
+                ConfigSchemaField::string_with_default(
+                    "release_output",
+                    HtmlSectionConfig::DEFAULT_RELEASE_OUTPUT,
+                ),
+            )
+            .expect("html schema is under construction");
+        html_schema
+            .validate_and_freeze()
+            .expect("html schema is valid");
 
-        // HTML document shell keys
-        registry.register_backend_string("html_lang");
-        registry.register_backend_string("html_title_prefix");
-        registry.register_backend_string("html_title_postfix");
-        registry.register_backend_string("html_favicon");
-        registry.register_backend_bool("html_inject_charset");
-        registry.register_backend_bool("html_inject_viewport");
-        registry.register_backend_bool("html_inject_color_scheme");
-        registry.register_backend_bool("html_inject_core_css");
-        registry.register_backend_string("html_body_style");
+        builder_surface
+            .config_schemas
+            .register_project_section(NamedConfigSectionSchema {
+                name: "html",
+                schema: html_schema,
+                required: true,
+            });
+    }
+
+    fn register_html_fields(schema: &mut ConfigSchema) {
+        let root = schema.root();
+
+        schema
+            .register_field(root, ConfigSchemaField::string("origin"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("page_url_style"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::bool("redirect_index_html"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("html_lang"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("html_title_prefix"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("html_title_postfix"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("html_favicon"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::bool("html_inject_charset"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::bool("html_inject_viewport"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::bool("html_inject_color_scheme"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::bool("html_inject_core_css"))
+            .expect("html schema is under construction");
+        schema
+            .register_field(root, ConfigSchemaField::string("html_body_style"))
+            .expect("html schema is under construction");
     }
 
     /// Compile one module through the appropriate builder path (JS-only or HTML+Wasm).

@@ -5,12 +5,10 @@ use crate::projects::settings::Config;
 
 #[test]
 fn frontend_options_use_the_configured_loop_limit() {
-    let mut config = Config::default();
-    config
-        .settings
-        .insert(String::from("origin"), String::from("/moth"));
-    config.template_const_loop_iteration_limit = 42;
-
+    let config = Config {
+        template_const_loop_iteration_limit: 42,
+        ..Config::default()
+    };
     let options = config.frontend_options();
 
     assert_eq!(options.template_const_loop_iteration_limit, 42);

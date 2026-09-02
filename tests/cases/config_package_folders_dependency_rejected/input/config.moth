@@ -1,3 +1,6 @@
-package_folders #= { "packages" }
+project #= |
+    name = "test_project",
+|
+html #= ||
 @helper value
 entry_root #= value

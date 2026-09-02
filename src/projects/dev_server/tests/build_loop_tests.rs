@@ -681,7 +681,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "entry_root #= \"src\"\ndev_folder #= \"preview\"\noutput_folder #= \"release\"\n",
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"preview\",\n    release_output = \"release\",\n|\n",
     )
     .expect("should write project config");
     fs::write(
@@ -734,7 +734,11 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
     let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(root.join("config.moth"), "entry_root #= \"src\"\n").expect("should write config");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
     fs::write(source_root.join("@page.moth"), "#[:<h1>Dev Cycle</h1>]\n")
         .expect("should write page source");
 
