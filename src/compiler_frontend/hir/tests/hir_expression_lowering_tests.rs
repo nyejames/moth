@@ -3097,11 +3097,9 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
 
     for (op, args, result_type_ids, expected_id) in cases {
         let expects_result = !result_type_ids.is_empty();
-        let receiver_requires_mutable = op.requires_mutable_receiver();
         let call_expression = Expression::collection_builtin_call_with_typed_arguments(
             receiver_expression.clone(),
             op,
-            receiver_requires_mutable,
             args,
             result_type_ids,
             &mut builder.type_environment,

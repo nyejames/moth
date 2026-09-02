@@ -44,7 +44,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_get".to_owned(),
+                        COLLECTION_GET_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },
@@ -79,7 +79,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_set".to_owned(),
+                        COLLECTION_SET_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },
@@ -110,7 +110,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_push_growable".to_owned(),
+                        COLLECTION_PUSH_GROWABLE_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },
@@ -141,7 +141,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_push_fixed".to_owned(),
+                        COLLECTION_PUSH_FIXED_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },
@@ -172,7 +172,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_remove".to_owned(),
+                        COLLECTION_REMOVE_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },
@@ -196,7 +196,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_length".to_owned(),
+                        COLLECTION_LENGTH_HOST_NAME.to_owned(),
                     )),
                     wasm: None,
                 },

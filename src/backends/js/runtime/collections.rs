@@ -103,18 +103,6 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        // Fixed push requires a strict branded-wrapper check: unlike the broad validator
-        // above, growable arrays are rejected so fixed semantics can never silently mutate a
-        // growable collection.
-        self.emit_line("function __moth_collection_is_fixed_collection(collection) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line(
-                "return !Array.isArray(collection) && __moth_collection_is_valid(collection);",
-            );
-        });
-        self.emit_line("}");
-        self.emit_line("");
-
         // Validates that `index` is an integer within the logical item bounds.
         // Works with both growable arrays and fixed wrappers via `__moth_collection_items`.
         self.emit_line("function __moth_collection_index_is_valid(collection, index) {");
@@ -181,14 +169,14 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        // Fixed push keeps the fallible carrier contract: the strict branded-wrapper validator
+        // Fixed push keeps the fallible carrier contract: the strict branded-wrapper check
         // rejects growable arrays and malformed external values, and pushing past capacity is a
-        // runtime error instead of a silent reallocation. After
-        // `__moth_collection_is_fixed_collection` passes, `collection.fixedCapacity` is a
+        // runtime error instead of a silent reallocation.
+        // After the inline strict wrapper check passes, `collection.fixedCapacity` is a
         // positive integer.
         self.emit_line("function __moth_collection_push_fixed(collection, value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__moth_collection_is_fixed_collection(collection)) {");
+            emitter.emit_line("if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
                     "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",

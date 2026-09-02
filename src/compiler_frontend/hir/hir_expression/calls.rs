@@ -103,29 +103,17 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         op: CollectionBuiltinOp,
         receiver: &Expression,
-        receiver_requires_mutable: bool,
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
-        // The parser resolves each collection operation's receiver mutability from the same
-        // operation policy, so a disagreement here is an internal invariant failure.
-        if receiver_requires_mutable != op.requires_mutable_receiver() {
-            return_hir_transformation_error!(
-                format!(
-                    "Collection builtin {:?} reached HIR lowering with inconsistent receiver mutability",
-                    op
-                ),
-                self.hir_error_location(location)
-            );
-        }
-
-        let mut full_args = Vec::with_capacity(args.len() + 1);
-        if receiver_requires_mutable {
-            full_args.push(Self::mutable_call_argument(receiver.clone(), location));
+        let receiver_argument = if op.requires_mutable_receiver() {
+            Self::mutable_call_argument(receiver.clone(), location)
         } else {
-            full_args.push(Self::shared_call_argument(receiver.clone(), location));
-        }
+            Self::shared_call_argument(receiver.clone(), location)
+        };
+        let mut full_args = Vec::with_capacity(args.len() + 1);
+        full_args.push(receiver_argument);
         full_args.extend(args.iter().cloned());
 
         let id = match op {

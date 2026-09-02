@@ -1382,10 +1382,6 @@ Number.isInteger(collection.fixedCapacity)
 );
 }
 
-function __moth_collection_is_fixed_collection(collection) {
-return !Array.isArray(collection) && __moth_collection_is_valid(collection);
-}
-
 function __moth_collection_index_is_valid(collection, index) {
 const items = __moth_collection_items(collection);
 return Number.isInteger(index) && index >= 0 && index < items.length;
@@ -1419,7 +1415,7 @@ collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (!__moth_collection_is_fixed_collection(collection)) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);

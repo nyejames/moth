@@ -19,6 +19,7 @@ must_contain = [
 path = "index.html"
 kind = "html"
 must_not_contain = [
+    "function __moth_collection_push(",
     "__moth_result_propagate(__moth_collection_push_growable(",
     "__moth_result_propagate(__moth_collection_remove(",
     "__moth_result_propagate(__moth_collection_length(",

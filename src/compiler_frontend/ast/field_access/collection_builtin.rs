@@ -274,7 +274,6 @@ pub(super) fn parse_collection_builtin_member_typed(
     let builtin_expression = Expression::collection_builtin_call_with_typed_arguments(
         receiver_expression,
         builtin,
-        mutating_receiver_required,
         normalize_call_arguments(&args),
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),

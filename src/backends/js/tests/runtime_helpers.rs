@@ -811,20 +811,6 @@ fn collection_is_valid_accepts_fixed_wrappers() {
     );
 }
 
-/// Verifies that `__moth_collection_is_fixed_collection` rejects growable arrays and reuses
-/// the strict wrapper validation for branded fixed wrappers. [fixed-collection]
-#[test]
-fn collection_is_fixed_collection_rejects_arrays_and_validates_wrappers() {
-    let source = lower_minimal_module("main");
-    let validator = helper_source(&source, "__moth_collection_is_fixed_collection");
-
-    assert!(
-        validator.contains("!Array.isArray(collection)")
-            && validator.contains("__moth_collection_is_valid(collection)"),
-        "__moth_collection_is_fixed_collection must reject plain arrays and reuse wrapper validation"
-    );
-}
-
 /// Verifies that `__moth_collection_push_fixed` validates the branded wrapper and checks capacity before pushing. [fixed-collection]
 #[test]
 fn collection_push_fixed_checks_capacity_before_pushing() {
@@ -832,8 +818,9 @@ fn collection_push_fixed_checks_capacity_before_pushing() {
     let push = helper_source(&source, "__moth_collection_push_fixed");
 
     assert!(
-        push.contains("__moth_collection_is_fixed_collection(collection)")
-            && push.contains("items.length >= collection.fixedCapacity")
+        push.contains(
+            "if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {"
+        ) && push.contains("items.length >= collection.fixedCapacity")
             && push.contains("items.push(value);")
             && push.contains("{ tag: \"ok\", value: null }"),
         "__moth_collection_push_fixed must validate the branded wrapper, check capacity, push, and return the ok carrier"

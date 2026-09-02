@@ -133,7 +133,6 @@ pub enum ExpressionKind {
     CollectionBuiltinCall {
         receiver: Box<Expression>,
         op: CollectionBuiltinOp,
-        receiver_requires_mutable: bool,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         location: SourceLocation,
