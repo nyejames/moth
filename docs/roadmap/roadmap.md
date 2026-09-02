@@ -11,6 +11,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 # Plans
 
 - [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md): ACTIVE
+- [Automatic Markdown heading section links](./plans/automatic-markdown-section-links-plan.md)
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
