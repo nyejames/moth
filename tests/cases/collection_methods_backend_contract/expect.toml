@@ -9,14 +9,15 @@ kind = "html"
 must_contain = [
     "__moth_collection_get",
     "__moth_collection_set",
-    "__moth_collection_push",
+    "__moth_collection_push_growable",
+    "__moth_collection_push_fixed",
     "__moth_collection_remove",
     "__moth_collection_length",
     "collection_methods_backend_contract",
 ]
 must_not_contain = [
     "__moth_write(__moth_index(",
-    "__moth_result_propagate(__moth_collection_push(",
+    "__moth_result_propagate(__moth_collection_push_growable(",
     "__moth_result_propagate(__moth_collection_remove(",
     "__moth_result_propagate(__moth_collection_length(",
 ]

@@ -2,8 +2,9 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
-    COLLECTION_GET_HOST_NAME, COLLECTION_LENGTH_HOST_NAME, COLLECTION_PUSH_HOST_NAME,
-    COLLECTION_REMOVE_HOST_NAME, COLLECTION_SET_HOST_NAME, ExternalFunctionId,
+    COLLECTION_GET_HOST_NAME, COLLECTION_LENGTH_HOST_NAME, COLLECTION_PUSH_FIXED_HOST_NAME,
+    COLLECTION_PUSH_GROWABLE_HOST_NAME, COLLECTION_REMOVE_HOST_NAME, COLLECTION_SET_HOST_NAME,
+    ExternalFunctionId,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
@@ -89,9 +90,9 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
     registry
         .register_function_in_package(
             package_id,
-            ExternalFunctionId::CollectionPush,
+            ExternalFunctionId::CollectionPushGrowable,
             ExternalFunctionDef {
-                name: COLLECTION_PUSH_HOST_NAME.to_owned(),
+                name: COLLECTION_PUSH_GROWABLE_HOST_NAME.to_owned(),
                 parameters: vec![
                     crate::compiler_frontend::external_packages::ExternalParameter {
                         language_type: ExternalSignatureType::Abi(ExternalAbiType::Inferred),
@@ -109,7 +110,38 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
-                        "__moth_collection_push".to_owned(),
+                        "__moth_collection_push_growable".to_owned(),
+                    )),
+                    wasm: None,
+                },
+            },
+        )
+        .expect("builtin function registration should not collide");
+
+    registry
+        .register_function_in_package(
+            package_id,
+            ExternalFunctionId::CollectionPushFixed,
+            ExternalFunctionDef {
+                name: COLLECTION_PUSH_FIXED_HOST_NAME.to_owned(),
+                parameters: vec![
+                    crate::compiler_frontend::external_packages::ExternalParameter {
+                        language_type: ExternalSignatureType::Abi(ExternalAbiType::Inferred),
+                        access_kind: ExternalAccessKind::Mutable,
+                    },
+                    crate::compiler_frontend::external_packages::ExternalParameter {
+                        language_type: ExternalSignatureType::Abi(ExternalAbiType::Inferred),
+                        access_kind: ExternalAccessKind::Shared,
+                    },
+                ],
+                returns: external_success_returns(
+                    ExternalAbiType::Void,
+                    ExternalReturnAlias::Fresh,
+                ),
+                error_return_type: None,
+                lowerings: ExternalFunctionLowerings {
+                    js: Some(ExternalJsLowering::RuntimeFunction(
+                        "__moth_collection_push_fixed".to_owned(),
                     )),
                     wasm: None,
                 },

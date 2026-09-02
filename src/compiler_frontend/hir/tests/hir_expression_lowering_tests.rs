@@ -2988,7 +2988,10 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
     let receiver_name = super::symbol("values", &mut string_table);
     let get_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionGet;
     let set_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionSet;
-    let push_id = crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionPush;
+    let growable_push_id =
+        crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionPushGrowable;
+    let fixed_push_id =
+        crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionPushFixed;
     let remove_id =
         crate::compiler_frontend::external_packages::ExternalFunctionId::CollectionRemove;
     let length_id =
@@ -3052,15 +3055,27 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
             vec![fallible_none_result],
             set_id,
         ),
+        // PushFixed deliberately reuses the growable receiver below: HIR must consume the
+        // explicit operation identity, not reclassify the push from the receiver's shape.
         (
-            CollectionBuiltinOp::Push,
+            CollectionBuiltinOp::PushFixed,
             vec![CallArgument::positional(
                 Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
                 CallAccessMode::Shared,
                 location.clone(),
             )],
             vec![fallible_none_result],
-            push_id,
+            fixed_push_id,
+        ),
+        (
+            CollectionBuiltinOp::PushGrowable,
+            vec![CallArgument::positional(
+                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                CallAccessMode::Shared,
+                location.clone(),
+            )],
+            vec![],
+            growable_push_id,
         ),
         (
             CollectionBuiltinOp::Remove,
@@ -3082,10 +3097,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
 
     for (op, args, result_type_ids, expected_id) in cases {
         let expects_result = !result_type_ids.is_empty();
-        let receiver_requires_mutable = matches!(
-            op,
-            CollectionBuiltinOp::Set | CollectionBuiltinOp::Push | CollectionBuiltinOp::Remove
-        );
+        let receiver_requires_mutable = op.requires_mutable_receiver();
         let call_expression = Expression::collection_builtin_call_with_typed_arguments(
             receiver_expression.clone(),
             op,

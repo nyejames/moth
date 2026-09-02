@@ -1315,7 +1315,8 @@ fn external_id_sort_key(id: &ExternalFunctionId) -> String {
         }
         ExternalFunctionId::CollectionGet => "builtin:collection_get".to_owned(),
         ExternalFunctionId::CollectionSet => "builtin:collection_set".to_owned(),
-        ExternalFunctionId::CollectionPush => "builtin:collection_push".to_owned(),
+        ExternalFunctionId::CollectionPushGrowable => "builtin:collection_push_growable".to_owned(),
+        ExternalFunctionId::CollectionPushFixed => "builtin:collection_push_fixed".to_owned(),
         ExternalFunctionId::CollectionRemove => "builtin:collection_remove".to_owned(),
         ExternalFunctionId::CollectionLength => "builtin:collection_length".to_owned(),
         ExternalFunctionId::Synthetic(id) => format!("synthetic:{id}"),

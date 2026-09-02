@@ -108,6 +108,18 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
     ) -> Result<LoweredExpression, CompilerError> {
+        // The parser resolves each collection operation's receiver mutability from the same
+        // operation policy, so a disagreement here is an internal invariant failure.
+        if receiver_requires_mutable != op.requires_mutable_receiver() {
+            return_hir_transformation_error!(
+                format!(
+                    "Collection builtin {:?} reached HIR lowering with inconsistent receiver mutability",
+                    op
+                ),
+                self.hir_error_location(location)
+            );
+        }
+
         let mut full_args = Vec::with_capacity(args.len() + 1);
         if receiver_requires_mutable {
             full_args.push(Self::mutable_call_argument(receiver.clone(), location));
@@ -119,7 +131,8 @@ impl<'a> HirBuilder<'a> {
         let id = match op {
             CollectionBuiltinOp::Get => ExternalFunctionId::CollectionGet,
             CollectionBuiltinOp::Set => ExternalFunctionId::CollectionSet,
-            CollectionBuiltinOp::Push => ExternalFunctionId::CollectionPush,
+            CollectionBuiltinOp::PushGrowable => ExternalFunctionId::CollectionPushGrowable,
+            CollectionBuiltinOp::PushFixed => ExternalFunctionId::CollectionPushFixed,
             CollectionBuiltinOp::Remove => ExternalFunctionId::CollectionRemove,
             CollectionBuiltinOp::Length => ExternalFunctionId::CollectionLength,
         };

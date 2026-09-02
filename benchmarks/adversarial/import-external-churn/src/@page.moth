@@ -17,15 +17,13 @@ page_title #= [: [project_name] v[version]]
 
 items ~{String} = {}
 loop 0 to base_count |i|:
-    ~items.push([: item-[i]]) catch:
-    ;
+    ~items.push([: item-[i]])
 ;
 
 metrics ~{Metric} = {}
 loop 0 to scaled_count() |i|:
     phase = (i / 1.0) * pi_value()
-    ~metrics.push(build_metric([: metric-[i]], phase)) catch:
-    ;
+    ~metrics.push(build_metric([: metric-[i]], phase))
 ;
 
 handle ~ApiHandle = create_handle("main")

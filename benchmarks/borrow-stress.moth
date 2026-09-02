@@ -47,20 +47,17 @@ counter_summary = render_counter(counter)
 
 buckets ~{Bucket} = {}
 loop 0 to 12 |i|:
-    ~buckets.push(Bucket([: bucket-[i] ], i)) catch:
-    ;
+    ~buckets.push(Bucket([: bucket-[i] ], i))
 ;
 
 messages ~{String} = {}
 sample_bucket ~= Bucket("sample", 1)
 sample_message = consume_bucket(~sample_bucket)
-~messages.push(sample_message) catch:
-;
+~messages.push(sample_message)
 
 loop buckets |bucket|:
     message = [: [bucket.label]:[bucket.count] ]
-    ~messages.push(message) catch:
-    ;
+    ~messages.push(message)
 ;
 
 io.line([: [counter_summary]])

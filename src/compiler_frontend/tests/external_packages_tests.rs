@@ -5,6 +5,10 @@
 //! regressions here can break multiple frontend stages at once.
 
 use super::*;
+use crate::compiler_frontend::external_packages::{
+    external_success_returns, ExternalAbiType, ExternalJsLowering, ExternalReturnAlias,
+    ExternalSignatureType,
+};
 
 #[test]
 fn return_slots_preserve_alias_metadata() {
@@ -67,10 +71,45 @@ fn register_function_rejects_duplicates() {
 #[test]
 fn collection_helpers_keep_receiver_parameter_access_modes() {
     let registry = ExternalPackageRegistry::new();
-    let push = registry
-        .get_function_by_id(ExternalFunctionId::CollectionPush)
+
+    let growable_push = registry
+        .get_function_by_id(ExternalFunctionId::CollectionPushGrowable)
         .unwrap();
-    assert_eq!(push.parameters[0].access_kind, ExternalAccessKind::Mutable);
+    let fixed_push = registry
+        .get_function_by_id(ExternalFunctionId::CollectionPushFixed)
+        .unwrap();
+
+    for push in [growable_push, fixed_push] {
+        assert_eq!(push.parameters.len(), 2);
+        assert_eq!(push.parameters[0].access_kind, ExternalAccessKind::Mutable);
+        assert_eq!(
+            push.parameters[0].language_type,
+            ExternalSignatureType::Abi(ExternalAbiType::Inferred)
+        );
+        assert_eq!(push.parameters[1].access_kind, ExternalAccessKind::Shared);
+        assert_eq!(
+            push.parameters[1].language_type,
+            ExternalSignatureType::Abi(ExternalAbiType::Inferred)
+        );
+        assert_eq!(
+            push.returns,
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh)
+        );
+        assert!(push.error_return_type.is_none());
+        assert!(push.lowerings.wasm.is_none());
+    }
+
+    assert!(matches!(
+        &growable_push.lowerings.js,
+        Some(ExternalJsLowering::RuntimeFunction(name))
+            if name.as_str() == "__moth_collection_push_growable"
+    ));
+    assert!(matches!(
+        &fixed_push.lowerings.js,
+        Some(ExternalJsLowering::RuntimeFunction(name))
+            if name.as_str() == "__moth_collection_push_fixed"
+    ));
+    assert_ne!(growable_push.name, fixed_push.name);
 
     let set = registry
         .get_function_by_id(ExternalFunctionId::CollectionSet)

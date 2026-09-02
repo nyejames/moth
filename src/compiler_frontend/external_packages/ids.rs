@@ -17,7 +17,8 @@ pub const CORE_IO_PACKAGE_PATH: &str = "@core/io";
 pub const IO_NAMESPACE_NAME: &str = "io";
 pub const COLLECTION_GET_HOST_NAME: &str = "__moth_collection_get";
 pub const COLLECTION_SET_HOST_NAME: &str = "__moth_collection_set";
-pub const COLLECTION_PUSH_HOST_NAME: &str = "__moth_collection_push";
+pub const COLLECTION_PUSH_GROWABLE_HOST_NAME: &str = "__moth_collection_push_growable";
+pub const COLLECTION_PUSH_FIXED_HOST_NAME: &str = "__moth_collection_push_fixed";
 pub const COLLECTION_REMOVE_HOST_NAME: &str = "__moth_collection_remove";
 pub const COLLECTION_LENGTH_HOST_NAME: &str = "__moth_collection_length";
 
@@ -55,7 +56,8 @@ pub enum ExternalFunctionId {
     IoInputLastPointerReleased,
     CollectionGet,
     CollectionSet,
-    CollectionPush,
+    CollectionPushGrowable,
+    CollectionPushFixed,
     CollectionRemove,
     CollectionLength,
     /// Synthetic functions registered by tests. Never emitted by production parsers.
@@ -88,7 +90,8 @@ impl ExternalFunctionId {
             Self::IoInputLastPointerReleased => "__moth_io_input_last_pointer_released",
             Self::CollectionGet => COLLECTION_GET_HOST_NAME,
             Self::CollectionSet => COLLECTION_SET_HOST_NAME,
-            Self::CollectionPush => COLLECTION_PUSH_HOST_NAME,
+            Self::CollectionPushGrowable => COLLECTION_PUSH_GROWABLE_HOST_NAME,
+            Self::CollectionPushFixed => COLLECTION_PUSH_FIXED_HOST_NAME,
             Self::CollectionRemove => COLLECTION_REMOVE_HOST_NAME,
             Self::CollectionLength => COLLECTION_LENGTH_HOST_NAME,
             Self::Synthetic(_) => "<synthetic>",

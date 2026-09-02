@@ -669,8 +669,7 @@ fn boracle_source_shared_alias_conflict_uses_derived_loan() {
         r#"
 items ~= {"a"}
 shared = items
-~items.push("b") catch:
-;
+~items.push("b")
 result = shared
 "#,
         BoracleDump::Conflicts,
@@ -689,8 +688,7 @@ fn boracle_source_shared_alias_final_use_allows_mutation() {
 items ~= {"a"}
 shared = items
 result = shared
-~items.push("b") catch:
-;
+~items.push("b")
 "#,
         BoracleDump::Conflicts,
     );
@@ -726,8 +724,7 @@ fn boracle_source_copy_is_independent_from_source_alias() {
 items ~= {"a"}
 shared = items
 snapshot ~= copy items
-~snapshot.push("b") catch:
-;
+~snapshot.push("b")
 result = shared
 "#,
         BoracleDump::Conflicts,
@@ -746,8 +743,7 @@ fn boracle_source_copy_report_keeps_origins_independent() {
 items ~= {1}
 shared = items
 snapshot ~= copy items
-~snapshot.push(2) catch:
-;
+~snapshot.push(2)
 result = shared
 "#,
     );
@@ -801,8 +797,7 @@ fn boracle_source_copy_through_alias_stays_write_through_without_path_join() {
         r#"
 items ~= {1}
 writer ~= items
-~items.push(2) catch:
-;
+~items.push(2)
 payload ~= {3}
 writer = copy payload
 "#,
@@ -875,8 +870,7 @@ fn boracle_source_rebind_separates_old_alias_origin() {
 items ~= {"a"}
 shared = items
 items = {"b"}
-~items.push("c") catch:
-;
+~items.push("c")
 result = shared
 "#,
         BoracleDump::Conflicts,
@@ -895,8 +889,7 @@ fn boracle_source_rebind_report_separates_old_and_new_generations() {
 items ~= {"a"}
 shared = items
 items = {"b"}
-~items.push("c") catch:
-;
+~items.push("c")
 result = shared
 "#,
     );
@@ -972,8 +965,7 @@ slot ~= {"slot"}
 slot = source
 survivor = slot
 slot = {"new"}
-~slot.push("changed") catch:
-;
+~slot.push("changed")
 result = survivor
 "#,
     );
@@ -1121,8 +1113,7 @@ fn boracle_source_write_through_keeps_alias_loan_live_before_overlap() {
         r#"
 items ~= {1}
 writer ~= items
-~items.push(2) catch:
-;
+~items.push(2)
 writer = {3}
 "#,
     );
@@ -1331,8 +1322,7 @@ keep_values |value {Int}| -> {Int}:
 items ~= {1}
 shared = items
 unknown ~= keep_values(value = items)
-~unknown.push(2) catch:
-;
+~unknown.push(2)
 result = shared
 "#,
         BoracleDump::Conflicts,
@@ -1355,8 +1345,7 @@ keep_values |value {Int}| -> {Int}:
 items ~= {1}
 shared = items
 unknown ~= keep_values(value = items)
-~unknown.push(2) catch:
-;
+~unknown.push(2)
 result = shared
 "#,
     );
@@ -1465,8 +1454,7 @@ load_values |value {Int}, fail Bool| -> {Int}, Error!:
 items ~= {1}
 should_fail ~= false
 loaded = load_values(value = items, fail = should_fail) catch:
-    ~items.push(2) catch:
-    ;
+    ~items.push(2)
     then {0}
 ;
 observed = loaded
@@ -1579,8 +1567,7 @@ Pair = |
 items ~= {1}
 pair ~= Pair(items, items)
 alias = pair.first
-~items.push(2) catch:
-;
+~items.push(2)
 result = alias
 "#,
         BoracleDump::Conflicts,
@@ -1604,8 +1591,7 @@ Pair = |
 items ~= {1}
 pair ~= Pair(items, items)
 alias = pair.first
-~items.push(2) catch:
-;
+~items.push(2)
 result = alias
 "#,
     );
@@ -1801,8 +1787,7 @@ observe |value {Int}| -> {Int}:
 
 items ~= {1}
 shared = items
-~items.push(2) catch:
-;
+~items.push(2)
 result = observe(value = shared)
 "#,
     );
@@ -1833,10 +1818,8 @@ fn boracle_source_mutable_alias_used_only_as_mutable_call_stays_live() {
         r#"
 items ~= {1}
 writer ~= items
-~items.push(2) catch:
-;
-~writer.push(3) catch:
-;
+~items.push(2)
+~writer.push(3)
 result = items
 "#,
     );
@@ -1929,8 +1912,7 @@ condition = true
 if condition:
     observed = observe(value = shared)
 else
-    ~items.push(2) catch:
-    ;
+    ~items.push(2)
 ;
 result = 0
 "#,
@@ -1980,8 +1962,7 @@ counter ~= 0
 loop counter < 2:
     old = items
     items = {2}
-    ~items.push(3) catch:
-    ;
+    ~items.push(3)
     result = old
     counter = counter + 1
 ;
@@ -2098,8 +2079,7 @@ fn boracle_source_typed_report_connects_origins_loans_and_conflicts() {
         r#"
 items ~= {"a"}
 shared = items
-~items.push("b") catch:
-;
+~items.push("b")
 result = shared
 "#,
     );

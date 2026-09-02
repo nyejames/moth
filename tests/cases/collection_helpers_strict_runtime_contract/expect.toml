@@ -9,7 +9,8 @@ kind = "html"
 must_contain = [
     "function __moth_collection_get(",
     "function __moth_collection_set(",
-    "function __moth_collection_push(",
+    "function __moth_collection_push_growable(",
+    "function __moth_collection_push_fixed(",
     "function __moth_collection_remove(",
     "function __moth_collection_length(",
 ]
@@ -18,7 +19,7 @@ must_contain = [
 path = "index.html"
 kind = "html"
 must_not_contain = [
-    "__moth_result_propagate(__moth_collection_push(",
+    "__moth_result_propagate(__moth_collection_push_growable(",
     "__moth_result_propagate(__moth_collection_remove(",
     "__moth_result_propagate(__moth_collection_length(",
 ]

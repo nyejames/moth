@@ -22,21 +22,21 @@ ACTIVE_PLAN:
 STATUS: active
 
 CURRENT_SLICE:
-- Phase: Phase 0 - refresh, preserve local work and establish the baseline
-- Checklist item: 0A-0D
-- Goal: establish local state, classify all push owners and record passing baseline gates
-- Non-goals: no implementation edits before the current branch, local documentation work and baseline failures are understood
+- Phase: Phase 1 - complete the semantic and runtime cutover
+- Checklist item: 1A-1F
+- Goal: split growable and fixed push identities end to end, migrate executable sources and accept the code-bearing gate
+- Non-goals: no source or generated documentation edits; no HTML-Wasm collection lowering; no benchmark history recording
 
 LAST_GOOD_COMMIT:
-- `none` until the first implementation slice is accepted
+- `b079c3932` (Phase 0 roadmap activation checkpoint)
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: clean at activation; no user-authored documentation edits or unrelated changes were present
-- Branch: `collection-push-fallability` at `08d3cd8734bd51b9372ff0b1e4398fd3893d8910`
-- Dedicated worker worktrees: none; one read-only inventory worker used no worktree
+- Clean / known changes: Phase 1 production, Rust test, embedded-source, benchmark and integration-fixture edits only; no unrelated changes observed
+- Branch: `collection-push-fallability` at `b079c3932`
+- Dedicated worker worktrees: none; three bounded native workers used the shared worktree with disjoint file ownership
 INVENTORY_NOTES:
-- Old identities: `CollectionBuiltinOp::Push`, `ExternalFunctionId::CollectionPush`, `COLLECTION_PUSH_HOST_NAME` and `__moth_collection_push` remain only in the pre-cutover implementation and tests
-- Moth call sites: 41 test-case calls (16 growable with handling to migrate, 21 fixed with handling to retain, 3 mutable-receiver rejection cases, 1 fixed unhandled rejection), 59 executable benchmark calls (all growable with handling), 39 documentation calls (32 growable unhandled, 5 fixed handled, 2 ambiguous examples needing explicit setup)
+- Old identities: `CollectionBuiltinOp::Push`, `ExternalFunctionId::CollectionPush`, `COLLECTION_PUSH_HOST_NAME` and `__moth_collection_push` were removed from the Phase 1 implementation, tests, fixtures and benchmarks; stale source/generated documentation references remain for Phase 2
+- Moth call sites: 41 test-case calls (16 growable with handling to migrate, 21 fixed with handling to retain, 3 mutable-receiver rejection cases, 1 fixed unhandled rejection), 31 embedded Rust-test source calls (all growable with handling), 59 executable benchmark calls (all growable with handling), 39 documentation calls (32 growable unhandled, 5 fixed handled, 2 ambiguous examples needing explicit setup)
 - Display-only benchmark samples: 3 `.push(` spellings inside `code-highlighter-stress.moth` `$code` text; do not migrate
 - No package Moth call sites; generated `docs/release/**` is rebuild-only
 MIGRATION_INVENTORY:
@@ -45,6 +45,7 @@ MIGRATION_INVENTORY:
 - Test-case file retaining fixed unhandled rejection: `fixed_collection_push_without_fallible_handling_rejected`
 - Test-case files that only protect receiver rejection: `collection_immutable_receiver_rejected`, `collection_mutating_method_requires_explicit_receiver_tilde`, `collection_mutating_method_temporary_receiver_rejected`
 - Benchmark files with executable growable handling to remove: `borrow-stress.moth`, `collection-stress.moth`, `speed-test.moth`, `type-stress.moth`, `adversarial/collection-map-borrow-churn.moth`, `adversarial/expression-rpn-churn.moth`, `adversarial/one-module-kitchen-sink.moth`, `adversarial/import-external-churn/src/@page.moth`
+- Embedded executable Rust-test sources migrated during Phase 1: `src/compiler_frontend/analysis/borrow_checker/tests/borrow_checker_loop_tests.rs` (10 calls), `src/compiler_frontend/ast/expressions/tests/cast_boundary_tests.rs` (1 call), `src/projects/tests/boracle_tests.rs` (20 calls); block terminators, handlers for other fallible operations and borrow assertions were preserved
 - Display-only benchmark file: `code-highlighter-stress.moth` lines 456, 934 and 935 are `$code("moth")` text and remain unchanged
 - Documentation call-site files: `docs/src/docs/bindings/{explicit-copies,explicit-copies-basic,mutable-bindings,mutable-bindings-basic,shared-access}.mtf`; `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`; `docs/src/docs/collections/{collection-operations,collection-operations-basic,growable-collections,growable-collections-basic}.mtf`; `docs/src/docs/errors/{catch-and-recovery,propagation}.mtf`; `docs/src/docs/memory/{copy-and-exclusive-access,copy-and-exclusive-access-basic,declared-regions,reference-semantics,reference-semantics-basic}.mtf`; `docs/src/docs/packages/core/collections/{collections,collections-basic}.mtf`; `docs/src/docs/reactivity/{mutation-and-invalidation,mutation-and-invalidation-basic}.mtf`; `docs/src/developer-docs/memory-management/{boracle/boracle-reference-solver,declared-regions/declared-regions}.mtf`; `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
 - Ambiguous documentation examples requiring explicit type setup: `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf:212` and `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf:803`
@@ -85,8 +86,7 @@ RELEVANT_CODE:
 - `src/compiler_frontend/ast/expressions/expression.rs::collection_builtin_call_with_typed_arguments`: result-type construction for collection calls
 - `src/compiler_frontend/hir/hir_expression/calls.rs::lower_collection_builtin_call_expression`: resolved AST operation to stable external call target
 - `src/compiler_frontend/external_packages/ids.rs::ExternalFunctionId`: stable binding-backed call identity
-- `src/builder_surface/core_packages/collections.rs::register_core_collections_package`: access and backend-lowering metadata
-- `src/backends/js/runtime/collections.rs::emit_runtime_collection_helpers`: current unified runtime helper and fixed-capacity check
+- `src/backends/js/runtime/collections.rs::emit_runtime_collection_helpers`: split growable and fixed runtime helpers
 - `src/compiler_frontend/ast/statements/tests/collections_tests.rs`: frontend collection-call contract tests
 - `src/compiler_frontend/hir/tests/hir_expression_lowering_tests.rs`: HIR target and result-lowering tests
 - `src/compiler_frontend/hir/tests/reachability_tests.rs`: stable external-call reachability facts
@@ -146,19 +146,23 @@ BLOCKERS / RISKS:
 - HTML-Wasm currently has no collection binding lowering. Do not accidentally claim or implement it in this plan
 
 VALIDATION_STATE:
-- focused commands: `cargo fmt --all -- --check` passed; `cargo test --workspace --quiet -- --format terse` passed with 5648 tests; `cargo run --quiet -- tests --tag collections --backend html` passed 84/84 (42 successful, 42 expected failures); `cargo run --package xtask --bin xtask -- bench-validate` passed all 82 benchmark cases
-- first `just validate` attempt: failed only because the roadmap activation edit happened during its benchmark diff guard (`tracked files changed during benchmark run`)
-- clean `just validate` rerun: passed Clippy, feature-lane check (0 findings), source audit (1285 files, 0 findings), unit suites (4814 + 17 + 817), integration tests (1932/1932), docs check, benchmark sanity, all scaling budgets and timer erasure
-- unrelated failures: none observed
+- Phase 0 focused baseline: formatting passed; workspace tests 5648 passed; collections tag 84/84 correct (42 successful, 42 expected failures); benchmark preflight 82/82 passed
+- First Phase 0 `just validate` attempt stopped only because its benchmark diff guard observed the concurrent roadmap activation edit
+- Clean Phase 0 `just validate` rerun passed Clippy, feature-lane check (0 findings), source audit (1285 files, 0 findings), unit suites (4814 + 17 + 817), integration tests (1932/1932), docs check, benchmark sanity, all scaling budgets and timer erasure
+- Phase 1 focused checks: `cargo fmt --all -- --check` passed; filtered collection Rust tests passed 192/192; full workspace tests passed 5651 tests across 5 suites
+- Phase 1 named cases passed 1/1 each for `collection_ordered_runtime_operations`, `fixed_collection_push_overflow_catch` and `fixed_collection_js_runtime_capacity`; `cargo run --quiet -- tests --tag collections --backend html` passed 84/84 (42 successful, 42 expected failures)
+- Phase 1 integration audit wrote inventory for 1776 cases and 1932 backend executions; `cargo run --package xtask --bin xtask -- bench-validate` passed all 82 benchmark cases
+- Phase 1 clean `just validate` passed native Clippy, feature-lane check (0 findings), source audit (1285 files, 0 findings), unit suites (4817 + 17 + 817), integration tests (1932/1932), docs check with no errors or warnings, benchmark sanity (8 CLI and 10 frontend quick cases after 82-case preflight), all 3 scaling series within budget and timer erasure (8580672-byte no-timer binary clean)
+- Unrelated failures: none observed
 - LSP references unavailable because configured `rust-analyzer` is absent from the official toolchain; repository search inventory was used instead
 
 DOCS_IMPACT:
 - progress matrix needed: yes, update the existing Collections row rather than adding a new row
-- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure. Binding examples were already correct. The only remaining stale output is any generated page under `docs/release/**` not yet rebuilt
+- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure. Binding examples were already correct. The remaining stale source and generated output is deferred to Phase 2
 - authorized docs updates: yes, explicitly requested by the user
 
 NEXT_ACTION:
-- Phase 0 audit findings are corrected; rerun the read-only audit, accept the roadmap activation checkpoint, then begin the Phase 1 vertical cutover
+- Phase 1 audit and code-bearing validation passed; commit the complete cutover checkpoint, then begin the Phase 2 documentation alignment
 ```
 
 ## Reviewed current state

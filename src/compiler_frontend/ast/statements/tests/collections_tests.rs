@@ -162,11 +162,8 @@ fn rejects_item_that_does_not_match_explicit_collection_type() {
 }
 
 #[test]
-fn parses_push_after_explicit_empty_collection() {
-    let (ast, string_table) = parse_single_file_ast(
-        "values ~{Int} = {}\n~values.push(1) catch:
-;\n",
-    );
+fn parses_growable_push_after_explicit_empty_collection() {
+    let (ast, string_table) = parse_single_file_ast("values ~{Int} = {}\n~values.push(1)\n");
     let body = start_function_body(&ast, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
@@ -174,8 +171,8 @@ fn parses_push_after_explicit_empty_collection() {
     };
 
     assert_eq!(
-        handled_collection_builtin_op(push_expr),
-        CollectionBuiltinOp::Push
+        runtime_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushGrowable
     );
 }
 
@@ -238,8 +235,7 @@ fn parses_collection_get_with_fallback_handler_and_propagation() {
 #[test]
 fn parses_collection_mutators_and_length_calls() {
     let (ast, string_table) = parse_single_file_ast(
-        "values ~= {1, 2, 3}\n~values.set(1, 9) catch:\n;\n~values.push(4) catch:
-;\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
+        "values ~= {1, 2, 3}\n~values.set(1, 9) catch:\n;\n~values.push(4)\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
     );
     let body = start_function_body(&ast, &string_table);
 
@@ -255,8 +251,8 @@ fn parses_collection_mutators_and_length_calls() {
         panic!("expected push(...) statement");
     };
     assert_eq!(
-        handled_collection_builtin_op(push_expr),
-        CollectionBuiltinOp::Push
+        runtime_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushGrowable
     );
 
     let NodeKind::VariableDeclaration(removed_decl) = &body[3].kind else {
@@ -280,8 +276,7 @@ fn parses_collection_mutators_and_length_calls() {
 #[test]
 fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
     let (ast, string_table) = parse_single_file_ast(
-        "values ~= {1, 2, 3}\n~values.push(4) catch:
-;\n~values.set(1, 9) catch:\n;\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
+        "values ~= {1, 2, 3}\n~values.push(4)\n~values.set(1, 9) catch:\n;\nremoved = ~values.remove(2) catch:\n    then 0\n;\nsize = values.length()\n",
     );
     let body = start_function_body(&ast, &string_table);
 
@@ -289,8 +284,8 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
         panic!("expected push(...) statement");
     };
     assert_eq!(
-        handled_collection_builtin_op(push_expr),
-        CollectionBuiltinOp::Push
+        runtime_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushGrowable
     );
 
     let NodeKind::ExpressionStatement(set_expr) = &body[2].kind else {
@@ -311,8 +306,23 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
 }
 
 #[test]
-fn rejects_unhandled_collection_push_result() {
-    let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\n~values.push(4)\n");
+fn accepts_unhandled_growable_collection_push() {
+    let (ast, string_table) = parse_single_file_ast("values ~= {1, 2, 3}\n~values.push(4)\n");
+    let body = start_function_body(&ast, &string_table);
+
+    let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
+        panic!("expected push statement");
+    };
+
+    assert_eq!(
+        runtime_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushGrowable
+    );
+}
+
+#[test]
+fn rejects_unhandled_fixed_collection_push_result() {
+    let diagnostic = parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\n~items.push(3)\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -324,21 +334,80 @@ fn rejects_unhandled_collection_push_result() {
 }
 
 #[test]
-fn accepts_collection_push_postfix_propagation() {
-    parse_single_file_ast(
+fn rejects_catch_handler_on_growable_collection_push() {
+    let diagnostic =
+        parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\n~values.push(4) catch:\n;\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::CatchOnNonFallible,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rejects_propagation_on_growable_collection_push() {
+    let diagnostic = parse_single_file_ast_diagnostic(
         "append || -> Error!:
     values ~= {1, 2, 3}
     ~values.push(4)!
 ;
 ",
     );
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::BangOnNonFallible,
+            ..
+        }
+    ));
 }
 
 #[test]
-fn rejects_collection_push_fallback_value() {
+fn parses_fixed_collection_push_with_fallback_handler() {
+    let (ast, string_table) =
+        parse_single_file_ast("items ~{2 Int} = {1, 2}\n~items.push(3) catch:\n;\n");
+    let body = start_function_body(&ast, &string_table);
+
+    let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
+        panic!("expected push statement");
+    };
+
+    assert_eq!(
+        handled_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushFixed
+    );
+}
+
+#[test]
+fn parses_fixed_collection_push_postfix_propagation() {
+    let (ast, string_table) = parse_single_file_ast(
+        "append || -> Error!:
+    items ~{2 Int} = {1, 2}
+    ~items.push(3)!
+;
+",
+    );
+    let body = function_body_by_name(&ast, &string_table, "append");
+
+    let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
+        panic!("expected push statement");
+    };
+
+    assert_eq!(
+        handled_collection_builtin_op(push_expr),
+        CollectionBuiltinOp::PushFixed
+    );
+}
+
+#[test]
+fn rejects_fixed_collection_push_fallback_value() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "values ~= {1, 2, 3}
-~values.push(4) catch:
+        "items ~{2 Int} = {1, 2}
+~items.push(3) catch:
     then 0
 ;
 ",
@@ -359,6 +428,17 @@ fn rejects_mutating_collection_method_without_explicit_receiver_tilde() {
 
     assert!(matches!(
         diagnostic.payload,
+        DiagnosticPayload::InvalidReceiverCall {
+            reason: InvalidReceiverCallReason::MutableReceiverMissingMarker,
+            ..
+        }
+    ));
+
+    let fixed_diagnostic =
+        parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\nitems.push(3)\n");
+
+    assert!(matches!(
+        fixed_diagnostic.payload,
         DiagnosticPayload::InvalidReceiverCall {
             reason: InvalidReceiverCallReason::MutableReceiverMissingMarker,
             ..

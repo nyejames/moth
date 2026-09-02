@@ -445,8 +445,7 @@ fn builtin_named_parameter_with_cast_reports_builtin_call_shape() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
 values ~= {1}
-~values.push(value = cast "2") catch:
-;
+~values.push(value = cast "2")
 "#,
     );
 

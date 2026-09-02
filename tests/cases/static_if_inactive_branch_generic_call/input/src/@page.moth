@@ -13,9 +13,7 @@ identity type A |value A| -> A:
 ;
 
 append_label |target ~{String}|:
-    ~target.push("inactive") catch:
-        io.error("push failed")
-    ;
+    ~target.push("inactive")
 ;
 
 active ~= 0

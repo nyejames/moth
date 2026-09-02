@@ -11,10 +11,12 @@
 //!
 //! Semantic policy:
 //! - `get`, `set`, and `remove` return `{ tag: "ok", value: ... }` or `{ tag: "err", value: ... }`.
-//! - `push` is a fallible helper returning `{ tag: "ok", value: null }` on success.
+//! - Growable `push` is infallible and mutates the array directly with no result carrier.
+//! - Fixed `push` is a fallible helper returning `{ tag: "ok", value: null }` on success.
 //! - `length` is an infallible helper returning logical item count.
 //! - `get`, `set`, and `remove` validate receivers with
-//!   `BuiltinErrorCode::CollectionExpectedOrderedCollection`.
+//!   `BuiltinErrorCode::CollectionExpectedOrderedCollection`; fixed `push` rejects growable
+//!   arrays with the same error through a strict branded-wrapper check.
 //! - Invalid index or out-of-bounds (get, set, remove) → `BuiltinErrorCode::CollectionIndexOutOfBounds`.
 //!   This includes non-integer indices, negative indices, and `index >= length`.
 //! - Fixed-capacity push when full → `BuiltinErrorCode::CollectionFixedCapacityExceeded`.
@@ -52,7 +54,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
 
         // Collection helpers share this accessor so fixed wrappers keep dense
-        // array semantics for get, set, push, remove, and length.
+        // array semantics for get, set, remove, length, and fixed push.
         self.emit_line("function __moth_collection_items(collection) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (Array.isArray(collection)) {");
@@ -61,19 +63,6 @@ impl<'hir> JsEmitter<'hir> {
             });
             emitter.emit_line("}");
             emitter.emit_line("return collection.items;");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-
-        // Returns the fixed capacity for fixed collections, or null for growable.
-        self.emit_line("function __moth_collection_fixed_capacity(collection) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (Array.isArray(collection)) {");
-            emitter.with_indent(|em| {
-                em.emit_line("return null;");
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return collection.fixedCapacity;");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -110,6 +99,18 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("&& collection.items.length <= collection.fixedCapacity");
             });
             emitter.emit_line(");");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        // Fixed push requires a strict branded-wrapper check: unlike the broad validator
+        // above, growable arrays are rejected so fixed semantics can never silently mutate a
+        // growable collection.
+        self.emit_line("function __moth_collection_is_fixed_collection(collection) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line(
+                "return !Array.isArray(collection) && __moth_collection_is_valid(collection);",
+            );
         });
         self.emit_line("}");
         self.emit_line("");
@@ -170,9 +171,24 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("function __moth_collection_push(collection, value) {");
+        // Growable push is infallible: growable collections are plain JS arrays, so the helper
+        // is a direct mutation with no result carrier, validation branch, or fixed-capacity
+        // logic.
+        self.emit_line("function __moth_collection_push_growable(collection, value) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (!__moth_collection_is_valid(collection)) {");
+            emitter.emit_line("collection.push(value);");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        // Fixed push keeps the fallible carrier contract: the strict branded-wrapper validator
+        // rejects growable arrays and malformed external values, and pushing past capacity is a
+        // runtime error instead of a silent reallocation. After
+        // `__moth_collection_is_fixed_collection` passes, `collection.fixedCapacity` is a
+        // positive integer.
+        self.emit_line("function __moth_collection_push_fixed(collection, value) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line("if (!__moth_collection_is_fixed_collection(collection)) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
                     "return __moth_error_result(\"{invalid_collection_message}\", {invalid_collection_code});",
@@ -180,8 +196,7 @@ impl<'hir> JsEmitter<'hir> {
             });
             emitter.emit_line("}");
             emitter.emit_line("const items = __moth_collection_items(collection);");
-            emitter.emit_line("const fixedCapacity = __moth_collection_fixed_capacity(collection);");
-            emitter.emit_line("if (fixedCapacity !== null && items.length >= fixedCapacity) {");
+            emitter.emit_line("if (items.length >= collection.fixedCapacity) {");
             emitter.with_indent(|em| {
                 em.emit_line(&format!(
                     "return __moth_error_result(\"{capacity_exceeded_message}\", {capacity_exceeded_code});",
