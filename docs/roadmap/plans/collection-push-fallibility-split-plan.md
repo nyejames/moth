@@ -22,23 +22,23 @@ ACTIVE_PLAN:
 STATUS: active
 
 CURRENT_SLICE:
-- Phase: Phase 1 - complete the semantic and runtime cutover
-- Checklist item: 1A-1F
-- Goal: split growable and fixed push identities end to end, migrate executable sources and accept the code-bearing gate
-- Non-goals: no source or generated documentation edits; no HTML-Wasm collection lowering; no benchmark history recording
+- Phase: Phase 2 - align documentation, status and deferred coverage
+- Checklist item: 2A-2F
+- Goal: update canonical teaching sources, support status, deferred ownership and generated release output
+- Non-goals: no implementation or test changes unless documentation review proves a real defect; no HTML-Wasm lowering
 
 LAST_GOOD_COMMIT:
-- `b079c3932` (Phase 0 roadmap activation checkpoint)
+- `222e69703` (Phase 1 semantic cutover checkpoint)
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: Phase 1 production, Rust test, embedded-source, benchmark and integration-fixture edits only; no unrelated changes observed
-- Branch: `collection-push-fallability` at `b079c3932`
-- Dedicated worker worktrees: none; three bounded native workers used the shared worktree with disjoint file ownership
+- Clean / known changes: Phase 2 source documentation, roadmap, generated release routes and refreshed plan capsule are complete; only the Phase 2 checkpoint commit remains, with no unrelated changes observed
+- Branch: `collection-push-fallability` at `222e69703`
+- Dedicated worker worktrees: none; two bounded documentation workers used the shared worktree with disjoint file ownership
 INVENTORY_NOTES:
-- Old identities: `CollectionBuiltinOp::Push`, `ExternalFunctionId::CollectionPush`, `COLLECTION_PUSH_HOST_NAME` and `__moth_collection_push` were removed from the Phase 1 implementation, tests, fixtures and benchmarks; stale source/generated documentation references remain for Phase 2
+- Old identities: `CollectionBuiltinOp::Push`, `ExternalFunctionId::CollectionPush`, `COLLECTION_PUSH_HOST_NAME` and `__moth_collection_push` were removed from implementation, tests, fixtures and benchmarks; source and generated documentation now use the split contract and helper names
 - Moth call sites: 41 test-case calls (16 growable with handling to migrate, 21 fixed with handling to retain, 3 mutable-receiver rejection cases, 1 fixed unhandled rejection), 31 embedded Rust-test source calls (all growable with handling), 59 executable benchmark calls (all growable with handling), 39 documentation calls (32 growable unhandled, 5 fixed handled, 2 ambiguous examples needing explicit setup)
-- Display-only benchmark samples: 3 `.push(` spellings inside `code-highlighter-stress.moth` `$code` text; do not migrate
-- No package Moth call sites; generated `docs/release/**` is rebuild-only
+- Display-only benchmark samples: 3 `.push(` spellings inside `code-highlighter-stress.moth` `$code` text remain unchanged
+- No package Moth call sites; generated `docs/release/**` was rebuilt from source with no direct edits
 MIGRATION_INVENTORY:
 - Test-case files with growable handling to remove: `collection_alias_observes_mutation`, `collection_helpers_strict_runtime_contract`, `collection_methods_backend_contract`, `collection_mutable_access_js_regression`, `collection_mutation_inside_branch`, `collection_mutation_inside_loop`, `collection_mutation_through_mutable_alias`, `collection_ordered_runtime_operations`, `explicit_empty_collection_can_be_pushed`, `function_call_mutable_param_fresh_values`, `loop_borrow_independent_roots`, `loop_borrow_mutation_conflict`, `static_if_inactive_branch_generic_call`, `template_runtime_repeated_slot_single_evaluation`
 - Test-case files retaining fixed handling: `fixed_collection_const_capacity_success`, `fixed_collection_facade_capacity_success`, `fixed_collection_imported_capacity_success`, `fixed_collection_js_runtime_capacity`, `fixed_collection_mutable_empty_push_success`, `fixed_collection_push_overflow_catch`, `fixed_collection_remove_preserves_capacity`, `fixed_collection_struct_field_default_success`
@@ -153,16 +153,18 @@ VALIDATION_STATE:
 - Phase 1 named cases passed 1/1 each for `collection_ordered_runtime_operations`, `fixed_collection_push_overflow_catch` and `fixed_collection_js_runtime_capacity`; `cargo run --quiet -- tests --tag collections --backend html` passed 84/84 (42 successful, 42 expected failures)
 - Phase 1 integration audit wrote inventory for 1776 cases and 1932 backend executions; `cargo run --package xtask --bin xtask -- bench-validate` passed all 82 benchmark cases
 - Phase 1 clean `just validate` passed native Clippy, feature-lane check (0 findings), source audit (1285 files, 0 findings), unit suites (4817 + 17 + 817), integration tests (1932/1932), docs check with no errors or warnings, benchmark sanity (8 CLI and 10 frontend quick cases after 82-case preflight), all 3 scaling series within budget and timer erasure (8580672-byte no-timer binary clean)
+- Phase 2 `cargo run --quiet -- build docs --release` wrote 74 output files successfully; `cargo run --quiet -- check docs --terse` passed with no errors or warnings
+- Phase 2 generated-route inspection found split helpers and current contract across Collections, Core collections, Progress, access-and-aliasing and Boracle routes; stale-path searches found no old helper or unified-fallibility wording
 - Unrelated failures: none observed
 - LSP references unavailable because configured `rust-analyzer` is absent from the official toolchain; repository search inventory was used instead
 
 DOCS_IMPACT:
 - progress matrix needed: yes, update the existing Collections row rather than adding a new row
-- other docs stale: the accepted collection reference pages, memory examples, reactivity examples, error examples and the Core collections Basic page were corrected by the final memory model consistency closure. Binding examples were already correct. The remaining stale source and generated output is deferred to Phase 2
+- source docs aligned: canonical collections, cross-topic examples, Core collections pages, progress rows and roadmap ownership now describe the accepted split; generated release routes were rebuilt from those sources
 - authorized docs updates: yes, explicitly requested by the user
 
 NEXT_ACTION:
-- Phase 1 audit and code-bearing validation passed; commit the complete cutover checkpoint, then begin the Phase 2 documentation alignment
+- Phase 2 source audit, release rebuild, docs check and rendered-route audit are complete; create the documentation checkpoint commit, then begin Phase 3 closeout
 ```
 
 ## Reviewed current state

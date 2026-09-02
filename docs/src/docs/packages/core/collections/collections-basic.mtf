@@ -16,7 +16,7 @@ Non-empty literals infer their element type from their items. Empty literals nee
 
 Collection methods use receiver syntax. `get`, `set` and `remove` take the fallible path, so they need `!` or `catch`. `length` stays infallible.
 
-`push` depends on the collection. A growable `{T}` always has room, so its `push` is infallible. A fixed `{N T}` can be full, so its `push` is fallible.
+`push` depends on the collection. A growable `{T}` grows to make room, so its `push` is infallible. A fixed `{N T}` can be full, so its `push` is fallible.
 
 [codeblock, $code("moth"):
     values ~= {1, 2, 3}

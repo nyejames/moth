@@ -1263,13 +1263,6 @@ return collection;
 return collection.items;
 }
 
-function __moth_collection_fixed_capacity(collection) {
-if (Array.isArray(collection)) {
-return null;
-}
-return collection.fixedCapacity;
-}
-
 function __moth_collection_is_valid(collection) {
 if (Array.isArray(collection)) {
 return true;
@@ -1288,6 +1281,10 @@ Number.isInteger(collection.fixedCapacity)
 && collection.fixedCapacity > 0
 && collection.items.length <= collection.fixedCapacity
 );
+}
+
+function __moth_collection_is_fixed_collection(collection) {
+return !Array.isArray(collection) && __moth_collection_is_valid(collection);
 }
 
 function __moth_collection_index_is_valid(collection, index) {
@@ -1318,13 +1315,16 @@ items[index] = value;
 return { tag: "ok", value: null };
 }
 
-function __moth_collection_push(collection, value) {
-if (!__moth_collection_is_valid(collection)) {
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (!__moth_collection_is_fixed_collection(collection)) {
 return __moth_error_result("Collection operation expects an ordered collection", 100);
 }
 const items = __moth_collection_items(collection);
-const fixedCapacity = __moth_collection_fixed_capacity(collection);
-if (fixedCapacity !== null && items.length >= fixedCapacity) {
+if (items.length >= collection.fixedCapacity) {
 return __moth_error_result("Fixed collection capacity exceeded", 102);
 }
 items.push(value);

@@ -25,8 +25,17 @@ value. Allocation exhaustion is unrecoverable and traps rather than entering
     ~names.push("Priya")
 ]
 
+Handling a growable push is a compile-time error:
+
+[codeblock, $code("moth"):
+    -- INVALID: growable push takes neither handling form
+    ~names.push("Priya") catch:
+    ;
+    ~names.push("Rob")!
+]
+
 Fixed `{N T}` push is the fallible one, because a fixed collection can be full.
-See @./collection-operations (Collection operations) for both contracts.
+See @./#collection-operations (Collection operations) for both contracts.
 
 Use @../bindings/#mutable-bindings (Mutable bindings) for the distinction
 between mutable storage and one exclusive operation.

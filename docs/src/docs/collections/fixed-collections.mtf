@@ -79,3 +79,25 @@ These are valid:
 A fixed literal may contain fewer items than its capacity.
 
 Its logical length is the number of stored items, not the maximum capacity.
+
+### Push and capacity
+
+Fixed `push` appends after the last stored item. When the collection has a
+free slot, the push succeeds and returns no value. When the collection is
+full, the push fails, so a fixed push needs `catch` or postfix `!`:
+
+[codeblock, $code("moth"):
+    values ~{3 Int} = {10, 20}
+
+    ~values.push(30) catch:
+        io.error("no free slot")
+    ;
+]
+
+The failure goes through the builtin `Error!` collection error path, and a
+failed push leaves the stored items unchanged. The `~` before the call is
+the explicit mutable receiver access that every mutating collection
+operation requires.
+
+`remove` frees one slot. Removing an item lets later pushes succeed again,
+and it never changes the collection's capacity or type.

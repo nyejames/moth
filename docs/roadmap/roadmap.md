@@ -25,7 +25,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Growable collections infallability](./plans/collection-push-fallibility-split-plan.md)
+- [Growable collections infallibility](./plans/collection-push-fallibility-split-plan.md)
 
 ## Adding and maintaining plans
 
@@ -166,6 +166,10 @@ After fixed collection type constraints:
 - default-fill syntax such as `{...none}` and `{...0}`
 - explicit fixed and growable conversion through `copy` after cast and copy hardening
 - growable initial-capacity hints only if future backend work shows they are useful
+
+Separately deferred:
+
+- HTML-Wasm collection lowering, owned by the [HTML mixed JavaScript and Wasm backend plan](./plans/html_project_backend_wasm_final_implementation_plan.md). Future collection lowering must preserve infallible growable push and fallible fixed push.
 
 ## Trait ecosystem follow-ups
 

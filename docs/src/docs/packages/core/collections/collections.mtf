@@ -4,7 +4,7 @@
 
 ### Binding-backed behaviour
 
-The package registers five host functions that implement the compiler-owned collection member operations:
+The package registers six host functions that implement the compiler-owned collection member operations:
 
 [table:
     [th:
@@ -26,8 +26,14 @@ The package registers five host functions that implement the compiler-owned coll
     ]
 
     [td:
-        [: `__moth_collection_push`]
-        [: `push(value)`]
+        [: `__moth_collection_push_growable`]
+        [: `push(value)` on a growable `{T}`]
+        [: mutable]
+    ]
+
+    [td:
+        [: `__moth_collection_push_fixed`]
+        [: `push(value)` on a fixed `{N T}`]
         [: mutable]
     ]
 
@@ -44,7 +50,9 @@ The package registers five host functions that implement the compiler-owned coll
     ]
 ]
 
-These host functions use inferred ABI types for the collection element and value parameters. The index parameter is `I32`. The length return is `I32`. Fallible operations return through the builtin `Error!` channel.
+These host functions use inferred ABI types for the collection element and value parameters. The index parameter is `I32`. The length return is `I32`. Both push helpers return no success value. Source-visible failure still travels through the builtin `Error!` channel: fixed push fails this way only when the collection is full, while growable push has no failure path and allocation exhaustion traps rather than entering `Error!`.
+
+The single source spelling `push(value)` resolves once during typed AST construction: the receiver's collection shape selects the growable or fixed host function, and HIR and the backends consume the resolved operations without re-inspecting the receiver type.
 
 ### Source-visible surface
 
@@ -52,11 +60,11 @@ Authors interact with collections through language-level syntax and receiver met
 
 - `get(index)` returns the element at `index` or fails with `Error!`
 - `set(index, value)` replaces the element at `index` or fails with `Error!`
-- `push(value)` appends `value` after the last element. On a growable `{T}` it is infallible; on a fixed `{N T}` it fails with `Error!` when the collection is full
+- `push(value)` appends `value` after the last element. One spelling serves both shapes: on a growable `{T}` it is infallible and returns no value; on a fixed `{N T}` it returns no success value and fails with `Error!` only when the collection is full
 - `remove(index)` removes and returns the element at `index` or fails with `Error!`
 - `length()` returns the logical length as `Int`
 
-`get`, `set`, `remove` and fixed-collection `push` take the fallible path. `length` and growable `push` stay infallible. `set`, `push` and `remove` require mutable receiver access through `~`.
+`get`, `set`, `remove` and fixed-collection `push` take the fallible path. `length` and growable `push` stay infallible. `set`, both push forms and `remove` require mutable receiver access through `~`. Both push forms return no success value, and growable `push` rejects `catch` and postfix `!`.
 
 [codeblock, $code("moth"):
     values ~= {1, 2, 3}
@@ -73,12 +81,6 @@ Authors interact with collections through language-level syntax and receiver met
     count = values.length()
 ]
 
-### Current implementation debt
-
-The registered host functions above describe the **current** implementation, which still uses one unified fallible `__moth_collection_push` for both growable and fixed receivers. That does not yet match the accepted source contract, under which growable `push` is infallible and only fixed `push` is fallible.
-
-Splitting the unified helper is owned by `docs/roadmap/plans/collection-push-fallibility-split-plan.md`. Until that plan executes, the compiler and runtime still treat every `push` as fallible. See @../../../progress (progress matrix) for the current-state row.
-
 ### No direct dependency
 
 `@core/collections` carries no source-visible dependency surface. Do not write a dependency clause for it. The package exists to back the compiler-owned methods that receiver syntax invokes.
@@ -92,11 +94,11 @@ Splitting the unified helper is owned by `docs/roadmap/plans/collection-push-fal
 
 ### Backend behaviour
 
-HTML-JS lowers the host functions to JavaScript runtime helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
+HTML-JS lowers the host functions to JavaScript runtime helpers, including separate growable and fixed push helpers. HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Deferred surfaces
 
-Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations, fixed-capacity collections and specialised collection variants. See @../../../progress (progress matrix) for current status.
+Deferred collection surfaces include HTML-Wasm lowering, map operations as direct host functions, collection equality, collection iteration protocol, sortable collections, deque operations and specialised collection variants. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
