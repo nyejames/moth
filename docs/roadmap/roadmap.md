@@ -25,7 +25,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Active implementation work
 
-- [Growable collections infallibility](./plans/collection-push-fallibility-split-plan.md)
 
 ## Adding and maintaining plans
 

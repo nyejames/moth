@@ -2169,6 +2169,20 @@ contract = "language.collections.ordered_runtime_operations"
 role = "primary"
 
 [[case]]
+id = "growable_collection_push_catch_rejected"
+path = "growable_collection_push_catch_rejected"
+tags = ["integration", "collections", "diagnostics"]
+contract = "language.collections.growable_push_catch_rejected"
+role = "primary"
+
+[[case]]
+id = "growable_collection_push_bang_rejected"
+path = "growable_collection_push_bang_rejected"
+tags = ["integration", "collections", "diagnostics"]
+contract = "language.collections.growable_push_bang_rejected"
+role = "primary"
+
+[[case]]
 id = "collection_mutable_access_js_regression"
 path = "collection_mutable_access_js_regression"
 tags = ["integration", "collections", "js-backend", "regression"]
