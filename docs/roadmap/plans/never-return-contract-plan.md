@@ -4,9 +4,9 @@
 
 Add the explicit `-> !` Never return contract across Moth's callable, control-flow, HIR, analysis and backend boundaries before the HTML mixed JavaScript and Wasm backend implementation starts.
 
-`-> !` states that a callable never returns control normally. It is a control-flow contract, not a value type. The implementation must not add a source-visible `Never` type, a Never `TypeId`, a fake `None` result, bottom-type coercion or an expression value that can stand in for another type.
+`-> !` states that a callable never returns control normally. It is a callable control-flow contract, not a value type. The implementation must not add a source-visible `Never` type, a Never `TypeId`, a fake `None` result, bottom-type coercion or an expression value that can stand in for another type.
 
-This plan also consolidates the current duplicated terminality logic into one control-flow exit analysis that distinguishes producing a value, returning to the caller and diverging. The same facts must serve ordinary function terminality, value-producing block completeness, declared Never validation and statically infinite loop proof.
+This plan also replaces the current duplicated terminality logic with one AST-owned exit analysis that distinguishes value production, return to the caller, divergence and loop-local exits. Ordinary function terminality, value-producing block completeness, declared Never validation and structural true-loop proof must consume that one fact owner.
 
 ## Current-state capsule
 
@@ -15,43 +15,47 @@ ACTIVE_PLAN: docs/roadmap/plans/never-return-contract-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh callable, terminality, HIR, analysis and backend owners
 BLOCKERS: runtime anonymous records must be delivered first
-NEXT_ACTION: activate after runtime anonymous records, record the live repository state and rerun the current owner inventory
+NEXT_ACTION: activate after runtime anonymous records, record the live repository state and rerun the owner inventory
 ```
 
-Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in working notes when implementation starts. Do not pin a queued plan to a commit.
+Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in untracked working notes when implementation starts. Do not pin a queued plan to a commit.
 
-## Roadmap position and prerequisites
+## Roadmap position
 
 This plan runs after runtime anonymous records and immediately before the HTML mixed JavaScript and Wasm backend implementation.
 
-Hard prerequisites:
+The order is deliberate. The Wasm implementation must consume a settled HIR function return contract and terminating Never call. It must not invent Never semantics from missing results or backend `unreachable` instructions.
+
+At closeout, delete this plan and remove its roadmap entry in the same commit. Keep the delivered capability before the Wasm implementation in the roadmap order.
+
+## Hard prerequisites
 
 - runtime anonymous records are delivered and their HIR, borrow and lifetime integration is stable
 - canonical module compilation and immutable public semantic interfaces are delivered
 - generated concrete functions use sidecars and stable callable identities
-- Stage 4 static Bool specialization selects active AST control flow before terminality and durable executable facts
-- value-producing `if`, match and catch blocks already distinguish producing paths from terminating paths
-- assertion messages and `assert(false)` already lower through explicit failure control flow
-- HIR calls use stable local, module-private, cross-module, generated and binding-backed targets
-- borrow validation, lifetime-region analysis and per-function link facts consume validated HIR without rewriting it
-- JavaScript and the current experimental Wasm backend both lower explicit HIR terminators
+- Stage 4 static Bool specialisation selects active AST control flow before terminality and durable executable facts
+- value-producing `if`, match and catch blocks distinguish producing paths from terminating paths
+- `assert(false)` already lowers through explicit unrecoverable control flow
+- HIR calls use stable local, cross-module, generated and binding-backed targets
+- borrow validation, lifetime analysis and link facts consume validated HIR without rewriting it
+- JavaScript and the current experimental Wasm backend lower explicit HIR terminators
 
-Name these delivered capabilities rather than citing the plans that implemented them.
+Name delivered capabilities rather than citing temporary plans as semantic authorities.
 
 ## Required authorities
 
-Read these from the active worktree before implementation and re-read the affected sections during every phase audit:
+Read these from the active worktree before implementation. Re-read the affected sections during every phase audit.
 
 - `AGENTS.md`
-- `docs/compiler-design-overview.md` in full because this work crosses syntax, AST, public interfaces, HIR, borrow validation, lifetime summaries, link facts and backend handoff
-- `docs/build-system-design.md` opening authority, architectural invariants, generated-function boundary, entry/package link planning, target validation and HTML mixed-target sections
+- `docs/compiler-design-overview.md` in full
+- `docs/build-system-design.md` opening authority, architectural invariants, generated-function boundary, entry/package linking, target validation and mixed-target sections
 - `docs/src/developer-docs/language/overview.mtf`
 - `docs/src/docs/functions/function-declarations.mtf`
 - `docs/src/docs/functions/calls-and-access.mtf`
 - `docs/src/docs/functions/returns-and-multiple-values.mtf`
 - `docs/src/docs/errors/assertions.mtf`
 - `docs/src/docs/branching/value-producing-if.mtf`
-- the canonical pattern-matching references when match exit analysis changes
+- the canonical pattern-matching references affected by exit analysis
 - `docs/src/docs/loops/conditional-loops.mtf`
 - `docs/src/docs/loops/loop-control.mtf`
 - `docs/src/docs/traits/trait-requirements.mtf`
@@ -67,11 +71,11 @@ Read these from the active worktree before implementation and re-read the affect
 - `docs/src/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 
-The permanent language references and compiler architecture become the semantic authorities before this plan is retired. This plan records the implementation sequence and accepted design while work is queued.
+Permanent language references and compiler architecture must own the final semantics before this plan is retired.
 
-## Accepted language contract
+# Accepted design
 
-### Source syntax
+## Source syntax
 
 A callable that never returns normally declares one whole return contract:
 
@@ -89,9 +93,9 @@ serve || -> !:
 ;
 ```
 
-The bare `!` appears immediately after `->`. It is not a suffix on a type and does not reserve a new keyword.
+The bare `!` appears immediately after `->`. It is not a suffix on a type and does not reserve a keyword.
 
-`-> !` is mutually exclusive with every success, optional and error return slot. These forms are invalid:
+`-> !` is mutually exclusive with every success, optional and error return slot. Reject all of these with targeted signature diagnostics:
 
 ```moth
 bad || -> String, !:
@@ -107,41 +111,47 @@ bad || -> !!:
 ;
 ```
 
-Use a targeted function-signature diagnostic at the conflicting token. Do not let `-> !` enter the ordinary return-list parser as a missing type or as `Error!` with an omitted error type.
+Do not let bare `!` fall into ordinary type parsing as a missing type. Keep `T!` as the existing final error-return slot inside an ordinary return contract.
 
-### Callable surfaces
+## Callable surfaces
 
-The Never return contract is available anywhere Moth stores a callable contract:
+The Never return contract is valid anywhere Moth stores a callable contract:
 
 - ordinary functions
 - receiver methods
+- named function values and interned function signatures
 - generic function templates and generated concrete functions
 - trait requirements and conformance matching
 - exported functions and receiver methods
 - cross-module and future package interfaces
-- binding-backed and external functions whose provider metadata explicitly declares the contract
+- binding-backed and external functions whose provider metadata explicitly declares Never
 
-It is an exact callable contract. A required `-> !` method is satisfied only by an implementation whose signature is also `-> !`. A body that happens to diverge does not make an ordinary `-> String` signature compatible with `-> !`, and a `-> !` method does not satisfy an ordinary return contract.
+The contract is exact. A requirement or function type that says `-> !` matches only another `-> !` contract. A body that happens to diverge does not make an ordinary `-> String` signature compatible with Never. A Never signature does not satisfy an ordinary return contract.
 
-### Never is not a value type
+Changing a public callable from ordinary returns to Never, or the reverse, is a public semantic change and must alter its public-interface fingerprint.
+
+## Never is not a value type
 
 Moth does not add:
 
 - a source-visible `Never` name
 - a Never `TypeId`
 - a Never literal or value
-- variables, parameters, fields, collection elements or generic arguments of Never type
+- a `DataType::Never`, `ParsedTypeRef::Never` or `CanonicalTypeIdentity::Never`
+- variables, parameters, fields, aliases, options, collections, maps or generic arguments whose value type is Never
 - `Never -> T` compatibility or bottom-type coercion
 - a fake `None` or unit value for divergence
 - a multi-return slot containing Never
 
-`None` remains the unit-like no-value representation used by ordinary functions that may complete. It has one trivial runtime meaning. A Never return contract has no normal return at all. Do not conflate them.
+`None` remains the unit-like representation for ordinary no-value completion. It has one trivial runtime meaning. A Never callable has no normal return at all.
 
-Each compiler layer should represent the distinction as a callable return-contract enum, not as a boolean attached to an ordinary return vector and not as a sentinel type ID.
+The current compiler also stores named callable values as function types in `TypeEnvironment`. Such a function value may carry a function signature whose return contract is Never. The value's type is still the existing function type. This does not create a Never value. Invoking that value remains subject to the standalone-statement rule.
 
-### Implementation divergence versus declared Never
+Each semantic layer must use an explicit `Returns` versus `Never` enum. Do not add an `is_never` boolean beside ordinary return fields and do not use an empty vector, missing type or sentinel ID to encode Never.
 
-An ordinary declared return type remains a valid future-facing API even when its current implementation diverges:
+## Implementation divergence versus declared Never
+
+An ordinary typed function may currently diverge:
 
 ```moth
 load_name || -> String:
@@ -149,7 +159,7 @@ load_name || -> String:
 ;
 ```
 
-Callers continue to treat `load_name()` as a normal `String` call. Its current body divergence only proves that the function does not fall through without returning its declared value.
+Callers still see an ordinary `String` call. The body only proves that the current implementation does not fall through without satisfying its declared contract.
 
 An explicit Never contract is stronger:
 
@@ -159,18 +169,18 @@ fatal |message String| -> !:
 ;
 ```
 
-Only this explicit contract tells callers that control cannot continue after the call. Same-file visibility, inlining, constant propagation and whole-program knowledge must not infer this source-validity fact from an ordinary callable's implementation.
+Only an explicit `-> !` contract propagates divergence across a call boundary. This rule applies in the same file, across modules, after inlining, during constant propagation and across generated functions. Optimisation may use stronger implementation knowledge later, but source validity must not.
 
-### Explicitness for unannotated functions
+## Explicitness for unannotated functions
 
-An unannotated function normally has an ordinary no-success-value contract and may complete at the end of its body.
+An unannotated user function normally has an ordinary no-success-value contract and may complete at the end of its body.
 
-When its specialised active body is proven to diverge on every reachable path, reject the omitted return contract and require the author to choose explicitly:
+When its specialised active body is proven to diverge on every reachable path, reject the omitted contract. The diagnostic must explain both valid choices:
 
 - write `-> !` when never returning is the final intended contract
-- write the ordinary type the function is expected to return when the current body is only an unfinished placeholder
+- write the ordinary return type expected in the future when the current body is only an unfinished placeholder
 
-Example diagnostic intent:
+Diagnostic intent:
 
 ```text
 Function `serve` cannot complete normally.
@@ -178,31 +188,31 @@ Declare `-> !` when it is intended never to return, or declare the ordinary
 return type it is expected to produce when this implementation is temporary.
 ```
 
-Use a typed diagnostic payload and retain the function declaration location. The final rendered wording may follow current diagnostic conventions, but it must present both choices and clearly prefer `-> !` for permanently divergent behaviour.
+Use a typed diagnostic payload and retain the function declaration location. The exact wording may follow current renderer conventions, but it must make `-> !` the permanent-divergence choice and an ordinary type the future-value choice.
 
 An explicitly typed ordinary function may diverge on every current path without this diagnostic.
 
-This explicitness diagnostic applies only to user-authored callable declarations with an omitted return contract. The compiler-synthesised entry `start` keeps its builder-owned ordinary contract and cannot be annotated in source. Root runtime work may still call a Never function and make `start` diverge without manufacturing a source declaration or requiring impossible `start -> !` syntax.
+Apply this rule only to user-authored callable declarations with an omitted return contract. The compiler-synthesised entry `start` keeps its builder-owned ordinary contract. Root runtime work may call a Never function and make `start` diverge without requiring impossible source syntax for `start`.
 
-### Declared Never body validation
+## Declared Never body validation
 
 A function declared `-> !` is valid only when every reachable path in the specialised active AST diverges.
 
-These do not satisfy `-> !`:
+These exits do not satisfy Never:
 
 - falling off the end of the body
-- ordinary `return`, including a no-value return
+- ordinary `return`, including a bare no-value return
 - `return!`
 - postfix error propagation that returns an error to the caller
 - postfix option propagation that returns absence to the caller
 - any branch that can complete normally
 - a loop that can exit through a reachable `break` targeting that loop
 
-Those operations may terminate the current AST path, but they return control to the caller or resume after the loop. They are not divergence.
+These operations may terminate the current AST path, but they return control to the caller or resume after the loop. They are not divergence.
 
-Validate all authored source normally before static specialization. Name resolution, type checking, generic evidence, return shape and propagation legality still apply inside a branch that later becomes inactive. After normal Stage 4 Bool specialization, only active reachable paths participate in the Never proof. Unreachable tails after a proven non-continuing statement do not invalidate the contract.
+Validate all authored source before static specialisation. Name resolution, type checking, generic evidence, return shape and propagation legality still apply inside a branch later removed as inactive. After Stage 4 specialisation, only active reachable paths participate in the Never proof. Unreachable tails after a proven non-continuing statement do not invalidate the contract.
 
-### Statement-only Never calls
+## Standalone-only Never calls
 
 A call whose declared contract is `-> !` is valid only as a standalone statement:
 
@@ -210,9 +220,9 @@ A call whose declared contract is `-> !` is valid only as a standalone statement
 fatal("unreachable")
 ```
 
-It may appear wherever an ordinary executable statement is legal, including nested branches, loops, lexical scopes and normal-root runtime work.
+It may appear wherever an ordinary executable statement is legal, including branches, loops, lexical scopes and normal-root runtime work.
 
-It is invalid in every value-consuming expression position:
+Reject it in every value-consuming position:
 
 ```moth
 value String = fatal()
@@ -229,18 +239,18 @@ This restriction applies recursively inside calls, operators, constructors, cast
 
 A Never call cannot be followed by postfix `!`, postfix `?` or `catch`. It has no success, error or optional value to handle.
 
-The parser and AST should provide a targeted placement diagnostic such as:
+Use a targeted placement diagnostic such as:
 
 ```text
 `fatal()` never returns and cannot be used as a value.
 Call it as a standalone terminating statement instead.
 ```
 
-Preserve the one shared call-shaped argument parser and parameter-slot routing owner. Do not add a second call grammar for Never calls.
+Preserve the one shared call-shaped argument parser and parameter-slot routing owner. Do not add a second call grammar.
 
-### Value-producing blocks
+## Value-producing blocks
 
-A standalone Never call may complete one branch of a block-form value producer because that branch diverges instead of producing a value:
+A standalone Never call may complete one branch of a block-form value producer because that branch diverges rather than producing a value:
 
 ```moth
 name = if ready:
@@ -250,81 +260,178 @@ else
 ;
 ```
 
-The Never call does not produce a `String` and no coercion occurs. The value block remains valid because one path produces the receiver value and the other cannot reach the receiver.
+The Never call does not produce `String` and no coercion occurs.
 
-The inline form remains invalid when it places a Never call in a value slot:
+The inline form remains invalid because it places the call in a value slot:
 
 ```moth
 name = if ready then "Priya" else fatal("name unavailable")
 ```
 
-Preserve the existing rule that at least one reachable path must produce values. A value-producing block where every branch diverges still reports the existing no-producing-path diagnostic rather than inventing a result type.
+Preserve the existing rule that at least one reachable path must produce values. A value-producing block where every branch diverges still reports the existing no-producing-path diagnostic.
 
 ## Initial divergence proof boundary
 
 The first implementation proves divergence through exactly these structural sources:
 
 1. An `assert` whose condition has normalised to compile-time `false`.
-2. A standalone call whose declared callable contract is `-> !`, except where accepting that call would form an unvalidated recursive proof cycle.
+2. A standalone call whose published callable contract is `-> !`, subject to recursive proof safety below.
 3. A conditional `loop` whose condition has normalised to compile-time `true` and which has no reachable `break` targeting that loop.
 4. A lexical scope whose every reachable exit diverges.
 5. An `if` with an active `else` where every reachable branch diverges.
 6. An exhaustive match where every reachable arm and required default path diverges.
-7. Statement sequencing where later statements are considered only on paths that can still fall through.
+7. Statement sequencing where later statements apply only to paths that can still fall through.
 
-A true conditional loop may diverge even when its body reaches the end or executes `continue`, because those paths start the next iteration. A path that returns to the caller remains a return path. A reachable break targeting the loop makes the post-loop continuation reachable.
+A normalised-true loop may diverge when its body falls through or executes `continue`, because those paths start another iteration. A return path still returns to the caller. A reachable break targeting the loop makes the post-loop continuation reachable.
 
 Nested loop control is structural:
 
 - `break` and `continue` target the nearest loop
-- a nested loop consumes its own break and continue exits
-- a break in a nested loop does not make an outer true loop escapable
-- return and divergence facts pass outward through nested loops
+- a nested loop consumes its own break and continue facts
+- a nested-loop break does not make an outer true loop escapable
+- return and divergence facts pass outward
 
-Collection and range loops remain conservatively non-divergent because their iteration count is finite or may be zero under the current source contract.
+Collection and range loops remain conservatively non-divergent because their iteration count is finite or may be zero.
 
-Use the same folded Bool authority and specialised AST fact that ordinary static `if` already uses. Do not add literal-only matchers in several consumers.
+Use the existing folded Bool authority. Do not add literal-only checks in several consumers.
 
-### Recursive proof safety
+## Recursive proof safety
 
-An explicit Never signature is a contract for callers, but a source function must not use an unvalidated cycle of Never signatures as its own proof. The first implementation should validate source Never bodies over the active Never-call graph with these rules:
+An explicit signature is a contract for callers, but a source function must not use an unvalidated cycle of Never signatures as its own proof.
 
-- a Never call to an already validated provider module or explicit binding-backed contract may prove divergence
-- source provider modules are trusted only after their own module compilation has validated and published the contract
-- same-module source functions may use an acyclic dependency order
-- a self-edge or strongly connected group whose proof depends on one of its own unvalidated Never edges receives a structured deferred-proof diagnostic
-- an unreachable recursive edge after independent divergence does not participate in the proof
-- no recursive proof failure may become `CompilerError` or silently accept the cycle
+The first implementation must:
 
-Keep this proof bookkeeping compiler-local. Do not expose recursive proof state in public interfaces, HIR types or backend metadata.
+- trust a Never provider module only after its interface has been validated and published
+- trust explicit binding-backed Never metadata after provider validation
+- permit same-module Never dependencies in an acyclic validation order
+- reject a self-edge or strongly connected same-module group whose proof depends on its own unvalidated Never edges
+- ignore an unreachable recursive edge after independent divergence
+- issue a structured deferred-proof diagnostic for a circular proof rather than accepting it or raising `CompilerError`
 
-## Deliberately deferred proof extensions
+Keep proof bookkeeping compiler-local. Do not expose validation state in public interfaces, HIR or backend metadata.
 
-The core implementation must leave these accepted proof gaps visible in the progress matrix after the feature lands:
+# Deliberately deferred proof work
 
-- direct-recursion and mutual-recursion proof for declared Never bodies where validation would otherwise depend circularly on the same unproven contracts
+The implemented feature must remain `Partial` in the progress matrix because these accepted proof extensions remain:
+
+- direct-recursion and mutual-recursion proof for declared Never bodies when validation otherwise depends on the same unproven contracts
 - richer data-flow proof that a non-literal runtime loop condition remains true forever
-- broader structural non-termination proof beyond the accepted true-loop, explicit Never-call and branch rules
-- whole-program or SCC-based divergence proof where it can remain deterministic and does not change ordinary callable contracts implicitly
+- broader deterministic structural, SCC or whole-program non-termination proof
 
-These are proof extensions only. They may accept more correctly declared `-> !` bodies in the future.
+These are proof extensions. They may accept more correctly declared `-> !` bodies later.
 
-The following are deliberate final constraints, not deferred gaps:
+The following are final constraints, not deferred gaps:
 
-- divergence never propagates through an ordinary callable contract for source-validity decisions
+- ordinary callable contracts never propagate divergence for source validity
 - external code is non-returning only when its binding contract explicitly says `-> !`
 - Never is not a first-class type or value
 - Never calls are not value expressions
 - bottom coercion is not part of Moth
-- `-> !` cannot be mixed with ordinary or error return slots
+- `-> !` cannot mix with ordinary or error return slots
 
-Do not list those constraints in the roadmap or progress matrix as work expected to land later.
+Do not present those constraints as future roadmap promises.
 
-## Control-flow exit model
+# Intended compiler model
 
-The current compiler has separate terminality owners and a broad `TERMINATES` fact that groups returning to the caller with unrecoverable failure. Replace that duplication with one AST-owned control-flow exit analysis.
+Exact Rust names may change. The distinctions may not.
 
-The exact Rust type may vary, but it must preserve independent facts equivalent to:
+## Neutral signature syntax
+
+```rust
+pub(crate) enum FunctionReturnContractSyntax {
+    Returns(Vec<ReturnSlotSyntax>),
+    Never { location: SourceLocation },
+}
+```
+
+`FunctionSignatureSyntax` carries this contract instead of using `returns: Vec<_>` as the complete meaning.
+
+## Resolved callable contract
+
+```rust
+pub(crate) enum FunctionReturnContract {
+    Returns(Vec<ReturnSlot>),
+    Never { location: SourceLocation },
+}
+```
+
+Provide named queries for `is_never`, success returns, error return and resolved ordinary return IDs. An ordinary-return query must not silently map Never to an empty vector.
+
+## Function type metadata
+
+The current `TypeEnvironment` stores callable signatures inside `TypeDefinition::Function`. Replace `FunctionTypeDefinition`'s direct success and error fields with a function-type return contract when those signatures can describe Never:
+
+```rust
+pub enum FunctionTypeReturnContract {
+    Returns {
+        success: Box<[TypeId]>,
+        error: Option<TypeId>,
+    },
+    Never,
+}
+```
+
+The containing function type still has an ordinary `TypeId`. No `TypeId` identifies Never itself.
+
+Function type interning, equality, hashing, substitution, display and canonical projection must include the exact return-contract variant. A named function value whose signature is Never remains a function value and can only be invoked as a standalone terminating statement.
+
+## Public and trait interfaces
+
+Use explicit stable vocabulary, for example:
+
+```rust
+pub(crate) enum PublicCallableReturnContract {
+    Returns {
+        success: Vec<PublicReturnTypeSlot>,
+        error: Option<CanonicalTypeIdentity>,
+    },
+    Never,
+}
+```
+
+Trait-local `This` return vocabulary remains scoped to trait surfaces. A trait Never contract carries no fake type identity.
+
+## Binding-backed contracts
+
+```rust
+pub enum ExternalFunctionReturnContract {
+    Returns {
+        success: Vec<ExternalReturnSlot>,
+        error: Option<ExternalSignatureType>,
+    },
+    Never,
+}
+```
+
+A binding marked Never has no success aliases and no error slot. Validate that invariant before publication.
+
+## HIR function contract
+
+```rust
+pub enum HirFunctionReturnContract {
+    Returns(TypeId),
+    Never,
+}
+```
+
+The ordinary variant retains the existing unit, single, tuple or fallible-carrier type. Never carries no type ID and produces no ABI result.
+
+## HIR terminating call
+
+```rust
+HirTerminator::NeverCall {
+    target: CallTarget,
+    args: Vec<HirExpression>,
+}
+```
+
+The terminator retains the ordinary stable target and evaluated arguments. It has no result local, result type or successor.
+
+Do not encode Never as `Call { result: None }` followed by a source-level failure. HIR owns one semantic call with no continuation. A backend may lower that operation to a call followed by defensive unreachable machinery.
+
+# Shared control-flow exit model
+
+Replace duplicate terminality owners with one AST-owned exit analysis. The representation must retain independent facts equivalent to:
 
 ```rust
 pub(crate) struct ControlFlowExitSummary {
@@ -337,253 +444,165 @@ pub(crate) struct ControlFlowExitSummary {
 }
 ```
 
-Use a better scoped representation if the live AST requires it. Do not compress these facts into a tri-state enum and do not add a pile of unrelated booleans to parser contexts. The analysis owner should provide named queries for each consumer:
-
-- ordinary no-value function may complete normally
-- ordinary typed function has no reachable fallthrough
-- value-producing branch has no fallthrough and either produces or otherwise exits
-- value producer has at least one reachable producing path
-- declared Never function has divergence on every reachable path and no return-to-caller path
-- true loop has no reachable break targeting itself
+A better scoped representation is allowed when needed for nested loops. Do not compress these facts into a tri-state enum.
 
 Alternative branches union exit possibilities. Statement sequencing applies the next statement only to paths that can still fall through. Loop analysis consumes the nearest loop's break and continue facts at the loop boundary.
 
-Keep diagnostic policy outside the pure summary calculation where practical. One analysis should compute facts, while function terminality and value-production validators select their own typed diagnostics.
+The analysis should answer named consumer questions:
 
-## Intended semantic data shape
+- may an ordinary no-value function complete normally
+- can an ordinary typed function fall through without returning
+- is a value-producing branch complete
+- does a value producer have at least one producing path
+- does every reachable path in a declared Never function diverge
+- can a normalised-true loop break to its continuation
 
-Use explicit enums at every layer so invalid mixed states are unrepresentable.
+Keep diagnostic policy outside the pure summary calculation where practical.
 
-### Neutral signature syntax
+# Reviewed current repository shape
 
-Conceptual shape:
+Reverify all paths at activation. These are navigation facts, not permanent architecture.
 
-```rust
-pub(crate) enum FunctionReturnContractSyntax {
-    Returns(Vec<ReturnSlotSyntax>),
-    Never { location: SourceLocation },
-}
-```
+## Signature and callable owners
 
-`FunctionSignatureSyntax` carries this contract instead of treating `returns: Vec<_>` as the complete return meaning.
+- `src/compiler_frontend/declaration_syntax/signature_members.rs` stores `FunctionSignatureSyntax.returns: Vec<ReturnSlotSyntax>` and parses a type before a trailing error-channel `!`
+- `src/compiler_frontend/ast/statements/functions.rs` stores `FunctionSignature.returns: Vec<ReturnSlot>` and `ReturnChannel`
+- `src/compiler_frontend/datatypes/definitions.rs` stores `FunctionTypeDefinition { parameters, returns, error_return }` inside `TypeDefinition::Function`
+- `src/compiler_frontend/public_interface/model.rs` stores success returns and optional error return directly on public functions and receiver methods
+- trait definitions and conformance matching store typed requirement return slots
+- `src/compiler_frontend/external_packages/definitions.rs` stores `returns` plus `error_return_type` on external definitions and specs
+- generic materialisation, import projection, receiver catalogues and reactive metadata inspect current return vectors
 
-### Resolved AST callable contract
-
-Conceptual shape:
-
-```rust
-pub(crate) enum FunctionReturnContract {
-    Returns(Vec<ReturnSlot>),
-    Never { location: SourceLocation },
-}
-```
-
-`FunctionSignature` should expose named queries such as `is_never`, `success_returns`, `error_return` and ordinary resolved return IDs without forcing callers to pattern-match raw vectors repeatedly. Queries for ordinary returns must reject or explicitly handle Never rather than silently returning empty vectors that make Never look like unit.
-
-### Public and trait interfaces
-
-Public functions, receiver methods and trait requirements need explicit stable return-contract vocabulary, for example:
-
-```rust
-pub(crate) enum PublicCallableReturnContract {
-    Returns {
-        success: Vec<PublicReturnTypeSlot>,
-        error: Option<CanonicalTypeIdentity>,
-    },
-    Never,
-}
-```
-
-Trait-local `This` return vocabulary remains scoped to trait requirement surfaces. A trait Never contract carries no `TraitSurfaceTypeIdentity`.
-
-The public-interface fingerprint includes the exact return-contract variant. Changing `-> String` to `-> !` or the reverse is a public semantic change.
-
-### Binding-backed contracts
-
-Binding metadata needs the same distinction, for example:
-
-```rust
-pub enum ExternalFunctionReturnContract {
-    Returns {
-        success: Vec<ExternalReturnSlot>,
-        error: Option<ExternalSignatureType>,
-    },
-    Never,
-}
-```
-
-Provider annotations may spell `-> !`. A binding marked Never has no success alias metadata and no error slot. Validate the provider definition before publishing it.
-
-### HIR function contracts
-
-Replace `HirFunction::return_type: TypeId` with an explicit function return contract, conceptually:
-
-```rust
-pub enum HirFunctionReturnContract {
-    Returns(TypeId),
-    Never,
-}
-```
-
-The ordinary variant continues to carry the existing unit, single, tuple or fallible-carrier type. Never carries no type ID and produces no ABI result.
-
-### HIR terminating calls
-
-Add a dedicated terminator, conceptually:
-
-```rust
-HirTerminator::NeverCall {
-    target: CallTarget,
-    args: Vec<HirExpression>,
-}
-```
-
-Exact naming may follow current HIR conventions. The variant must retain the ordinary stable call target and evaluated arguments. It has no result local, no result type and no successor.
-
-Do not encode this as an ordinary `Call { result: None }` followed by a source-level failure terminator. The call itself owns the no-continuation contract. A backend may lower it to a target call followed by defensive unreachable machinery, but HIR must retain one semantic operation.
-
-## Reviewed current compiler state
-
-Reverify every item at activation. These are navigation facts, not permanent architecture.
-
-### Signature and callable owners
-
-- `src/compiler_frontend/declaration_syntax/signature_members.rs` stores `FunctionSignatureSyntax.returns: Vec<ReturnSlotSyntax>` and parses a type before treating a trailing `!` as the error channel.
-- `src/compiler_frontend/ast/statements/functions.rs` stores `FunctionSignature.returns: Vec<ReturnSlot>` with `ReturnChannel::Success` or `ReturnChannel::Error`.
-- `src/compiler_frontend/public_interface/model.rs` stores success returns and an optional error return directly on public functions and receiver methods. Trait requirements carry a vector of typed return slots.
-- `src/compiler_frontend/traits/definitions.rs` and conformance matching store typed requirement returns and channels.
-- `src/compiler_frontend/external_packages/definitions.rs` stores `returns` plus `error_return_type` on external function definitions and specs.
-- generated template materialisation, import projection, public interface construction and reactive metadata each inspect the existing return vectors.
-
-### AST calls and terminality
+## AST and terminality owners
 
 - every `Expression` owns a semantic `TypeId`
-- ordinary function, method and host call expressions carry `result_type_ids`
-- `src/compiler_frontend/ast/statements/body_expr_stmt.rs` parses standalone calls through the value-expression path and then filters which expressions may stand alone
-- `src/compiler_frontend/ast/statements/terminality.rs` owns ordinary function terminality and recognises literal-false assertions
-- `src/compiler_frontend/ast/statements/value_production/completeness.rs` separately owns branch exit summaries and separately recognises literal-false assertions
-- loops remain conservative in current terminality analysis
-- static Bool specialization occurs under `src/compiler_frontend/ast/module_ast/finalization/`
+- ordinary function, method and host call expressions carry result type IDs
+- `src/compiler_frontend/ast/statements/body_expr_stmt.rs` parses standalone calls through the value-expression path
+- `src/compiler_frontend/ast/statements/terminality.rs` owns ordinary function terminality and recognises false assertions
+- `src/compiler_frontend/ast/statements/value_production/completeness.rs` separately owns branch exits and separately recognises false assertions
+- current terminality treats loops conservatively
+- static Bool specialisation lives under AST finalisation
 
-### HIR and analysis
+## HIR and analysis owners
 
-- `HirFunction` currently carries one `return_type: TypeId`
-- HIR declaration lowering manufactures unit, tuple and fallible carrier return types from AST return slots
+- `HirFunction` currently carries `return_type: TypeId`
+- HIR declaration lowering manufactures unit, tuple and fallible-carrier return types
 - ordinary calls are `HirStatementKind::Call { target, args, result }`
-- `HirTerminator` owns branches, returns, runtime failures and assertion failures but has no call terminator
+- `HirTerminator` owns branches, returns and unrecoverable failures but has no call terminator
 - HIR validation, display, remapping, reachability, borrow transfer, call summaries, problem extraction and backend validation exhaustively match current terminators
-- public call and lifetime summaries assume normal exit/result vocabulary even when a body currently has only failure exits
+- result and lifetime summaries assume normal exit/result vocabulary even when a body currently only fails
 
-### Backends
+## Backend owners
 
-- JavaScript emits ordinary calls inside blocks and emits terminators through the dispatcher path
-- the JavaScript backend can reuse ordinary target/argument call lowering, then emit a defensive compiler-owned throw if a Never callee returns
-- current Wasm LIR already has a result-less call statement and a `Trap` terminator that emits `unreachable`
-- before the larger Wasm redesign, a HIR Never call can lower to a result-less LIR call followed by `Trap`
-- the later structured Wasm implementation must preserve the semantic call plus unreachable fallback without reconstructing Never from a missing result type
+- JavaScript emits ordinary calls inside blocks and terminators through the dispatcher path
+- current Wasm LIR has a result-less call statement and a `Trap` terminator that emits `unreachable`
+- the current Wasm path can lower a HIR Never call to a result-less call followed by trap without redesigning the whole LIR
+- the later structured Wasm implementation must preserve the semantic call plus unreachable fallback
 
-## Scope
+# Scope
 
 This plan owns:
 
-- `-> !` source syntax and diagnostics
-- callable return-contract vocabulary through syntax, AST, public interfaces, traits, generics, external packages and HIR
+- `-> !` syntax and diagnostics
+- callable return-contract vocabulary through syntax, AST, existing function-type metadata, public interfaces, traits, generics, external packages and HIR
 - exact callable compatibility and fingerprints
 - standalone-only Never call parsing and AST representation
-- one shared control-flow exit and divergence analysis
+- shared exit and divergence analysis
 - unannotated all-path-divergence diagnostics
 - declared Never body validation
-- structural true-loop divergence proof with nearest-loop break handling
+- true-loop proof with nearest-loop break handling
 - HIR Never function contracts and Never-call terminators
 - HIR validation, display, remapping and CFG utilities
-- borrow, lifetime, reachability, link-fact and generated-sidecar integration
-- Boracle problem extraction and operational representation where the HIR terminator affects it
+- borrow, lifetime, call-summary, reachability and link-fact integration
+- generated-sidecar integration
+- Boracle problem extraction and operational representation
 - JavaScript and current Wasm lowering
-- binding-backed and annotated external JavaScript Never contracts
+- explicit binding-backed and annotated external JavaScript Never contracts
 - canonical language and compiler documentation
 - progress matrix and roadmap status
-- downstream Wasm plan prerequisite and lowering contract
+- the downstream Wasm prerequisite and lowering contract
 - generated documentation rebuild
 
-## Non-goals
+# Non-goals
 
 Do not add:
 
-- a Never `TypeId`, `DataType`, `ParsedTypeRef` or `CanonicalTypeIdentity`
+- a Never `TypeId`, `TypeDefinition`, builtin, `DataType`, `ParsedTypeRef` or canonical type identity
 - a source keyword or named `Never` type
-- `None` as a spelling for divergence
+- `None` as divergence syntax
 - bottom-type subtyping or coercion
-- Never expressions, variables, parameters, fields, aliases, options, collections, maps or generic arguments
+- values whose type is Never
 - expression-position Never calls
 - mixed Never and ordinary/error return slots
-- implicit no-return effects inferred from ordinary function bodies at call sites
+- implicit no-return effects inferred from ordinary callable bodies at call sites
 - source-visible panic expressions
-- a replacement for the statement-only `assert` intrinsic
+- a replacement for statement-only `assert`
 - recursion/SCC divergence proof in the first implementation
-- arbitrary loop invariant or whole-program termination analysis
+- arbitrary loop-invariant or whole-program termination analysis
 - labelled loop control
 - backend-specific source syntax
 - compatibility shims for old return-vector or HIR return-type APIs
 
-## General implementation rules
+# General implementation rules
 
-- Re-read the current worktree, not a cached repository snapshot.
+- Read the active worktree, not a cached repository snapshot.
 - Preserve user-authored local changes and classify active worker branches before editing.
 - Keep one callable return-contract owner per compiler layer.
-- Use enums to make `Returns` versus `Never` explicit. Do not add `is_never: bool` beside ordinary return fields.
-- Keep `TypeEnvironment` unchanged by this feature except where generic existing code needs a query. Never must not enter type identity.
+- Use enums so invalid mixed states are unrepresentable.
+- Do not add a Never type definition or builtin to `TypeEnvironment`. Update only the existing function-type signature payload where callable function types need the return contract.
 - Keep one call-shaped parser and one parameter-slot routing owner.
-- Parse and resolve call arguments once, then select value-expression or terminating-statement construction from the resolved callable contract and use context.
-- Do not let HIR, borrow analysis, link planning or backends infer Never from an empty return vector, a unit type, a missing result local or an all-failure body.
-- Do not let source validity depend on inlining or implementation inspection across an ordinary call boundary.
-- Delete replaced fields, vector-only assumptions and duplicate terminality helpers in the same phase that cuts consumers over.
-- Use structured `CompilerDiagnostic` values for every malformed signature, invalid call placement and body-contract failure.
-- Keep test-only constructors and fixtures under their test owners.
-- Prefer integration cases for user-visible behaviour and focused unit tests for hidden contract, exit-summary, HIR and backend invariants.
-- Do not edit generated files under `docs/release/**` directly.
-- Do not mark the progress row supported until the full source, analysis and backend path is present.
+- Parse and resolve arguments once, then construct either a value call or terminating statement from the resolved callable contract and source context.
+- Do not let HIR, analyses, link planning or backends infer Never from an empty return vector, unit type, missing result local or all-failure body.
+- Do not let source validity depend on inlining or ordinary callee implementation inspection.
+- Delete replaced fields, vector-only assumptions and duplicate terminality helpers during the cutover.
+- Use `CompilerDiagnostic` for malformed source and `CompilerError` for impossible post-AST/HIR states.
+- Keep tests outside production files.
+- Prefer integration cases for source-visible behaviour and focused unit tests for hidden invariants.
+- Do not edit `docs/release/**` directly.
+- Keep progress status truthful. The feature remains `Deferred` before implementation and `Partial` after core implementation because proof gaps remain.
 
-## Mandatory phase completion protocol
+# Mandatory phase completion protocol
 
-Every phase is an accepted checkpoint, not a loose batch of edits. Before the next phase starts:
+Every phase is a stable accepted checkpoint. Before the next phase starts:
 
-1. Re-read the affected authority sections and the full style guide.
-2. Review every changed module from its `mod.rs` or owning entry point.
-3. Run a read-only phase audit focused on architecture ownership, semantic gaps, stale paths, diagnostics and test quality. This is an implementation audit, not a registered audit-framework run unless the user separately requests one.
-4. Resolve every actionable audit finding and rerun affected targeted tests.
-5. Perform the full `AGENTS.md` Slice review.
-6. Run the phase's targeted validation commands.
-7. Run `just validate` for every code-bearing phase. Run the documentation release-build gate for a strictly documentation-only phase.
-8. Run `just boracle` in every phase that changes HIR terminators, borrow-problem extraction or Boracle semantics because the opt-in lane is not part of `just validate`.
-9. Run `git diff --check` and confirm only intended files changed.
-10. Record exact results in working notes and commit the phase as one coherent checkpoint.
+1. Re-read the affected authority sections plus the full style guide, testing guide and validation guide.
+2. Review changed modules from their owning entry points.
+3. Run a read-only phase audit for architecture ownership, semantic gaps, stale paths, diagnostics and test quality.
+4. Resolve every actionable finding and rerun affected tests.
+5. Perform the complete `AGENTS.md` Slice review.
+6. Run targeted phase validation.
+7. Run `just validate` for every code-bearing phase.
+8. Run `just boracle` whenever HIR terminators, borrow problem extraction or Boracle semantics change.
+9. Run `git diff --check` and inspect `git status --short`.
+10. Record exact results in working notes and commit one coherent checkpoint.
 
-A phase is not accepted while its mandatory read-only audit is unavailable or has open actionable findings. Record the blocker rather than claiming completion.
+A phase is not accepted while its mandatory read-only audit is unavailable or has open actionable findings. Record the blocker instead of claiming completion.
 
-# Phase 0 - Refresh current owners and establish the baseline
+# Phase 0 - Refresh owners and baseline
 
 ## Goal
 
-Re-anchor the plan in the active worktree after runtime anonymous records land. Produce a complete owner and test inventory before changing semantic data.
+Re-anchor the plan after runtime anonymous records land. Produce a complete current owner and test inventory before semantic edits.
 
-## Implementation checklist
+## Work
 
 - [ ] Read every required authority from the active worktree.
-- [ ] Record `git rev-parse HEAD`, branch, `git status --short` and `git worktree list --porcelain` in untracked working notes.
-- [ ] Inventory active workers and local changes touching signatures, AST calls, terminality, HIR, analysis, public interfaces, external packages, JS, Wasm, docs, roadmap or progress.
-- [ ] Preserve all user-authored and unrelated changes. Do not reset, stash or reformat them.
-- [ ] Reconfirm that runtime anonymous records are complete and the queued Wasm implementation has not started.
-- [ ] Inventory every direct `FunctionSignature.returns`, public return-vector, trait return-vector, external `returns/error_return_type` and `HirFunction.return_type` consumer.
-- [ ] Inventory every expression-call constructor and every statement-expression entry point.
-- [ ] Inventory every terminality, branch-exit, false-assert and loop-exit classifier.
-- [ ] Inventory every exhaustive `HirTerminator` match across validation, display, remapping, reachability, borrow analysis, lifetime analysis, Boracle, JS and Wasm.
-- [ ] Inventory current integration contracts and primary owners for functions, returns, assertions, loops, value-producing blocks, traits, generics, modules and external JS.
-- [ ] Record baseline test counts and any unrelated failures without weakening gates.
+- [ ] Record HEAD, branch, status and worktrees in untracked working notes.
+- [ ] Inventory active workers and local changes touching this surface.
+- [ ] Reconfirm runtime anonymous records are complete and the queued Wasm implementation has not started.
+- [ ] Inventory every direct return-vector, error-return and HIR return-type consumer.
+- [ ] Inventory `FunctionTypeDefinition` interning, equality, hashing, substitution, display and canonical projection.
+- [ ] Inventory every call constructor and statement-expression entry point.
+- [ ] Inventory terminality, branch-exit, false-assert and loop-exit classifiers.
+- [ ] Inventory every exhaustive `HirTerminator` match across HIR, analyses, Boracle, JS and Wasm.
+- [ ] Inventory current integration contracts and primary test ownership.
+- [ ] Record baseline counts and unrelated failures without weakening gates.
 
 Suggested searches:
 
 ```bash
 rg -n 'FunctionSignatureSyntax|ReturnSlotSyntax|FunctionSignature|ReturnChannel' src tests
+rg -n 'FunctionTypeDefinition|TypeDefinition::Function' src tests
 rg -n 'PublicFunctionSemantics|PublicReceiverMethodSemantics|PublicTraitRequirement' src tests
 rg -n 'ExternalFunctionDef|ExternalFunctionSpec|error_return_type|\.returns\b' src tests
 rg -n 'HirFunction|return_type|HirTerminator|HirStatementKind::Call' src tests
@@ -592,19 +611,15 @@ rg -n 'ExpressionKind::FunctionCall|ExpressionKind::MethodCall|HostFunctionCall'
 rg -n 'DispatcherLoop|WasmLirTerminator::Trap|emit_call_statement' src/backends
 ```
 
-## Phase 0 audit and style-guide review
+## Audit
 
-- [ ] Confirm the inventory follows semantic ownership rather than directory names alone.
-- [ ] Confirm no existing callable return-contract enum already solves part of the task.
-- [ ] Confirm no newer static-control-flow analysis supersedes the reviewed terminality paths.
-- [ ] Confirm the proposed enum cutover will remove invalid mixed states rather than wrap old vectors.
-- [ ] Confirm every current HIR terminator consumer is accounted for.
-- [ ] Confirm test ownership and progress-matrix wording reflect the live tree.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm the inventory follows semantic ownership rather than directory names.
+- [ ] Confirm no newer return-contract or control-flow analysis already supersedes reviewed paths.
+- [ ] Confirm every HIR terminator consumer is listed.
+- [ ] Confirm test ownership and matrix wording reflect the live tree.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 0 validation and acceptance
-
-Run baseline commands without changing tracked files:
+## Validation
 
 ```bash
 cargo fmt --all -- --check
@@ -614,67 +629,71 @@ just boracle
 just validate
 ```
 
-- [ ] Record exact results and counts.
+- [ ] Record exact results.
 - [ ] Separate pre-existing failures from task-created failures.
-- [ ] Update the capsule's current slice only after the baseline is understood.
-- [ ] Commit only if the refreshed plan itself needed factual corrections.
+- [ ] Commit only if the plan needs factual corrections.
 
-# Phase 1 - Replace vector-only return state with callable return contracts
+# Phase 1 - Introduce callable return-contract data models
 
 ## Goal
 
-Establish explicit `Returns` versus `Never` vocabulary through every semantic layer while preserving current source behaviour. This phase is a data-model cutover, not the public `-> !` syntax activation.
+Replace vector-only return state with explicit `Returns` versus `Never` vocabulary through every semantic layer while preserving current ordinary source behaviour. Public `-> !` syntax remains inactive until the representation is complete.
 
-## Implementation checklist
+## Work
 
 ### Neutral and AST signatures
 
-- [ ] Add one neutral signature return-contract enum.
-- [ ] Add one resolved AST callable return-contract enum.
-- [ ] Move ordinary return slots into the `Returns` variant.
-- [ ] Keep return-slot channel rules unchanged inside `Returns`.
-- [ ] Add named queries for ordinary success types, error type, no-value completion and future Never detection.
-- [ ] Reject accidental ordinary-return queries on Never rather than treating it as an empty return list.
-- [ ] Thread the new shape through declaration shells, remapping, source rebinding, ordering hints and AST signature resolution.
-- [ ] Do not accept `-> !` source syntax yet unless the whole dormant representation can round-trip safely without exposing partial behaviour.
+- [ ] Add neutral and resolved return-contract enums.
+- [ ] Move existing ordinary slots into `Returns`.
+- [ ] Preserve current success/error rules inside `Returns`.
+- [ ] Add named queries for success slots, error slot, ordinary no-value completion and Never.
+- [ ] Make ordinary-return queries reject or explicitly handle Never rather than returning empty collections.
+- [ ] Thread the shape through declaration shells, remapping, rebinding, ordering hints and signature resolution.
+
+### Function types
+
+- [ ] Replace `FunctionTypeDefinition.returns` plus `error_return` with a function-type return contract.
+- [ ] Keep the containing function type's ordinary `TypeId`.
+- [ ] Include the return-contract variant in function-type interning, equality, hashing and cache keys.
+- [ ] Preserve it through generic substitution and inherited generated environments.
+- [ ] Render Never function signatures without inventing a type name.
+- [ ] Include it in canonical function-type projection if the current interface uses one.
+- [ ] Add named function-value tests for exact Never signature identity.
 
 ### Public, trait and generated vocabulary
 
-- [ ] Add explicit public function and receiver-method return-contract vocabulary.
-- [ ] Add explicit trait requirement return-contract vocabulary.
-- [ ] Add explicit external function return-contract vocabulary.
-- [ ] Thread ordinary `Returns` through public-interface projection, import projection, generic template retention, generated materialisation, receiver catalogues and conformance matching.
-- [ ] Include the return-contract variant in equality and fingerprint inputs.
-- [ ] Keep all current ordinary signatures semantically identical.
+- [ ] Add explicit public function and receiver-method return contracts.
+- [ ] Add explicit trait requirement return contracts.
+- [ ] Add explicit external function return contracts.
+- [ ] Thread ordinary `Returns` through public projection, import projection, generic templates, generated materialisation, receiver catalogues and conformance matching.
+- [ ] Include the variant in equality and fingerprint inputs.
 
 ### HIR function metadata
 
-- [ ] Replace `HirFunction::return_type: TypeId` with `HirFunctionReturnContract::Returns(TypeId)` plus a dormant `Never` variant.
-- [ ] Thread ordinary return types through HIR declaration registration, validation, displays, test fixtures, JS return lowering, Wasm signatures and all backend ABI queries.
-- [ ] Do not map dormant Never to `None` or another type ID.
-- [ ] Remove the old direct field and every compatibility accessor that would preserve its ambiguous shape.
+- [ ] Replace `HirFunction::return_type: TypeId` with `HirFunctionReturnContract`.
+- [ ] Thread `Returns(TypeId)` through HIR registration, validation, display, fixtures and backend ABI queries.
+- [ ] Add a dormant `Never` variant without mapping it to `None`.
+- [ ] Remove the direct field and ambiguous compatibility accessors.
 
 ### External metadata
 
-- [ ] Replace `returns` plus `error_return_type` as top-level external-function state with one explicit return contract.
-- [ ] Preserve builder-friendly construction for ordinary functions without adding parallel legacy constructors.
-- [ ] Reject a Never contract carrying return alias metadata by construction.
-- [ ] Update external package registration, clone accounting, provider conversion and tests.
+- [ ] Replace top-level `returns` plus `error_return_type` state with one external return contract.
+- [ ] Preserve readable builder construction for ordinary functions without parallel legacy constructors.
+- [ ] Make return aliases impossible on Never.
+- [ ] Update registry, clone accounting, provider conversion and tests.
 
-## Phase 1 audit and style-guide review
+## Audit
 
-- [ ] Confirm `Returns` and `Never` are enums at each real boundary, not a shared broad type that leaks donor-local identities.
-- [ ] Confirm no `is_never` boolean duplicates an enum variant.
-- [ ] Confirm `TypeEnvironment`, `ParsedTypeRef`, `DataType` and canonical type identity gained no Never state.
-- [ ] Confirm ordinary no-value functions still use the ordinary `Returns(NoneTypeId)` path in HIR.
-- [ ] Confirm every old direct return vector or `HirFunction.return_type` consumer was cut over or deleted.
-- [ ] Confirm no compatibility wrapper preserves the old API.
-- [ ] Confirm test fixtures use the new real shape rather than test-only shortcuts.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm every layer uses an enum and no duplicate boolean.
+- [ ] Confirm `TypeEnvironment` gained no Never type definition. Any change is confined to existing function-signature payloads.
+- [ ] Confirm ordinary no-value functions remain ordinary `Returns`.
+- [ ] Confirm all old direct return fields are cut over or deleted.
+- [ ] Confirm fixtures construct the real shape.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 1 validation and acceptance
+## Validation
 
-Run focused signature, interface, trait, external package, HIR and backend tests, then:
+Run focused signature, datatype, public-interface, trait, external-package, HIR and backend tests, then:
 
 ```bash
 cargo fmt --all
@@ -683,72 +702,65 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Confirm all existing ordinary source behaviour is unchanged.
-- [ ] Confirm benchmark history and tracked summaries are unchanged.
-- [ ] Resolve all task-related failures before accepting the phase.
+- [ ] Confirm ordinary source behaviour is unchanged.
+- [ ] Confirm benchmark history is unchanged.
 
-# Phase 2 - Consolidate control-flow exits and divergence proof
+# Phase 2 - Consolidate control-flow exits
 
 ## Goal
 
-Replace duplicate terminality logic with one pure AST exit analysis while preserving existing diagnostics. Add the internal facts required for declared Never and true-loop proof before public syntax depends on them.
+Replace duplicate terminality logic with one pure AST exit analysis. Add true-loop and divergence facts before public Never syntax depends on them.
 
-## Implementation checklist
+## Work
 
-### Shared exit analysis
+### Shared analysis
 
-- [ ] Create one focused AST control-flow analysis module with clear ownership documentation.
+- [ ] Add one focused AST control-flow exit module.
 - [ ] Represent fallthrough, produced values, caller returns, divergence and nearest-loop exits independently.
-- [ ] Implement deterministic alternative-branch union and reachable statement sequencing.
-- [ ] Stop scanning a sequence after no path can reach the next statement.
-- [ ] Classify `return` and `return!` as caller returns, not divergence.
+- [ ] Implement deterministic branch union and reachable statement sequencing.
+- [ ] Stop sequencing once no path can reach the next statement.
+- [ ] Classify `return` and `return!` as caller returns.
 - [ ] Classify normalised false assertions as divergence.
-- [ ] Keep dynamic assertions as fallthrough-capable.
-- [ ] Classify existing runtime failure constructs only where they are source-visible AST exits. Do not infer backend traps from later IR.
-- [ ] Consume lexical-scope exits without losing their child-scope semantics.
+- [ ] Keep dynamic assertions fallthrough-capable.
+- [ ] Preserve lexical scope.
 
 ### Branches and matches
 
-- [ ] Preserve existing statement `if` terminality.
+- [ ] Preserve statement `if` terminality.
 - [ ] Preserve value-producing `if`, match and catch completeness.
-- [ ] Preserve match exhaustiveness rules and required default handling.
-- [ ] Preserve the existing at-least-one-producing-path rule.
-- [ ] Keep known-Bool specialization as the only owner that removes inactive branches.
-- [ ] Analyze only the specialised active AST for terminality while keeping earlier frontend validation unchanged.
+- [ ] Preserve exhaustiveness and required-default rules.
+- [ ] Preserve the at-least-one-producing-path rule.
+- [ ] Use specialised active AST only for terminality and divergence.
 
 ### Loops
 
-- [ ] Add nearest-loop break and continue accounting without introducing labels or source-visible IDs.
+- [ ] Add nearest-loop break and continue accounting without labels.
 - [ ] Treat a normalised-true conditional loop with no reachable break targeting itself as non-fallthrough.
 - [ ] Convert body fallthrough and continue paths into divergence at that loop boundary.
-- [ ] Preserve return-to-caller paths through the loop.
-- [ ] Preserve divergence paths through the loop.
-- [ ] Let a reachable break targeting the loop expose post-loop fallthrough.
-- [ ] Ensure nested loops consume their own break and continue facts.
+- [ ] Preserve caller returns and existing divergence through the loop.
+- [ ] Let a reachable self-targeting break expose the post-loop path.
+- [ ] Consume nested-loop exits at the nested boundary.
 - [ ] Keep collection and range loops conservative.
 
 ### Existing consumers
 
 - [ ] Rewrite ordinary function terminality to query the shared summary.
-- [ ] Rewrite value-production completeness and reachable `then` traversal to use the shared reachability owner.
+- [ ] Rewrite value-production completeness and reachable `then` traversal to use the shared owner.
 - [ ] Delete duplicate false-assert and branch-terminal classifiers.
-- [ ] Keep existing user-facing diagnostics stable unless a more precise source location is required.
-- [ ] Add pure unit tests for summary union, sequencing, nested loops, mixed return/diverge paths and unreachable tails.
+- [ ] Preserve current diagnostics unless precision requires a better location.
+- [ ] Add pure summary tests for union, sequencing, nested loops, mixed return/diverge paths and unreachable tails.
 
-## Phase 2 audit and style-guide review
+## Audit
 
-- [ ] Confirm there is one exit-analysis owner and no second recursive AST walk deciding the same semantics.
-- [ ] Confirm return-to-caller and divergence remain distinct.
-- [ ] Confirm value-production diagnostics select policy from shared facts rather than being embedded in the analyzer.
-- [ ] Confirm nested `break` cannot escape its nearest loop.
-- [ ] Confirm true-loop proof uses normalised Bool authority rather than a new source-text or literal scanner.
-- [ ] Confirm unreachable statements cannot influence summaries or inferred produced types.
-- [ ] Confirm existing assertion-message and static-if owners were not duplicated.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm there is one recursive exit-analysis owner.
+- [ ] Confirm caller return and divergence remain distinct.
+- [ ] Confirm diagnostic policy stays in consumers.
+- [ ] Confirm nested `break` cannot escape the nearest loop.
+- [ ] Confirm folded Bool authority is reused.
+- [ ] Confirm unreachable statements do not affect summaries or produced-type inference.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 2 validation and acceptance
-
-Run focused terminality, value-production, assertion, match and loop tests, then:
+## Validation
 
 ```bash
 cargo fmt --all
@@ -760,94 +772,89 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Confirm previously accepted and rejected programs keep the same result except for any explicitly approved true-loop terminality improvement.
-- [ ] Do not expose `-> !` until this phase is accepted.
+- [ ] Preserve existing results except the approved true-loop terminality improvement.
+- [ ] Do not expose `-> !` before this phase is accepted.
 
-# Phase 3 - Add `-> !` syntax, callable semantics and statement-only AST calls
+# Phase 3 - Add `-> !` syntax and frontend semantics
 
 ## Goal
 
-Activate the complete frontend and semantic interface contract. Source parsing, body validation and call placement must all use the explicit return-contract vocabulary without manufacturing a value.
+Activate complete source syntax, body validation, exact interfaces and standalone-only call construction without manufacturing a value.
 
-## Implementation checklist
+## Work
 
 ### Signature syntax
 
-- [ ] Parse bare `!` immediately after `->` as `FunctionReturnContractSyntax::Never`.
-- [ ] Require the body-opening colon after a function Never contract.
-- [ ] Support bodyless trait requirement `-> !` through the shared signature parser.
-- [ ] Reject commas, another `!`, a following type, optional suffixes and error slots after Never with targeted diagnostics.
-- [ ] Reject `!` in parameter, field, alias and ordinary type annotation positions through existing type diagnostics.
-- [ ] Keep `T!` as the final error-return slot inside ordinary `Returns`.
-- [ ] Add syntax tests for every valid and malformed boundary.
+- [ ] Parse bare `!` immediately after `->` as Never.
+- [ ] Require the existing function body colon after Never.
+- [ ] Support bodyless trait requirement `-> !` through shared signature parsing.
+- [ ] Reject commas, another `!`, following types, optional suffixes and error slots after Never.
+- [ ] Reject bare `!` in parameters, fields, aliases and ordinary type positions.
+- [ ] Keep `T!` as an ordinary final error slot.
+- [ ] Add valid and malformed syntax tests.
 
-### Function declaration validation
+### Function validation
 
-- [ ] Resolve `-> !` without requesting or interning a type.
-- [ ] Validate explicit Never bodies using the shared specialised-AST exit analysis.
-- [ ] Reject active fallthrough at the body end.
-- [ ] Reject active ordinary returns at their authored locations.
-- [ ] Keep existing return-shape and propagation diagnostics in all authored branches before specialization.
-- [ ] Diagnose user-authored unannotated functions whose active body is all-path divergent and present both explicit contract choices.
-- [ ] Exclude the compiler-synthesised entry `start` from this diagnostic while allowing its root work to diverge.
-- [ ] Allow explicitly typed ordinary functions whose active body currently diverges.
-- [ ] Keep ordinary typed function terminality unchanged.
-- [ ] Prevent a declared Never function from using its own or a mutually recursive unvalidated contract as circular proof in the first implementation.
+- [ ] Resolve Never without interning a type.
+- [ ] Validate Never bodies with shared active-AST exit facts.
+- [ ] Reject fallthrough and every caller-returning exit.
+- [ ] Keep normal frontend checking in inactive branches before specialisation.
+- [ ] Diagnose all-path-divergent unannotated user functions with both contract choices.
+- [ ] Exclude compiler-synthesised `start` from that explicitness diagnostic.
+- [ ] Accept explicitly typed placeholder implementations that diverge.
+- [ ] Prevent same-cycle Never calls from proving one another in the first implementation.
 
-### Standalone call parsing
+### Call construction and placement
 
-- [ ] Introduce an AST statement shape for a resolved Never call. It must carry the same target/receiver and routed argument facts needed by ordinary call lowering, without an `Expression` wrapper or `TypeId`.
-- [ ] Refactor shared call construction to return a named resolved outcome such as value call versus terminating call.
-- [ ] Let statement context accept the terminating outcome and emit the Never-call AST node.
-- [ ] Let every value context reject the terminating outcome with one targeted diagnostic.
-- [ ] Cover free functions, receiver methods, generic calls, imported calls and binding-backed calls through the same route.
+- [ ] Add an AST statement shape for a resolved Never call. It carries target or receiver plus routed arguments but no `Expression` or `TypeId`.
+- [ ] Refactor call construction to return a named value-call versus terminating-call outcome.
+- [ ] Parse and validate arguments once.
+- [ ] Let statement context accept the terminating outcome.
+- [ ] Let every value context reject it with the targeted placement diagnostic.
+- [ ] Cover free functions, methods, named function values, generic calls, imported calls and binding-backed calls through the same route.
 - [ ] Preserve named arguments, defaults, mutable access and generic request emission.
-- [ ] Reject postfix handling and `catch` on a Never call.
-- [ ] Reject Never calls in assertion conditions and messages before assertion-specific HIR.
-- [ ] Ensure a Never call ends reachable AST statement sequencing.
+- [ ] Reject postfix handling and `catch`.
+- [ ] Reject Never calls in assertion arguments.
+- [ ] End reachable AST statement sequencing after a Never call.
 
 ### Public interfaces and exact matching
 
-- [ ] Project Never through exported free-function and receiver-method interfaces.
-- [ ] Project Never through trait requirements without a fake return type.
-- [ ] Make conformance matching exact on the return-contract variant.
-- [ ] Import Never callable contracts without donor-local state.
-- [ ] Include the variant in public-interface equality and fingerprinting.
-- [ ] Treat changing ordinary returns to Never as a semantic interface change.
+- [ ] Project Never through exported functions and methods.
+- [ ] Project Never through trait requirements with no fake type.
+- [ ] Make conformance and function-type matching exact on the contract variant.
+- [ ] Import Never contracts without donor-local state.
+- [ ] Include the variant in interface equality and fingerprints.
 
-### Generics and generated requests
+### Generics
 
-- [ ] Retain Never on generic function templates.
-- [ ] Infer generic arguments for Never calls from immediate call arguments and evidence only. There is no expected result context.
-- [ ] Emit concrete requests from active standalone Never calls.
+- [ ] Retain Never on generic templates.
+- [ ] Infer Never-call type arguments from immediate arguments and evidence only. There is no expected result context.
+- [ ] Emit concrete requests from active standalone calls.
 - [ ] Preserve inactive static-branch request discard.
-- [ ] Ensure generated concrete signatures retain Never exactly.
-- [ ] Reject malformed generic declarations whose parameters cannot meet the existing public-shape usage rules.
+- [ ] Preserve Never on generated concrete signatures.
+- [ ] Reject generic declarations that cannot meet existing parameter-use inference rules.
 
-### Binding-backed and annotated JS contracts
+### Binding-backed contracts
 
-- [ ] Allow explicit Never in compiler-owned external function metadata.
+- [ ] Permit explicit Never in external metadata.
 - [ ] Extend `@moth.sig` parsing to accept a whole `-> !` contract.
-- [ ] Keep external signature restrictions otherwise unchanged.
-- [ ] Reject external Never definitions that also provide success returns, error returns or return aliases.
-- [ ] Require explicit provider metadata. Do not inspect foreign source bodies to infer Never.
+- [ ] Reject Never metadata mixed with success returns, error returns or aliases.
+- [ ] Require explicit provider metadata. Do not inspect foreign bodies.
 
-## Phase 3 audit and style-guide review
+## Audit
 
-- [ ] Confirm bare `!` is parsed only by callable return-contract syntax and remains unavailable as an ordinary type.
-- [ ] Confirm one call argument parser serves value calls and Never calls.
-- [ ] Confirm no Never call is stored in `ExpressionKind` or assigned a `TypeId`.
-- [ ] Confirm diagnostics distinguish permanent `-> !` intent from temporary typed placeholders.
-- [ ] Confirm only explicit Never contracts propagate across call boundaries.
-- [ ] Confirm trait and public-interface matching is exact.
-- [ ] Confirm generic requests are emitted only from active standalone calls.
-- [ ] Confirm external bindings require explicit metadata.
-- [ ] Confirm no temporary private-only or same-module-only semantic restriction was introduced.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm bare `!` is owned only by callable return syntax.
+- [ ] Confirm one call parser serves value and Never calls.
+- [ ] Confirm Never calls never enter `ExpressionKind` and never get a result type.
+- [ ] Confirm explicitness diagnostics distinguish permanent intent from temporary placeholders.
+- [ ] Confirm only explicit contracts propagate divergence.
+- [ ] Confirm trait, function-type and public matching are exact.
+- [ ] Confirm generic requests come only from active standalone calls.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 3 validation and acceptance
+## Validation
 
-Run focused parser, function, call, trait, generic, public-interface and external-package tests, then:
+Run focused parser, function, call, datatype, trait, generic, interface and external-package tests, then:
 
 ```bash
 cargo fmt --all
@@ -859,71 +866,65 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Add integration diagnostics for malformed signatures, body contract violations and value-position calls.
-- [ ] Confirm every new diagnostic uses stable payload identity and precise source locations.
-- [ ] Do not update the progress matrix to supported until HIR and backends are complete.
+- [ ] Add integration diagnostics for malformed signatures, invalid bodies and value-position calls.
+- [ ] Keep progress status deferred until HIR and backend work lands.
 
-# Phase 4 - Lower Never contracts and calls through HIR
+# Phase 4 - Lower Never through HIR
 
 ## Goal
 
-Give HIR an explicit no-return function contract and dedicated terminating call while preserving ordinary call identity, argument evaluation and CFG invariants.
+Give HIR an explicit Never function contract and dedicated terminating call with ordinary target identity, argument evaluation and CFG invariants.
 
-## Implementation checklist
+## Work
 
-### HIR function contracts
+### HIR functions
 
-- [ ] Lower AST ordinary returns to `HirFunctionReturnContract::Returns`.
-- [ ] Lower AST Never to `HirFunctionReturnContract::Never`.
+- [ ] Lower ordinary AST returns to `HirFunctionReturnContract::Returns`.
+- [ ] Lower Never to `HirFunctionReturnContract::Never`.
 - [ ] Emit no implicit return for Never functions.
-- [ ] Treat surviving fallthrough in a Never function as an internal AST-to-HIR invariant failure because AST should have diagnosed it.
-- [ ] Make HIR validation reject return terminators in Never functions.
-- [ ] Make HIR validation reject a Never function whose reachable block graph has a normal return or unfinished terminator.
-- [ ] Keep ordinary no-value functions distinct and still emit ordinary unit return where required.
+- [ ] Treat surviving Never fallthrough as `CompilerError` because AST should diagnose it.
+- [ ] Reject return terminators in Never functions during HIR validation.
+- [ ] Keep ordinary unit functions distinct.
 
-### Never-call terminator
+### NeverCall
 
-- [ ] Add the dedicated `NeverCall` HIR terminator.
-- [ ] Reuse ordinary call target resolution and argument lowering.
-- [ ] Evaluate receiver and arguments once in normal left-to-right call order.
+- [ ] Add the dedicated HIR terminator.
+- [ ] Reuse ordinary target resolution and argument lowering.
+- [ ] Evaluate receiver and arguments once in current left-to-right order.
 - [ ] Preserve fresh-rvalue materialisation for mutable arguments.
 - [ ] Emit no result local and no continuation block.
 - [ ] Stop lowering later statements on the current path.
-- [ ] Map the authored call location into the HIR side table.
-- [ ] Remap every argument and target-owned string identity correctly.
+- [ ] Map the authored call location into side tables.
+- [ ] Remap arguments and target-owned string identities correctly.
 
-### HIR validation and utilities
+### Validation and utilities
 
-- [ ] Validate Never-call arguments like ordinary call arguments.
-- [ ] Resolve the target's callable return contract from local HIR, generated sidecars, public interfaces or binding metadata as appropriate.
-- [ ] Reject a `NeverCall` whose target is not explicitly Never as `CompilerError` because well-formed AST cannot produce it.
-- [ ] Reject an ordinary call statement or expression targeting an explicit Never contract as `CompilerError`.
-- [ ] Update terminator successor queries so NeverCall has no successors.
-- [ ] Update block validation, reachability roots, display, debug views, remapping, source mapping and structured-HIR derivation.
-- [ ] Update test fixture constructors to require an explicit HIR return contract.
-- [ ] Do not add a fake Never expression or result local for fixture convenience.
+- [ ] Validate arguments like ordinary calls.
+- [ ] Resolve the target contract from local HIR, generated sidecars, public interfaces or binding metadata.
+- [ ] Reject NeverCall targeting an ordinary function as `CompilerError`.
+- [ ] Reject ordinary value/statement call IR targeting explicit Never as `CompilerError`.
+- [ ] Mark NeverCall as a no-successor terminator.
+- [ ] Update block validation, reachability, display, debug views, remapping, source mapping and structured-HIR derivation.
+- [ ] Require explicit HIR return contracts in fixtures.
 
-### HIR call facts
+### Link facts
 
-- [ ] Record NeverCall as a normal call edge in per-function link facts.
-- [ ] Collect resource, project-context, capability, reactive and target-gated facts from its arguments and target exactly once.
+- [ ] Record NeverCall as a normal call edge.
+- [ ] Collect argument resource, project-context, capability, reactive and target facts once.
 - [ ] Preserve deterministic source order.
-- [ ] Keep no result provenance or result resource facts because no result exists.
+- [ ] Emit no result provenance or result resource facts.
 
-## Phase 4 audit and style-guide review
+## Audit
 
-- [ ] Confirm HIR has one semantic Never-call operation rather than call plus source failure.
-- [ ] Confirm the target contract is validated from explicit metadata, not inferred from result absence.
-- [ ] Confirm no result local, tuple, unit value or Never TypeId exists.
-- [ ] Confirm CFG successor utilities and unreachable-tail lowering agree.
-- [ ] Confirm call argument order and side-table locations match ordinary calls.
-- [ ] Confirm HIR display and test helpers expose the real contract rather than hiding it.
+- [ ] Confirm HIR has one semantic operation rather than call plus source failure.
+- [ ] Confirm target contract comes from explicit metadata.
+- [ ] Confirm no result local, unit placeholder or Never TypeId exists.
+- [ ] Confirm successor utilities and unreachable-tail lowering agree.
+- [ ] Confirm argument order and side-table locations match ordinary calls.
 - [ ] Confirm every exhaustive terminator match was intentionally updated.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 4 validation and acceptance
-
-Run focused HIR lowering, validation, display and reachability tests, then:
+## Validation
 
 ```bash
 cargo fmt --all
@@ -934,73 +935,70 @@ just boracle
 just validate
 ```
 
-- [ ] Confirm no uninitialized terminator or dead continuation block remains after NeverCall lowering.
-- [ ] Confirm HIR failures caused by malformed test fixtures are `CompilerError`, not user diagnostics.
+- [ ] Confirm no uninitialised terminator or dead continuation block remains.
+- [ ] Keep malformed HIR fixture failures on `CompilerError`.
 
-# Phase 5 - Integrate borrow, lifetime, link and generated analyses
+# Phase 5 - Integrate analyses, summaries and generated work
 
 ## Goal
 
-Make every downstream semantic consumer understand NeverCall as a terminating call with ordinary argument effects and no result or successor.
+Teach every downstream semantic consumer that NeverCall is a terminating call with ordinary argument effects and no result or successor.
 
-## Implementation checklist
+## Work
 
 ### Borrow validation
 
-- [ ] Generate shared or exclusive argument accesses using the same callable parameter metadata as ordinary calls.
-- [ ] Apply mutation and optional final-use transfer effects before the path terminates where the existing call contract requires them.
-- [ ] Do not create a result local, result origin, return alias or post-call state.
-- [ ] End loan/access liveness at the terminator according to existing block-exit rules.
-- [ ] Keep reactive invalidation and argument side effects observable even though no continuation exists.
-- [ ] Update statement/terminator metadata collectors and use scanners.
+- [ ] Generate shared or exclusive argument accesses through existing parameter metadata.
+- [ ] Apply mutation and optional final-use transfer effects before divergence where the call contract requires them.
+- [ ] Create no result local, result origin, return alias or post-call state.
+- [ ] End liveness at the terminator using existing block-exit rules.
+- [ ] Preserve reactive invalidation and argument effects.
+- [ ] Update use and metadata collectors.
 
 ### Lifetime and escape analysis
 
-- [ ] Record argument and retained-edge effects that occur before divergence.
-- [ ] Emit no result provenance, detached result or outgoing result family.
-- [ ] Represent the absence of a normal exit explicitly in local and exported summaries where required.
-- [ ] Ensure project/link summary instantiation never expects a post-call continuation from NeverCall.
-- [ ] Preserve cleanup and destruction on paths that execute before the call according to validated HIR and memory planning.
-- [ ] Do not invent a special runtime ownership mode for Never.
+- [ ] Record argument and retained-edge effects before divergence.
+- [ ] Emit no result family, provenance or detached result.
+- [ ] Represent absence of normal exit explicitly where summaries need it.
+- [ ] Ensure link-level summary instantiation expects no continuation.
+- [ ] Preserve cleanup that occurs before the call under the validated memory plan.
+- [ ] Add no Never-specific ownership mode.
 
 ### Public call summaries
 
 - [ ] Keep parameter access and mutation summaries for Never callables.
-- [ ] Mark normal-return/result summary state as absent through explicit callable contract or exit facts.
-- [ ] Avoid empty result vectors that could be confused with ordinary unit returns.
-- [ ] Ensure generated summaries and public interfaces agree on Never.
+- [ ] Represent normal-return/result state as absent through the explicit contract.
+- [ ] Never use an empty result vector as unit/Never ambiguity.
+- [ ] Keep generated summaries and public interfaces aligned.
 
-### Reachability and link facts
+### Reachability and generated functions
 
 - [ ] Traverse NeverCall targets as ordinary call edges.
-- [ ] Include generated targets raised by standalone Never calls.
-- [ ] Include binding-backed runtime imports and helper requirements.
-- [ ] Traverse argument expressions for nested ordinary calls, resources, reactive facts and target features.
+- [ ] Include generated targets requested by standalone Never calls.
+- [ ] Include binding-backed imports and helper requirements.
+- [ ] Traverse argument expressions for nested ordinary calls and all link facts.
 - [ ] Do not traverse a nonexistent successor.
 
 ### Boracle
 
 - [ ] Update normalized problem extraction for NeverCall.
-- [ ] Preserve call argument access and call-effect events before the terminal exit.
-- [ ] Add a terminal problem representation that cannot be mistaken for a normal return.
-- [ ] Update the bounded operational oracle, validation, rendering, reducers and generated problem support where the terminator vocabulary is exhaustive.
-- [ ] Keep the reference solver and operational oracle semantically aligned on the new event order.
-- [ ] Add focused fixtures for shared/mutable arguments, retained argument effects and no successor.
+- [ ] Preserve call argument access and call-effect events before terminal exit.
+- [ ] Add a terminal representation distinct from normal return.
+- [ ] Update validation, the reference solver, operational oracle, rendering, reducers and generated problem support where exhaustive.
+- [ ] Keep production and oracle event ordering aligned.
+- [ ] Add focused shared/mutable argument and no-successor fixtures.
 
-## Phase 5 audit and style-guide review
+## Audit
 
-- [ ] Confirm argument effects are neither dropped nor applied twice.
+- [ ] Confirm argument effects are neither dropped nor duplicated.
 - [ ] Confirm no result facts or post-call state exist.
-- [ ] Confirm exported summaries distinguish Never from unit return.
-- [ ] Confirm reachability includes the callee and argument dependencies.
-- [ ] Confirm memory analysis consumes HIR facts without source inspection.
-- [ ] Confirm Boracle models the same call-before-terminal ordering as production HIR.
-- [ ] Confirm no backend or analysis infers Never from `result: None`.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm summaries distinguish Never from unit.
+- [ ] Confirm reachability includes callee and argument dependencies.
+- [ ] Confirm analyses consume HIR without source inspection.
+- [ ] Confirm Boracle models call-before-divergence ordering.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 5 validation and acceptance
-
-Run focused borrow, lifetime, call-summary, reachability, generated and Boracle tests, then:
+## Validation
 
 ```bash
 cargo fmt --all
@@ -1013,74 +1011,70 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Confirm the opt-in Boracle lane passes independently of `just validate`.
-- [ ] Confirm no analysis accepts an impossible normal successor after NeverCall.
+- [ ] Confirm no analysis accepts a normal successor after NeverCall.
 
-# Phase 6 - Add JavaScript and current Wasm lowering
+# Phase 6 - Lower JavaScript and current Wasm
 
 ## Goal
 
-Lower the explicit HIR contract on every current target before the larger Wasm backend rewrite begins. Preserve a defensive hard stop if a declared Never callee violates its contract at runtime.
+Support Never on every current target before the larger Wasm rewrite. Make continuation impossible when a declared Never callee violates its runtime contract.
 
-## Implementation checklist
+## Work
 
 ### JavaScript
 
 - [ ] Emit Never functions with no source-visible return value.
-- [ ] Lower a NeverCall through the existing target and argument call-emission owner.
-- [ ] Emit the call once.
-- [ ] Immediately emit a compiler-owned throw if control returns from the call.
-- [ ] Use an invariant message that identifies a violated `-> !` contract without exposing internal IDs.
-- [ ] Preserve external-module import/glue handling for binding-backed Never calls.
-- [ ] Preserve reactive invalidations and argument effects that happen before the call.
-- [ ] Ensure dispatcher control cannot continue to another block after NeverCall.
+- [ ] Lower NeverCall through existing target and argument call emission.
+- [ ] Emit the call exactly once.
+- [ ] Immediately emit a compiler-owned unrecoverable throw if control returns.
+- [ ] Use a message that identifies a violated `-> !` contract without internal IDs.
+- [ ] Preserve external-module imports and glue.
+- [ ] Preserve argument effects and reactive invalidations before the call.
+- [ ] Ensure dispatcher control cannot continue afterward.
 
-Conceptual emitted shape:
+Conceptual output:
 
 ```javascript
 fatal(message);
 throw new Error("Moth `-> !` function returned unexpectedly");
 ```
 
-The exact helper or emitted text may use the existing runtime-failure owner. It must remain compiler-owned and unrecoverable.
+The exact helper may reuse the existing runtime-failure owner.
 
-### Current Wasm backend
+### Current Wasm
 
-- [ ] Map HIR Never function contracts to zero Wasm results.
-- [ ] Lower NeverCall to a result-less direct/import call followed by the existing LIR trap/unreachable path.
-- [ ] Preserve argument lowering and call target identity.
-- [ ] Reject unsupported Never-call targets during target validation rather than dropping the call.
-- [ ] Emit `unreachable` after every Never call, including binding-backed calls.
-- [ ] Add artefact tests that prove call then unreachable ordering.
-- [ ] Do not redesign the whole Wasm LIR in this plan.
+- [ ] Map Never function contracts to zero Wasm results.
+- [ ] Lower NeverCall to a result-less call followed by the existing LIR trap path.
+- [ ] Preserve target identity and argument lowering.
+- [ ] Emit Wasm `unreachable` after every Never call, including imports.
+- [ ] Reject unsupported targets during target validation rather than dropping calls.
+- [ ] Add artefact tests proving call then unreachable order.
+- [ ] Do not redesign the full Wasm LIR here.
 
 ### Target validation
 
-- [ ] Inspect NeverCall arguments and targets exactly like ordinary calls.
-- [ ] Keep unsupported binding or feature diagnostics rooted at the authored call.
+- [ ] Inspect NeverCall arguments and targets like ordinary calls.
+- [ ] Keep unsupported binding/feature diagnostics at the authored call.
 - [ ] Do not reject Never merely because it has no result type.
-- [ ] Verify that a backend which accepts the call can express an unreachable fallback.
+- [ ] Require an accepted backend to express the defensive unreachable fallback.
 
-### Downstream Wasm contract
+### Downstream Wasm plan
 
-- [ ] Update the queued HTML mixed JavaScript and Wasm backend plan's named prerequisites to require the delivered Never return contract and HIR NeverCall terminator.
-- [ ] Require the future structured Wasm LIR to preserve call plus unreachable semantics.
-- [ ] Require the future Wasm tests to retain local, cross-module, generated and binding-backed NeverCall coverage.
-- [ ] Do not link one plan as a semantic authority. Name the delivered capability and point both plans at permanent compiler documentation.
+- [ ] Update the queued HTML mixed JavaScript and Wasm plan's named prerequisites to require delivered Never function contracts and NeverCall HIR.
+- [ ] Require future structured Wasm LIR to preserve call plus unreachable semantics.
+- [ ] Retain local, cross-module, generated and binding-backed Never coverage.
+- [ ] Point both plans to permanent compiler documentation rather than making this temporary plan an authority.
 
-## Phase 6 audit and style-guide review
+## Audit
 
-- [ ] Confirm JS and Wasm consume explicit HIR Never facts rather than result absence.
-- [ ] Confirm a returning external Never implementation cannot reach code HIR marked unreachable.
-- [ ] Confirm the defensive fallback is emitted after, not before or instead of, the call.
-- [ ] Confirm backend target selection and external glue remain in their current owners.
-- [ ] Confirm no whole-Wasm redesign or compatibility adapter entered this plan.
-- [ ] Confirm artefact tests protect semantics without freezing unrelated formatting.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Confirm both backends consume explicit HIR facts rather than result absence.
+- [ ] Confirm a returning external implementation cannot reach code HIR marked unreachable.
+- [ ] Confirm fallback occurs after the call.
+- [ ] Confirm target selection and external glue stay in existing owners.
+- [ ] Confirm no broad Wasm redesign or compatibility adapter entered this phase.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 6 validation and acceptance
-
-Run focused JS, Wasm, backend validation and integration tests, then:
+## Validation
 
 ```bash
 cargo fmt --all
@@ -1092,111 +1086,104 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Confirm emitted JavaScript throws if a test external Never function returns.
-- [ ] Confirm emitted Wasm validates and contains the required unreachable path.
-- [ ] Confirm ordinary functions and result-less unit calls retain their previous lowering.
+- [ ] Prove JS throws if a test external Never function returns.
+- [ ] Prove emitted Wasm validates and contains unreachable.
+- [ ] Confirm ordinary unit calls retain previous lowering.
 
-# Phase 7 - Complete user-visible integration coverage
+# Phase 7 - Complete integration coverage
 
 ## Goal
 
-Prove the complete source contract across local, cross-module, generic, trait, external and control-flow boundaries with one clear primary owner per behaviour.
+Prove the full contract across local, cross-module, function-value, generic, trait, external and control-flow boundaries with one primary owner per behaviour.
 
-## Required integration coverage
+## Required valid coverage
 
-### Valid declarations and calls
-
-- [ ] local `fatal || -> !` ending in `assert(false)`
+- [ ] local Never function ending in `assert(false)`
 - [ ] Never receiver method
-- [ ] exported Never function imported and called from another module
-- [ ] generic Never function whose type arguments are inferred from arguments
+- [ ] named function value whose signature preserves exact Never
+- [ ] exported Never function imported across a module boundary
+- [ ] generic Never function inferred from arguments
 - [ ] generated NeverCall reachability and backend lowering
-- [ ] trait requirement `-> !` with exact conforming method
-- [ ] annotated external JS `@moth.sig ... -> !`
-- [ ] true conditional loop with no reachable break satisfying a Never body
-- [ ] nested inner-loop break not invalidating outer true-loop divergence
+- [ ] trait requirement `-> !` with exact conformance
+- [ ] annotated external JS Never contract
+- [ ] normalised-true loop with no self-targeting break
+- [ ] nested inner-loop break that does not invalidate an outer true loop
 - [ ] block-form value producer with one `then` branch and one Never-call branch
-- [ ] ordinary typed placeholder body that only asserts false
+- [ ] ordinary typed placeholder whose body only asserts false
 
-### Invalid signatures
+## Required invalid signature coverage
 
 - [ ] `-> !, String`
 - [ ] `-> String, !`
 - [ ] `-> Error!, !`
 - [ ] `-> !!`
-- [ ] Never used as a parameter, field, alias or collection element
-- [ ] `None` used as an attempted explicit return type remains invalid under its existing rule
+- [ ] bare `!` in parameters, fields, aliases and collection types
+- [ ] attempted `-> None` retains its existing invalid-type rule
 
-### Invalid Never bodies
+## Required invalid Never body coverage
 
-- [ ] active fallthrough
-- [ ] active bare `return`
-- [ ] active `return!`
-- [ ] active option/error propagation to the caller
+- [ ] fallthrough
+- [ ] bare `return`
+- [ ] `return!`
+- [ ] option/error propagation to caller
 - [ ] one divergent branch and one completing branch
-- [ ] true loop with a reachable break targeting itself
-- [ ] recursive or mutually recursive proof cycle receives the accepted deferred-proof diagnostic rather than an internal error or unsound acceptance
+- [ ] true loop with self-targeting reachable break
+- [ ] direct or mutual recursive proof cycle reports the accepted deferred-proof diagnostic
 
-### Invalid call placement
+## Required invalid call-placement coverage
 
-- [ ] declaration initializer
-- [ ] assignment RHS
+- [ ] declaration initializer and assignment RHS
 - [ ] return value
-- [ ] ordinary function argument
-- [ ] receiver or constructor argument
-- [ ] operator operand
-- [ ] condition
+- [ ] function, receiver and constructor argument
+- [ ] operator operand and condition
 - [ ] template interpolation
-- [ ] collection/map element
-- [ ] assertion condition or message
+- [ ] collection and map element
+- [ ] assertion condition and message
 - [ ] inline value-producing branch
 - [ ] postfix `!`, postfix `?` and `catch`
 
-### Explicitness diagnostic
+## Required explicitness coverage
 
 - [ ] unannotated all-path false assertion
-- [ ] unannotated all-path true loop
-- [ ] unannotated structured branches that all diverge
-- [ ] diagnostic offers permanent `-> !` and temporary ordinary-type choices
+- [ ] unannotated normalised-true loop
+- [ ] unannotated branches that all diverge
+- [ ] diagnostic offers permanent Never and temporary ordinary-type choices
 - [ ] explicitly typed equivalent is accepted
-- [ ] unannotated function that may complete remains an ordinary no-value function
-- [ ] compiler-synthesised `start` may diverge without an impossible source annotation
+- [ ] unannotated function that may complete stays ordinary no-value
+- [ ] compiler-synthesised `start` may diverge without source annotation
 
-### Exact interfaces
+## Required exact-interface coverage
 
-- [ ] trait requires Never but implementation declares ordinary type
-- [ ] trait requires ordinary type but implementation declares Never
-- [ ] public-interface fingerprint changes when return contract changes
-- [ ] same-file callers do not infer divergence from an ordinary typed callee body
-- [ ] cross-module callers do not infer divergence from an ordinary typed callee body
-- [ ] external function with no returns remains ordinary unit unless explicitly marked Never
+- [ ] trait requires Never but implementation declares ordinary returns
+- [ ] trait requires ordinary returns but implementation declares Never
+- [ ] function-type matching distinguishes the contracts
+- [ ] public fingerprint changes when the contract changes
+- [ ] same-file and cross-module callers do not infer divergence from ordinary typed callee bodies
+- [ ] external function with no returns remains ordinary unit unless explicitly Never
 
 ## Test ownership
 
 - Put user-visible syntax, diagnostics and runtime behaviour under `tests/cases/`.
-- Use one primary contract for the Never return surface and boundary/adversarial cases for distinct failures.
-- Put pure exit-summary tests under the AST control-flow analysis test module.
-- Put HIR shape and invariant tests under `src/compiler_frontend/hir/tests/`.
-- Put public-interface, trait, external package and generated-sidecar invariants under their owning test directories.
-- Put JS and Wasm artefact assertions under their backend test owners.
-- Keep Boracle semantics in the opt-in Boracle test tree.
-- Do not use benchmark fixtures as correctness evidence.
-- Remove or rewrite old tests that encode vector-only return state, duplicated false-assert terminality or `HirFunction.return_type` directly.
+- Give the Never surface one primary contract and distinct boundary/adversarial cases.
+- Put pure exit facts under the AST analysis tests.
+- Put HIR invariants under `src/compiler_frontend/hir/tests/`.
+- Put datatype, interface, trait, external and generated invariants under their owners.
+- Put backend artefact assertions under JS and Wasm tests.
+- Keep Boracle semantics in its opt-in tree.
+- Do not use benchmarks as correctness evidence.
+- Remove or rewrite tests that encode obsolete direct return fields or duplicate terminality.
 
-## Phase 7 audit and style-guide review
+## Audit
 
-- [ ] Map each accepted behaviour to one primary test owner.
-- [ ] Confirm no fixture duplicates another without protecting a distinct boundary.
-- [ ] Confirm diagnostics assert stable codes/reasons and source locations.
-- [ ] Confirm runtime tests prove the defensive fallback where observable.
-- [ ] Confirm HIR tests do not make incidental block IDs or formatting contractual.
-- [ ] Confirm cross-module, generic, trait and external surfaces are all covered.
-- [ ] Confirm deferred recursion and richer loop proof are rejected cleanly and recorded as gaps.
-- [ ] Perform the mandatory read-only phase audit and Slice review.
+- [ ] Map each behaviour to one primary test owner.
+- [ ] Remove redundant fixtures.
+- [ ] Assert stable diagnostic codes, reasons and source locations.
+- [ ] Prove defensive fallback where observable.
+- [ ] Avoid incidental block-ID and formatting contracts.
+- [ ] Cover all callable surfaces and deferred proof failures.
+- [ ] Complete the mandatory phase audit and Slice review.
 
-## Phase 7 validation and acceptance
-
-Run targeted canonical cases and the complete suite:
+## Validation
 
 ```bash
 cargo fmt --all
@@ -1208,107 +1195,118 @@ just boracle
 just validate
 ```
 
-Use the final contract ID selected by the live manifest conventions. Do not create duplicate primary ownership.
+Use the final contract ID selected by current manifest conventions. Do not create duplicate primary ownership.
 
-# Phase 8 - Update permanent documentation, progress and roadmap
+# Phase 8 - Update permanent docs, progress and roadmap
 
 ## Goal
 
-Move the accepted contract into permanent authorities, report the implemented core accurately and keep every accepted proof extension visible as deferred work.
+Move the final semantics into permanent authorities, report implemented support accurately and keep every accepted proof extension visible as future work.
 
-This phase is documentation-only unless its review exposes an implementation defect. If Rust, tests, fixtures, scripts or manifests change, treat it as code-bearing and run `just validate`.
+This phase is documentation-only unless review exposes an implementation defect.
 
-## Canonical language documentation
+## Language documentation
 
-- [ ] Update `function-declarations.mtf` with `-> !` as a whole callable return contract.
-- [ ] Update `returns-and-multiple-values.mtf` to distinguish ordinary no-value completion, typed placeholders and Never.
-- [ ] Update `calls-and-access.mtf` with standalone-only Never calls and invalid value contexts.
-- [ ] Update `assertions.mtf` to explain that `assert(false)` proves divergence but remains a statement rather than a Never value.
-- [ ] Update `value-producing-if.mtf` with a block-form producing/diverging example and the invalid inline value form.
-- [ ] Update conditional-loop and loop-control references with the normalised-true/no-break proof boundary.
-- [ ] Update trait requirement and conformance references with exact Never matching.
-- [ ] Update generic declaration/inference references with argument-only inference for Never calls.
-- [ ] Update external binding contracts with explicit `@moth.sig ... -> !` and the no-success/no-error rule.
-- [ ] Update the cheatsheet with compact syntax, placement and proof rules.
-- [ ] Update paired Basic pages only where the concept belongs at that teaching level.
+- [ ] Update function declarations with `-> !` as a whole callable contract.
+- [ ] Update returns docs to distinguish ordinary no-value completion, typed placeholders and Never.
+- [ ] Update calls docs with standalone-only placement.
+- [ ] Update assertions docs to explain that false assertions prove divergence but are not Never values.
+- [ ] Update value-producing block docs with producing/diverging block form and invalid inline form.
+- [ ] Update loop docs with the normalised-true/no-break proof boundary.
+- [ ] Update trait docs with exact matching.
+- [ ] Update generic docs with argument-only inference for Never calls.
+- [ ] Update external binding docs with explicit `@moth.sig ... -> !`.
+- [ ] Update the cheatsheet.
+- [ ] Update Basic pages only where the concept belongs at that level.
 
-## Compiler and build architecture
+## Compiler architecture
 
 Update `docs/compiler-design-overview.md` with durable ownership for:
 
-- callable return-contract vocabulary separate from type identity
+- callable return contracts separate from value type identity
+- function types that carry Never signatures without a Never value type
 - the absence of a Never `TypeId`
-- shared AST control-flow exit analysis
-- specialised active-AST Never validation
-- statement-only Never calls
-- public interface and exact trait/binding contracts
-- `HirFunctionReturnContract`
-- `HirTerminator::NeverCall`
-- borrow, lifetime and link-fact treatment
+- shared AST exit analysis
+- specialised active-AST validation
+- standalone-only Never calls
+- exact public, trait, generic and external contracts
+- HIR function return contracts and `NeverCall`
+- borrow, lifetime, reachability and link treatment
 - backend call plus unreachable fallback
 
-Review `docs/build-system-design.md`. Edit only if target validation, link facts or the downstream Wasm handoff lack a durable contract. Do not copy language semantics into build-system prose.
+Review `docs/build-system-design.md`. Edit only if target validation, linking or the Wasm handoff lacks a durable boundary. Do not copy language semantics into build-system prose.
 
-Review `index.md`. Update it only if files move, a new subsystem module is added or locator text becomes materially inaccurate.
+Review `index.md` and update it only if owners or paths changed.
 
 ## Progress matrix
 
 Add or update one focused **Never return contracts** row in `docs/src/docs/progress/@page.moth`.
 
-Before implementation starts, the row may be `Deferred` with coverage `None` if the accepted design is recorded early. After this plan lands, set it to `Partial`, not `Supported`, because accepted proof extensions remain.
+Before implementation, an accepted-design row may be `Deferred` with coverage `None`. After this plan lands, set it to `Partial`, not `Supported`, because accepted proof gaps remain.
 
-The implemented-state row must say:
+The implemented row must state:
 
 - source syntax is `-> !`
-- it is a whole callable contract, not a first-class type or `TypeId`
+- it is a whole callable contract, not a first-class type or Never `TypeId`
 - calls are standalone terminating statements and cannot be consumed as values
-- explicit contracts propagate through local, cross-module, generic, trait and binding-backed surfaces
-- core divergence proof covers false assertions, explicit Never calls, normalised-true conditional loops without a reachable break, lexical scopes, branches and exhaustive matches
-- HIR uses an explicit Never function contract and terminating call
-- JavaScript and current Wasm lowering include a defensive unreachable fallback
+- explicit contracts propagate through local, function-value, cross-module, generic, trait and binding-backed surfaces
+- core proof covers false assertions, explicit Never calls, normalised-true no-break loops, lexical scopes, branches and exhaustive matches
+- HIR uses explicit Never function contracts and terminating calls
+- JS and current Wasm emit a defensive unreachable fallback
 - ordinary typed functions may currently diverge without becoming Never to callers
 
-The same row must list these accepted future gaps:
+The same row must list every accepted proof gap to close later:
 
 - direct and mutual recursion proof for declared Never bodies
 - richer data-flow proof of permanently true runtime loop conditions
-- broader structural or whole-program non-termination proof
+- broader deterministic structural, SCC or whole-program non-termination proof
 
-Do not list first-class Never values, bottom coercion, expression-position calls or implicit ordinary-call divergence as future gaps. Those are deliberate exclusions.
+Do not list first-class Never values, bottom coercion, value-position calls or implicit ordinary-call divergence as gaps. Those are deliberate exclusions.
 
-Update the existing **Assertions**, **Functions and calls**, **Control flow**, **Traits**, **Generics** and external-binding notes only where they would otherwise contradict the new row. Avoid duplicating the whole Never contract across several rows.
+Update existing Assertions, Functions and calls, Control flow, Traits, Generic functions and binding-backed package notes only where they would otherwise contradict the new row. Avoid repeating the whole contract across several rows.
 
 ## Roadmap
 
-While queued, keep this plan immediately after runtime anonymous records and before the HTML mixed JavaScript and Wasm backend plan.
+While queued, keep this plan immediately after runtime anonymous records and before the Wasm implementation.
 
-At implementation closeout:
+At closeout:
 
-- [ ] delete this plan and remove its queued roadmap entry in the same completion commit
-- [ ] keep the downstream Wasm plan after the delivered capability
-- [ ] add a **Never return proof follow-ups** subsection under deferred design if no existing focused section owns the proof gaps
-- [ ] list direct/mutual recursion proof, richer loop-condition proof and broader deterministic non-termination proof there
+- [ ] delete this plan and remove its queued entry in the same commit
+- [ ] keep the Wasm implementation after the delivered capability
+- [ ] add a `Never return proof follow-ups` subsection under deferred design if no focused owner exists
+- [ ] list recursion proof, richer loop-condition proof and broader deterministic non-termination proof
 - [ ] do not add final constraints as deferred work
-- [ ] ensure the progress matrix repeats the accepted proof gaps so users can see current support without reading the roadmap
+- [ ] keep the same proof gaps visible in the progress matrix
 
-## Generated documentation
+## Downstream Wasm plan
+
+Update its named prerequisites and required final design so it consumes:
+
+- `HirFunctionReturnContract::Never`
+- `HirTerminator::NeverCall`
+- zero-result ABI for Never functions
+- call plus defensive unreachable semantics
+- local, cross-module, generated and binding-backed coverage
+
+Do not cite this temporary plan as a semantic authority.
+
+## Generated docs
 
 - [ ] Check docs with the current compiler.
 - [ ] Rebuild `docs/release/**` through the compiler.
-- [ ] Review the generated diff for the new syntax, code highlighting and link integrity.
+- [ ] Review generated syntax highlighting, links and examples.
 - [ ] Do not hand-edit generated output.
 
-## Phase 8 audit and style-guide review
+## Audit
 
-- [ ] Confirm permanent docs, not this temporary plan, own the final semantics.
-- [ ] Confirm Advanced and Basic pages remain truthful at their chosen depth.
-- [ ] Confirm matrix status is `Partial` and names every accepted proof gap.
-- [ ] Confirm deliberate exclusions are not misreported as future promises.
-- [ ] Confirm roadmap ordering and downstream Wasm prerequisites are correct.
-- [ ] Confirm generated docs came only from the source build.
-- [ ] Perform the mandatory read-only documentation audit and Slice review.
+- [ ] Confirm permanent docs own final semantics.
+- [ ] Confirm matrix status is `Partial` after implementation and names every accepted proof gap.
+- [ ] Confirm exclusions are not misreported as future promises.
+- [ ] Confirm roadmap order and downstream Wasm prerequisites are correct.
+- [ ] Confirm generated docs came from source.
+- [ ] Complete the mandatory documentation audit and Slice review.
 
-## Phase 8 validation and acceptance
+## Validation
 
 For a strictly documentation-only phase:
 
@@ -1324,22 +1322,18 @@ If any code-bearing file changes, also run:
 just validate
 ```
 
-- [ ] Resolve every docs warning, broken example and generated-diff mismatch.
-- [ ] Confirm no implementation claim exceeds tested support.
-
 # Phase 9 - Delete stale paths and complete final review
 
 ## Goal
 
-Prove the repository has one final Never return path, no fake type/value representation and no stale vector-only or duplicate terminality assumptions.
+Prove there is one final Never return path, no fake type/value representation and no stale vector-only or duplicate terminality assumptions.
 
-## Stale-path and ownership searches
-
-Run focused searches and inspect every match:
+## Stale-path searches
 
 ```bash
 rg -n 'HirFunction\s*\{[^}]*return_type|\.return_type\b' src tests
 rg -n 'FunctionSignature\s*\{[^}]*returns|FunctionSignatureSyntax\s*\{[^}]*returns' src tests
+rg -n 'FunctionTypeDefinition\s*\{[^}]*returns|FunctionTypeDefinition\s*\{[^}]*error_return' src tests
 rg -n 'PublicFunctionSemantics.*returns|PublicReceiverMethodSemantics.*returns' src tests
 rg -n 'error_return_type' src tests
 rg -n 'assert_condition_is_statically_false|statically_false.*assert|BranchExitSummary::TERMINATES' src tests
@@ -1347,54 +1341,52 @@ rg -n 'Never.*TypeId|TypeId.*Never|DataType::Never|ParsedTypeRef::Never|Canonica
 rg -n 'NeverCall|HirTerminator::NeverCall|FunctionReturnContract' src tests docs --glob '!docs/release/**'
 ```
 
-Expected outcomes:
+Expected results:
 
-- no old direct HIR return-type field remains
-- no vector-only callable contract remains where Never is legal
+- no old direct HIR return field remains
+- no vector-only contract remains where Never is legal
 - no duplicated false-assert terminality classifier remains
 - no Never type identity exists
-- every NeverCall match is intentional and exhaustive
-- ordinary result-less calls remain distinct from Never calls
-- current Wasm and future Wasm plan wording both preserve call plus unreachable
+- every NeverCall match is intentional
+- ordinary result-less calls remain distinct
+- current and future Wasm paths preserve call plus unreachable
 
 ## Final architecture audit
 
-Give a read-only final auditor:
+Give the read-only final auditor:
 
 - this plan
-- the complete final diff
-- the accepted interview decisions
-- the phase audit findings and resolutions
+- the complete diff
+- accepted interview decisions
+- phase findings and resolutions
 - exact validation results
-- the permanent documentation updates
-- the progress and roadmap changes
+- permanent docs
+- progress and roadmap changes
 
-The final audit must check:
+The audit must check:
 
-- [ ] exact source syntax and signature exclusivity
-- [ ] no first-class Never type or bottom coercion
-- [ ] standalone-only call placement
+- [ ] syntax and signature exclusivity
+- [ ] no first-class Never or bottom coercion
+- [ ] standalone-only placement
 - [ ] explicit-only interprocedural propagation
-- [ ] typed-placeholder behaviour
+- [ ] typed placeholder behaviour
 - [ ] unannotated divergence diagnostics
-- [ ] shared control-flow exit ownership
+- [ ] shared exit ownership
 - [ ] true-loop and nested-break correctness
-- [ ] exact trait, generic, public and external contracts
-- [ ] HIR contract and NeverCall invariants
+- [ ] exact function-type, trait, generic, public and external contracts
+- [ ] HIR and NeverCall invariants
 - [ ] borrow, lifetime, reachability and generated facts
 - [ ] Boracle parity
-- [ ] JS and Wasm defensive fallback
+- [ ] JS and Wasm fallback
 - [ ] no compatibility or stale path
-- [ ] correct test ownership
+- [ ] test ownership
 - [ ] permanent documentation authority
-- [ ] progress matrix gaps and roadmap ordering
+- [ ] matrix gaps and roadmap order
 - [ ] style-guide compliance
 
-Resolve every actionable finding, rerun affected phase gates and obtain a fresh clean final audit.
+Resolve every actionable finding, rerun affected gates and obtain a fresh clean final audit.
 
 ## Final validation
-
-Run the complete final state gates:
 
 ```bash
 cargo fmt --all -- --check
@@ -1407,43 +1399,59 @@ git diff --check
 
 - [ ] Record exact results and counts.
 - [ ] Confirm generated docs are current.
-- [ ] Confirm benchmark history and tracked summaries changed only if an independently justified benchmark update was required.
-- [ ] Confirm `git status --short` contains only intended completion files.
-- [ ] Delete this plan and remove its roadmap entry in the same completion commit.
+- [ ] Confirm benchmark history changed only with separate justification.
+- [ ] Confirm status contains only intended files.
+- [ ] Delete this plan and its roadmap entry in the same completion commit.
 
-## Definition of done
+# Validation summary
+
+| Phase | Change class | Required final gate |
+|---|---|---|
+| Phase 0 | read-only or plan correction | baseline commands, then the gate matching any tracked edit |
+| Phase 1 | code-bearing | focused data-model tests plus `just validate` |
+| Phase 2 | code-bearing | control-flow tests plus `just validate` |
+| Phase 3 | code-bearing | frontend/interface tests plus `just validate` |
+| Phase 4 | code-bearing and HIR | HIR tests, `just boracle` and `just validate` |
+| Phase 5 | code-bearing and analysis | analysis tests, `just boracle` and `just validate` |
+| Phase 6 | code-bearing and backend | JS/Wasm tests plus `just validate` |
+| Phase 7 | code-bearing integration | canonical suite, `just boracle` and `just validate` |
+| Phase 8 | docs-only unless defects surface | docs release build, or `just validate` when mixed |
+| Phase 9 | whole-plan closeout | final audit, `just boracle`, `just validate` and docs release build |
+
+# Definition of done
 
 The plan is complete only when:
 
 - [ ] `-> !` parses as one whole callable return contract
 - [ ] Never cannot mix with success, optional or error return slots
-- [ ] no Never type, value, `TypeId`, `DataType`, parsed type or canonical type identity exists
-- [ ] explicit Never works for functions, methods, generics, traits, exports and binding-backed calls
+- [ ] no Never value type, `TypeId`, `DataType`, parsed type or canonical type identity exists
+- [ ] existing function types can encode a Never callable signature without creating a Never value
+- [ ] Never works for functions, methods, function values, generics, traits, exports and binding-backed calls
 - [ ] callable compatibility is exact
 - [ ] only explicit `-> !` propagates divergence across call boundaries
 - [ ] Never calls are standalone statements only
 - [ ] value-producing blocks accept producing/diverging branch mixtures without coercion
-- [ ] all-diverging value producers still require at least one producing path
+- [ ] all-diverging value producers still require a producing path
 - [ ] unannotated all-path divergence requires an explicit contract choice
 - [ ] explicitly typed placeholder implementations may diverge
-- [ ] declared Never bodies reject fallthrough and caller-returning exits
+- [ ] Never bodies reject fallthrough and caller-returning exits
 - [ ] false assertions, explicit Never calls and normalised-true no-break loops prove divergence
 - [ ] nested loop break targeting is correct
 - [ ] one AST exit analysis serves terminality, value production and Never validation
 - [ ] HIR functions carry explicit return contracts
 - [ ] HIR NeverCall has a target and arguments but no result or successor
 - [ ] HIR validation checks the target contract
-- [ ] borrow and lifetime analyses apply argument effects with no result or post-call state
+- [ ] borrow and lifetime analyses apply arguments with no result or post-call state
 - [ ] reachability and link facts retain the call edge and argument facts
 - [ ] generated sidecars preserve Never
 - [ ] Boracle models call effects before terminal divergence
 - [ ] JavaScript emits a defensive throw after the call
 - [ ] current Wasm emits a result-less call followed by unreachable
-- [ ] the downstream Wasm plan names and preserves the delivered contract
-- [ ] canonical docs own the final semantics
+- [ ] the downstream Wasm plan preserves the delivered contract
+- [ ] canonical docs own final semantics
 - [ ] the progress matrix reports implemented core support as `Partial`
-- [ ] every accepted proof extension is visible in the progress matrix and roadmap
+- [ ] every accepted proof extension is visible in both progress matrix and roadmap
 - [ ] deliberate exclusions are not presented as future work
 - [ ] all mandatory phase audits and Slice reviews are complete
-- [ ] `just boracle`, `just validate` and the docs release build pass
-- [ ] the plan and roadmap entry are retired together
+- [ ] `just boracle`, `just validate` and docs release build pass
+- [ ] plan and roadmap entry are retired together
