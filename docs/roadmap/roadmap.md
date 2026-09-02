@@ -24,6 +24,7 @@ None.
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
+- [Never return contracts](./plans/never-return-contract-plan.md)
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
