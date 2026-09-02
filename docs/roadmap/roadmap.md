@@ -10,7 +10,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 # Plans
 
-- [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md)
+- [Build configuration values and project globals](./plans/build-configuration-values-and-project-globals-plan.md): ACTIVE
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
@@ -23,12 +23,9 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
-## Active implementation work
-
-
 ## Adding and maintaining plans
 
-This roadmap owns the order. A plan owns its own work and nothing else.
+This roadmap owns the order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
 
 **Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
 
