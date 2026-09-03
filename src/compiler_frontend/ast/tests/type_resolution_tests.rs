@@ -233,6 +233,7 @@ fn constant_capacity_resolves_to_fixed_collection() {
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     scope_context.add_compile_time_var(constant_declaration, SourceLocation::default());
 
@@ -397,6 +398,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let wrapper_declaration = Declaration {
         id: wrapper_path.clone(),
         value: Expression::template(wrapper_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![wrapper_declaration]));
     let mut resolution_context =
@@ -411,6 +413,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
             location,
             ValueMode::ImmutableReference,
         ),
+        config_qualifier: None,
     };
 
     let resolved_fields = resolve_struct_field_types(
@@ -450,6 +453,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                 project_member.clone(),
             )),
+        config_qualifier: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![constant]));
     let collection_type_id = type_environment.intern_collection(builtin_type_ids::INT, None);
@@ -484,6 +488,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let field = Declaration {
         id: struct_path.clone().append(string_table.intern("values")),
         value: collection,
+        config_qualifier: None,
     };
 
     let resolved_fields = resolve_struct_field_types(

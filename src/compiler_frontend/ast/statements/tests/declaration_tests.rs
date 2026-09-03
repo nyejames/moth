@@ -121,7 +121,33 @@ fn rejects_keyword_shadow_variable_declarations() {
     ));
 }
 
-// --------------------------
+#[test]
+fn rejects_unconsumed_source_config_qualifier_at_declaration_boundary() {
+    let diagnostic = parse_single_file_ast_diagnostic("analytics #Config of Bool = false\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: crate::compiler_frontend::compiler_messages::InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn rejects_config_qualifier_fields_in_source_constant_records() {
+    let diagnostic =
+        parse_single_file_ast_diagnostic("settings #= | flag #Config of Bool = false |\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: crate::compiler_frontend::compiler_messages::InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            ..
+        }
+    ));
+}
+
 //  Type mismatch diagnostics
 // --------------------------
 

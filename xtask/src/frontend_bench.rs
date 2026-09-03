@@ -100,6 +100,7 @@ pub(crate) fn run_one_frontend_case(
     let options = FrontendBenchmarkOptions {
         entry_path: invocation.entry,
         build_profile,
+        build_config_inputs: Vec::new(),
     };
 
     match run_frontend_benchmark(options) {

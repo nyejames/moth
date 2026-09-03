@@ -72,6 +72,7 @@ pub(crate) fn synthetic_content_header(
         type_annotation: ParsedTypeRef::BuiltinString {
             location: input.location.clone(),
         },
+        config_qualifier: None,
         initializer_tokens: input.initializer_tokens,
         initializer_references: input.initializer_references,
         location: input.location.clone(),

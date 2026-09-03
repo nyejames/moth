@@ -498,6 +498,7 @@ fn resolve_multi_bind_targets(
                     target_data_type.to_owned(),
                     target_ownership.to_owned(),
                 ),
+                config_qualifier: None,
             });
 
             resolved_bindings.push(MultiBindTarget {

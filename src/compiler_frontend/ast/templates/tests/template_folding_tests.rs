@@ -62,10 +62,12 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
         item: Some(Declaration {
             id: item_path,
             value: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }),
         index: Some(Declaration {
             id: index_path,
             value: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }),
     };
 

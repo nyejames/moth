@@ -78,6 +78,9 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
         params: Vec::new(),
         return_type: TypeId(0),
     });
+    module
+        .function_provenance
+        .insert(FunctionId(0), Default::default());
     module.blocks.push(HirBlock {
         id: BlockId(0),
         region: RegionId(0),
@@ -115,6 +118,8 @@ fn base_hir(
             params: Vec::new(),
             return_type: TypeId(0),
         });
+        hir.function_provenance
+            .insert(FunctionId(index as u32), Default::default());
     }
     for (index, origin) in public_origins.iter().enumerate() {
         hir.function_ids_by_origin

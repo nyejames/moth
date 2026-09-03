@@ -14,7 +14,8 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnexpectedTrailingComma
             | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
             | DiagnosticPayload::TypeMismatch { .. }
-            | DiagnosticPayload::UnreachableMatchArm => {}
+            | DiagnosticPayload::UnreachableMatchArm
+            | DiagnosticPayload::ProjectContextEscape { .. } => {}
 
             DiagnosticPayload::ExpectedToken { expected, found } => {
                 expected.remap_string_ids(remap);
@@ -853,6 +854,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedTraitFeature { .. }
             | DiagnosticPayload::InvalidTraitKeywordUsage { .. }
             | DiagnosticPayload::PrivateTypeInExportedApi { .. }
+            | DiagnosticPayload::ProjectContextEscape { .. }
             | DiagnosticPayload::InvalidTraitConformance { .. }
             | DiagnosticPayload::InvalidTraitIncompatibility { .. }
             | DiagnosticPayload::TraitNameUsedAsType { .. }

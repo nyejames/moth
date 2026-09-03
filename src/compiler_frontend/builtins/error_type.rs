@@ -156,13 +156,14 @@ fn type_declaration(
             data_type,
             ValueMode::ImmutableReference,
         ),
+        config_qualifier: None,
     }
 }
-
 fn required_field(id: InternedPath, data_type: DataType, location: SourceLocation) -> Declaration {
     Declaration {
         id,
         value: Expression::no_value(location, data_type, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }
 }
 
@@ -170,6 +171,7 @@ fn defaulted_int_field(id: InternedPath, value: i32, location: SourceLocation) -
     Declaration {
         id,
         value: Expression::int(value, location, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }
 }
 

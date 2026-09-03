@@ -226,11 +226,13 @@ fn aggregate_value_constructors_union_child_provenance() {
         id: InternedPath::from_single_str("first", &mut string_table),
         value: Expression::int(3, location.clone(), ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(project_provenance.clone()),
+        config_qualifier: None,
     };
     let field_b = Declaration {
         id: InternedPath::from_single_str("second", &mut string_table),
         value: Expression::int(4, location.clone(), ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(builder_provenance.clone()),
+        config_qualifier: None,
     };
     let struct_expression = Expression::struct_instance(
         InternedPath::from_single_str("Record", &mut string_table),
@@ -253,6 +255,7 @@ fn aggregate_value_constructors_union_child_provenance() {
             id: InternedPath::from_single_str("payload", &mut string_table),
             value: Expression::int(5, location.clone(), ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance),
+            config_qualifier: None,
         }],
         diagnostic_type: DataType::Int,
         type_id: builtin_type_ids::INT,

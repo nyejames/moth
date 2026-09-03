@@ -11,20 +11,25 @@
 //! job may parallelize its own file preparation. Root setup and source-backed package validation
 //! live in sibling modules.
 
+use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
+use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
 use crate::projects::settings::Config;
-
 use rustc_hash::FxHashMap;
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
@@ -84,11 +89,67 @@ pub(crate) struct ModuleCompilationJob {
     #[cfg(feature = "timers")]
     pub(crate) timing_module_key: crate::timing::TimingModuleKey,
 }
+/// Deferred preparation identity for one owned, unselected `.moth` source.
+///
+/// Discovery records these descriptors while canonical sources still mutate the shared external
+/// provider state. The descriptors are prepared only after every canonical boundary has finished
+/// discovery, so each transient job forks the final canonical registry/cache/resolution state.
+struct CheckOnlyModuleSpec {
+    owner_module_id: ModuleId,
+    source_id: SourceId,
+    candidate_source_ids: Vec<SourceId>,
+    source_origin_lookup: FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    stable_origin: StableModuleOriginIdentity,
+}
 
+/// One transient semantic unit for one owned, unselected `.moth` source.
+///
+/// Check-only jobs deliberately carry no graph publication state. The owner module ID lets the
+/// frontend reuse the canonical boundary context. Provider bindings and source-package dependencies
+/// are resolved into this job-local metadata without inserting graph edges. The prepared payload
+/// carries the job-local file-reference table and resource IDs; both are discarded with the
+/// transient result.
+pub(crate) struct CheckOnlyModuleCompilationJob {
+    /// Canonical module that owns this transient source.
+    pub(crate) owner_module_id: ModuleId,
+    /// Prefix length used when merging this job's local string table.
+    pub(crate) string_table_base_len: usize,
+    /// Provider-module bindings resolved for retained clauses in this source only.
+    pub(crate) provider_bindings: Vec<CheckOnlyProviderBinding>,
+    /// Source-package bindings resolved for retained clauses in this source only.
+    pub(crate) source_package_dependencies: Vec<CheckOnlySourcePackageDependency>,
+    /// Provider registry snapshot isolated to this transient job.
+    ///
+    /// Provider-backed imports may create packages while this source is prepared. The snapshot
+    /// starts from canonical discovery state but is never written back to the builder surface.
+    pub(crate) external_packages: Arc<ExternalPackageRegistry>,
+    /// Provider resolution rows isolated to this transient job.
+    pub(crate) external_dependency_resolution_table: ExternalImportResolutionTable,
+    /// Provider-independent prepared semantic payload for the transient source.
+    pub(crate) prepared: PreparedModule,
+}
+
+/// One transient authored provider clause bound to a canonical module interface.
+///
+/// This is intentionally not a `ResolvedDependencyEdge`: check-only resolution must not carry
+/// graph insertion locations or be mistaken for a canonical graph edge.
+#[derive(Clone, Debug)]
+pub(crate) struct CheckOnlyProviderBinding {
+    pub(crate) dependency_shell_id: DependencyShellId,
+    pub(crate) provider_module_id: ModuleId,
+}
+pub(crate) struct CheckOnlySourcePackageDependency {
+    pub(crate) dependency_shell_id: DependencyShellId,
+    pub(crate) dependency_prefix: String,
+}
+
+/// The check-only jobs stay in a separate lane so no caller can accidentally publish their
+/// interfaces, generated functions, resource associations, graph edges or backend roots.
 struct ModuleCompilationJobBatch {
     drafts: Vec<ModuleCompilationJobDraft>,
     resolved_edges: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    check_only_specs: Vec<CheckOnlyModuleSpec>,
 }
 
 fn resolve_directory_dependency_path(
@@ -128,28 +189,92 @@ pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    /// Transient check-only units, kept separate from canonical publication lanes.
+    check_only_jobs: Vec<CheckOnlyModuleCompilationJob>,
+    /// Deferred transient source descriptors awaiting the final canonical provider state.
+    check_only_specs: Vec<CheckOnlyModuleSpec>,
 }
 
 impl ModuleCompilationSchedule {
     /// Read-only access to the compile waves in deterministic graph order.
     ///
-    /// Each wave is non-empty and contains every canonical module assigned to that graph wave.
-    #[cfg(test)]
+    /// Each wave is non-empty and contains every canonical module assigned to the graph wave.
     pub(crate) fn waves(&self) -> &[Vec<ModuleCompilationJob>] {
         &self.waves
     }
+    pub(crate) fn canonical_source_package_dependencies(
+        &self,
+    ) -> &[ResolvedSourcePackageDependency] {
+        &self.source_package_dependencies
+    }
 
+    /// Prepare deferred transient jobs from the final canonical provider state.
+    ///
+    /// Canonical discovery for every project and source-package boundary must complete before
+    /// this method is called. Each job still receives its own clone, so transient provider
+    /// mutations cannot leak to canonical discovery or sibling jobs.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_check_only_jobs(
+        &mut self,
+        style_directives: &StyleDirectiveRegistry,
+        project_path_resolver: &ProjectPathResolver,
+        external_imports: &mut ExternalImportDiscoveryState<'_>,
+        directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        let specs = std::mem::take(&mut self.check_only_specs);
+        if specs.is_empty() {
+            return Ok(());
+        }
+        let preparation_context = ModulePreparationContext {
+            style_directives,
+            project_path_resolver: Some(project_path_resolver.clone()),
+        };
+        let fork_source = string_table.fork_source();
+        for spec in specs {
+            let CheckOnlyModuleSpec {
+                owner_module_id,
+                source_id,
+                candidate_source_ids,
+                source_origin_lookup,
+                stable_origin,
+            } = spec;
+            self.check_only_jobs.push(prepare_check_only_module(
+                owner_module_id,
+                source_id,
+                &candidate_source_ids,
+                directory_dependency_resolution.source_tree_index(),
+                style_directives,
+                &preparation_context,
+                project_path_resolver,
+                external_imports,
+                directory_dependency_resolution,
+                &source_origin_lookup,
+                stable_origin,
+                &fork_source,
+                string_table,
+            )?);
+        }
+        Ok(())
+    }
+
+    /// Consume the schedule while retaining the separate transient check-only lane.
+    ///
+    /// The first three values are the canonical graph publication lanes. Check-only jobs are
+    /// returned separately and must never be inserted into those lanes or the project graph.
     pub(crate) fn into_parts(
         self,
     ) -> (
         Vec<Vec<ModuleCompilationJob>>,
         Vec<ResolvedDependencyEdge>,
         Vec<ResolvedSourcePackageDependency>,
+        Vec<CheckOnlyModuleCompilationJob>,
     ) {
         (
             self.waves,
             self.provider_bindings,
             self.source_package_dependencies,
+            self.check_only_jobs,
         )
     }
 }
@@ -165,6 +290,7 @@ impl ModuleCompilationSchedule {
 /// facade roots now own API-only semantic jobs. A defensive
 /// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces through
 /// the existing `CompilerMessages`/string-table boundary without panicking.
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_project(
     config: &Config,
@@ -177,6 +303,38 @@ pub(crate) fn discover_all_modules_in_project(
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+    discover_all_modules_in_project_with_check_only(
+        config,
+        project_path_resolver,
+        project_module_graph,
+        style_directives,
+        external_imports,
+        directory_dependency_resolution,
+        resource_inputs,
+        false,
+        string_table,
+        #[cfg(feature = "timers")]
+        timing_boundary,
+    )
+}
+
+/// Discover a project inventory and optionally prepare transient check-only units.
+///
+/// The default project discovery path remains canonical-only. Check mode opts in explicitly so
+/// malformed or otherwise failing unselected sources do not affect build/dev commands.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn discover_all_modules_in_project_with_check_only(
+    config: &Config,
+    project_path_resolver: &ProjectPathResolver,
+    project_module_graph: &mut ProjectModuleGraph,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
+    include_check_only: bool,
+    string_table: &mut StringTable,
+    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
+) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -186,14 +344,18 @@ pub(crate) fn discover_all_modules_in_project(
         directory_dependency_resolution,
         resource_inputs,
         true,
+        include_check_only,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
     )
 }
-
+/// Discover a source-package inventory and optionally prepare transient check-only units.
+///
+/// Source packages use the same explicit opt-in as the project boundary; their canonical graph
+/// jobs and provider bindings remain unchanged in either mode.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn discover_all_modules_in_package(
+pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
     package_module_graph: &mut ProjectModuleGraph,
@@ -201,6 +363,7 @@ pub(crate) fn discover_all_modules_in_package(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    include_check_only: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -213,6 +376,7 @@ pub(crate) fn discover_all_modules_in_package(
         directory_dependency_resolution,
         resource_inputs,
         false,
+        include_check_only,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -229,6 +393,7 @@ fn discover_all_modules_in_boundary(
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     require_normal_entry: bool,
+    include_check_only: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
@@ -252,6 +417,7 @@ fn discover_all_modules_in_boundary(
         drafts,
         resolved_edges,
         source_package_dependencies,
+        check_only_specs,
     } = discover_modules_serial_provider_capable(
         &seeds,
         ModuleDiscoveryContext {
@@ -263,6 +429,7 @@ fn discover_all_modules_in_boundary(
         },
         external_imports,
         resource_inputs,
+        include_check_only,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -285,13 +452,15 @@ fn discover_all_modules_in_boundary(
     // this groups the result into dependency-ordered compile waves without re-running discovery.
     // Every canonical module appears in exactly one wave, and the directory compiler consumes one
     // wave at a time; per-module file preparation owns any internal parallelism.
-    order_discovered_modules_by_compile_waves(
+    let schedule = order_discovered_modules_by_compile_waves(
         project_module_graph,
         drafts,
         resolved_edges,
         source_package_dependencies,
+        check_only_specs,
         string_table,
-    )
+    )?;
+    Ok(schedule)
 }
 
 /// Deterministic canonical module seeds in `ModuleId` order, for discovery seeding.
@@ -312,6 +481,377 @@ fn module_seeds_in_module_id_order(
             entry_path: node.root_file().to_path_buf(),
         })
         .collect()
+}
+/// Select the owned, unselected Moth sources for one canonical module.
+///
+/// `candidate_source_ids` is the exact semantic candidate vector used by the canonical BFS and
+/// `selected_source_ids` is its final queued set. Filtering in that order preserves the index's
+/// deterministic module-relative path ordering while excluding templates, Markdown, provider-owned
+/// records and any source outside the owner boundary. In particular, an unrooted record can never
+/// enter a transient unit because it cannot satisfy the explicit ownership check.
+fn classify_check_only_source_ids(
+    module_id: ModuleId,
+    candidate_source_ids: &[SourceId],
+    selected_source_ids: &BTreeSet<SourceId>,
+    source_tree_index: &super::source_tree_index::SourceTreeIndex,
+) -> Vec<SourceId> {
+    candidate_source_ids
+        .iter()
+        .copied()
+        .filter(|source_id| !selected_source_ids.contains(source_id))
+        .filter(|source_id| {
+            let source = source_tree_index.source(*source_id);
+            matches!(
+                source.classification(),
+                SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+            ) && matches!(
+                source.ownership(),
+                SourceOwnership::Owned(owner) if owner == module_id
+            )
+        })
+        .collect()
+}
+/// Prepare one owned, unselected Moth source as an isolated transient semantic unit.
+///
+/// The source table retains the canonical candidate identities so indexed file-reference
+/// resolution uses the same module-root and ownership rules as a canonical module. The requested
+/// source and every non-Moth content target it reaches are prepared and retained in this job, while
+/// no target becomes another module root. Provider clauses, external package discovery and
+/// resolution rows are all job-local; file references use a fresh resource registry whose IDs die
+/// with the job.
+#[allow(clippy::too_many_arguments)]
+fn prepare_check_only_module(
+    owner_module_id: ModuleId,
+    source_id: SourceId,
+    candidate_source_ids: &[SourceId],
+    source_tree_index: &super::source_tree_index::SourceTreeIndex,
+    style_directives: &StyleDirectiveRegistry,
+    preparation_context: &ModulePreparationContext<'_>,
+    project_path_resolver: &ProjectPathResolver,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    source_origin_lookup: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    stable_origin: StableModuleOriginIdentity,
+    fork_source: &StringTableForkSource,
+    string_table: &mut StringTable,
+) -> Result<CheckOnlyModuleCompilationJob, CompilerMessages> {
+    let source = source_tree_index.source(source_id);
+    if !matches!(
+        source.classification(),
+        SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+    ) || !matches!(
+        source.ownership(),
+        SourceOwnership::Owned(owner) if owner == owner_module_id
+    ) {
+        return Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(format!(
+                "ModuleId {} check-only source ID {} is not an owned Moth source",
+                owner_module_id.index(),
+                source_id.index()
+            )),
+            string_table,
+        ));
+    }
+
+    // Provider-backed discovery is intentionally forked from the canonical builder surface. A
+    // check-only source may invoke a provider and create external package/cache/resolution rows,
+    // but none of those transient mutations may become visible to a later canonical module or
+    // another check-only source.
+    let providers = external_imports.providers;
+    let mut isolated_external_packages = external_imports.external_packages.clone();
+    let mut isolated_external_cache = external_imports.cache.clone();
+    let mut isolated_resolution_table = external_imports.resolution_table.clone();
+    let mut isolated_external_imports = ExternalImportDiscoveryState {
+        external_packages: &mut isolated_external_packages,
+        providers,
+        cache: &mut isolated_external_cache,
+        resolution_table: &mut isolated_resolution_table,
+    };
+
+    let source_order = candidate_source_ids
+        .iter()
+        .enumerate()
+        .map(|(order, source_id)| (*source_id, order))
+        .collect::<FxHashMap<_, _>>();
+
+    let entry_file_path = source.canonical_path().to_path_buf();
+    let fork = fork_source.fork_for_module();
+    let (local_string_table, string_table_base_len) = fork.into_parts();
+    let mut syntax = preparation_context.begin_syntax_discovery(
+        stable_origin,
+        source_origin_lookup,
+        candidate_source_ids
+            .iter()
+            .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+        &entry_file_path,
+        Some(FileRole::Normal),
+        local_string_table,
+        #[cfg(feature = "timers")]
+        None,
+    )?;
+
+    let mut provider_bindings = Vec::new();
+    let mut source_package_dependencies = Vec::new();
+    let mut pending_module_sources = VecDeque::from([source_id]);
+    let mut queued_module_sources = BTreeSet::from([source_id]);
+    // Resolve file-value paths against a job-local resource registry. The prepared payload retains
+    // the settled occurrence table, while physical source IDs and missing watches are discarded
+    // with this resolver instead of entering the canonical resource registry.
+    let mut transient_resource_inputs = ResourceInputRegistry::new();
+    let mut file_reference_resolver =
+        FileReferenceResolver::new(source_tree_index, &mut transient_resource_inputs);
+    let mut pending_content_sources = BTreeSet::new();
+    let mut prepared_content_sources = BTreeSet::new();
+
+    // Same-module clauses form a source closure inside the transient job. Every reached Moth
+    // source is prepared into the one module-local header set, while cross-module and
+    // source-package clauses remain job-local binding metadata.
+    while let Some(current_source_id) = pending_module_sources.pop_front() {
+        let current_source = source_tree_index.source(current_source_id);
+        if !matches!(
+            current_source.classification(),
+            SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+        ) || !matches!(
+            current_source.ownership(),
+            SourceOwnership::Owned(owner) if owner == owner_module_id
+        ) {
+            return Err(graph_inventory_mismatch_error(
+                format!(
+                    "ModuleId {} reached check-only source ID {} outside its owned Moth source set",
+                    owner_module_id.index(),
+                    current_source_id.index()
+                ),
+                syntax.string_table_mut(),
+            ));
+        }
+        let current_order = source_order.get(&current_source_id).copied().ok_or_else(|| {
+            graph_inventory_mismatch_error(
+                format!(
+                    "ModuleId {} reached check-only source ID {} outside its candidate source set",
+                    owner_module_id.index(),
+                    current_source_id.index()
+                ),
+                syntax.string_table_mut(),
+            )
+        })?;
+        let current_file_path = current_source.canonical_path().to_path_buf();
+        let input = prepare_owned_source_input(
+            current_source_id,
+            source_tree_index,
+            style_directives,
+            syntax.string_table_mut(),
+        )
+        .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
+        let prepared_output = syntax.prepare_source(input)?;
+
+        for dependency in &prepared_output.file_dependency_clauses {
+            let provider = &dependency.dependency;
+            let action = match resolve_structural_provider_reference(
+                provider,
+                dependency.binding.clause_kind(),
+                &current_file_path,
+                project_path_resolver,
+                &mut isolated_external_imports,
+                directory_dependency_resolution,
+                syntax.string_table_mut(),
+            ) {
+                Ok(action) => action,
+                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+            };
+            if matches!(&action, StructuralProviderAction::Handled) {
+                continue;
+            }
+
+            let resolved = resolve_directory_dependency_path(
+                directory_dependency_resolution,
+                provider,
+                &current_file_path,
+                syntax.string_table_mut(),
+            )?;
+            match resolved {
+                ResolvedDependency::SameModuleSource {
+                    source_id: target_source_id,
+                    consumer_module_id,
+                    ..
+                } => {
+                    if consumer_module_id != owner_module_id {
+                        return Err(graph_inventory_mismatch_error(
+                            "Check-only same-module dependency resolved to another module"
+                                .to_owned(),
+                            syntax.string_table_mut(),
+                        ));
+                    }
+                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                    if queued_module_sources.insert(target_source_id) {
+                        pending_module_sources.push_back(target_source_id);
+                    }
+                }
+                ResolvedDependency::CrossModule {
+                    provider_module_id,
+                    consumer_module_id,
+                    ..
+                } => {
+                    if consumer_module_id != owner_module_id {
+                        return Err(graph_inventory_mismatch_error(
+                            "Check-only cross-module dependency resolved to another consumer module"
+                                .to_owned(),
+                            syntax.string_table_mut(),
+                        ));
+                    }
+                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                    provider_bindings.push(CheckOnlyProviderBinding {
+                        dependency_shell_id: provider.dependency_shell_id,
+                        provider_module_id,
+                    });
+                }
+                ResolvedDependency::SourcePackageSurface {
+                    consumer_module_id,
+                    dependency_prefix,
+                    ..
+                } => {
+                    if consumer_module_id != owner_module_id {
+                        return Err(graph_inventory_mismatch_error(
+                            "Check-only source-package dependency resolved to another consumer module"
+                                .to_owned(),
+                            syntax.string_table_mut(),
+                        ));
+                    }
+                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                    source_package_dependencies.push(CheckOnlySourcePackageDependency {
+                        dependency_shell_id: provider.dependency_shell_id,
+                        dependency_prefix,
+                    });
+                }
+                ResolvedDependency::BindingPackage => {
+                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                }
+            }
+        }
+
+        let mut discovered_content_sources = Vec::new();
+        for file_reference in prepared_output.structural_file_references.iter() {
+            let resolved = syntax
+                .resolve_file_reference(
+                    &mut file_reference_resolver,
+                    owner_module_id,
+                    prepared_output.path_syntax.table(),
+                    file_reference,
+                    &mut discovered_content_sources,
+                )
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                })?;
+            syntax
+                .record_resolved_file_reference(resolved)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                })?;
+        }
+        discovered_content_sources.sort_unstable();
+        discovered_content_sources.dedup();
+        for target_source_id in discovered_content_sources {
+            if prepared_content_sources.insert(target_source_id) {
+                pending_content_sources.insert(target_source_id);
+            }
+        }
+        syntax.retain_prepared_output(current_order, prepared_output);
+    }
+
+    // A `.mtf` or `.md` file-value target contributes its synthetic `content` declaration to this
+    // check-only source's own prepared header set. It is not a Moth root and therefore never gets a
+    // separate graph/check-only job. Process nested content references in SourceId order so a
+    // content source can itself depend on another content source without a second traversal.
+    while let Some(target_source_id) = pending_content_sources.pop_first() {
+        let target = source_tree_index.source(target_source_id);
+        let target_kind = match target.classification() {
+            SourceClassification::CompilerSemantic(kind) => *kind,
+            _ => {
+                return Err(graph_inventory_mismatch_error(
+                    format!(
+                        "ModuleId {} content target source ID {} is not compiler semantic",
+                        owner_module_id.index(),
+                        target_source_id.index()
+                    ),
+                    syntax.string_table_mut(),
+                ));
+            }
+        };
+        if target_kind == SourceFileKind::Moth {
+            // `.moth` targets are classified as source-kind/no-value references, not content
+            // sources. Keep this defensive arm from manufacturing another transient Moth root if
+            // a future classifier ever hands one to the content lane.
+            continue;
+        }
+        if !matches!(
+            target.ownership(),
+            SourceOwnership::Owned(owner) if owner == owner_module_id
+        ) {
+            return Err(graph_inventory_mismatch_error(
+                format!(
+                    "ModuleId {} content target source ID {} is not owned by its consumer",
+                    owner_module_id.index(),
+                    target_source_id.index()
+                ),
+                syntax.string_table_mut(),
+            ));
+        }
+        let target_order = source_order.get(&target_source_id).copied().ok_or_else(|| {
+            graph_inventory_mismatch_error(
+                format!(
+                    "ModuleId {} content target source ID {} is absent from its candidate source set",
+                    owner_module_id.index(),
+                    target_source_id.index()
+                ),
+                syntax.string_table_mut(),
+            )
+        })?;
+        let target_input = prepare_owned_source_input(
+            target_source_id,
+            source_tree_index,
+            style_directives,
+            syntax.string_table_mut(),
+        )
+        .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
+        let target_output = syntax.prepare_source(target_input)?;
+        let mut nested_content_sources = Vec::new();
+        for file_reference in target_output.structural_file_references.iter() {
+            let resolved = syntax
+                .resolve_file_reference(
+                    &mut file_reference_resolver,
+                    owner_module_id,
+                    target_output.path_syntax.table(),
+                    file_reference,
+                    &mut nested_content_sources,
+                )
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                })?;
+            syntax
+                .record_resolved_file_reference(resolved)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                })?;
+        }
+        nested_content_sources.sort_unstable();
+        nested_content_sources.dedup();
+        for nested_source_id in nested_content_sources {
+            if prepared_content_sources.insert(nested_source_id) {
+                pending_content_sources.insert(nested_source_id);
+            }
+        }
+        syntax.retain_prepared_output(target_order, target_output);
+    }
+
+    let prepared = syntax.finish()?;
+    Ok(CheckOnlyModuleCompilationJob {
+        owner_module_id,
+        string_table_base_len,
+        provider_bindings,
+        source_package_dependencies,
+        external_packages: Arc::new(isolated_external_packages),
+        external_dependency_resolution_table: isolated_resolution_table,
+        prepared,
+    })
 }
 
 /// Insert resolved dependency edges directly by `ModuleId` into the project module graph.
@@ -372,22 +912,23 @@ fn graph_inventory_mismatch_error(
 /// Group module-job drafts by the populated graph's compile waves and attach each stable origin.
 ///
 /// WHAT: iterates the graph's compile waves and groups every discovered job so providers precede
-///       consumers. Drafts are keyed by their
-///       graph-assigned `ModuleId`, so the grouping matches by identity rather than re-deriving
-///       identity from a root path. Each lifted `ModuleCompilationJob` carries the exact
-///       `StableModuleOriginIdentity` the graph assigned to that module.
+///       consumers. Drafts are keyed by their graph-assigned `ModuleId`, so the grouping matches
+///       by identity rather than re-deriving identity from a root path. Each lifted
+///       `ModuleCompilationJob` carries the exact `StableModuleOriginIdentity` the graph assigned
+///       to that module.
 /// WHY: discovery seeds entries in `ModuleId` order and resolves direct dependency edges. The
 ///      dependency-ordered wave order is known after those edges enter the graph. The graph and
-///      discovery must agree exactly on the graph node set: every
-///      graph node needs one matching discovered draft and vice versa. Duplicate jobs,
-///      missing graph entries and leftover inventories are all internal invariant failures
-///      surfaced through the `CompilerMessages`/string-table boundary. A graph cycle is the same
-///      kind of internal failure reported by `compile_waves`.
+///      discovery must agree exactly on the graph node set: every graph node needs one matching
+///      discovered draft and vice versa. Duplicate jobs, missing graph entries and leftover
+///      inventories are all internal invariant failures surfaced through the
+///      `CompilerMessages`/string-table boundary. A graph cycle is the same kind of internal
+///      failure reported by `compile_waves`.
 fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<ModuleCompilationJobDraft>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    check_only_specs: Vec<CheckOnlyModuleSpec>,
     string_table: &mut StringTable,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let waves = project_module_graph
@@ -460,11 +1001,12 @@ fn order_discovered_modules_by_compile_waves(
             string_table,
         ));
     }
-
     Ok(ModuleCompilationSchedule {
         waves: grouped_waves,
         provider_bindings,
         source_package_dependencies,
+        check_only_jobs: Vec::new(),
+        check_only_specs,
     })
 }
 
@@ -482,6 +1024,7 @@ fn discover_modules_serial_provider_capable(
     context: ModuleDiscoveryContext<'_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    include_check_only: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
@@ -495,6 +1038,7 @@ fn discover_modules_serial_provider_capable(
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
     let mut source_package_dependencies = Vec::new();
+    let mut check_only_specs = Vec::new();
     let fork_source = string_table.fork_source();
     let preparation_context = ModulePreparationContext {
         style_directives,
@@ -531,7 +1075,6 @@ fn discover_modules_serial_provider_capable(
                 )
             })?;
 
-        #[cfg(feature = "timers")]
         let stable_origin = project_module_graph
             .node(seed.module_id)
             .stable_origin()
@@ -547,11 +1090,6 @@ fn discover_modules_serial_provider_capable(
 
         let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
-        #[cfg(not(feature = "timers"))]
-        let stable_origin = project_module_graph
-            .node(seed.module_id)
-            .stable_origin()
-            .clone();
         #[cfg(feature = "timers")]
         let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
         let mut prepared_owned_sources =
@@ -566,12 +1104,13 @@ fn discover_modules_serial_provider_capable(
                 )
             });
         let mut syntax = preparation_context.begin_syntax_discovery(
-            stable_origin,
+            stable_origin.clone(),
             source_origin_lookup,
             candidate_source_ids
                 .iter()
                 .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
             &seed.entry_path,
+            None,
             local_string_table,
             #[cfg(feature = "timers")]
             timing_context,
@@ -636,6 +1175,7 @@ fn discover_modules_serial_provider_capable(
                 let provider = &dependency.dependency;
                 let action = match resolve_structural_provider_reference(
                     provider,
+                    dependency.binding.clause_kind(),
                     &source_path,
                     project_path_resolver,
                     external_imports,
@@ -737,6 +1277,16 @@ fn discover_modules_serial_provider_capable(
 
             syntax.retain_prepared_output(order, prepared_output);
         }
+        let check_only_source_ids = if include_check_only {
+            classify_check_only_source_ids(
+                seed.module_id,
+                &candidate_source_ids,
+                &queued,
+                source_tree_index,
+            )
+        } else {
+            Vec::new()
+        };
         let prepared = syntax.finish()?;
         add_frontend_counter(FrontendCounter::ModuleCount, 1);
         add_frontend_counter(
@@ -758,6 +1308,15 @@ fn discover_modules_serial_provider_capable(
         for edge in &mut resolved_edges[module_edge_start..] {
             edge.graph_location.remap_string_ids(&graph_location_remap);
         }
+        for check_only_source_id in check_only_source_ids {
+            check_only_specs.push(CheckOnlyModuleSpec {
+                owner_module_id: seed.module_id,
+                source_id: check_only_source_id,
+                candidate_source_ids: candidate_source_ids.clone(),
+                source_origin_lookup: source_origin_lookup.clone(),
+                stable_origin: stable_origin.clone(),
+            });
+        }
         drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
             string_table_base_len,
@@ -771,5 +1330,6 @@ fn discover_modules_serial_provider_capable(
         drafts,
         resolved_edges,
         source_package_dependencies,
+        check_only_specs,
     })
 }

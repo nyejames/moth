@@ -296,6 +296,7 @@ fn prepare_template_source(
     let options = HeaderParseOptions {
         entry_file_id,
         project_path_resolver: Some(path_resolver.clone()),
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
     let context = FrontendFilePrepareContext {
@@ -343,6 +344,7 @@ fn fold_template_ast(
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
             root_role: ModuleRootRole::Normal,
@@ -352,6 +354,8 @@ fn fold_template_ast(
             entry_dir: entry_scope,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution,
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit: options.template_const_loop_iteration_limit,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

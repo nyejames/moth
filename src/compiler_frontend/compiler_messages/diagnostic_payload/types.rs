@@ -24,6 +24,16 @@ pub enum NameNamespace {
     ConfigKey,
 }
 
+/// Why project-context-dependent semantic facts cannot cross a package facade boundary.
+///
+/// The reason is intentionally independent of the rendered wording so build, check and tooling
+/// can distinguish direct public declarations from executable reachability failures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectContextEscapeReason {
+    ExportedDeclaration,
+    ReachableExecutable,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TypeMismatchContext {
     Assignment,
@@ -151,6 +161,50 @@ pub enum InvalidConfigReason {
     NotCompileTimeConstant,
     ValueCouldNotFold,
     EmptyProjectSetting,
+    /// A direct-project field was qualified but its schema policy is fixed-only.
+    ConfigQualifierFixedField,
+    /// A known direct-project field's `#Config` contract does not match its schema shape.
+    ConfigQualifierSchemaTypeMismatch {
+        declared: StringId,
+        expected: StringId,
+    },
+    /// A source or project field's name cannot become a build-config contract.
+    ConfigContractNameInvalid,
+    /// A `#Config` qualifier appeared outside an allowed source declaration.
+    ConfigQualifierInvalidPlacement,
+    /// A `#Config` qualifier appeared outside a direct `project` record field.
+    ConfigQualifierInvalidProjectPlacement,
+    /// A filesystem module or source-package prefix claimed the reserved `@project` root.
+    ProjectGlobalsNameReserved,
+    /// The qualifier's `of` type is outside the primitive/optional contract vocabulary.
+    ConfigQualifierUnsupportedType,
+    /// An already-typed build-config value did not agree with another contract for the same name.
+    ///
+    /// The two interned descriptions include primitive type, optionality and default/required
+    /// facts; source locations are carried by the primary and secondary diagnostic labels.
+    ConfigContractConflict {
+        first: StringId,
+        conflicting: StringId,
+    },
+    /// An explicit command input name was not present in the complete boundary contract set.
+    ///
+    /// `provided_argument_index` retains the command position even though the diagnostic's
+    /// source anchor falls back to the project/config context.
+    UnknownBuildConfigInput {
+        key: StringId,
+        provided_argument_index: Option<usize>,
+    },
+    /// An explicit or builder-provided primitive did not exactly match the contract type.
+    ///
+    /// `provided_argument_index` retains command provenance when the supplied value came from
+    /// outside the authored qualifier declaration.
+    ConfigInputTypeMismatch {
+        provided: StringId,
+        expected: StringId,
+        provided_argument_index: Option<usize>,
+    },
+    /// A required direct-project config contract had no input, global or default.
+    MissingConfigInput,
     UnknownKey {
         key: StringId,
     },
@@ -379,22 +433,35 @@ impl InvalidConfigReason {
                 *active_profile = remap.get(*active_profile);
             }
 
-            Self::UnknownKey { key } => {
-                *key = remap.get(*key);
+            Self::MissingActiveBuilderSection { section } => {
+                *section = remap.get(*section);
             }
-
+            Self::InvalidConfigValueShape { expected } => {
+                *expected = remap.get(*expected);
+            }
             Self::UnknownRecordField { record, field }
             | Self::MissingRequiredRecordField { record, field } => {
                 *record = remap.get(*record);
                 *field = remap.get(*field);
             }
-
-            Self::InvalidConfigValueShape { expected } => {
+            Self::ConfigQualifierSchemaTypeMismatch { declared, expected } => {
+                *declared = remap.get(*declared);
                 *expected = remap.get(*expected);
             }
-
-            Self::MissingActiveBuilderSection { section } => {
-                *section = remap.get(*section);
+            Self::ConfigContractConflict { first, conflicting } => {
+                *first = remap.get(*first);
+                *conflicting = remap.get(*conflicting);
+            }
+            Self::UnknownBuildConfigInput { key, .. } | Self::UnknownKey { key } => {
+                *key = remap.get(*key);
+            }
+            Self::ConfigInputTypeMismatch {
+                provided,
+                expected,
+                provided_argument_index: _,
+            } => {
+                *provided = remap.get(*provided);
+                *expected = remap.get(*expected);
             }
 
             Self::MissingKey
@@ -411,6 +478,13 @@ impl InvalidConfigReason {
             | Self::UnsupportedStatement
             | Self::StandaloneTemplateUnsupported
             | Self::MissingValue
+            | Self::ConfigQualifierFixedField
+            | Self::ProjectGlobalsNameReserved
+            | Self::ConfigContractNameInvalid
+            | Self::ConfigQualifierInvalidPlacement
+            | Self::ConfigQualifierInvalidProjectPlacement
+            | Self::ConfigQualifierUnsupportedType
+            | Self::MissingConfigInput
             | Self::UnsupportedScalarValue
             | Self::NotCompileTimeConstant
             | Self::ValueCouldNotFold
@@ -498,6 +572,12 @@ pub enum InvalidDependencyClauseReason {
     NamespaceAliasWithSelections,
     InvalidSelectionDelimiter,
     DependencyClauseNotAllowed,
+    /// The reserved `@project` namespace cannot be used as a nested dependency path.
+    ProjectGlobalsPathReserved,
+    /// The project package facade cannot declare a dependency on its own `@project` provider.
+    ProjectGlobalsFacadeDependencyNotAllowed,
+    /// The reserved `@project` synthetic interface cannot be directly re-exported.
+    ProjectGlobalsReexportNotAllowed,
     ProviderRequiresBinding,
     /// A continuation comma consumed a declaration-start token as a dependency selection.
     ///
@@ -570,6 +650,8 @@ impl InvalidCompileTimePathReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TypeAnnotationContext {
     DeclarationTarget,
+    /// Required primitive/optional type after a declaration-owned `#Config of` qualifier.
+    BuildConfigContract,
     SignatureParameter,
     SignatureReturn,
     TypeAliasTarget,
@@ -1751,6 +1833,7 @@ pub enum CommonSyntaxMistakeReason {
     SignatureParenthesisDelimiter,
     SignatureAsKeyword,
     InvalidCompileTimeBindingSpacing,
+    InvalidConfigQualifierSpacing,
     InvalidMutableBindingSpacing,
     InvalidReactiveBindingSpacing,
     InvalidSymbolicSpacing { error: SymbolicSpacingError },
@@ -1781,6 +1864,7 @@ impl CommonSyntaxMistakeReason {
             | CommonSyntaxMistakeReason::SignatureParenthesisDelimiter
             | CommonSyntaxMistakeReason::SignatureAsKeyword
             | CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing
+            | CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing
             | CommonSyntaxMistakeReason::InvalidMutableBindingSpacing
             | CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing
             | CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. }

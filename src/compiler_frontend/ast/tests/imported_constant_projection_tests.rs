@@ -216,6 +216,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     let module_constant = Declaration {
         id: constant_path.clone(),
         value: Expression::structural_string(producer_pieces, SourceLocation::default()),
+        config_qualifier: None,
     };
     let const_values =
         ConstValueStore::from_test_declarations(vec![module_constant], &producer_type_environment)
@@ -329,6 +330,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     let nested_count = Declaration {
         id: InternedPath::from_single_str("count", &mut producer_string_table),
         value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let nested_record = Expression::anonymous_const_record(
         vec![nested_count],
@@ -341,14 +343,17 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         Declaration {
             id: InternedPath::from_single_str("year", &mut producer_string_table),
             value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("enabled", &mut producer_string_table),
             value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("nested", &mut producer_string_table),
             value: nested_record,
+            config_qualifier: None,
         },
     ];
     let constant_path = InternedPath::from_single_str("meta", &mut producer_string_table);
@@ -360,6 +365,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
             ValueMode::ImmutableOwned,
             producer_marker,
         ),
+        config_qualifier: None,
     };
     let const_values =
         ConstValueStore::from_test_declarations(vec![module_constant], &producer_type_environment)
@@ -597,6 +603,7 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }
 }
 

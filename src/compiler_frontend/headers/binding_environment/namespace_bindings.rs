@@ -24,6 +24,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
+use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -551,6 +552,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             ))
             .into());
         }
+
+        let local_name_location = clause
+            .namespace_binding_location()
+            .cloned()
+            .unwrap_or_else(|| clause.location.clone());
+        ensure_not_keyword_shadow_identifier(local_name, local_name_location, self.string_table)?;
 
         Ok(local_name)
     }

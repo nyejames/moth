@@ -9,8 +9,10 @@
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidDeclarationReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
+    InvalidDeclarationReason,
 };
+pub(crate) use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
     BindingEnvironmentInput, prepare_binding_environment,
@@ -32,6 +34,9 @@ pub use crate::compiler_frontend::headers::types::{
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the
 // header field, so this re-export is only reached from test modules.
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    find_config_qualifier_marker, normalize_source_build_config_contract,
+};
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -40,7 +45,7 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use std::path::Path;
 
 /// Parse one tokenized file using the supplied string table.
@@ -85,12 +90,14 @@ pub fn parse_file_headers_with_table(
         .is_some_and(|resolver| resolver.is_module_root_file(&source_path));
 
     let file_role = if is_entry_file {
-        match options.active_root_role {
-            ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
-            ModuleRootRole::Support | ModuleRootRole::ProjectPackageFacade => {
-                FileRole::ActiveApiOnlyModuleRoot
-            }
-        }
+        options
+            .entry_file_role
+            .unwrap_or(match options.active_root_role {
+                ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
+                ModuleRootRole::Support | ModuleRootRole::ProjectPackageFacade => {
+                    FileRole::ActiveApiOnlyModuleRoot
+                }
+            })
     } else if is_prepared_module_root || is_module_root_file_by_name {
         FileRole::ImportedModuleRoot
     } else {
@@ -165,9 +172,12 @@ pub fn prepare_file_from_tokens(
 /// complete before provider interfaces are available so binding can consume retained syntax
 /// without retokenizing or reparsing source.
 pub fn prepare_header_syntax(
-    mut prepared_files: Vec<FileFrontendPrepareOutput>,
+    prepared_files: Vec<FileFrontendPrepareOutput>,
     string_table: &mut StringTable,
 ) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
+    let source_build_config_contracts =
+        collect_source_build_config_contracts(&prepared_files, string_table)?;
+    let mut prepared_files = prepared_files;
     let module_symbols = build_module_symbols(&mut prepared_files, string_table)?;
 
     let mut headers: Vec<Header> = Vec::new();
@@ -192,6 +202,7 @@ pub fn prepare_header_syntax(
 
     Ok(PreparedHeaderSyntax {
         headers,
+        source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
         const_fragment_count,
@@ -200,6 +211,134 @@ pub fn prepare_header_syntax(
         header_stats,
         module_symbols,
     })
+}
+
+/// Find retained parameter/field defaults and body tokens carrying `#Config`.
+///
+/// Header preparation has already parsed declaration shells for signatures and record payloads,
+/// while function/start bodies remain token slices. Inspecting both retained representations keeps
+/// illegal nested placements ahead of AST without adding a recursive expression walk.
+pub(crate) fn find_config_qualifier_marker_in_header(
+    header: &Header,
+    string_table: &StringTable,
+) -> Option<(SourceLocation, bool)> {
+    let retained_member_marker = match &header.kind {
+        HeaderKind::Constant { declaration } => {
+            find_config_qualifier_marker(&declaration.initializer_tokens, string_table)
+        }
+        HeaderKind::Function { signature, .. } => signature
+            .parameters
+            .iter()
+            .find_map(|parameter| {
+                find_config_qualifier_marker(&parameter.default_tokens, string_table)
+            }),
+        HeaderKind::Struct { fields, .. } => fields
+            .iter()
+            .find_map(|field| find_config_qualifier_marker(&field.default_tokens, string_table)),
+        HeaderKind::Choice { variants, .. } => variants.iter().find_map(|variant| {
+            let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
+                fields,
+            } = &variant.payload
+            else {
+                return None;
+            };
+            fields
+                .iter()
+                .find_map(|field| find_config_qualifier_marker(&field.default_tokens, string_table))
+        }),
+        HeaderKind::Trait { declaration } => declaration
+            .requirements
+            .iter()
+            .flat_map(|requirement| requirement.signature.parameters.iter())
+            .find_map(|parameter| {
+                find_config_qualifier_marker(&parameter.default_tokens, string_table)
+            }),
+        _ => None,
+    };
+
+    retained_member_marker
+        .or_else(|| find_config_qualifier_marker(&header.tokens.tokens, string_table))
+}
+
+/// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
+///
+/// The declaration shell itself remains in `PreparedHeaderSyntax::headers` for the later
+/// config-resolution barrier. This pass only creates the provider-independent contract carrier and
+/// performs flat retained-token placement checks; it never constructs an expression or turns the
+/// source contract into a module symbol.
+fn collect_source_build_config_contracts(
+    prepared_files: &[FileFrontendPrepareOutput],
+    string_table: &mut StringTable,
+) -> Result<Vec<SourceBuildConfigContract>, DiagnosticBag> {
+    let mut contracts = Vec::new();
+    let mut diagnostics = DiagnosticBag::new();
+
+    for output in prepared_files {
+        // The project config source has its own direct-project qualifier consumer. Leaving its
+        // top-level qualifier diagnostics on that path keeps config.moth semantics unchanged.
+        let is_config_file = output
+            .source_file
+            .name()
+            .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
+        if is_config_file {
+            continue;
+        }
+
+        for header in &output.headers {
+            let report_marker = |location: SourceLocation, adjacent: bool| {
+                if adjacent {
+                    CompilerDiagnostic::invalid_config_reason(
+                        header.tokens.src_path.name(),
+                        InvalidConfigReason::ConfigQualifierInvalidPlacement,
+                        location,
+                    )
+                } else {
+                    CompilerDiagnostic::common_syntax_mistake(
+                        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
+                        location,
+                    )
+                }
+            };
+
+            if let Some((location, adjacent)) =
+                find_config_qualifier_marker_in_header(header, string_table)
+            {
+                diagnostics.push(report_marker(location, adjacent));
+                continue;
+            }
+
+            let HeaderKind::Constant { declaration } = &header.kind else {
+                continue;
+            };
+            let Some(qualifier) = &declaration.config_qualifier else {
+                continue;
+            };
+            let Some(name) = header.tokens.src_path.name() else {
+                diagnostics.push(CompilerDiagnostic::invalid_config_reason(
+                    None,
+                    InvalidConfigReason::ConfigContractNameInvalid,
+                    header.name_location.clone(),
+                ));
+                continue;
+            };
+
+            match normalize_source_build_config_contract(
+                name,
+                header.name_location.clone(),
+                qualifier,
+                &declaration.initializer_tokens,
+                string_table,
+            ) {
+                Ok(contract) => contracts.push(contract),
+                Err(diagnostic) => diagnostics.push(*diagnostic),
+            }
+        }
+    }
+
+    if diagnostics.has_errors() {
+        return Err(diagnostics);
+    }
+    Ok(contracts)
 }
 
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces to produce
@@ -223,6 +362,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
     let PreparedHeaderSyntax {
         mut headers,
+        source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
@@ -276,6 +416,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 
     Ok(BoundModuleHeaders {
         headers,
+        source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,

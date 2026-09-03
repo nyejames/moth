@@ -14,6 +14,10 @@ use crate::build_system::output::{
     WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::builder_surface::BuilderSurface;
+use crate::compiler_frontend::build_config::{
+    BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
+    BuildInputName, PrimitiveBuildValue,
+};
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, SourceLocation,
 };
@@ -631,8 +635,10 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     #[cfg(feature = "timers")]
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
-    let mut executor =
-        ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(InvalidOutputWarningBuilder)));
+    let mut executor = ProjectBuildExecutor::new(
+        ProjectBuilder::new(Box::new(InvalidOutputWarningBuilder)),
+        BuildConfigInputSet::new(),
+    );
     let messages = match executor.build_and_write(&entry_file, &[]) {
         Ok(_) => panic!("invalid output path should fail writing"),
         Err(messages) => messages,
@@ -681,26 +687,75 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"preview\",\n    release_output = \"release\",\n|\n",
+        "project #= |\n    name = \"docs\",\n    version #Config of String = \"authored\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"preview\",\n    release_output = \"release\",\n|\n",
     )
     .expect("should write project config");
     fs::write(
         source_root.join("@page.moth"),
-        "#[:<h1>Directory Executor</h1>]\n",
+        "@project version\n#[:<h1>[version]</h1>]\n",
     )
     .expect("should write page source");
-
-    let mut executor =
-        ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())));
+    let mut build_config_inputs = BuildConfigInputSet::new();
+    build_config_inputs
+        .insert(BuildConfigInputEntry::new(
+            BuildInputName::new("version").expect("test input name should validate"),
+            PrimitiveBuildValue::String("cli".to_owned()),
+            BuildConfigValueLocation::Command(BuildCommandLocation::new(1)),
+        ))
+        .expect("test command input should be unique");
+    let mut executor = ProjectBuildExecutor::new(
+        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        build_config_inputs,
+    );
     #[cfg(feature = "timers")]
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let build_result = executor
         .build_and_write(&root, &[])
         .expect("directory dev build should succeed");
+    assert!(
+        build_result.config.config_resolution_records.is_empty(),
+        "successful builds must not retain transient config-resolution records"
+    );
+    let first_output = fs::read_to_string(root.join("preview/index.html"))
+        .expect("first directory dev build should write its page");
+    assert!(
+        first_output.contains("<h1>cli</h1>"),
+        "first directory dev build must render the retained CLI input"
+    );
 
     #[cfg(feature = "timers")]
     let timing_snapshot = timing_session.finish();
+
+    #[cfg(feature = "timers")]
+    let second_timing_session =
+        crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
+    let second_build_result = executor
+        .build_and_write(&root, &[])
+        .expect("repeated directory dev build should succeed");
+    assert!(
+        second_build_result
+            .config
+            .config_resolution_records
+            .is_empty(),
+        "repeated dev builds must also discard transient resolution records"
+    );
+    #[cfg(feature = "timers")]
+    let _second_timing_snapshot = second_timing_session.finish();
+    assert_eq!(
+        second_build_result
+            .directory_output_plan
+            .as_ref()
+            .expect("repeated directory build should return its output plan")
+            .output_root,
+        root.join("preview")
+    );
+    let second_output = fs::read_to_string(root.join("preview/index.html"))
+        .expect("repeated directory dev build should write its page");
+    assert!(
+        second_output.contains("<h1>cli</h1>"),
+        "repeated directory dev build must retain and render the CLI input"
+    );
 
     #[cfg(feature = "timers")]
     assert_eq!(
@@ -743,8 +798,10 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
         .expect("should write page source");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor =
-        ProjectBuildExecutor::new(ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())));
+    let mut executor = ProjectBuildExecutor::new(
+        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        BuildConfigInputSet::new(),
+    );
 
     let first = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
     let second = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());

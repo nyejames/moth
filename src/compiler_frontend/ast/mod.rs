@@ -177,11 +177,13 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::timing_scope_attributed;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Resolved choice definition carried from AST to HIR for pre-registration.
 ///
@@ -250,6 +252,9 @@ pub struct Ast {
     pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path:
         FxHashMap<InternedPath, AstImportedFunctionContract>,
+    /// Provenance introduced by static configuration branch selection, keyed by function path
+    /// until HIR allocates the build-local function IDs.
+    pub(crate) static_if_function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
 }
 
 /// Consumer-local semantic contract for one imported concrete source function.
@@ -303,6 +308,12 @@ pub(in crate::compiler_frontend) struct AstBuildInput {
     pub module_symbols: ModuleSymbols,
     pub binding_environment: HeaderBindingEnvironment,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
+    /// Names of this module's own source `#Config` contracts.
+    ///
+    /// The boundary value map is project-wide, but source qualifier materialization must remain
+    /// module-local so a namesake declaration in another source cannot borrow its value.
+    pub source_build_config_contract_names:
+        Arc<FxHashSet<crate::compiler_frontend::build_config::BuildInputName>>,
 }
 
 impl Ast {
@@ -330,13 +341,15 @@ impl Ast {
             module_symbols,
             binding_environment,
             top_level_const_fragments,
+            source_build_config_contract_names,
         } = input;
 
         reset_ast_counters();
 
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
-        let (phase_context, string_table) = AstPhaseContext::from_build_context(context);
+        let (phase_context, string_table) =
+            AstPhaseContext::from_build_context(context, source_build_config_contract_names);
 
         timing_scope_attributed!(
             timing_guard_ast_total,

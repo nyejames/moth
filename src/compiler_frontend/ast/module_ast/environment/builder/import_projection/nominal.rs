@@ -333,6 +333,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         diagnostic_type,
                         ValueMode::ImmutableReference,
                     ),
+                    config_qualifier: None,
                 })
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
@@ -509,6 +510,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             field_declarations.push(Declaration {
                 id: field_path,
                 value: default_value,
+                config_qualifier: None,
             });
         }
 

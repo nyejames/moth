@@ -94,6 +94,7 @@ fn children_directive_accepts_const_string_reference() {
             },
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
 
     let mut token_stream =

@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use std::fs;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
                 .to_str()
                 .expect("temp file path should be valid UTF-8 for this test"),
             &[],
+            &BuildConfigInputSet::new(),
         );
 
         let Err(messages) = result else {
@@ -67,6 +69,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
             .to_str()
             .expect("temp file path should be valid UTF-8 for this test"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("frontend built-ins should compile without project-owned style registrations");
 

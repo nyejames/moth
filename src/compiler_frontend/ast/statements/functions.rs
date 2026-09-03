@@ -274,6 +274,7 @@ pub(crate) fn signature_member_to_declaration(
     Ok(Declaration {
         id: member.id.clone(),
         value,
+        config_qualifier: None,
     })
 }
 

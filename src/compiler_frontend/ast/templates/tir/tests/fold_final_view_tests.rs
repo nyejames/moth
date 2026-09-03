@@ -943,6 +943,7 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
                 item: Some(Declaration {
                     id: item_path,
                     value: Expression::int(0, SourceLocation::default(), ValueMode::ImmutableOwned),
+                    config_qualifier: None,
                 }),
                 index: None,
             }),

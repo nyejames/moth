@@ -373,6 +373,7 @@ fn inline_visible_constant_references_impl(
                         template_ir_store,
                         string_table,
                     )?,
+                    config_qualifier: None,
                 });
             }
 

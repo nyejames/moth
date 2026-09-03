@@ -114,6 +114,7 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
         declarations: vec![
             PublicDeclarationRecord {
                 origin: OriginDeclarationId::Type(target_origin.clone()),
+                synthetic_interface_provenance: Default::default(),
                 semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
                     generic_parameters: Vec::new(),
                     fields: Vec::new(),
@@ -122,6 +123,7 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
             },
             PublicDeclarationRecord {
                 origin: OriginDeclarationId::Trait(trait_origin),
+                synthetic_interface_provenance: Default::default(),
                 semantics: PublicDeclarationSemantics::Trait(PublicTraitSemantics {
                     requirements: requirement_names
                         .iter()
@@ -154,6 +156,7 @@ fn function_record(
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category,
             parameters: Vec::new(),
@@ -338,6 +341,7 @@ fn rejects_nested_external_type_from_same_path_but_different_package_origin() {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Type(struct_origin("Wrapper")),
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
                 generic_parameters: Vec::new(),
                 fields: vec![PublicFieldTypeSlot {
@@ -396,6 +400,7 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
                 module_origin(),
                 "open".to_owned(),
             )),
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
                 category: PublicFunctionCategory::GenericTemplate(
                     PublicGenericTemplateDescriptor {
@@ -431,6 +436,7 @@ fn rejects_declaration_category_mismatch() {
     let origin = OriginFunctionId::new_free(module_origin(), "render".to_owned());
     let declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Trait(PublicTraitSemantics {
             requirements: Vec::new(),
             incompatibilities: Vec::new(),
@@ -452,6 +458,7 @@ fn rejects_direct_private_nominal_before_interface_closure() {
     let origin = OriginFunctionId::new_free(module_origin(), "expose_private".to_owned());
     let declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
                 generic_parameters: Vec::new(),
@@ -500,6 +507,7 @@ fn rejects_nested_private_generic_instance_before_publication() {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Function(origin),
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
                 category: PublicFunctionCategory::GenericTemplate(
                     PublicGenericTemplateDescriptor {
@@ -573,6 +581,7 @@ fn rejects_missing_concrete_receiver_summary() {
     );
     let declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(receiver_origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields: Vec::new(),
@@ -613,6 +622,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
 
     let hidden_record = PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(hidden_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields: vec![PublicFieldTypeSlot {
@@ -625,6 +635,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
     };
     let card_record = PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(card_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields: vec![PublicFieldTypeSlot {
@@ -637,6 +648,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
     };
     let make_record = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(make_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
@@ -857,6 +869,7 @@ fn rejects_reusable_evidence_method_on_another_receiver() {
         OriginFunctionId::new_receiver(module_origin(), "display".to_owned(), other_origin.clone());
     interface.declarations.push(PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(other_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields: Vec::new(),

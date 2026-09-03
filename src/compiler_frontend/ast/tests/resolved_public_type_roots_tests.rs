@@ -103,6 +103,7 @@ fn constant_kind() -> HeaderKind {
         declaration: DeclarationSyntax {
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
+            config_qualifier: None,
             initializer_tokens: Vec::new(),
             initializer_references: Vec::new(),
             location: SourceLocation::default(),
@@ -119,6 +120,7 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
             int_type_id,
             ValueMode::default(),
         ),
+        config_qualifier: None,
     };
     let mut return_slot = ReturnSlot::success(DataType::Int);
     return_slot.type_id = Some(int_type_id);
@@ -140,6 +142,7 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
             int_type_id,
             ValueMode::default(),
         ),
+        config_qualifier: None,
     };
     FunctionSignature {
         parameters: vec![parameter],
@@ -164,6 +167,7 @@ fn constant_declaration(type_id: TypeId, decl_path: InternedPath) -> Declaration
             type_id,
             ValueMode::default(),
         ),
+        config_qualifier: None,
     }
 }
 

@@ -81,6 +81,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
 
@@ -129,6 +130,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_compile_time_var(declaration, SourceLocation::default());
 
@@ -317,6 +319,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -364,6 +367,7 @@ fn child_frame_declaration_is_not_visible_to_parent() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -415,6 +419,7 @@ fn child_function_frame_does_not_capture_parent_locals() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -469,6 +474,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -482,6 +488,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -525,6 +532,7 @@ fn no_shadowing_across_ancestor_frames() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -603,6 +611,7 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
 
     let mut child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
@@ -694,6 +703,7 @@ fn cloned_context_does_not_share_current_frame() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -738,6 +748,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -755,6 +766,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );

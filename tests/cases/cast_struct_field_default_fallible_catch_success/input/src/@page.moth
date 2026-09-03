@@ -1,9 +1,9 @@
-Config = |
+CountBox = |
     count Int = cast "bad" catch:
         then 8
     ,
 |
 
-value = Config()
+value = CountBox()
 
 [: struct field fallible default cast: [value.count]]

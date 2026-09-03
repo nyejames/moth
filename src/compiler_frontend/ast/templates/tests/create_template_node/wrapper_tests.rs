@@ -95,14 +95,17 @@ fn docs_style_table_and_data_declarations(
         Declaration {
             id: wrapper_scope.append(string_table.intern("header_row")),
             value: Expression::template(header_row, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
         Declaration {
             id: wrapper_scope.append(string_table.intern("table")),
             value: Expression::template(table, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
         Declaration {
             id: wrapper_scope.append(string_table.intern("data")),
             value: Expression::template(data, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
     ]
 }

@@ -1,4 +1,6 @@
-use super::compile_project_frontend;
+use super::{
+    FrontendCompilationMode, compile_project_frontend, compile_project_frontend_with_inputs,
+};
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BackendBuilder, ProjectCompilation};
 use crate::builder_surface::BuilderSurface;
@@ -8,10 +10,16 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
     RuntimeAssetIdentity,
 };
+use crate::compiler_frontend::build_config::{
+    BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
+    BuildInputName, PrimitiveBuildValue,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidConfigReason, InvalidDependencyClauseReason,
+};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;
@@ -142,6 +150,65 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
             .iter()
             .all(|path| { !path.ends_with("@page.moth") && !path.ends_with("consumer/@mod.moth") }),
         "blocked consumers should not be semantically compiled: {diagnosed_paths:?}"
+    );
+}
+
+#[test]
+fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
+    // Keep the dependency unused so declaration-time validation cannot rely on binding or
+    // reachability analysis to reject the facade's self-dependency.
+    fs::write(dir.join("+package.moth"), "@project\n").expect("should write project facade");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("a facade dependency diagnostic should remain a retained frontend outcome");
+    let messages = frontend.into_render_messages(&mut string_table);
+
+    let matching = messages
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidDependencyClause {
+                    reason: InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
+                    ..
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        1,
+        "the facade's own @project declaration should produce one structured diagnostic"
+    );
+    assert_eq!(matching[0].kind.code(), "MOTH-SYNTAX-0019");
+    assert!(
+        matching[0]
+            .primary_location
+            .scope
+            .to_path_buf(&messages.string_table)
+            .ends_with("+package.moth"),
+        "self-dependency diagnostic should point to the facade source"
     );
 }
 
@@ -636,6 +703,106 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     assert_eq!(
         ast_total_count, 1,
         "detailed AST construction must still record one aggregate span"
+    );
+}
+
+#[test]
+fn source_package_config_inputs_are_isolated_from_project_inputs() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    let package = dir.join("packages/config_input");
+    let src = dir.join("src");
+    fs::create_dir_all(&package).expect("should create source package root");
+    fs::create_dir_all(&src).expect("should create project entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "@config_input helper\nenabled #Config of Bool\nvalue = helper()\n",
+    )
+    .expect("should write project source contract");
+    fs::write(
+        package.join("@mod.moth"),
+        "enabled #Config of Bool\nexport:\n    helper || -> Int:\n        return 2\n    ;\n;\n",
+    )
+    .expect("should write source-package contract");
+
+    let mut build_config_inputs = BuildConfigInputSet::new();
+    build_config_inputs
+        .insert(BuildConfigInputEntry::new(
+            BuildInputName::new("enabled").expect("test input name should be valid"),
+            PrimitiveBuildValue::Bool(true),
+            BuildConfigValueLocation::Command(BuildCommandLocation::new(0)),
+        ))
+        .expect("project input should be unique");
+
+    let mut config = Config::new(dir.clone());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "config_input",
+        package,
+        PackageOrigin::Builder,
+    );
+
+    let result = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    );
+    let Err(messages) = result else {
+        panic!("source-package config contract must not consume the project input");
+    };
+    let observed_identities = messages
+        .error_diagnostics()
+        .map(|diagnostic| diagnostic.identity())
+        .collect::<Vec<_>>();
+
+    let matching = messages
+        .error_diagnostics()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidConfig {
+                    reason: InvalidConfigReason::MissingConfigInput,
+                    ..
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        1,
+        "the isolated source package should report exactly one missing-input diagnostic; observed {observed_identities:?}"
+    );
+    let diagnostic = matching[0];
+    let DiagnosticPayload::InvalidConfig {
+        key: Some(key),
+        reason: InvalidConfigReason::MissingConfigInput,
+    } = &diagnostic.payload
+    else {
+        unreachable!("the diagnostic was filtered to the missing-input payload");
+    };
+    assert_eq!(messages.string_table.resolve(*key), "enabled");
+    let location = diagnostic
+        .primary_location
+        .scope
+        .to_path_buf(&messages.string_table);
+    assert_eq!(
+        location,
+        PathBuf::from("@mod.moth"),
+        "missing-input diagnostic should point to the dependency contract"
     );
 }
 
@@ -2708,9 +2875,11 @@ fn directory_project_rejects_missing_entry_root() {
     // Parse config so entry_root is applied to Config.
     let config_path = dir.join("config.moth");
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = crate::build_system::project_config::ProjectConfigParseServices {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     let parse_result = crate::build_system::project_config::compile_project_config_file(
         &mut config,

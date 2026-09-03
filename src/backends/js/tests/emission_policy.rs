@@ -113,6 +113,9 @@ fn module_with_unreachable_function(
 
     module.blocks.push(return_block(1, unit_type));
     module.functions.push(function(1, 1, unit_type));
+    module
+        .function_provenance
+        .insert(FunctionId(1), Default::default());
     module.regions.push(HirRegion::lexical(RegionId(1), None));
 
     let function_path = InternedPath::from_single_str("unused_helper", string_table);

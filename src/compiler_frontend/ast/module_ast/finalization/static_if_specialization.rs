@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::normalize_ast::TemplateNormalizationError;
@@ -79,6 +80,7 @@ impl StaticIfCandidate {
 pub(super) struct StaticIfSpecialization {
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
+    function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
 }
 
 impl StaticIfSpecialization {
@@ -86,10 +88,22 @@ impl StaticIfSpecialization {
         self.inactive_generic_requests
             .append(&mut other.inactive_generic_requests);
         self.selection_count += other.selection_count;
+        for (function_path, provenance) in other.function_provenance.drain() {
+            self.function_provenance
+                .entry(function_path)
+                .or_default()
+                .merge(&provenance);
+        }
     }
 
     pub(super) fn has_selections(&self) -> bool {
         self.selection_count != 0
+    }
+
+    pub(super) fn function_provenance(
+        &self,
+    ) -> &FxHashMap<InternedPath, SyntheticInterfaceProvenance> {
+        &self.function_provenance
     }
 
     pub(super) fn run(
@@ -104,6 +118,8 @@ impl StaticIfSpecialization {
             resolver,
             inactive_generic_requests: Vec::new(),
             selection_count: 0,
+            current_function_path: None,
+            function_provenance: FxHashMap::default(),
         };
 
         for node in ast_nodes {
@@ -114,6 +130,7 @@ impl StaticIfSpecialization {
         Ok(Self {
             inactive_generic_requests: specializer.inactive_generic_requests,
             selection_count: specializer.selection_count,
+            function_provenance: specializer.function_provenance,
         })
     }
 
@@ -140,6 +157,8 @@ struct StaticIfSpecializer<'a> {
     resolver: ConstValueResolver<'a>,
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
+    current_function_path: Option<InternedPath>,
+    function_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
 }
 
 impl StaticIfSpecializer<'_> {
@@ -170,14 +189,23 @@ impl StaticIfSpecializer<'_> {
                 let selection = self.resolve_static_bool(condition, environment)?;
 
                 let mut then_environment = environment.clone();
-                self.specialize_body(then_body, &mut then_environment)?;
-                if let Some(else_body) = else_body {
+                let then_provenance = self
+                    .specialize_body_with_isolated_provenance(then_body, &mut then_environment)?;
+                let else_provenance = if let Some(else_body) = else_body {
                     let mut else_environment = environment.clone();
-                    self.specialize_body(else_body, &mut else_environment)?;
-                }
+                    self.specialize_body_with_isolated_provenance(else_body, &mut else_environment)?
+                } else {
+                    FxHashMap::default()
+                };
 
-                selection.map(|select_then| {
+                if let Some((select_then, provenance)) = selection {
+                    self.record_selected_provenance(&provenance);
                     self.record_inactive_range(branch_metadata.request_ranges, select_then);
+                    self.merge_provenance_map(if select_then {
+                        then_provenance
+                    } else {
+                        else_provenance
+                    });
                     let selected_scope = if select_then {
                         Some(branch_metadata.then_scope.clone())
                     } else {
@@ -188,8 +216,12 @@ impl StaticIfSpecializer<'_> {
                     } else {
                         else_body.take().unwrap_or_default()
                     };
-                    (body, selected_scope)
-                })
+                    Some((body, selected_scope))
+                } else {
+                    self.merge_provenance_map(then_provenance);
+                    self.merge_provenance_map(else_provenance);
+                    None
+                }
             }
             NodeKind::LexicalScope { body } => {
                 let mut nested_environment = environment.clone();
@@ -238,9 +270,13 @@ impl StaticIfSpecializer<'_> {
                 self.specialize_body(body, &mut loop_environment)?;
                 None
             }
-            NodeKind::Function(_, _, body) => {
+            NodeKind::Function(function_path, _, body) => {
+                let previous_function_path =
+                    self.current_function_path.replace(function_path.clone());
                 let mut function_environment = environment.clone();
-                self.specialize_body(body, &mut function_environment)?;
+                let result = self.specialize_body(body, &mut function_environment);
+                self.current_function_path = previous_function_path;
+                result?;
                 None
             }
             NodeKind::Assert { condition, message } => {
@@ -402,12 +438,24 @@ impl StaticIfSpecializer<'_> {
                 let selection = self.resolve_static_bool(&value_if.condition, environment)?;
 
                 let mut then_environment = environment.clone();
-                self.specialize_body(&mut value_if.then_body, &mut then_environment)?;
+                let then_provenance = self.specialize_body_with_isolated_provenance(
+                    &mut value_if.then_body,
+                    &mut then_environment,
+                )?;
                 let mut else_environment = environment.clone();
-                self.specialize_body(&mut value_if.else_body, &mut else_environment)?;
+                let else_provenance = self.specialize_body_with_isolated_provenance(
+                    &mut value_if.else_body,
+                    &mut else_environment,
+                )?;
 
-                selection.map(|select_then| {
+                if let Some((select_then, provenance)) = selection {
+                    self.record_selected_provenance(&provenance);
                     self.record_inactive_range(value_if.generic_request_ranges, select_then);
+                    self.merge_provenance_map(if select_then {
+                        then_provenance
+                    } else {
+                        else_provenance
+                    });
                     let (body, scope) = if select_then {
                         (
                             std::mem::take(&mut value_if.then_body),
@@ -419,12 +467,16 @@ impl StaticIfSpecializer<'_> {
                             value_if.else_scope.clone(),
                         )
                     };
-                    ValueLexicalScope {
+                    Some(ValueLexicalScope {
                         body,
                         scope,
                         result_type_ids: value_if.result_type_ids.clone(),
-                    }
-                })
+                    })
+                } else {
+                    self.merge_provenance_map(then_provenance);
+                    self.merge_provenance_map(else_provenance);
+                    None
+                }
             }
             ValueBlock::LexicalScope(value_lexical_scope) => {
                 let mut lexical_environment = environment.clone();
@@ -475,10 +527,15 @@ impl StaticIfSpecializer<'_> {
         &mut self,
         condition: &Expression,
         environment: &ConstValueEnvironment,
-    ) -> Result<Option<bool>, TemplateNormalizationError> {
+    ) -> Result<Option<(bool, SyntheticInterfaceProvenance)>, TemplateNormalizationError> {
         match self.resolver.resolve_expression(condition, environment) {
             Ok(resolved) => match resolved.kind {
-                ExpressionKind::Bool(value) => Ok(Some(value)),
+                ExpressionKind::Bool(value) => Ok(Some((
+                    value,
+                    condition
+                        .synthetic_interface_provenance
+                        .union(&resolved.synthetic_interface_provenance),
+                ))),
                 _ => Ok(None),
             },
             Err(ConstResolutionError::TemplateClassification(error)) => {
@@ -486,6 +543,47 @@ impl StaticIfSpecializer<'_> {
             }
             Err(_) => Ok(None),
         }
+    }
+
+    fn specialize_body_with_isolated_provenance(
+        &mut self,
+        body: &mut [AstNode],
+        environment: &mut ConstValueEnvironment,
+    ) -> Result<FxHashMap<InternedPath, SyntheticInterfaceProvenance>, TemplateNormalizationError>
+    {
+        let saved_provenance = std::mem::take(&mut self.function_provenance);
+        let result = self.specialize_body(body, environment);
+        let branch_provenance = std::mem::take(&mut self.function_provenance);
+        self.function_provenance = saved_provenance;
+        result.map(|()| branch_provenance)
+    }
+
+    fn merge_provenance_map(
+        &mut self,
+        branch_provenance: FxHashMap<InternedPath, SyntheticInterfaceProvenance>,
+    ) {
+        for (function_path, provenance) in branch_provenance {
+            if provenance.is_empty() {
+                continue;
+            }
+            self.function_provenance
+                .entry(function_path)
+                .or_default()
+                .merge(&provenance);
+        }
+    }
+
+    fn record_selected_provenance(&mut self, provenance: &SyntheticInterfaceProvenance) {
+        if provenance.is_empty() {
+            return;
+        }
+        let Some(function_path) = &self.current_function_path else {
+            return;
+        };
+        self.function_provenance
+            .entry(function_path.clone())
+            .or_default()
+            .merge(provenance);
     }
 
     fn install_local_const(

@@ -1,0 +1,11 @@
+enabled #Config of Bool = true
+
+configured_result || -> Int:
+    result ~= 0
+    if enabled:
+        result = 1
+    else
+        result = 2
+    ;
+    return result
+;

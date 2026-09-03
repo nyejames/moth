@@ -755,7 +755,7 @@ td {
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Ready!&quot;</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-keyword'>else</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Not ready yet&quot;</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>One semicolon closes the whole structure.</p><p>Moth does not have an <code>else if</code> chain. Nest another <code>if</code> inside <code>else</code>, or use pattern matching when several cases belong to one value.</p><p>A known Bool may later specialise this same ordinary <code>if</code> before HIR; both branches remain valid source. <code>#Config if</code> is not a Moth form.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>One semicolon closes the whole structure.</p><p>Moth does not have an <code>else if</code> chain. Nest another <code>if</code> inside <code>else</code>, or use pattern matching when several cases belong to one value.</p><p>A <code>#Config of Bool</code> value can specialise this same ordinary <code>if</code> before HIR; both branches remain valid source. <code>#Config if</code> is not a Moth form.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -767,7 +767,7 @@ td {
 
 <span class='moth-code-keyword'>if</span> enabled<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-function'>perform_optional_work</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p><code>#Config of Bool</code> is another future source of the same folded value. It will use this ordinary folded-value path rather than introducing config-specific branch syntax.</p><h3>No statement-level <code>else if</code></h3><p>A same-line <code>else if</code> chain is not syntax.</p><p>Use a nested <code>if</code> inside the <code>else</code> body:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> first_condition<span class='moth-code-delimiter'>:</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>An implemented <code>#Config of Bool</code> value is one source of the same folded value. It uses this ordinary folded-value path rather than introducing config-specific branch syntax.</p><h3>No statement-level <code>else if</code></h3><p>A same-line <code>else if</code> chain is not syntax.</p><p>Use a nested <code>if</code> inside the <code>else</code> body:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>if</span> first_condition<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;first&quot;</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-keyword'>else</span>
     <span class='moth-code-keyword'>if</span> second_condition<span class='moth-code-delimiter'>:</span>

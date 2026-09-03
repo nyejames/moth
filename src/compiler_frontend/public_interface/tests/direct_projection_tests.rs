@@ -57,6 +57,9 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -155,6 +158,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        config_qualifier: None,
     }
 }
 
@@ -171,6 +175,7 @@ fn field_declaration_no_default(
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -267,6 +272,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     let max_size_constant = Declaration {
         id: InternedPath::from_single_str("MaxSize", &mut string_table),
         value: Expression::int(256, SourceLocation::default(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let module_constants = vec![max_size_constant];
     let const_values = ConstValueStore::from_test_declarations(module_constants.clone(), &env)
@@ -487,6 +493,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
             struct_type_id,
             ValueMode::MutableReference,
         ),
+        config_qualifier: None,
     };
     let method_signature = FunctionSignature {
         parameters: vec![receiver],
@@ -694,6 +701,11 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     let env = TypeEnvironment::new();
     let int_id = env.builtins().int;
     let string_id = env.builtins().string;
+    let default_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "default-prefix",
+    );
 
     // Every default expression carries its declared TypeId so the projection reads the
     // correct canonical type identity from the expression, not from a global builtin
@@ -706,7 +718,10 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
                 string_table.intern("default-prefix"),
                 SourceLocation::default(),
                 ValueMode::ImmutableOwned,
-            ),
+            )
+            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                default_member.clone(),
+            )),
             &mut string_table,
         ),
         field_declaration_with_default(
@@ -767,6 +782,11 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     let PublicDeclarationSemantics::Function(semantics) = &record.semantics else {
         panic!("expected a function record");
     };
+    assert_eq!(
+        record.synthetic_interface_provenance.members(),
+        &[default_member],
+        "default provenance belongs to the owning declaration record",
+    );
 
     assert_eq!(semantics.parameters.len(), 3);
 

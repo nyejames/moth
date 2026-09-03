@@ -361,7 +361,9 @@ fn run_semantic_stages(
         resolved_file_references,
     } = inputs;
     let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
-    let active_root_role = active_module_origin.role();
+    let active_root_role = context
+        .root_role_override
+        .unwrap_or_else(|| active_module_origin.role());
     let external_dependency_resolution_table = context.external_dependency_resolution_table;
 
     // 1. Bind retained header syntax against provider interfaces.
@@ -896,6 +898,7 @@ fn build_ast_with_registered_types(
             capacity_estimate,
             resolved_file_references,
             module_origin,
+            build_config_values: Arc::clone(&context.build_config_values),
         },
         #[cfg(feature = "timers")]
         timing_context,

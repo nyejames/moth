@@ -24,6 +24,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
+use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -519,6 +520,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             source_location,
             provider_id,
         } = input;
+
+        let local_name_location = local_alias.map_or(source_location, |alias| &alias.location);
+        ensure_not_keyword_shadow_identifier(
+            local_name,
+            local_name_location.clone(),
+            self.string_table,
+        )?;
+
         let view = self
             .source_provider_dependencies
             .binding_view(provider_id)?;
@@ -553,7 +562,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             },
         };
 
-        registry.register(local_name, binding, Some(source_location.clone()))?;
+        registry.register(local_name, binding, Some(local_name_location.clone()))?;
         file_visibility
             .visible_declaration_paths_mut()
             .insert(local_path.clone());

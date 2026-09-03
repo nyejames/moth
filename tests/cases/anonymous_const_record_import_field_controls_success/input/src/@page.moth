@@ -1,0 +1,3 @@
+values #= | Import = 1, import = 2 |
+
+io.line([: Import=[values.Import] import=[values.import]])

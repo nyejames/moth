@@ -22,9 +22,10 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
-    NumberLiteralErrorReason, OperatorOperandPosition, PathKind, RangeOperandKind,
-    RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
-    TypeMismatchContext, UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    NumberLiteralErrorReason, OperatorOperandPosition, PathKind, ProjectContextEscapeReason,
+    RangeOperandKind, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -1345,6 +1346,17 @@ impl CompilerDiagnostic {
                 exported_name,
                 private_type,
             },
+        )
+    }
+
+    pub(crate) fn project_context_escape(
+        reason: ProjectContextEscapeReason,
+        location: SourceLocation,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape),
+            location,
+            DiagnosticPayload::ProjectContextEscape { reason },
         )
     }
 

@@ -11,6 +11,7 @@
 //! so that logic is centralized in this module.
 
 pub(crate) mod binding_mode;
+pub(crate) mod build_config_contract;
 pub(crate) mod choice;
 pub(crate) mod declaration_shell;
 pub(crate) mod generic_parameters;

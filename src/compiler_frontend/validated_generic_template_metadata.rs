@@ -76,7 +76,10 @@ fn collect_public_callable_origins(
 ) -> Result<FxHashMap<OriginFunctionId, bool>, CompilerError> {
     let mut callables = FxHashMap::default();
 
-    for PublicDeclarationRecord { origin, semantics } in &draft.declarations {
+    for PublicDeclarationRecord {
+        origin, semantics, ..
+    } in &draft.declarations
+    {
         match semantics {
             PublicDeclarationSemantics::Function(function) => {
                 let OriginDeclarationId::Function(function_origin) = origin else {

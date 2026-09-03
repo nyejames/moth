@@ -23,6 +23,7 @@ use crate::compiler_frontend::public_call_summary::{PublicCallParameterAccess, P
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, StableModuleOriginIdentity,
 };
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // ===========================================================================
@@ -309,13 +310,19 @@ pub(crate) struct PublicTraitSemantics {
 
 /// One declaration-centric record in the public interface draft.
 ///
-/// WHAT: carries exactly one stable [`OriginDeclarationId`] and its closed
-/// [`PublicDeclarationSemantics`]. The builder produces one record per stable origin in the
-/// deterministic export-binding order, with receiver methods deterministically attached to
+/// WHAT: carries exactly one stable [`OriginDeclarationId`], the aggregate
+/// [`SyntheticInterfaceProvenance`] of all public semantic values owned by that declaration and
+/// its closed [`PublicDeclarationSemantics`]. The builder produces one record per stable origin in
+/// the deterministic export-binding order, with receiver methods deterministically attached to
 /// their owning struct or choice record.
+///
+/// Empty provenance means the declaration is portable. Provenance is a separate semantic fact from
+/// declaration/source identity: it is cloned unchanged when an imported declaration record is
+/// retained through interface closure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicDeclarationRecord {
     pub(crate) origin: OriginDeclarationId,
+    pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
     pub(crate) semantics: PublicDeclarationSemantics,
 }
 

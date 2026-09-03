@@ -112,6 +112,7 @@ fn orphan_declaration() -> Declaration {
     Declaration {
         id: InternedPath::new(),
         value: orphan_bool_expression(),
+        config_qualifier: None,
     }
 }
 

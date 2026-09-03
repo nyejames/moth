@@ -1,6 +1,6 @@
-**Accepted deferred design.** `@project`, source `#Config` and entry-local `config:` blocks are queued implementation work. This page defines the accepted final contract. The current compiler does not yet implement these surfaces. See @../progress (Progress) for current status.
+**Implemented `@project`; entry-local config deferred.** Direct and source `#Config` contracts and the immutable `@project` interface are implemented. Root-local `config:` blocks remain deferred under the entry-config implementation plan. See @../progress (Progress) for current status.
 
-Entry config covers `@project` and entry-local `config:` blocks. Both feed builder metadata and compile-time values into normal module roots.
+This page covers explicit `@project` access and the accepted, separately deferred entry-local `config:` contract.
 
 ### `@project`
 

@@ -123,6 +123,7 @@ fn declaration_syntax_remaps_all_fields() {
             name: type_name,
             location: make_location(&mut local),
         },
+        config_qualifier: None,
         initializer_tokens: vec![make_symbol_token(init_name, &mut local)],
         initializer_references: vec![InitializerReference {
             name: ref_name,

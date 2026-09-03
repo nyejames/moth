@@ -46,6 +46,7 @@ fn body_local_struct_default_preserves_missing_template_authority() {
             },
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
 
     let error = validate_struct_default_values(&fields, &store)
@@ -67,6 +68,7 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
             ValueMode::ImmutableReference,
             ConstRecordState::RuntimeValue,
         ),
+        config_qualifier: None,
     }];
 
     let error = validate_struct_default_values(&fields, &store)

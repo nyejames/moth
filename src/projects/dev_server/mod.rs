@@ -18,6 +18,8 @@ mod watch;
 
 pub use server::run_dev_server;
 
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
+
 // The validation/path helpers remain production-private; integration-style unit tests exercise
 // them through this narrow re-export instead of making the runtime API wider.
 #[cfg(test)]
@@ -28,6 +30,11 @@ pub struct DevServerOptions {
     pub host: String,
     pub port: u16,
     pub poll_interval_ms: u64,
+    /// The explicit typed build-config inputs this dev command started with.
+    ///
+    /// They ride the shared bootstrap state on every initial and watch-triggered rebuild so
+    /// the server keeps one set of explicit inputs for its whole lifetime.
+    pub(crate) inputs: BuildConfigInputSet,
 }
 
 impl Default for DevServerOptions {
@@ -36,6 +43,7 @@ impl Default for DevServerOptions {
             host: String::from("127.0.0.1"),
             port: 6342,
             poll_interval_ms: 300,
+            inputs: BuildConfigInputSet::new(),
         }
     }
 }

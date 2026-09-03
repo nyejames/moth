@@ -164,7 +164,7 @@ fn function_parameter_default_records_content_hint_and_body_stays_unhinted() {
 #[test]
 fn struct_field_default_records_content_hint() {
     let (output, mut strings) =
-        prepare_source("Config = |\n    path String = [: [@docs/intro.md] ],\n|\n");
+        prepare_source("Options = |\n    path String = [: [@docs/intro.md] ],\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
         matches!(kind, HeaderKind::Struct { .. })
@@ -238,7 +238,7 @@ fn resource_file_value_records_no_content_hint() {
 #[test]
 fn struct_field_resource_default_records_no_content_hint() {
     let (output, strings) =
-        prepare_source("Config = |\n    icon_url String = @assets/logo.svg,\n|\n");
+        prepare_source("Options = |\n    icon_url String = @assets/logo.svg,\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
         matches!(kind, HeaderKind::Struct { .. })

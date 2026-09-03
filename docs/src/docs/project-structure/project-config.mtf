@@ -1,4 +1,4 @@
-**Implemented grouped config.** This page defines the grouped project-config contract, and the compiler implements it. `config.moth` authors one grouped `project` record plus builder sections such as `html`. Retired flat keys (`project #= "html"`, `dev_folder`, `output_folder` and `package_folders`) are rejected. Former top-level builder fields such as `origin` no longer configure the builder; unregistered names remain private helpers. Build-configuration [$html:<code>#Config</code>], [$html:<code>@project</code>] and entry-local [$html:<code>config:</code>] blocks remain queued. See @../progress (Progress) for current support.
+**Implemented grouped config and build-config values.** This page defines the grouped project-config contract, direct and source `#Config` contracts and the immutable explicit `@project` interface implemented by the compiler. `config.moth` authors one grouped `project` record plus builder sections such as `html`. Retired flat keys (`project #= "html"`, `dev_folder`, `output_folder` and `package_folders`) are rejected. Former top-level builder fields such as `origin` no longer configure the builder; unregistered names remain private helpers. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current support.
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies or package resolution.
 
@@ -38,7 +38,12 @@
 
 ### Direct project `#Config` fields
 
-Queued. A later build-configuration-values plan will let a direct primitive or optional field of `project` declare `#Config of T`. Nested project fields cannot declare `#Config` contracts. The compiler does not accept `#Config` in `config.moth` yet.
+A direct field of `project` may declare `#Config of T` only when the selected project schema marks
+that field `Configurable` and its value has a supported primitive or optional primitive shape.
+Registered fixed-only identity, source-discovery and compiler-control fields reject `#Config`; a
+primitive shape alone does not make them configurable. The compiler resolves an eligible field from
+explicit typed command or programmatic input, a compatible builder global, the declaration default
+or a missing-input diagnostic. Nested project fields cannot declare `#Config` contracts.
 
 See @#build-inputs (Build configuration values) for the full source and CLI contract. See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the build-system authority and `@project` contract.
 

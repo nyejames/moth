@@ -13,7 +13,7 @@
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, HeaderParseOptions,
     PreparedHeaderSyntax, prepare_header_syntax,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -188,6 +188,9 @@ pub(super) struct ModulePreparationContext<'a> {
 pub(super) struct ModuleSyntaxDiscovery<'a> {
     context: &'a ModulePreparationContext<'a>,
     entry_file_path: PathBuf,
+    /// Explicit file role for transient entry selections; canonical module roots derive this from
+    /// `active_root_role`.
+    entry_file_role: Option<FileRole>,
     active_root_role: ModuleRootRole,
     expected_active_origin: StableModuleOriginIdentity,
     source_module_origins: SourceModuleOriginTable,
@@ -204,12 +207,14 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
 
 impl ModulePreparationContext<'_> {
     /// Begin header-owned reachability discovery for one indexed directory module.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn begin_syntax_discovery<'a>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
         origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
         candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
         entry_file_path: &Path,
+        entry_file_role: Option<FileRole>,
         mut string_table: StringTable,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
@@ -222,10 +227,10 @@ impl ModulePreparationContext<'_> {
         .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let source_module_origins =
             SourceModuleOriginTable::from_graph_ownership(&source_files, origin_by_canonical_path);
-
         Ok(ModuleSyntaxDiscovery {
             context: self,
             entry_file_path: entry_file_path.to_path_buf(),
+            entry_file_role,
             active_root_role: stable_origin.role(),
             expected_active_origin: stable_origin,
             source_module_origins,
@@ -456,6 +461,7 @@ impl ModulePreparationContext<'_> {
         let options = HeaderParseOptions {
             entry_file_id,
             project_path_resolver: self.project_path_resolver.clone(),
+            entry_file_role: None,
             active_root_role,
         };
 
@@ -912,6 +918,7 @@ impl ModuleSyntaxDiscovery<'_> {
         let options = HeaderParseOptions {
             entry_file_id,
             project_path_resolver: self.context.project_path_resolver.clone(),
+            entry_file_role: self.entry_file_role,
             active_root_role: self.active_root_role,
         };
         let prepare_context = FrontendFilePrepareContext {

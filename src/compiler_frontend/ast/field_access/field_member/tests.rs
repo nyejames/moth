@@ -72,6 +72,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }],
         SourceLocation::default(),
         ValueMode::ImmutableOwned,
@@ -161,6 +162,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }],
     )]);
     let receiver = AstNode {

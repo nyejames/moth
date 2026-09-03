@@ -68,6 +68,9 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         params: vec![],
         return_type: unit_type,
     }];
+    module
+        .function_provenance
+        .insert(FunctionId(0), Default::default());
     module.start_function = Some(FunctionId(0));
     module
         .function_origins

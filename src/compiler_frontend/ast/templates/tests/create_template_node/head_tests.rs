@@ -102,6 +102,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let declaration = Declaration {
         id: scope.append(stale_name),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let style_directives = frontend_test_style_directives();
     let context = with_test_path_context(
@@ -245,6 +246,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
             SourceLocation::default(),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
@@ -320,6 +322,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let declaration = Declaration {
         id: scope.append(stale_name),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let style_directives = frontend_test_style_directives();
     let context = with_test_path_context(
@@ -442,6 +445,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
         vec![Declaration {
             id: field_path,
             value: field_value,
+            config_qualifier: None,
         }],
         SourceLocation::default(),
         ValueMode::ImmutableOwned,
@@ -453,6 +457,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let declaration = Declaration {
         id: scope.append(record_name),
         value: record_value,
+        config_qualifier: None,
     };
     let context = constant_template_context(&scope, &[declaration]);
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -508,6 +513,7 @@ fn source_authored_template_option_capture_if_suffix_reaches_ast() {
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
 
@@ -558,6 +564,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
 
@@ -847,6 +854,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
 
@@ -1356,6 +1364,7 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }];
 
     let mut token_stream = template_tokens_from_source(
@@ -1572,6 +1581,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     let declaration = Declaration {
         id: scope.append(list_shell_name),
         value: Expression::template(shell_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let condition_declaration = Declaration {
         id: scope.append(keep_going_name),
@@ -1582,6 +1592,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
             DataType::Bool,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     let context = with_test_path_context(
         ScopeContext::new_for_tests(
@@ -1709,6 +1720,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
             token_stream.current_location(),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
 
@@ -1744,6 +1756,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
             token_stream.current_location(),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     let context = imported_const_template_context(&token_stream.src_path, declaration, show_banner);
 
@@ -1773,6 +1786,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }];
 
     let mut token_stream = template_tokens_from_source(
@@ -1924,6 +1938,7 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
             token_stream.current_location(),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
 
@@ -1964,6 +1979,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }];
 
     let mut token_stream = template_tokens_from_source(
@@ -1999,6 +2015,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }];
 
     let mut token_stream = template_tokens_from_source(
@@ -2071,6 +2088,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -2118,6 +2136,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
                 DataType::collection(DataType::StringSlice),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -2163,6 +2182,7 @@ fn const_required_template_loop_reports_non_const_body() {
                 DataType::StringSlice,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );
@@ -2415,6 +2435,7 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let declaration = Declaration {
         id: token_stream.src_path.append(maybe_name),
         value: Expression::coerced(present_value, option_string_type_id),
+        config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -2458,6 +2479,7 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
     let declaration = Declaration {
         id: token_stream.src_path.append(maybe_name),
         value: absent_value,
+        config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -2496,6 +2518,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
 
@@ -2534,6 +2557,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         },
         SourceLocation::default(),
     );

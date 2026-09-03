@@ -5,17 +5,16 @@
 //! dependencies. Empty provenance means portable (no project-context dependency). Non-empty
 //! provenance carries a sorted, duplicate-free, member-granular dependency set.
 //! WHY: the compiler design overview requires stable member-granular synthetic-interface
-//! dependencies. This module owns the portable provenance vocabulary so AST value metadata, HIR
-//! function facts and future provider binding share one identity without leaking process-local
-//! IDs, source locations, interned names or unordered iteration.
+//! identities and provenance. AST values, AST-to-HIR function facts, HIR link facts and the
+//! project-global facade consume them without leaking process-local IDs, source locations,
+//! interned names or unordered iteration.
 //!
 //! ## Ownership boundary
 //!
 //! This module owns the provenance vocabulary and its deterministic set operations only. It does
-//! not own propagation policy, AST traversal, HIR lowering or link-fact propagation. Those belong
-//! to the existing AST expression, HIR lowering and HIR validation owners. The future production
-//! consumer of the per-function provenance fact is the per-function link-fact lane described in
-//! the compiler design overview.
+//! not own propagation policy, AST traversal, HIR lowering or link-fact propagation. Those remain
+//! with AST expression/value handling, AST-to-HIR function-fact accumulation, HIR link-fact
+//! reachability and project-global facade projection; this module supplies their shared identity.
 
 /// Classification of a synthetic compile-time interface's scope.
 ///
@@ -26,10 +25,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum SyntheticInterfaceClass {
     /// Project-global membership. Non-portable: the dependency set depends on project context.
-    #[allow(
-        dead_code,
-        reason = "The project-context producer lands in the downstream config/interface slice."
-    )]
     ProjectContext,
     /// Builder-owned synthetic interface. Reserved for future builder-owned producers.
     #[allow(
@@ -57,10 +52,7 @@ pub(crate) struct SyntheticInterfaceMemberIdentity {
 impl SyntheticInterfaceMemberIdentity {
     /// Construct a synthetic interface member identity.
     ///
-    /// Compiler-internal: construction is reserved for the future synthetic-interface producer
-    /// (config/provider binding) and for test injection. The names are owned stable strings, not
-    /// interned IDs or rendered display names.
-    #[cfg(test)]
+    /// The names are owned stable strings, not interned IDs or rendered display names.
     pub(crate) fn new(
         class: SyntheticInterfaceClass,
         interface: impl Into<String>,
@@ -72,6 +64,24 @@ impl SyntheticInterfaceMemberIdentity {
             member: member.into(),
         }
     }
+
+    /// The semantic scope classification of this member.
+    #[cfg(test)]
+    pub(crate) fn class(&self) -> SyntheticInterfaceClass {
+        self.class
+    }
+
+    /// The stable synthetic interface name.
+    #[cfg(test)]
+    pub(crate) fn interface(&self) -> &str {
+        &self.interface
+    }
+
+    /// The stable member name within the interface.
+    #[cfg(test)]
+    pub(crate) fn member(&self) -> &str {
+        &self.member
+    }
 }
 
 /// Semantic-provenance value recording one function's direct synthetic-interface dependencies.
@@ -80,8 +90,8 @@ impl SyntheticInterfaceMemberIdentity {
 /// carries a sorted, duplicate-free set of member-granular dependencies. The set is canonical
 /// after construction; `merge` and `union` preserve the canonical sorted, duplicate-free order.
 /// WHY: per-function link facts need a stable, deterministic provenance value that does not
-/// depend on iteration order, source location or process-local identity. The future production
-/// consumer is the per-function link-fact lane described in the compiler design overview.
+/// depend on iteration order, source location or process-local identity. AST-to-HIR lowering
+/// carries this value into HIR link-fact collection, while the project-global facade retains it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) struct SyntheticInterfaceProvenance {
     members: Vec<SyntheticInterfaceMemberIdentity>,
@@ -105,7 +115,6 @@ impl SyntheticInterfaceProvenance {
     }
 
     /// Provenance carrying a single direct synthetic-interface dependency.
-    #[cfg(test)]
     pub(crate) fn single(member: SyntheticInterfaceMemberIdentity) -> Self {
         Self::from_members(vec![member])
     }
@@ -114,11 +123,19 @@ impl SyntheticInterfaceProvenance {
     pub(crate) fn is_empty(&self) -> bool {
         self.members.is_empty()
     }
+    /// Whether this provenance contains a member from the requested interface class.
+    ///
+    /// Consumers use this narrow read-only query to enforce class-specific boundary policy
+    /// without exposing the canonical member storage or depending on iteration order.
+    pub(crate) fn contains_class(&self, class: SyntheticInterfaceClass) -> bool {
+        self.members.iter().any(|member| member.class == class)
+    }
 
     /// The sorted, duplicate-free member dependencies.
     ///
-    /// The future production consumer is the per-function link-fact lane. Tests use this to
-    /// verify deterministic duplicate-free union and AST-to-HIR association.
+    /// Tests inspect this canonical slice to verify deterministic unions and AST-to-HIR
+    /// association; production consumers use set operations and class queries without exposing
+    /// member storage.
     #[cfg(test)]
     pub(crate) fn members(&self) -> &[SyntheticInterfaceMemberIdentity] {
         &self.members

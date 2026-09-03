@@ -68,6 +68,11 @@ pub(crate) fn build_module(
         .collect();
     module.blocks = blocks;
     module.start_function = Some(start_function);
+    for function in &module.functions {
+        module
+            .function_provenance
+            .insert(function.id, Default::default());
+    }
 
     let mut max_region_id = 0u32;
     for block in &module.blocks {

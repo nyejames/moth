@@ -655,6 +655,7 @@ fn validate_and_apply_with_surface(
                 direct_field_locations: Vec::new(),
             })
             .collect(),
+        resolution_records: Vec::new(),
     };
     let mut config = Config::new(PathBuf::from("project"));
 
@@ -695,9 +696,9 @@ fn applies_grouped_project_record_to_config_fields() {
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.entry_root, PathBuf::from("src"));
-    assert_eq!(config.version, "1.2.3");
-    assert_eq!(config.author, "Ada");
-    assert_eq!(config.license, "MIT");
+    assert_eq!(config.version, Some("1.2.3".to_owned()));
+    assert_eq!(config.author, Some("Ada".to_owned()));
+    assert_eq!(config.license, Some("MIT".to_owned()));
     assert_eq!(config.template_const_loop_iteration_limit, 500);
 
     // Every compiler-owned field records its setting location.
@@ -714,6 +715,35 @@ fn applies_grouped_project_record_to_config_fields() {
             "field '{field_name}' should record its setting location"
         );
     }
+}
+
+#[test]
+fn omitted_optional_project_metadata_stays_absent() {
+    let mut string_table = StringTable::new();
+
+    let (config, errors) = validate_and_apply(
+        vec![("project", record(vec![("name", text("docs"))]))],
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.project_name, "docs");
+    assert_eq!(
+        config.entry_root,
+        PathBuf::from("src"),
+        "entry_root keeps its schema default when omitted"
+    );
+    assert_eq!(config.version, None);
+    assert_eq!(config.author, None);
+    assert_eq!(config.license, None);
+    assert!(!config.setting_locations.contains_key("version"));
+    assert!(!config.setting_locations.contains_key("author"));
+    assert!(!config.setting_locations.contains_key("license"));
+    assert!(
+        !config
+            .setting_locations
+            .contains_key("template_const_loop_iteration_limit")
+    );
 }
 
 #[test]
@@ -908,6 +938,7 @@ fn rejects_grouped_project_entry_root_symlink_outside_the_project() {
             name_location: test_location(),
             direct_field_locations: Vec::new(),
         }],
+        resolution_records: Vec::new(),
     };
     let mut config = Config::new(root.clone());
     let surface = BuilderSurface::with_mandatory_core();
@@ -947,6 +978,7 @@ fn rejects_grouped_project_entry_root_that_is_a_regular_file() {
             name_location: test_location(),
             direct_field_locations: Vec::new(),
         }],
+        resolution_records: Vec::new(),
     };
     let mut config = Config::new(root);
     let surface = BuilderSurface::with_mandatory_core();
@@ -1122,6 +1154,12 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
             source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\n\nhtml #= |\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+            builder_config_globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
         },
         &mut string_table,
     )
@@ -1381,6 +1419,14 @@ fn retains_compiled_project_metadata_type_and_field_location() {
             source_code: "project #= |\n    name = \"docs\",\n    custom_note = \"open\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
         },
         &mut string_table,
     )
@@ -1422,6 +1468,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
     .expect("open project metadata should apply");
 
     assert_eq!(config.extra_project_fields.len(), 1);
+
     assert_eq!(config.extra_project_fields[0].name, "custom_note");
     assert_eq!(
         config.extra_project_fields[0].type_identity,
@@ -1432,4 +1479,95 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         project.direct_field_locations[note_index]
     );
     assert_eq!(config.extra_project_fields[0].value, text("open"));
+}
+#[test]
+fn applies_direct_project_config_global_through_validation() {
+    let mut string_table = StringTable::new();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let mut globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    globals
+        .insert(
+            crate::compiler_frontend::build_config::BuildInputName::new("version")
+                .expect("version is a valid build input name"),
+            crate::compiler_frontend::build_config::PrimitiveBuildValue::String(
+                "builder".to_owned(),
+            ),
+        )
+        .expect("builder global name should be platform-neutral");
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            canonical_path: Path::new("/project/config.moth"),
+            source_code: "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &inputs,
+            builder_config_globals: &globals,
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .expect("builder global should fold before validation");
+    let mut config = Config::new(PathBuf::from("project"));
+    apply_result(validate_and_apply_config_declarations(
+        &mut config,
+        &compiled,
+        &surface.config_schemas,
+        &mut string_table,
+    ))
+    .expect("the folded configurable field should apply through normal validation");
+    assert_eq!(config.version, Some("builder".to_owned()));
+}
+
+#[test]
+fn applies_optional_direct_project_config_absence_and_retains_resolution_provenance() {
+    let mut string_table = StringTable::new();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            canonical_path: Path::new("/project/config.moth"),
+            source_code: "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &inputs,
+            builder_config_globals: &globals,
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .expect("optional config absence should compile");
+
+    let author_record = compiled
+        .resolution_records
+        .iter()
+        .find(|record| string_table.resolve(record.field_name) == "author")
+        .expect("optional author resolution should retain a record");
+    assert_eq!(author_record.value, None);
+    assert_eq!(
+        author_record.origin,
+        crate::compiler_frontend::build_config::BuildConfigValueOrigin::DeclarationDefault
+    );
+    assert_ne!(author_record.fingerprint.0, 0);
+
+    let mut config = Config::new(PathBuf::from("project"));
+    apply_result(validate_and_apply_config_declarations(
+        &mut config,
+        &compiled,
+        &surface.config_schemas,
+        &mut string_table,
+    ))
+    .expect("optional config absence should validate and apply");
+    assert_eq!(config.author, None);
 }

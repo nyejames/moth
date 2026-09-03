@@ -121,8 +121,8 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 ## Roadmap and current status
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
-- **Current implementation:** label numeric and anonymous-record support from the progress matrix.
-- **Queued work:** `number_type_numeric_plan.md`, `build-configuration-values-and-project-globals-plan.md` and `entry-config-blocks-runtime-title-plan.md`.
+- **Current implementation:** folded constants, typed build configuration values, immutable `@project`, label numeric and anonymous-record support from the progress matrix.
+- **Queued work:** `number_type_numeric_plan.md` and `entry-config-blocks-runtime-title-plan.md`.
 - **Deferred or outside scope:** trait objects and broad runtime reflection.
 
 ## Exit state

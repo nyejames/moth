@@ -12445,3 +12445,72 @@ path = "anonymous_const_record_catch_value_block_success"
 tags = ["const-records"]
 contract = "language.constants.anonymous_const_record_catch_value_block_projection"
 role = "primary"
+
+[[case]]
+id = "anonymous_const_record_config_field_rejected"
+path = "anonymous_const_record_config_field_rejected"
+tags = ["const-records", "config"]
+contract = "language.constants.anonymous_const_record_config_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_uppercase_config_field_rejected"
+path = "anonymous_const_record_uppercase_config_field_rejected"
+tags = ["const-records", "config"]
+contract = "language.constants.anonymous_const_record_uppercase_config_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_underscore_config_field_rejected"
+path = "anonymous_const_record_underscore_config_field_rejected"
+tags = ["const-records", "config"]
+contract = "language.constants.anonymous_const_record_underscore_config_field_rejected"
+role = "primary"
+
+[[case]]
+id = "anonymous_const_record_import_field_controls_success"
+path = "anonymous_const_record_import_field_controls_success"
+tags = ["const-records", "config"]
+contract = "language.constants.anonymous_const_record_import_field_controls_success"
+role = "primary"
+
+[[case]]
+id = "build_config_source_static_if"
+path = "build_config_source_static_if"
+tags = ["integration", "configuration", "control-flow"]
+contract = "language.configuration.source_config_static_bool_branch_selection"
+role = "primary"
+
+[[case]]
+id = "build_config_source_static_if_false"
+path = "build_config_source_static_if_false"
+tags = ["integration", "configuration", "control-flow"]
+contract = "language.configuration.source_config_static_bool_false_branch_selection"
+role = "primary"
+[[case]]
+id = "build_config_config_namesake_rejected"
+path = "build_config_config_namesake_rejected"
+tags = ["integration", "configuration", "diagnostics"]
+contract = "language.configuration.config_filename_does_not_claim_source_contracts"
+role = "boundary"
+[[case]]
+id = "build_config_source_cross_file"
+path = "build_config_source_cross_file"
+tags = ["integration", "configuration", "control-flow"]
+contract = "language.configuration.source_config_cross_file_binding"
+role = "primary"
+
+
+[[case]]
+id = "project_globals_explicit_binding"
+path = "project_globals_explicit_binding"
+tags = ["integration", "configuration", "dependencies"]
+contract = "language.configuration.explicit_project_globals_binding"
+role = "primary"
+
+[[case]]
+id = "project_globals_public_reexport_rejected"
+path = "project_globals_public_reexport_rejected"
+tags = ["integration", "configuration", "dependencies", "facade"]
+contract = "language.configuration.project_globals_public_reexport_rejected"
+role = "boundary"

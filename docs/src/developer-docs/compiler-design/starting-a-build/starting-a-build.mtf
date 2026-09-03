@@ -82,7 +82,7 @@ Config runs through one named **compiler service**, not a build-owned copy of th
 
 ## Build configuration values and `@project`
 
-Direct primitive fields of `project` may declare a build-config contract with `#Config of T`. The qualifier is compiler-owned and the semantic type remains `T`. Accepted types stay narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
+Direct fields of `project` may declare a build-config contract with `#Config of T` only when the selected project schema marks the field `Configurable` and its value has a supported primitive or optional primitive shape. Registered fixed-only identity, source-discovery and compiler-control fields reject the qualifier. The qualifier is compiler-owned and the semantic type remains `T`. Accepted types stay narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
 
 Command and programmatic inputs are typed immediately as concrete primitives before source contracts are checked. Exact `true` and `false` become `Bool`, complete whole numbers become `Int`, decimal or exponent forms become `Float`, quoted characters become `Char`, quoted strings become `String`, and every other value falls back to `String`. Explicit quoted strings force ambiguous text such as `"true"`; malformed quoted literals are diagnostics. Omitting an input is how optional absence resolves to `none`.
 
@@ -101,7 +101,7 @@ Normal modules may bind `@project` explicitly. Nothing injects it silently. Chil
 
 For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.
 
-Resolved source `#Config` values later become ordinary folded constants. They use ordinary `if` for
+Resolved source `#Config` values become ordinary folded constants. They use ordinary `if` for
 static Bool specialisation; there is no `#Config if` and no config-specific HIR node.
 
 **Diagram placeholder:** Resolved project fields enter ordinary module compilation through an immutable interface
@@ -142,9 +142,10 @@ The command/build system owns target intent; source does not observe physical ta
 
 - unknown command or unsupported builder capability
 - invalid config shape, forbidden config dependency or missing required input
-- queued config syntax that still differs from accepted end-state shape
+- entry-local `config:` syntax, which remains deferred under its own implementation plan
 
-When the walkthrough mentions config, label **current** versus **accepted** if the progress matrix still shows transitional forms.
+When the walkthrough mentions entry-local config, label **current** versus **accepted** because that
+surface remains deferred.
 
 ## Why Moth does it this way
 
@@ -159,9 +160,8 @@ When the walkthrough mentions config, label **current** versus **accepted** if t
 ## Roadmap and current status
 
 - **Accepted design:** one self-contained `config.moth` and a specialised `ProjectGlobalsInterface`.
-- **Implemented:** the grouped `config.moth` contract (one required `project` record plus active builder sections) is implemented; the legacy flat config shape is deleted. The walkthrough below no longer needs flat-config caveats.
-- **Queued work:** `build-configuration-values-and-project-globals-plan.md` and `entry-config-blocks-runtime-title-plan.md` own the remaining direct split of this surface.
-- **Deferred or outside scope:** config dependencies and a general Moth build script system.
+- **Implemented:** grouped `config.moth`, direct and source `#Config`, typed `--input` for build/check/dev, ordinary static-`if` integration and immutable explicit `@project`.
+- **Deferred:** entry-local `config:` blocks, config dependencies and a general Moth build script system.
 
 ## Exit state
 

@@ -575,6 +575,11 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Private type exposed by exported API",
             DiagnosticSeverity::Error,
         ),
+        RuleDiagnosticKind::ProjectContextEscape => DiagnosticDescriptor::new(
+            "MOTH-RULE-0086",
+            "Project context escapes package facade",
+            DiagnosticSeverity::Error,
+        ),
     }
 }
 

@@ -166,6 +166,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 ),
                                 ValueMode::ImmutableReference,
                             ),
+                            config_qualifier: None,
                         },
                     )
                     .map_err(|error| self.error_messages(error, string_table))?;
@@ -223,6 +224,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 },
                                 ValueMode::ImmutableReference,
                             ),
+                            config_qualifier: None,
                         },
                     )
                     .map_err(|error| self.error_messages(error, string_table))?;
@@ -530,6 +532,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         },
                         ValueMode::ImmutableReference,
                     ),
+                    config_qualifier: None,
                 },
             )
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -933,6 +936,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             external_package_registry: Arc::clone(&self.context.external_package_registry),
             style_directives: self.context.style_directives.clone(),
             file_value_resolution: self.context.file_value_resolution.clone(),
+            config_resolution: self.context.config_resolution.clone(),
+            build_config_values: Arc::clone(&self.context.build_config_values),
+            source_build_config_contract_names: Arc::clone(
+                &self.context.source_build_config_contract_names,
+            ),
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,

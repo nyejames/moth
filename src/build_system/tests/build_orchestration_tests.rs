@@ -15,6 +15,7 @@ use crate::build_system::output::{
     BuilderKind, OutputDestinationOutcome, OutputOwner, OutputPlan, OutputWriteOutcome,
 };
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, resolve_source_file_path, terse,
@@ -87,6 +88,7 @@ fn build_project_returns_result_without_writing_files() {
             .to_str()
             .expect("temp file path should be valid UTF-8 for this test"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("build should succeed");
 
@@ -108,6 +110,7 @@ fn build_project_preserves_builder_warnings_in_build_result() {
             &ProjectBuilder::new(Box::new(WarningBuilder)),
             "main.moth",
             &[],
+            &BuildConfigInputSet::new(),
         )
         .expect("build should succeed");
 
@@ -135,7 +138,8 @@ fn build_project_calls_validate_project_config() {
             built: built.clone(),
         }));
 
-        build_project(&builder, "main.moth", &[]).expect("build should succeed");
+        build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
+            .expect("build should succeed");
 
         assert!(
             validated.load(std::sync::atomic::Ordering::SeqCst),
@@ -173,6 +177,7 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("directory frontend and test backend should succeed");
 
@@ -208,6 +213,7 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -1006,7 +1012,8 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
         let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-        let Err(messages) = build_project(&builder, "main.moth", &[]) else {
+        let Err(messages) = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
+        else {
             panic!("build should fail with a frontend signature diagnostic");
         };
         let errors = messages.error_diagnostics().collect::<Vec<_>>();
@@ -1037,7 +1044,7 @@ fn config_validation_failure_returns_config_error_before_compilation() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = ProjectBuilder::new(Box::new(FailingValidationBuilder));
-        let result = build_project(&builder, "main.moth", &[]);
+        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new());
 
         let Err(messages) = result else {
             panic!("build_project should fail when config validation fails");
@@ -1132,6 +1139,7 @@ html #= |
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     assert!(
@@ -1181,6 +1189,7 @@ html #= |
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     assert!(
@@ -1232,6 +1241,7 @@ html #= |
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     assert!(
@@ -1327,6 +1337,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -1357,6 +1368,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -2015,6 +2027,7 @@ fn empty_directory_output_setting_is_rejected() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -2041,6 +2054,7 @@ fn absolute_output_setting_is_rejected() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -2067,6 +2081,7 @@ fn output_folder_inside_entry_root_is_rejected() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -2093,6 +2108,7 @@ fn identical_dev_and_release_folders_are_rejected() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
 
     let Err(messages) = result else {
@@ -2119,6 +2135,7 @@ fn valid_distinct_output_folders_resolve_unchanged() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("valid distinct folders should build");
 
@@ -2151,6 +2168,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("first dev build should compile");
     let dev_plan = dev_build
@@ -2175,6 +2193,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[Flag::Release],
+        &BuildConfigInputSet::new(),
     )
     .expect("first release build should compile");
     let release_plan = release_build

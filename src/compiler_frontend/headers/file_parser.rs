@@ -10,8 +10,10 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword, reserved_trait_keyword_error,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDeclarationReason, InvalidReceiverDeclarationReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
+    InvalidReceiverDeclarationReason,
 };
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
 use crate::compiler_frontend::headers::file_dependency_clauses::{
     parse_and_record_private_dependency, parse_and_record_public_dependency,
 };
@@ -19,6 +21,7 @@ use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::hash_items::handle_hash_item;
 use crate::compiler_frontend::headers::header_dispatch::create_header;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
+use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_header;
 use crate::compiler_frontend::headers::start_capture::push_runtime_template_tokens_to_start_function;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
@@ -33,6 +36,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
+use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use rustc_hash::FxHashSet;
@@ -739,6 +743,27 @@ fn finish_file_output(
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    if context.file_role == FileRole::ImportedModuleRoot
+        && let Some((location, adjacent)) =
+            find_config_qualifier_marker(&state.start_function_body, context.string_table)
+    {
+        let diagnostic = if adjacent {
+            CompilerDiagnostic::invalid_config_reason(
+                None,
+                InvalidConfigReason::ConfigQualifierInvalidPlacement,
+                location,
+            )
+        } else {
+            CompilerDiagnostic::common_syntax_mistake(
+                CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
+                location,
+            )
+        };
+        return Err(FileFrontendPrepareFailure::Diagnosed(
+            state.into_error(diagnostic),
+        ));
+    }
+
     if let Some(diagnostic) = dependency_generic_parameter_collision(
         &state.headers,
         &state.file_dependency_clauses,
@@ -786,16 +811,87 @@ fn finish_file_output(
 ///       emission.
 /// WHY: classification is the single graph-activity fact source, and the content ordering edges
 ///       must come from the same prepared rows at token level rather than an expression parse.
+///       Source `#Config` initializers are excluded until their primitive-only contract validation
+///       succeeds, so an invalid default cannot affect Stage 0 source discovery.
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
-    output.structural_file_references = classify_prepared_file_references(
-        output.path_syntax.table(),
+    let is_config_file = output
+        .source_file
+        .name()
+        .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
+    let mut consumed_path_syntax_ids = Vec::new();
+    consumed_path_syntax_ids.extend(
         output
             .file_dependency_clauses
             .iter()
             .map(|clause| clause.dependency.path_syntax),
+    );
+    let mut append_path_ids = |tokens: &[Token]| {
+        consumed_path_syntax_ids.extend(tokens.iter().filter_map(|token| match &token.kind {
+            TokenKind::Path(path_syntax_id) => Some(*path_syntax_id),
+            _ => None,
+        }));
+    };
+    for header in &output.headers {
+        let declaration_owned_marker = matches!(
+            &header.kind,
+            HeaderKind::Constant { declaration } if declaration.config_qualifier.is_some()
+        );
+        if is_config_file
+            || (!declaration_owned_marker
+                && find_config_qualifier_marker_in_header(header, string_table).is_none())
+        {
+            continue;
+        }
+
+        append_path_ids(&header.tokens.tokens);
+        match &header.kind {
+            HeaderKind::Constant { declaration } => {
+                append_path_ids(&declaration.initializer_tokens);
+            }
+            HeaderKind::Function { signature, .. } => {
+                for parameter in &signature.parameters {
+                    append_path_ids(&parameter.default_tokens);
+                }
+            }
+            HeaderKind::Struct { fields, .. } => {
+                for field in fields {
+                    append_path_ids(&field.default_tokens);
+                }
+            }
+            HeaderKind::Choice { variants, .. } => {
+                for variant in variants {
+                    let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
+                        fields,
+                    } = &variant.payload
+                    else {
+                        continue;
+                    };
+                    for field in fields {
+                        append_path_ids(&field.default_tokens);
+                    }
+                }
+            }
+            HeaderKind::Trait { declaration } => {
+                for requirement in &declaration.requirements {
+                    for parameter in &requirement.signature.parameters {
+                        append_path_ids(&parameter.default_tokens);
+                    }
+                }
+            }
+            HeaderKind::StartFunction
+            | HeaderKind::TypeAlias { .. }
+            | HeaderKind::ConstTemplate { .. }
+            | HeaderKind::TraitConformance { .. }
+            | HeaderKind::TraitIncompatibility { .. } => {}
+        }
+    }
+
+    output.structural_file_references = classify_prepared_file_references(
+        output.path_syntax.table(),
+        consumed_path_syntax_ids,
         output.file_id,
         string_table,
     );

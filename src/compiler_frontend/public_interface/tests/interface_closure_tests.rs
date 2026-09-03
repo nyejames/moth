@@ -28,6 +28,9 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
 
 fn provider_origin(module_name: &str) -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -69,22 +72,19 @@ fn function_record(
     name: &str,
     parameter_count: usize,
 ) -> PublicDeclarationRecord {
-    PublicDeclarationRecord {
-        origin: OriginDeclarationId::Function(function_origin(module, name)),
-        semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
-            category: PublicFunctionCategory::ConcreteLocal,
-            parameters: (0..parameter_count)
-                .map(|index| PublicParameterTypeSlot {
-                    name: Some(format!("arg{index}")),
-                    type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-                    access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
-                    folded_default: None,
-                })
-                .collect(),
-            returns: Vec::new(),
-            error_return: None,
-        }),
-    }
+    PublicDeclarationRecord { origin: OriginDeclarationId::Function(function_origin(module, name)), synthetic_interface_provenance: Default::default(), semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+        category: PublicFunctionCategory::ConcreteLocal,
+        parameters: (0..parameter_count)
+            .map(|index| PublicParameterTypeSlot {
+                name: Some(format!("arg{index}")),
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+                access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
+                folded_default: None,
+            })
+            .collect(),
+        returns: Vec::new(),
+        error_return: None,
+    }) }
 }
 
 fn struct_record(
@@ -94,6 +94,7 @@ fn struct_record(
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(type_origin(module, name)),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields,
@@ -109,6 +110,7 @@ fn alias_record(
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(alias_type_origin(module, name)),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::TransparentAlias(PublicAliasSemantics {
             target_type_identity: target,
         }),
@@ -118,6 +120,7 @@ fn alias_record(
 fn trait_record(module: &StableModuleOriginIdentity, name: &str) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Trait(trait_origin(module, name)),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Trait(PublicTraitSemantics {
             requirements: Vec::new(),
             incompatibilities: Vec::new(),
@@ -353,6 +356,50 @@ fn deep_reexport_closure_visits_each_record_once() {
             .count(),
         1,
         "the reachable evidence record must be copied exactly once"
+    );
+}
+
+#[test]
+fn closure_clones_provider_declaration_provenance() {
+    let provider = provider_origin("provider");
+    let origin = function_origin(&provider, "project_value");
+    let member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "project_value",
+    );
+    let mut declaration = function_record(&provider, "project_value", 0);
+    declaration.synthetic_interface_provenance =
+        SyntheticInterfaceProvenance::single(member.clone());
+    let provider_interface = provider_interface(
+        &provider,
+        vec![declaration],
+        vec![ConcreteCallSummaryRecord {
+            origin: origin.clone(),
+            summary: empty_summary(),
+        }],
+        Vec::new(),
+    );
+
+    let closed = close(
+        vec![ExportBinding::new(
+            provider_origin("facade"),
+            "project_value".to_owned(),
+            OriginDeclarationId::Function(origin.clone()),
+        )],
+        vec![&provider_interface],
+    )
+    .expect("provider declaration with provenance should close");
+
+    let closed_record = closed
+        .declarations
+        .iter()
+        .find(|record| record.origin == OriginDeclarationId::Function(origin.clone()))
+        .expect("closed interface should retain the provider declaration");
+    assert_eq!(
+        closed_record.synthetic_interface_provenance.members(),
+        &[member],
+        "ordinary interface closure must clone declaration provenance",
     );
 }
 

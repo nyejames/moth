@@ -57,6 +57,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     diagnostic_type,
                     ValueMode::ImmutableReference,
                 ),
+                config_qualifier: None,
             };
             Rc::make_mut(&mut self.declaration_table)
                 .append_for_construction(declaration)
@@ -463,6 +464,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             parameters.push(Declaration {
                 id: function_path.append(name),
                 value,
+                config_qualifier: None,
             });
             parameter_type_ids.push(type_id);
         }

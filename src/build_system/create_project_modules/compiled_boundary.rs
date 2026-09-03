@@ -29,11 +29,6 @@ use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
-
-/// One diagnosed module retained at the graph boundary.
-///
-/// The dense build-local `ModuleId` is retained only for deterministic ordering and outcome
-/// queries inside the owning boundary; it never enters a [`CompiledModuleArtifact`].
 #[derive(Debug)]
 pub(crate) struct DiagnosedModule {
     pub(crate) module_id: ModuleId,
@@ -835,6 +830,8 @@ pub(crate) struct ProjectFrontendCompilation {
     pub(crate) source_packages: CompletedSourcePackageRegistry,
     /// Build-only physical resource inputs and missing-target watches discovered before AST.
     pub(crate) resource_inputs: ResourceInputRegistry,
+    /// Diagnostics and warnings from transient check-only units, which have no canonical graph slot.
+    pub(crate) transient_messages: Vec<CompilerMessages>,
 }
 
 impl ProjectFrontendCompilation {
@@ -842,6 +839,15 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
+    ) -> Result<Self, CompilerError> {
+        Self::new_with_transient_messages(project, source_packages, resource_inputs, Vec::new())
+    }
+
+    pub(crate) fn new_with_transient_messages(
+        project: CompiledGraphBoundary,
+        source_packages: CompletedSourcePackageRegistry,
+        resource_inputs: ResourceInputRegistry,
+        transient_messages: Vec<CompilerMessages>,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
@@ -874,6 +880,7 @@ impl ProjectFrontendCompilation {
             project,
             source_packages,
             resource_inputs,
+            transient_messages,
         })
     }
 
@@ -884,6 +891,10 @@ impl ProjectFrontendCompilation {
     pub(crate) fn has_diagnosed_or_blocked(&self) -> bool {
         !self.project.diagnosed.is_empty()
             || !self.project.blocked.is_empty()
+            || self
+                .transient_messages
+                .iter()
+                .any(|messages| messages.error_count() > 0)
             || self.source_packages.iter().any(|package| {
                 !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
             })
@@ -919,6 +930,10 @@ impl ProjectFrontendCompilation {
             for diagnosed in package.boundary.diagnosed {
                 messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
             }
+        }
+
+        for transient in self.transient_messages {
+            messages.append_messages_preserving_context(transient);
         }
 
         messages

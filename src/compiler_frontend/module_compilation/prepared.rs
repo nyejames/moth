@@ -12,6 +12,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
@@ -41,7 +42,9 @@ pub(crate) struct PreparedModuleInput {
     /// by construction and is consumed by direct export-origin projection to resolve and validate
     /// the active root's origin and each directly-defined public header's defining source file.
     pub(crate) source_module_origins: SourceModuleOriginTable,
-    /// Provider-independent retained header syntax, produced before provider interfaces exist.
+    /// Provider-independent retained header syntax, including normalized source `#Config`
+    /// contract shells. The shells remain outside provider binding and are available to the later
+    /// project-wide resolution barrier through this payload.
     pub(crate) prepared_header_syntax: PreparedHeaderSyntax,
     /// Stage 0 resolved file-value targets, keyed with the preparing file and path-syntax handle.
     ///
@@ -75,5 +78,13 @@ impl PreparedModuleInput {
                     self.active_root_file_id.0
                 ))
             })
+    }
+
+    /// Borrow normalized source `#Config` shells retained during header preparation.
+    ///
+    /// The accessor exposes retained source contracts to the project-wide build-config barrier
+    /// without exposing provider-bound or mutable resolution state through `PreparedModuleInput`.
+    pub(crate) fn source_build_config_contracts(&self) -> &[SourceBuildConfigContract] {
+        &self.prepared_header_syntax.source_build_config_contracts
     }
 }

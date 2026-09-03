@@ -955,6 +955,8 @@ impl GenericTemplateArtefact {
             root_role: ModuleRootRole::Support,
             build_profile,
             file_value_resolution: Some(file_value_resolution),
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]
@@ -962,7 +964,8 @@ impl GenericTemplateArtefact {
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
-        let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        let (phase_context, string_table_ref) =
+            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,
@@ -1259,6 +1262,7 @@ impl GenericTemplateArtefact {
                     DataType::Function(Box::new(None), signature.clone()),
                     ValueMode::ImmutableReference,
                 ),
+                config_qualifier: None,
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
             append_materialised_declaration(lookups, declaration)?;
@@ -1315,6 +1319,7 @@ impl GenericTemplateArtefact {
                 let declaration = Declaration {
                     id: local_path.clone(),
                     value,
+                    config_qualifier: None,
                 };
                 let lookups = Rc::make_mut(&mut environment.lookups);
                 let declaration_id = match lookups
@@ -1352,6 +1357,7 @@ impl GenericTemplateArtefact {
                         diagnostic_type_spelling(type_id, &environment.type_environment),
                         ValueMode::ImmutableReference,
                     ),
+                    config_qualifier: None,
                 };
                 let lookups = Rc::make_mut(&mut environment.lookups);
                 if lookups.declaration_table.get_by_path(&local_path).is_none() {
@@ -1420,6 +1426,7 @@ impl GenericTemplateArtefact {
                     DataType::Function(Box::new(Some(receiver.clone())), signature.clone()),
                     ValueMode::ImmutableReference,
                 ),
+                config_qualifier: None,
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
             if lookups
@@ -1773,6 +1780,7 @@ impl GenericTemplateArtefact {
                             DataType::Function(Box::new(receiver), signature),
                             ValueMode::ImmutableReference,
                         ),
+                        config_qualifier: None,
                     },
                 )?;
             }
@@ -2183,6 +2191,7 @@ fn materialised_nominal_declaration(
             diagnostic_type,
             ValueMode::ImmutableReference,
         ),
+        config_qualifier: None,
     })
 }
 
@@ -2303,6 +2312,7 @@ fn materialised_struct_fields(
         declarations.push(Declaration {
             id: field.name.clone(),
             value,
+            config_qualifier: None,
         });
     }
     Ok(Some(declarations))
@@ -2712,6 +2722,7 @@ impl StableFunctionSignature {
             parameters.push(Declaration {
                 id: parameter_path,
                 value,
+                config_qualifier: None,
             });
             parameter_type_ids.push(type_id);
         }
@@ -2869,6 +2880,7 @@ fn declaration_table_without_module_values(
                     metadata.type_id,
                     metadata.value_mode.clone(),
                 ),
+                config_qualifier: None,
             },
         ) {
             return Err(CompilerError::compiler_error(
@@ -5325,6 +5337,8 @@ impl ModuleMaterialisationPreparation {
             root_role: ModuleRootRole::Support,
             build_profile: self.build_profile,
             file_value_resolution: Some(file_value_resolution),
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             capacity_estimate: self.capacity_estimate,
             #[cfg(feature = "timers")]
@@ -5332,7 +5346,8 @@ impl ModuleMaterialisationPreparation {
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
-        let (phase_context, string_table_ref) = AstPhaseContext::from_build_context(build_context);
+        let (phase_context, string_table_ref) =
+            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,

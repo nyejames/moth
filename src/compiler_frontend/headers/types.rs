@@ -7,9 +7,10 @@
 
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DependencyClauseKind};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
@@ -51,6 +52,13 @@ use std::sync::Arc;
 /// header parsing. `declarations` inside it is empty until dependency sorting completes.
 pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
+    /// Provider-independent source `#Config` declarations, normalized from top-level constant
+    /// shells before any provider binding or AST expression resolution.
+    ///
+    /// These shells intentionally do not belong to `ModuleSymbols`, public exports, dependency
+    /// clauses/edges, or local ordering hints. Their authored constant shells remain in `headers`
+    /// so the later config barrier can consume one retained source identity.
+    pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
     /// Number of top-level runtime templates in the active module root.
     ///
@@ -94,6 +102,9 @@ pub struct PreparedHeaderSyntax {
 /// before the provider graph has compiled.
 pub struct BoundModuleHeaders {
     pub headers: Vec<Header>,
+    /// Provider-independent source `#Config` declarations retained through binding for the
+    /// module-local static-value projection in AST construction.
+    pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub entry_runtime_fragment_count: usize,
     pub const_fragment_count: usize,
@@ -131,6 +142,12 @@ pub struct TopLevelConstFragment {
 pub struct HeaderParseOptions {
     pub entry_file_id: Option<FileId>,
     pub project_path_resolver: Option<ProjectPathResolver>,
+    /// An explicit role for the active entry file, when the caller is compiling a transient
+    /// selection rather than a graph-owned module root.
+    ///
+    /// WHY: check-only source selections retain their real source semantics and must not acquire
+    ///      active-root privileges merely because their selected file is the entry path.
+    pub entry_file_role: Option<FileRole>,
     /// The graph-owned semantic role of the root currently being compiled.
     ///
     /// WHY: entry-path equality identifies which file is active but cannot decide whether that
@@ -144,11 +161,16 @@ impl Default for HeaderParseOptions {
         Self {
             entry_file_id: None,
             project_path_resolver: None,
+            entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         }
     }
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "keeping declaration shells inline avoids an allocation for every constant header"
+)]
 #[derive(Clone, Debug)]
 pub enum HeaderKind {
     Function {
@@ -474,25 +496,26 @@ impl HeaderKind {
     /// Whether this header kind is an authored declaration that may participate in a
     /// module-root public export surface.
     ///
-    /// WHAT: returns `true` exactly for the authored declaration kinds: functions, structs,
-    ///       choices, transparent type aliases, compile-time constants and trait declarations.
-    ///       Returns `false` for const templates, the implicit active-root start function, trait
-    ///       conformance and trait incompatibility, which are not exportable declarations.
+    /// WHAT: returns `true` exactly for authored declaration kinds that are exportable after
+    /// syntax-only filtering: functions, structs, choices, transparent type aliases, ordinary
+    /// compile-time constants and trait declarations. Source `#Config` constants are contract
+    /// shells rather than exported declarations and therefore return `false`.
     /// WHY: the header, AST public-surface and semantic-origin stages all need the same
-    ///      declaration-kind gate to decide which headers may become public export entries.
-    ///      Owning the kind set on `HeaderKind` keeps one declaration-kind authority so the three
-    ///      stage-local public-export predicates cannot drift. Each predicate keeps its own
-    ///      file-role and export-mode policy; this method owns only the declaration-kind policy.
+    /// declaration-kind and contract-shell gate to decide which headers may become public export
+    /// entries. Owning both gates here keeps the stage-local predicates from drifting.
     pub fn is_authored_public_export_declaration(&self) -> bool {
-        matches!(
-            self,
+        match self {
             HeaderKind::Function { .. }
-                | HeaderKind::Struct { .. }
-                | HeaderKind::Choice { .. }
-                | HeaderKind::TypeAlias { .. }
-                | HeaderKind::Trait { .. }
-                | HeaderKind::Constant { .. }
-        )
+            | HeaderKind::Struct { .. }
+            | HeaderKind::Choice { .. }
+            | HeaderKind::TypeAlias { .. }
+            | HeaderKind::Trait { .. } => true,
+            HeaderKind::Constant { declaration } => declaration.config_qualifier.is_none(),
+            HeaderKind::StartFunction
+            | HeaderKind::ConstTemplate { .. }
+            | HeaderKind::TraitConformance { .. }
+            | HeaderKind::TraitIncompatibility { .. } => false,
+        }
     }
 
     /// Remap every interned string owned by this header kind into the merged global string table.
@@ -855,6 +878,15 @@ impl DependencyBindingSyntax {
         match self {
             Self::Namespace { .. } => None,
             Self::DirectSelections { range } => Some(*range),
+        }
+    }
+
+    /// Return the typed clause kind represented by this binding syntax.
+    pub fn clause_kind(&self) -> DependencyClauseKind {
+        match self {
+            Self::Namespace { alias: None } => DependencyClauseKind::Namespace,
+            Self::Namespace { alias: Some(_) } => DependencyClauseKind::NamespaceAlias,
+            Self::DirectSelections { .. } => DependencyClauseKind::DirectSelection,
         }
     }
 }
@@ -1754,7 +1786,7 @@ fn validate_choice_variant(
         crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
             fields,
         } => {
-            for field in fields {
+            for field in fields.iter() {
                 validate_signature_member(field, source_file, path_syntax)?;
             }
         }

@@ -1,0 +1,7 @@
+project #= |
+    name = "test_project",
+    entry_root = "src",
+    version = "1.2.3",
+    displayName = "Docs",
+|
+html #= ||

@@ -4,6 +4,10 @@ Moth is a high-level language with first-class string templates. Its compiler is
 
 This document is the single source of truth for accepted core compiler architecture, semantic ownership and cross-stage compiler contracts. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
+The compiler implements direct and source `#Config` values as ordinary folded constants and exposes
+immutable project fields through explicit `@project`. Entry-local `config:` blocks remain deferred;
+other accepted end-state contracts are labelled in their owning sections.
+
 `docs/build-system-design.md` owns project bootstrap, Stage 0 graph construction, config, module and package topology, command policy, project builders, linking and output ownership. Read both documents when a task crosses the compiler and build-system boundary.
 
 `docs/src/developer-docs/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Moth. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.

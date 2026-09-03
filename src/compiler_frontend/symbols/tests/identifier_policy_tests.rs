@@ -24,6 +24,17 @@ fn keyword_shadow_matching_ignores_case_and_leading_underscores() {
     assert_eq!(keyword_shadow_match("export"), Some("export"));
     assert_eq!(keyword_shadow_match("EXPORT"), Some("export"));
     assert_eq!(keyword_shadow_match("_export"), Some("export"));
+
+    assert_eq!(keyword_shadow_match("config"), Some("config"));
+    assert_eq!(keyword_shadow_match("Config"), Some("config"));
+    assert_eq!(keyword_shadow_match("CONFIG"), Some("config"));
+    assert_eq!(keyword_shadow_match("_config"), Some("config"));
+    assert_eq!(keyword_shadow_match("_Config"), Some("config"));
+
+    // Longer words that only start with the reserved spelling stay ordinary.
+    assert_eq!(keyword_shadow_match("configure"), None);
+    assert_eq!(keyword_shadow_match("Configured"), None);
+    assert_eq!(keyword_shadow_match("_configuration"), None);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! Focused invariant tests for the compiled `Module` lane container.
 
-use crate::build_system::build::ProjectCompilation;
+use crate::build_system::build::{ProjectAssemblyError, ProjectCompilation};
 use crate::build_system::create_project_modules::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
     CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
@@ -121,6 +121,9 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
     module
         .side_table
         .bind_function_name(FunctionId(0), start_name_path);
+    module
+        .function_provenance
+        .insert(FunctionId(0), Default::default());
     module
 }
 
@@ -368,7 +371,10 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         vec![module],
     ) {
         Ok(_) => panic!("missing external package ownership should violate entry assembly"),
-        Err(error) => error,
+        Err(ProjectAssemblyError::Infrastructure(error)) => error,
+        Err(ProjectAssemblyError::Diagnostic { .. }) => {
+            panic!("entry assembly invariant must remain an infrastructure error")
+        }
     };
     assert!(error.msg.contains("has no owning package"));
 }
@@ -1155,7 +1161,10 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
 
     let error = match ProjectCompilation::from_frontend(frontend) {
         Ok(_) => panic!("a package must not resolve another package's sidecar"),
-        Err(error) => error,
+        Err(ProjectAssemblyError::Infrastructure(error)) => error,
+        Err(ProjectAssemblyError::Diagnostic { .. }) => {
+            panic!("sidecar owner resolution must remain an infrastructure error")
+        }
     };
     assert!(
         error.msg.contains("in its calling boundary"),
@@ -1552,7 +1561,10 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
 
     let error = match ProjectCompilation::from_frontend(frontend) {
         Ok(_) => panic!("diagnosed or blocked modules must reject success-only compilation"),
-        Err(error) => error,
+        Err(ProjectAssemblyError::Infrastructure(error)) => error,
+        Err(ProjectAssemblyError::Diagnostic { .. }) => {
+            panic!("diagnosed or blocked boundary rejection must remain infrastructure")
+        }
     };
     assert!(
         error.msg.contains("boundary with diagnosed ModuleId"),

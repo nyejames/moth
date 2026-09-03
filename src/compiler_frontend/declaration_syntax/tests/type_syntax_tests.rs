@@ -634,6 +634,7 @@ fn resolves_named_types_recursively_in_composite_types() {
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
 
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
@@ -674,6 +675,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
             DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path.to_owned(), single_parameter_metadata(t_name));
@@ -734,6 +736,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
             DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path, single_parameter_metadata(t_name));
@@ -800,6 +803,7 @@ fn bare_generic_type_name_requires_type_arguments() {
             DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path, single_parameter_metadata(t_name));

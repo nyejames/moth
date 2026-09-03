@@ -13,6 +13,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -58,7 +59,7 @@ fn compile_boracle_input(
         mut string_table,
         mut frontend_surface,
         ..
-    } = bootstrap_project_build(&project_builder, valid_path)?;
+    } = bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new())?;
 
     if config.entry_dir.is_dir() {
         let error = CompilerError::compiler_error(

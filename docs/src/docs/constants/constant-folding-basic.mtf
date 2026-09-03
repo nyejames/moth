@@ -11,10 +11,11 @@ It cannot use a runtime variable or call a runtime function.
 
 When a constant expression is invalid, the compiler reports it during the build instead of leaving the failure for runtime.
 
-Static Bool `if` specialisation is accepted deferred until the constant-evaluation plan lands. It uses ordinary `if` syntax:
+Static Bool `if` specialisation is implemented for ordinary `if` syntax, including conditions from
+`#Config of Bool` values:
 
 [codeblock, $code("moth"):
-    enabled #Bool = false
+    enabled #Config of Bool = false
 
     if enabled:
         perform_optional_work()

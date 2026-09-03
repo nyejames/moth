@@ -74,14 +74,16 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::traits::environment::CoreTraitKind;
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
-
 /// The projected canonical signature for one receiver-method callable seed.
 ///
 /// WHAT: the canonical parameter, return and error-return types for one receiver method,
-/// projected once during receiver projection and keyed by the seed's `method_index`.
+/// projected once during receiver projection and keyed by the seed's `method_index`. The
+/// default provenance is retained as an internal aggregate so the owning nominal declaration
+/// record can publish it without changing the folded-value payload vocabulary.
 /// Free-function seeds do not carry this; their signature is projected by the free-function
 /// projection owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +91,7 @@ pub(super) struct ProjectedReceiverMethodSignature {
     pub(super) parameters: Vec<PublicParameterTypeSlot>,
     pub(super) returns: Vec<PublicReturnTypeSlot>,
     pub(super) error_return: Option<CanonicalTypeIdentity>,
+    pub(super) default_provenance: SyntheticInterfaceProvenance,
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,6 +1202,28 @@ pub(super) fn project_folded_default(
         return Ok(None);
     }
     convert_expression_to_folded_value(expression, folded_value_context).map(Some)
+}
+/// Return the aggregate provenance carried by one default expression.
+///
+/// `NoValue` is the explicit no-default marker and contributes nothing even if malformed test
+/// fixtures attach metadata to it. Every other normalized default expression already carries the
+/// union of its nested expression values in its root metadata.
+pub(super) fn project_default_provenance(expression: &Expression) -> SyntheticInterfaceProvenance {
+    if matches!(expression.kind, ExpressionKind::NoValue) {
+        SyntheticInterfaceProvenance::empty()
+    } else {
+        expression.synthetic_interface_provenance.clone()
+    }
+}
+/// Return the aggregate provenance carried by a declaration slice's default expressions.
+pub(super) fn project_defaults_provenance(
+    declarations: &[Declaration],
+) -> SyntheticInterfaceProvenance {
+    let mut provenance = SyntheticInterfaceProvenance::empty();
+    for declaration in declarations {
+        provenance.merge(&project_default_provenance(&declaration.value));
+    }
+    provenance
 }
 
 /// Projects declaration-owned access without consulting HIR or borrow-analysis side tables.

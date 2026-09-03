@@ -429,7 +429,7 @@ run_type_stress ||:
     square = make_square(15.0)
     counter ~= Counter(0)
     person = Person("Alice", 30, "alice@example.com", true)
-    config = make_default_config()
+    settings = make_default_config()
     metric = make_empty_metric()
     
     -- Call immutable methods

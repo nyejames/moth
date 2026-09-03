@@ -86,6 +86,21 @@ fn register_function_rejects_duplicates() {
 }
 
 #[test]
+fn register_package_rejects_reserved_project_namespace() {
+    let mut registry = ExternalPackageRegistry::new();
+    for path in ["@project", "@project/details", "project"] {
+        let error = registry
+            .register_package(path, crate::builder_surface::PackageOrigin::Builder)
+            .expect_err("binding packages must not claim the @project namespace");
+        assert!(
+            error
+                .msg
+                .contains("reserved for the @project project-globals interface")
+        );
+    }
+}
+
+#[test]
 fn collection_helpers_keep_receiver_parameter_access_modes() {
     let registry = ExternalPackageRegistry::new();
 

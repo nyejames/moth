@@ -805,6 +805,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let declaration = Declaration {
         id: source_path.clone(),
         value: source_expression,
+        config_qualifier: None,
     };
 
     let mut token_stream = template_tokens_from_source("[$(source): body]", &mut string_table);
@@ -922,6 +923,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
             },
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }];
 
     let mut token_stream =
@@ -1651,6 +1653,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
 
     let mut parent_tokens = template_tokens_from_source("[wrapper, $md: body]", &mut string_table);
@@ -1707,6 +1710,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
 
     let mut parent_tokens = template_tokens_from_source(
@@ -1808,10 +1812,12 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         Declaration {
             id: scope.append(string_table.intern("wrapper")),
             value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
         Declaration {
             id: scope.append(string_table.intern("heading")),
             value: Expression::template(insert, ValueMode::ImmutableOwned),
+            config_qualifier: None,
         },
     ];
 
@@ -2180,6 +2186,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper.clone(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
     let mut parent_tokens = template_tokens_from_source("[wrapper: body]", &mut string_table);
     let parent_context = ScopeContext::new_for_tests(
@@ -2255,6 +2262,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
 
     let mut parent_tokens = template_tokens_from_source("[wrapper: body]", &mut string_table);

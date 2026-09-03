@@ -1,6 +1,6 @@
 Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-**Accepted deferred syntax.** The examples show the accepted end-state contract. See @../progress (Progress) for current support.
+**Implemented contract.** Direct and source `#Config`, typed `--input` values and explicit `@project` are supported. Entry-local `config:` blocks remain deferred; see @../progress (Progress) for current support.
 
 ### `#Config` values
 

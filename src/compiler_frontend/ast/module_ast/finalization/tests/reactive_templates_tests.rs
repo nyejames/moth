@@ -95,6 +95,7 @@ fn no_value_declaration(
             type_id,
             ValueMode::ImmutableReference,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -550,6 +551,7 @@ fn references_use_metadata_computed_for_prior_declarations() {
                 test_source_location(3),
             )],
         ),
+        config_qualifier: None,
     };
 
     let mut ast = vec![
@@ -786,6 +788,7 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let show_declaration = Declaration {
         id: show_path.clone(),
         value: show_template,
+        config_qualifier: None,
     };
 
     let body_expression = template_with_subscription(
@@ -879,6 +882,7 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
             &mut store,
             reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
         ),
+        config_qualifier: None,
     };
 
     let body_site_id = store.next_expression_site_id();
@@ -976,6 +980,7 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
             &mut store,
             reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
         ),
+        config_qualifier: None,
     };
 
     let site_id = store.next_expression_site_id();
@@ -1072,6 +1077,7 @@ fn annotates_existing_child_expression_override() {
             &mut store,
             reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
         ),
+        config_qualifier: None,
     };
 
     let child_site_id = store.next_expression_site_id();

@@ -56,7 +56,11 @@ fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
 }
 
 fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {
-    Declaration { id: name, value }
+    Declaration {
+        id: name,
+        value,
+        config_qualifier: None,
+    }
 }
 
 fn param(
@@ -1742,6 +1746,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
+                    config_qualifier: None,
                 }],
             },
             location: test_source_location(2),
@@ -1855,6 +1860,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
+                    config_qualifier: None,
                 }],
             },
             location: test_source_location(2),

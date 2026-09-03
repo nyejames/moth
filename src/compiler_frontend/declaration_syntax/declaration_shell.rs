@@ -12,6 +12,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    BuildConfigQualifierSyntax, parse_build_config_qualifier, starts_build_config_qualifier,
+};
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
@@ -33,13 +36,12 @@ pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 ///      through every successful parse. Plain-diagnostic callers unbox once at
 ///      their existing boundary.
 type DeclarationShellResult<T> = Result<T, Box<CompilerDiagnostic>>;
-
-// All the component parts of a declaration before it is resolved / parsed.
-// Header parsing stores the shell; AST resolves the shell into a fully typed declaration.
 #[derive(Clone, Debug)]
 pub struct DeclarationSyntax {
     pub binding_mode: BindingMode,
     pub type_annotation: ParsedTypeRef,
+    /// Syntax-only `#Config of T` metadata retained for header consumers and AST resolution.
+    pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
     pub initializer_tokens: Vec<Token>,
     pub initializer_references: Vec<InitializerReference>,
     pub location: SourceLocation,
@@ -62,12 +64,15 @@ impl DeclarationSyntax {
         self.type_annotation.clone()
     }
 
-    /// Remap type annotation, initializer tokens, initializer references,
+    /// Remap type annotation, config qualifier, initializer tokens, initializer references,
     /// and source location into a merged string table.
     ///
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
+        if let Some(qualifier) = &mut self.config_qualifier {
+            qualifier.remap_string_ids(remap);
+        }
         for token in &mut self.initializer_tokens {
             token.remap_string_ids(remap);
         }
@@ -79,6 +84,9 @@ impl DeclarationSyntax {
 
     pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         self.type_annotation.rebind_source_identity(logical_path);
+        if let Some(qualifier) = &mut self.config_qualifier {
+            qualifier.rebind_source_identity(logical_path);
+        }
         for token in &mut self.initializer_tokens {
             token.location.rebind_source_identity(logical_path);
         }
@@ -89,15 +97,51 @@ impl DeclarationSyntax {
     }
 }
 
-// Declaration Syntax for general variables / constants or parameters
 pub fn parse_declaration_syntax(
     token_stream: &mut FileTokens,
     name: StringId,
     string_table: &mut StringTable,
 ) -> DeclarationShellResult<DeclarationSyntax> {
-    // This checks for mutability marker first (in the case of mutable methods)
-    // Or whether the declaration has an explicit Type
-    let target = parse_binding_target_syntax(name, token_stream, string_table)?;
+    // `#Config of T` is declaration-owned syntax, not an ordinary `#` binding followed by a
+    // type named `Config`. Detect it before the generic target parser so all declaration stages
+    // retain one qualifier representation.
+    let config_qualifier = if starts_build_config_qualifier(token_stream, string_table) {
+        Some(parse_build_config_qualifier(token_stream, string_table)?)
+    } else {
+        None
+    };
+
+    let target = if let Some(qualifier) = &config_qualifier {
+        BindingTargetSyntax {
+            name,
+            binding_mode: BindingMode::CompileTimeConstant,
+            type_annotation: qualifier.type_annotation.clone(),
+            location: qualifier.qualifier_location.clone(),
+        }
+    } else {
+        // This checks for mutability marker first (in the case of mutable methods), or whether
+        // the declaration has an explicit type.
+        parse_binding_target_syntax(name, token_stream, string_table)?
+    };
+
+    // A source `#Config` declaration may intentionally omit its initializer so a later
+    // provider-independent resolution barrier can supply the required input. Ordinary constants
+    // still require `= value`; the distinction is owned by the declaration qualifier itself.
+    if config_qualifier.is_some()
+        && matches!(
+            token_stream.current_token_kind(),
+            TokenKind::Comma | TokenKind::Eof | TokenKind::Newline
+        )
+    {
+        return Ok(DeclarationSyntax {
+            binding_mode: target.binding_mode,
+            type_annotation: target.type_annotation,
+            config_qualifier,
+            initializer_tokens: Vec::new(),
+            initializer_references: Vec::new(),
+            location: target.location,
+        });
+    }
 
     // Require assignment for declarations.
     match token_stream.current_token_kind() {
@@ -152,6 +196,7 @@ pub fn parse_declaration_syntax(
     Ok(DeclarationSyntax {
         binding_mode: target.binding_mode,
         type_annotation: target.type_annotation,
+        config_qualifier,
         initializer_references: collect_symbol_references(&initializer_tokens),
         initializer_tokens,
         location: target.location,

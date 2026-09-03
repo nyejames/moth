@@ -41,6 +41,14 @@ pub(super) fn collect_constant_type_hints(
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
 ) -> Result<(), CompilerError> {
+    // A `#Config of T` type belongs to the provider-independent contract shell, not to the
+    // ordinary declaration type graph. The resolution barrier will materialize the declaration
+    // after provider binding, so retaining this as a local ordering edge would leak contract
+    // vocabulary into header topology.
+    if declaration_syntax.config_qualifier.is_some() {
+        return Ok(());
+    }
+
     let mut selection_error = None;
     for_each_named_type_in_parsed_ref(&declaration_syntax.type_annotation, &mut |type_name| {
         if selection_error.is_none() {
@@ -166,11 +174,13 @@ pub(super) fn collect_content_source_ordering_hints(
 
         match kind {
             HeaderKind::Constant { declaration } => {
-                scan_tokens_for_content_sources(
-                    &declaration.initializer_tokens,
-                    &content_targets,
-                    local_ordering_hints,
-                );
+                if declaration.config_qualifier.is_none() {
+                    scan_tokens_for_content_sources(
+                        &declaration.initializer_tokens,
+                        &content_targets,
+                        local_ordering_hints,
+                    );
+                }
             }
 
             // Const-template tokens cover both the template head and body, including the

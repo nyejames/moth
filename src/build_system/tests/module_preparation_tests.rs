@@ -232,6 +232,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.file_id),
         project_path_resolver: frontend.project_path_resolver.clone(),
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
 
@@ -543,9 +544,11 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let compile_context = ModuleCompilationContext {
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
+        root_role_override: None,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
+        build_config_values: Arc::new(Default::default()),
         external_dependency_resolution_table: &resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
@@ -698,9 +701,11 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let compile_context = ModuleCompilationContext {
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
+        root_role_override: None,
         project_path_resolver: Some(project_path_resolver),
         style_directives: &style_directives,
         external_packages,
+        build_config_values: Arc::new(Default::default()),
         external_dependency_resolution_table: &resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
@@ -1178,6 +1183,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.file_id),
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
     let fork_source = fixture.frontend.string_table.fork_source();

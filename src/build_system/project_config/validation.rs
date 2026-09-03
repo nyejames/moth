@@ -291,11 +291,17 @@ fn apply_project_record_fields(
                 }
             }
 
-            ("version", ValidatedConfigValue::String(value)) => config.version = value,
+            ("version", ValidatedConfigValue::String(value)) => config.version = Some(value),
 
-            ("author", ValidatedConfigValue::String(value)) => config.author = value,
+            ("version", ValidatedConfigValue::OptionNone) => config.version = None,
 
-            ("license", ValidatedConfigValue::String(value)) => config.license = value,
+            ("author", ValidatedConfigValue::String(value)) => config.author = Some(value),
+
+            ("author", ValidatedConfigValue::OptionNone) => config.author = None,
+
+            ("license", ValidatedConfigValue::String(value)) => config.license = Some(value),
+
+            ("license", ValidatedConfigValue::OptionNone) => config.license = None,
 
             ("template_const_loop_iteration_limit", ValidatedConfigValue::Int(value)) => {
                 match validate_template_const_loop_iteration_limit(
@@ -503,10 +509,12 @@ struct ValueDiagnosticContext<'a> {
 enum ValidatedConfigValue {
     String(String),
     Int(i32),
+    Float(crate::compiler_frontend::folded_value::FiniteFloat),
     Bool(bool),
-    Collection(Vec<ValidatedConfigValue>),
+    Char(char),
     OptionNone,
     Record(Vec<ValidatedRecordField>),
+    Collection(Vec<ValidatedConfigValue>),
     /// An open-record field retained without a compiler-owned schema leaf.
     Preserved(Box<PreservedConfigField>),
 }
@@ -565,8 +573,20 @@ fn validate_value(
             None => ValueCheck::Mismatch,
         },
 
+        ConfigFieldShape::Float => match extract_float_value(value) {
+            Some(float_value) => ValueCheck::Valid(ValidatedConfigValue::Float(float_value)),
+
+            None => ValueCheck::Mismatch,
+        },
+
         ConfigFieldShape::Bool => match extract_bool_value(value) {
             Some(bool_value) => ValueCheck::Valid(ValidatedConfigValue::Bool(bool_value)),
+
+            None => ValueCheck::Mismatch,
+        },
+
+        ConfigFieldShape::Char => match extract_char_value(value) {
+            Some(char_value) => ValueCheck::Valid(ValidatedConfigValue::Char(char_value)),
 
             None => ValueCheck::Mismatch,
         },
@@ -922,6 +942,24 @@ fn format_closed_string_set_expected(allowed: &[&str]) -> String {
 fn extract_int_value(value: &PublicFoldedValue) -> Option<i32> {
     match value {
         PublicFoldedValue::Int(value) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Extract a finite floating-point value without accepting integer promotion.
+fn extract_float_value(
+    value: &PublicFoldedValue,
+) -> Option<crate::compiler_frontend::folded_value::FiniteFloat> {
+    match value {
+        PublicFoldedValue::Float(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+/// Extract a character value without accepting string coercion.
+fn extract_char_value(value: &PublicFoldedValue) -> Option<char> {
+    match value {
+        PublicFoldedValue::Char(value) => Some(*value),
         _ => None,
     }
 }

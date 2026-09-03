@@ -141,6 +141,7 @@ fn declaration_for_trait_bound_parameter(
             diagnostic_type,
             value_mode,
         ),
+        config_qualifier: None,
     }
 }
 

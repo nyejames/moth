@@ -212,6 +212,9 @@ pub(crate) fn common_syntax_mistake_message(
         CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => {
             "Invalid compile-time binding syntax. Use `name #= value` for inferred constants or `name #Type = value` for explicit constant types. For collection and option types, attach `#` to the first token of the type: `names #{String} = ...` or `value #String? = ...`.".to_string()
         }
+        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
+            "Invalid `#Config` qualifier spacing. Write `name #Config of Type = value` with no space between `#` and `Config`.".to_string()
+        }
         CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => {
             "Invalid mutable binding syntax. Use `name ~= value` for inferred mutable bindings or `name ~Type = value` for explicit mutable types. For collection types, attach `~` to the first token of the type: `values ~{String} = ...`.".to_string()
         }
@@ -320,6 +323,9 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
         }
         CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {
             "Remove the leading `+`; use the value directly".to_owned()
+        }
+        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
+            "Write the qualifier as `#Config of Type` without spaces inside `#Config`".to_owned()
         }
     }
 }

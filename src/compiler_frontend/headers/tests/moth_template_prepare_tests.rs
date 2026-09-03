@@ -108,6 +108,20 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
     );
 }
 
+#[test]
+fn config_marked_moth_template_paths_stay_out_of_structural_references() {
+    let (output, _) = prepare_directly("[@assets/missing.mtf #Config of String]");
+
+    assert!(
+        !output.path_syntax.table().paths().is_empty(),
+        "fixture should retain the authored path row"
+    );
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "config-marked Moth-template paths must not reach Stage 0 file references"
+    );
+}
+
 fn prepare_via_pipeline(
     source: &str,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
@@ -151,6 +165,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let options = HeaderParseOptions {
         entry_file_id: None,
         project_path_resolver: Some(project_path_resolver.clone()),
+        entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
     let context = FrontendFilePrepareContext {
@@ -198,6 +213,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             module_symbols: sorted_headers.module_symbols,
             binding_environment: sorted_headers.binding_environment,
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
+            source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
             root_role: ModuleRootRole::Normal,
@@ -207,6 +223,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
@@ -413,6 +431,7 @@ impl MothTemplateScopeFixture {
                 module_symbols: sorted_headers.module_symbols,
                 binding_environment: sorted_headers.binding_environment,
                 top_level_const_fragments: sorted_headers.top_level_const_fragments,
+                source_build_config_contract_names: Arc::new(Default::default()),
             },
             AstBuildContext {
                 root_role: ModuleRootRole::Normal,
@@ -422,6 +441,8 @@ impl MothTemplateScopeFixture {
                 entry_dir,
                 build_profile: FrontendBuildProfile::Dev,
                 file_value_resolution: None,
+                config_resolution: None,
+                build_config_values: Arc::new(Default::default()),
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 capacity_estimate: Default::default(),
                 #[cfg(feature = "timers")]
@@ -522,6 +543,7 @@ impl MothTemplateScopeFixture {
         let options = HeaderParseOptions {
             entry_file_id: None,
             project_path_resolver: Some(self.project_path_resolver.clone()),
+            entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
         let context = FrontendFilePrepareContext {
@@ -1173,6 +1195,7 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: constant_origin,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
@@ -1204,6 +1227,7 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: custom_constant_origin,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
@@ -1283,6 +1307,7 @@ fn provider_interface_collision_remaps_authored_declaration_location() {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: collision_origin,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
@@ -1799,6 +1824,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             module_symbols: sorted_headers.module_symbols,
             binding_environment: sorted_headers.binding_environment,
             top_level_const_fragments: sorted_headers.top_level_const_fragments,
+            source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
             root_role: ModuleRootRole::Normal,
@@ -1808,6 +1834,8 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             entry_dir,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

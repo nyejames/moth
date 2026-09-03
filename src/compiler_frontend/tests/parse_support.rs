@@ -120,6 +120,7 @@ pub(crate) fn parse_single_file_ast_build_result(
     let options = HeaderParseOptions {
         entry_file_id: None,
         project_path_resolver: Some(test_project_path_resolver()),
+        entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
@@ -210,6 +211,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
             root_role: ModuleRootRole::Normal,
@@ -219,6 +221,8 @@ pub(crate) fn parse_single_file_ast_build_result(
             entry_dir: entry_path,
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: Some(file_value_resolution),
+            config_resolution: None,
+            build_config_values: Arc::new(Default::default()),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

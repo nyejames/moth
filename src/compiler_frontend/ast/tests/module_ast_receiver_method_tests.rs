@@ -183,6 +183,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
                 DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         }],
     );
     struct_fields.insert(
@@ -196,6 +197,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
                 DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         }],
     );
 
@@ -228,6 +230,7 @@ fn non_recursive_runtime_structs_are_allowed() {
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         }],
     );
 

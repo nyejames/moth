@@ -135,6 +135,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
             capture_data_type,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
 
     let binding_location = declaration.value.location.clone();
@@ -468,6 +469,7 @@ fn build_arm_scope_with_choice_captures(
                 diagnostic_type_spelling(capture.type_id, type_environment),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         };
 
         let binding_location = declaration.value.location.clone();
@@ -532,6 +534,7 @@ fn convert_choice_payload(
                         diagnostic_type_spelling(field.type_id, type_environment),
                         ValueMode::ImmutableOwned,
                     ),
+                    config_qualifier: None,
                 })
                 .collect(),
         },

@@ -3048,6 +3048,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
             builtin_type_ids::INT,
             ValueMode::ImmutableReference,
         ),
+        config_qualifier: None,
     };
     parameter.value.reactive_source = Some(ReactiveSource {
         path: parameter_path.clone(),
@@ -3309,6 +3310,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
         parameters: vec![Declaration {
             id: InternedPath::new(),
             value: parameter_default,
+            config_qualifier: None,
         }],
         returns: Vec::new(),
     };
@@ -3432,6 +3434,7 @@ fn marker_signature(parameter_count: usize) -> FunctionSignature {
                     DataType::Inferred,
                     ValueMode::default(),
                 ),
+                config_qualifier: None,
             })
             .collect(),
         returns: Vec::new(),

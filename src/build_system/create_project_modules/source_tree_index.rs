@@ -22,6 +22,7 @@ use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePacka
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
@@ -32,7 +33,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
-use crate::projects::settings::Config;
+use crate::projects::settings::{Config, LANGUAGE_SOURCE_SUFFIX};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -628,7 +629,6 @@ impl SourceTreeIndex {
                 if !path.is_file() {
                     continue;
                 }
-
                 stats.files_seen += 1;
 
                 let file_name =
@@ -641,6 +641,19 @@ impl SourceTreeIndex {
                                 string_table,
                             )
                         })?;
+
+                if let SourceTreeBoundaryKind::Project { .. } = kind
+                    && directory == entry_root
+                    && (source_stem_from_file_name(file_name)
+                        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+                        || file_name_claims_project_globals_root(file_name))
+                {
+                    return Err(project_structure_messages(
+                        &path,
+                        InvalidConfigReason::ProjectGlobalsNameReserved,
+                        string_table,
+                    ));
+                }
 
                 if let Some(stem) = source_stem_from_file_name(file_name) {
                     source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
@@ -770,6 +783,17 @@ impl SourceTreeIndex {
                         string_table,
                     ));
                 }
+            }
+            if let SourceTreeBoundaryKind::Project { .. } = kind
+                && directory == entry_root
+                && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
+            {
+                let colliding_folder = directory.join(PROJECT_GLOBALS_DEPENDENCY_NAME);
+                return Err(project_structure_messages(
+                    &colliding_folder,
+                    InvalidConfigReason::ProjectGlobalsNameReserved,
+                    string_table,
+                ));
             }
 
             // On the project root pass, reject entry-root folders whose names collide with
@@ -1129,9 +1153,6 @@ fn discover_project_package_facade(
             continue;
         }
 
-        // A non-UTF-8 direct-child filename cannot be classified as a support-root candidate and
-        // must not be silently skipped. Use the same typed filesystem-name error owner as the
-        // source-tree traversal so the offending path is preserved for rendering.
         let file_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1142,6 +1163,14 @@ fn discover_project_package_facade(
                     string_table,
                 )
             })?;
+
+        if file_name_claims_project_globals_facade(file_name) {
+            return Err(project_structure_messages(
+                &path,
+                InvalidConfigReason::ProjectGlobalsNameReserved,
+                string_table,
+            ));
+        }
 
         if file_name_is_support_root_file(file_name) {
             let canonical = fs::canonicalize(&path)
@@ -1297,6 +1326,24 @@ fn logical_module_path_from(
                 string_table,
             )
         })
+}
+
+/// Whether a canonical module-root filename uses the reserved project-globals dependency name.
+fn file_name_claims_project_globals_root(file_name: &str) -> bool {
+    ["@", "+"].into_iter().any(|marker| {
+        file_name
+            .strip_prefix(marker)
+            .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
+            == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+    })
+}
+
+/// Whether a filename can be the reserved project package facade root.
+fn file_name_claims_project_globals_facade(file_name: &str) -> bool {
+    file_name
+        .strip_prefix('+')
+        .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
+        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
 }
 
 /// Extract the dependency-name stem from a compiler-recognized source file name.

@@ -30,9 +30,9 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload,
-    InvalidAssignmentTargetReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
+    DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -188,9 +188,11 @@ fn parse_project_config_for_test(
 ) -> Result<(), CompilerMessages> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
@@ -204,9 +206,11 @@ fn parse_project_config_for_test_with_html_keys(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
@@ -218,9 +222,11 @@ fn parse_project_config_for_test_with_packages(
     frontend_surface: &crate::builder_surface::BuilderSurface,
 ) -> Result<(), CompilerMessages> {
     let mut string_table = StringTable::new();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
 }
@@ -371,6 +377,7 @@ fn with_namespace_resolution(
     config: &Config,
     resolver: &ProjectPathResolver,
     source_packages: &crate::builder_surface::SourcePackageRegistry,
+    package_prefix: Option<&str>,
     body: impl FnOnce(&DirectoryDependencyResolution, &mut StringTable),
 ) {
     let mut string_table = StringTable::new();
@@ -408,8 +415,20 @@ fn with_namespace_resolution(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let resolution =
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index);
+    let resolution = if let Some(package_prefix) = package_prefix {
+        let package_source_tree_index = module_namespace_set
+            .source_package_boundaries()
+            .find(|(prefix, _)| *prefix == package_prefix)
+            .map(|(_, index)| index)
+            .expect("requested source package boundary should be indexed");
+        DirectoryDependencyResolution::package(
+            &module_namespace_set,
+            package_prefix,
+            package_source_tree_index,
+        )
+    } else {
+        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index)
+    };
     body(&resolution, &mut string_table);
 }
 
@@ -958,6 +977,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
         &config,
         &resolver,
         &crate::builder_surface::SourcePackageRegistry::default(),
+        None,
         |resolution, string_table| {
             let provider = provider_root(&["child"], string_table);
             let resolved = resolution
@@ -1016,6 +1036,7 @@ fn direct_selection_resolves_source_package_facade() {
         &config,
         &resolver,
         &source_packages,
+        None,
         |resolution, string_table| {
             let provider = provider_root(&["helper"], string_table);
             let resolved = resolution
@@ -1685,7 +1706,7 @@ fn parses_config_constant_declarations() {
 
     assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.project_name, "docs");
-    assert_eq!(config.version, "1.2.3");
+    assert_eq!(config.version, Some("1.2.3".to_owned()));
     assert_eq!(
         config.html_section.page_url_style.as_deref(),
         Some("trailing_slash")
@@ -1704,6 +1725,27 @@ fn parses_config_constant_declarations() {
 }
 
 #[test]
+fn persists_direct_project_config_resolution_records_in_live_config() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let config_path = root.join(settings::CONFIG_FILE_NAME);
+    fs::write(
+        &config_path,
+        "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root);
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(&mut config, &config_path, &style_directives)
+        .expect("optional direct config should parse");
+
+    assert_eq!(config.author, None);
+    assert_eq!(config.config_resolution_records.len(), 1);
+    assert_ne!(config.config_resolution_records[0].fingerprint.0, 0);
+}
+
+#[test]
 fn loads_canonical_config_file_from_project_root() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -1717,9 +1759,11 @@ fn loads_canonical_config_file_from_project_root() {
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
 
@@ -1752,7 +1796,7 @@ fn applies_grouped_project_record_to_config_fields() {
 
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.entry_root, PathBuf::from("src"));
-    assert_eq!(config.version, "1.2.3");
+    assert_eq!(config.version, Some("1.2.3".to_owned()));
 }
 
 #[test]
@@ -1789,9 +1833,11 @@ fn directory_projects_require_config_moth() {
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
 
@@ -1993,7 +2039,7 @@ fn parses_config_explicit_hash_binding_mode() {
 
     assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.project_name, "docs");
-    assert_eq!(config.version, "1.0");
+    assert_eq!(config.version, Some("1.0".to_owned()));
 }
 
 #[test]
@@ -2034,7 +2080,7 @@ fn rejects_config_named_support_type_declarations() {
     let cases = [
         (
             "struct",
-            "Config = |\n    value String,\n|\nproject #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "SupportType = |\n    value String,\n|\nproject #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
         ),
         (
             "choice",
@@ -2533,7 +2579,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
         .expect("module discovery should pass");
-    let (waves, provider_bindings, _) = modules.into_parts();
+    let (waves, provider_bindings, _, _) = modules.into_parts();
     let modules: Vec<_> = waves.iter().flatten().collect();
     assert_eq!(
         modules.len(),
@@ -3615,9 +3661,14 @@ fn accepts_config_local_reference_to_earlier_private_const() {
     parse_project_config_for_test(&mut config, &config_path, &style_directives)
         .expect("config with private const reference should succeed");
 
-    assert_eq!(config.version, "0.2.0", "version should be set");
     assert_eq!(
-        config.author, "0.2.0",
+        config.version,
+        Some("0.2.0".to_owned()),
+        "version should be set"
+    );
+    assert_eq!(
+        config.author,
+        Some("0.2.0".to_owned()),
         "author should resolve through private const reference"
     );
 }
@@ -4091,6 +4142,248 @@ fn entry_root_requires_at_least_one_root_entry_file() {
 }
 
 // ── Phase 4 project-structure collision tests ─────────────────────────────────
+
+#[test]
+fn rejects_reserved_project_globals_module_folder_at_entry_root() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/project")).expect("should create project module folder");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let messages = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("entry-root project folder must not claim @project");
+
+    assert!(matches!(
+        first_invalid_config_reason(&messages),
+        InvalidConfigReason::ProjectGlobalsNameReserved
+    ));
+}
+
+#[test]
+fn rejects_reserved_project_globals_module_root_file() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(root.join("src/@project.moth"), "x ~= 1\n")
+        .expect("should write reserved module root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let messages = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("@project.moth must not create a real project module");
+
+    assert!(matches!(
+        first_invalid_config_reason(&messages),
+        InvalidConfigReason::ProjectGlobalsNameReserved
+    ));
+}
+
+#[test]
+fn rejects_reserved_project_globals_facade_root_file() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("+project.moth"), "export:\n;\n")
+        .expect("should write reserved facade root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let messages = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("+project.moth must not claim the reserved project root");
+
+    assert!(matches!(
+        first_invalid_config_reason(&messages),
+        InvalidConfigReason::ProjectGlobalsNameReserved
+    ));
+}
+
+#[test]
+fn rejects_nested_reserved_project_globals_dependency() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let resolver = configured_resolver(&config);
+    for (source, expected_kind) in [
+        (
+            "@project/details\nx ~= 1\n",
+            DependencyClauseKind::Namespace,
+        ),
+        (
+            "@project/details value\nx ~= 1\n",
+            DependencyClauseKind::DirectSelection,
+        ),
+        (
+            "@project/details as project_details\nx ~= 1\n",
+            DependencyClauseKind::NamespaceAlias,
+        ),
+    ] {
+        fs::write(root.join("src/@page.moth"), source).expect("should write entry");
+        let Err(messages) = discover_modules_for_test(&config, &resolver, &style_directives) else {
+            panic!("nested @project dependency must be rejected");
+        };
+        let diagnostic = first_error_diagnostic(&messages);
+        assert!(
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidDependencyClause {
+                    clause_kind,
+                    reason: InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
+                } if *clause_kind == expected_kind
+            ),
+            "got {:?}, expected {:?}",
+            diagnostic.payload,
+            expected_kind
+        );
+    }
+}
+
+#[test]
+fn source_package_rejects_exact_reserved_project_globals_dependency() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("builder/helper");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::create_dir_all(&package_root).expect("should create helper package");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write project entry");
+    fs::write(package_root.join("@mod.moth"), "value ~= 1\n")
+        .expect("should write helper package root");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages.register_filesystem_root("helper", package_root, PackageOrigin::Builder);
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source = fs::canonicalize(root.join("builder/helper/@mod.moth"))
+        .expect("package source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &source_packages,
+        Some("helper"),
+        |resolution, string_table| {
+            let provider = provider_root(&["project"], string_table);
+            let mut external_packages = ExternalPackageRegistry::new();
+            let providers = ExternalImportProviderRegistry::empty();
+            let mut cache =
+                crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new();
+            let mut resolution_table =
+                crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+            let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+                external_packages: &mut external_packages,
+                providers: &providers,
+                cache: &mut cache,
+                resolution_table: &mut resolution_table,
+            };
+
+            let Err(error) = super::source_discovery::resolve_structural_provider_reference(
+                &provider,
+                DependencyClauseKind::Namespace,
+                &declaring_source,
+                &resolver,
+                &mut external_imports,
+                *resolution,
+                string_table,
+            ) else {
+                panic!("source-package @project dependency must be rejected");
+            };
+            let messages = error.into_messages(string_table);
+            let diagnostic = first_error_diagnostic(&messages);
+            assert!(matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidDependencyClause {
+                    clause_kind: DependencyClauseKind::Namespace,
+                    reason: InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
+                }
+            ));
+        },
+    );
+}
 
 #[test]
 fn rejects_moth_file_and_folder_collision_in_same_directory() {

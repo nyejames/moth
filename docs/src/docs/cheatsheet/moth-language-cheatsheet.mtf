@@ -1,8 +1,9 @@
     This cheatsheet describes the final design for the language. The @../progress (progress matrix)
-    is the authority on what the current Alpha compiler implements and which
-    targets support it.
+    is the authority for what the current Alpha compiler implements and which targets support it.
 
-    This may change or contain semantics that are not yet implemented. 
+    Direct and source `#Config` values and explicit `@project` access shown below are implemented.
+    The entry-local `config:` example is accepted design but remains deferred. Other mechanisms may
+    be accepted end-state design that is not yet implemented.
     For more detailed breakdowns, see the @../ (Moth documentation).
 
 ## Rules to internalise first
@@ -1345,8 +1346,8 @@ Project fields enter source through explicit `@project`:
 
 `@project` is never implicit or directly re-exported. Each dependency has its own config and inputs.
 
-One entry `config:` block may appear only at a normal root's top level:
-
+An entry-local `config:` block is accepted design but remains deferred. It may appear only at a
+normal root's top level:
 [codeblock, $code("moth"):
     favicon_url #= [@assets/favicon.svg]
 
@@ -1408,10 +1409,10 @@ JavaScript constants, receiver methods, callbacks, async functions, options, col
 WIT V1 is also value-only. Resources, callbacks, async, futures, streams, shared-memory views, raw pointers and returned/retained aliases remain deferred V1 gaps.
 
 ## No stable syntax yet
-
 Do not infer forms for:
 
 - project dependency declarations, versions, lockfiles, registry/local/Git sources
+- entry-local `config:` blocks
 - named non-capturing function references or primitive-backed newtypes
 - async scopes, coroutines, channels or suspension
 - reactive paths, derived values, events/effects, `$bind` or component messages

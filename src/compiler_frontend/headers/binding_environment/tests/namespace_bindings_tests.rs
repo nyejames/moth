@@ -11,7 +11,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind,
+    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
@@ -101,6 +101,19 @@ fn test_dependency(
     }
 }
 
+fn set_namespace_alias(
+    dependency: &mut RetainedDependencyClause,
+    alias: &str,
+    string_table: &mut StringTable,
+) {
+    dependency.binding = DependencyBindingSyntax::Namespace {
+        alias: Some(DependencyAlias {
+            name: string_table.intern(alias),
+            location: dependency.location.clone(),
+        }),
+    };
+}
+
 fn add_selection(
     dependency: &mut RetainedDependencyClause,
     selection_store: &mut Vec<DependencySelection>,
@@ -133,6 +146,361 @@ fn assert_duplicate_dependency_surface_member(error: CompilerDiagnostic) {
     );
 }
 
+fn assert_keyword_shadow_dependency_diagnostic(
+    diagnostics: &[CompilerDiagnostic],
+    expected_name: StringId,
+    expected_location: &SourceLocation,
+) {
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "keyword-shadow validation should stop dependency registration before any other diagnostic"
+    );
+    let diagnostic = &diagnostics[0];
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::ReservedNameCollision {
+                name,
+                reserved_by: ReservedNameOwner::Keyword,
+            } if *name == expected_name
+        ),
+        "expected the canonical keyword-shadow diagnostic, got {:?}",
+        diagnostic.payload
+    );
+    assert_eq!(
+        &diagnostic.primary_location, expected_location,
+        "keyword-shadow diagnostics must point at the dependency-created local name"
+    );
+}
+
+fn register_keyword_test_package(
+    registry: &mut ExternalPackageRegistry,
+    package_path: &str,
+    symbol_name: &str,
+) {
+    let package_id = registry
+        .register_package(package_path, crate::builder_surface::PackageOrigin::Builder)
+        .expect("keyword-shadow test package should register");
+    registry
+        .register_function_at_path(
+            package_id,
+            ExternalSymbolPath::from_single(symbol_name),
+            ExternalFunctionId::Synthetic(8_001),
+            empty_void_function(symbol_name),
+        )
+        .expect("keyword-shadow test symbol should register");
+}
+
+#[test]
+fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
+    for name in ["config", "Config", "CONFIG", "_config", "_Config"] {
+        let mut registry = ExternalPackageRegistry::new();
+        let provider_name = format!("{name}.js");
+        register_keyword_test_package(&mut registry, &format!("@test/{provider_name}"), "member");
+
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let dependency_path = intern_path(&["test", &provider_name], &mut string_table);
+        let dependency = test_dependency(dependency_path, &mut string_table);
+        let expected_name = string_table.intern(name);
+        let expected_location = dependency.dependency.location.clone();
+
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols
+            .file_dependency_clauses_by_source
+            .insert(source_file.clone(), vec![dependency]);
+
+        let error = prepare_binding_environment(BindingEnvironmentInput {
+            module_symbols: &module_symbols,
+            external_package_registry: &registry,
+            external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+            source_provider_dependencies: &Default::default(),
+            string_table: &mut string_table,
+        })
+        .expect_err("namespace names that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+    }
+}
+
+#[test]
+fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
+    for alias in ["config", "Config", "CONFIG", "_config", "_Config"] {
+        let mut registry = ExternalPackageRegistry::new();
+        register_keyword_test_package(&mut registry, "@test/namespace_alias", "member");
+
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let dependency_path = intern_path(&["test", "namespace_alias"], &mut string_table);
+        let mut dependency = test_dependency(dependency_path, &mut string_table);
+        set_namespace_alias(&mut dependency, alias, &mut string_table);
+        let expected_name = string_table.intern(alias);
+        let expected_location = dependency
+            .namespace_binding_location()
+            .cloned()
+            .expect("namespace alias should have a binding location");
+
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols
+            .file_dependency_clauses_by_source
+            .insert(source_file.clone(), vec![dependency]);
+
+        let error = prepare_binding_environment(BindingEnvironmentInput {
+            module_symbols: &module_symbols,
+            external_package_registry: &registry,
+            external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+            source_provider_dependencies: &Default::default(),
+            string_table: &mut string_table,
+        })
+        .expect_err("namespace aliases that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+    }
+}
+
+#[test]
+fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
+    for (index, source_name) in ["config", "Config", "CONFIG", "_config", "_Config"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut registry = ExternalPackageRegistry::new();
+        let package_path = format!("@test/selected_unaliased_{index}");
+        register_keyword_test_package(&mut registry, &package_path, source_name);
+
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let dependency_path = intern_path(
+            &["test", &format!("selected_unaliased_{index}")],
+            &mut string_table,
+        );
+        let mut dependency = test_dependency(dependency_path, &mut string_table);
+        let mut selection_store = Vec::new();
+        add_selection(
+            &mut dependency,
+            &mut selection_store,
+            source_name,
+            None,
+            &mut string_table,
+        );
+        let expected_name = string_table.intern(source_name);
+        let expected_location = selection_store[0].source_location.clone();
+
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols
+            .file_dependency_clauses_by_source
+            .insert(source_file.clone(), vec![dependency]);
+        module_symbols
+            .dependency_selections_by_source
+            .insert(source_file.clone(), selection_store);
+
+        let error = prepare_binding_environment(BindingEnvironmentInput {
+            module_symbols: &module_symbols,
+            external_package_registry: &registry,
+            external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+            source_provider_dependencies: &Default::default(),
+            string_table: &mut string_table,
+        })
+        .expect_err("selected names that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+    }
+}
+
+#[test]
+fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
+    for (index, alias) in ["config", "Config", "CONFIG", "_config", "_Config"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut registry = ExternalPackageRegistry::new();
+        let package_path = format!("@test/selected_alias_{index}");
+        register_keyword_test_package(&mut registry, &package_path, "member");
+
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let dependency_path = intern_path(
+            &["test", &format!("selected_alias_{index}")],
+            &mut string_table,
+        );
+        let mut dependency = test_dependency(dependency_path, &mut string_table);
+        let mut selection_store = Vec::new();
+        add_selection(
+            &mut dependency,
+            &mut selection_store,
+            "member",
+            Some(alias),
+            &mut string_table,
+        );
+        let expected_name = string_table.intern(alias);
+        let expected_location = selection_store[0]
+            .local_alias()
+            .expect("selected alias should be retained")
+            .location
+            .clone();
+
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols
+            .file_dependency_clauses_by_source
+            .insert(source_file.clone(), vec![dependency]);
+        module_symbols
+            .dependency_selections_by_source
+            .insert(source_file.clone(), selection_store);
+
+        let error = prepare_binding_environment(BindingEnvironmentInput {
+            module_symbols: &module_symbols,
+            external_package_registry: &registry,
+            external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+            source_provider_dependencies: &Default::default(),
+            string_table: &mut string_table,
+        })
+        .expect_err("selected aliases that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+    }
+}
+
+#[test]
+fn source_selection_binding_rejects_keyword_shadow_names_before_source_validation() {
+    let cases = [
+        ("config", None),
+        ("Config", None),
+        ("CONFIG", None),
+        ("member", Some("config")),
+        ("member", Some("Config")),
+        ("member", Some("_config")),
+    ];
+
+    for (source_name, local_alias) in cases {
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let symbol_path = intern_path(&["helper", source_name], &mut string_table);
+        let dependency_path = intern_path(&["helper"], &mut string_table);
+        let mut dependency = test_dependency(dependency_path, &mut string_table);
+        let mut selection_store = Vec::new();
+        add_selection(
+            &mut dependency,
+            &mut selection_store,
+            source_name,
+            local_alias,
+            &mut string_table,
+        );
+        let expected_name = string_table.intern(local_alias.unwrap_or(source_name));
+        let expected_location = selection_store[0].local_alias().map_or_else(
+            || selection_store[0].source_location.clone(),
+            |alias| alias.location.clone(),
+        );
+
+        let mut module_symbols = ModuleSymbols::empty();
+        module_symbols.module_file_paths.insert(source_file.clone());
+        module_symbols
+            .dependency_bindable_source_symbol_paths
+            .insert(symbol_path);
+        module_symbols
+            .file_dependency_clauses_by_source
+            .insert(source_file.clone(), vec![dependency]);
+        module_symbols
+            .dependency_selections_by_source
+            .insert(source_file.clone(), selection_store);
+
+        let error = prepare_binding_environment(BindingEnvironmentInput {
+            module_symbols: &module_symbols,
+            external_package_registry: &ExternalPackageRegistry::new(),
+            external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+            source_provider_dependencies: &Default::default(),
+            string_table: &mut string_table,
+        })
+        .expect_err("source dependency names that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+    }
+}
+
+#[test]
+fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_registration() {
+    let cases = [
+        ("config", None),
+        ("CONFIG", None),
+        ("VALUE", Some("config")),
+        ("VALUE", Some("CONFIG")),
+        ("VALUE", Some("_config")),
+    ];
+
+    for (source_name, local_alias) in cases {
+        let mut string_table = StringTable::new();
+        let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+        let mut dependency = test_dependency(
+            intern_path(&["provider"], &mut string_table),
+            &mut string_table,
+        );
+        let mut dependency_selections = Vec::new();
+        add_selection(
+            &mut dependency,
+            &mut dependency_selections,
+            source_name,
+            local_alias,
+            &mut string_table,
+        );
+        let expected_name = string_table.intern(local_alias.unwrap_or(source_name));
+        let expected_location = dependency_selections[0].local_alias().map_or_else(
+            || dependency_selections[0].source_location.clone(),
+            |alias| alias.location.clone(),
+        );
+        let provider = constant_provider("provider", &[source_name]);
+        let provider_dependencies =
+            SourceProviderDependencySet::new(vec![SourceProviderDependency {
+                kind: ProviderDependencyKind::Authored {
+                    shell: dependency.dependency.dependency_shell_id,
+                },
+                interface: &provider,
+            }])
+            .expect("provider dependency should resolve");
+        let mut module_symbols =
+            single_file_module_symbols(vec![dependency], dependency_selections, &mut string_table);
+
+        let error = bind_environment(
+            &provider_dependencies,
+            &mut module_symbols,
+            &mut string_table,
+        )
+        .expect_err("provider declaration names that shadow config must be rejected");
+
+        assert_keyword_shadow_dependency_diagnostic(
+            &error.diagnostics,
+            expected_name,
+            &expected_location,
+        );
+        assert!(
+            module_symbols.module_file_paths.contains(&source_file),
+            "provider fixture should retain its consumer source"
+        );
+    }
+}
 #[test]
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 fn binding_counters_separate_namespace_clauses_from_selected_names() {
@@ -1117,6 +1485,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: alpha_value,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
@@ -1151,6 +1520,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: beta_value,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text("beta".to_owned())),
@@ -1269,6 +1639,7 @@ fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
         ));
         declarations.push(PublicDeclarationRecord {
             origin,
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
@@ -1322,6 +1693,7 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
         binding_exports: Vec::new(),
         declarations: vec![PublicDeclarationRecord {
             origin: OriginDeclarationId::Type(box_origin),
+            synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
                 generic_parameters: Vec::new(),
                 fields: Vec::new(),
@@ -2041,6 +2413,7 @@ fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
         OriginDeclarationId::Constant(OriginConstantId::new(module_origin, "VALUE".to_owned()));
     let first = PublicDeclarationRecord {
         origin: origin.clone(),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
             type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
             folded_value: PublicFoldedValue::String(OwnedFoldedString::Text("first".to_owned())),

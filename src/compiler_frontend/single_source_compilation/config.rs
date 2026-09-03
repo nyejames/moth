@@ -15,6 +15,7 @@
 //! `config.moth` accepts — and the authored key-name spans config diagnostics underline. Config
 //! key schema and the application of folded values to project settings stay build-owned.
 
+use crate::builder_surface::config_schema::ProjectFieldConfigPolicies;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
@@ -22,6 +23,9 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
+use crate::compiler_frontend::build_config::{
+    BuildConfigInputSet, BuilderConfigGlobalSet, ConfigResolutionRecord, ConfigResolutionServices,
+};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
@@ -69,13 +73,21 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) binding_packages: &'a ExternalPackageRegistry,
+    /// Typed explicit command/programmatic inputs for direct project qualifiers.
+    pub(crate) build_config_inputs: &'a BuildConfigInputSet,
+    /// Typed platform-neutral primitive globals supplied by the selected builder.
+    pub(crate) builder_config_globals: &'a BuilderConfigGlobalSet,
+    /// Builder-schema policy for direct grouped-project fields.
+    pub(crate) project_field_config_policies: ProjectFieldConfigPolicies,
 }
-
 /// The folded config source a caller validates and applies.
 pub(crate) struct CompiledConfigSource {
     /// One owned folded declaration per authored top-level compile-time constant, in the
     /// declaration-table order the module store produces.
     pub(crate) declarations: Vec<FoldedConfigDeclaration>,
+    /// Direct-project qualifier resolution facts retained for later compiler phases.
+    #[allow(dead_code)]
+    pub(crate) resolution_records: Vec<ConfigResolutionRecord>,
 }
 
 /// One authored top-level config constant projected to the owned folded-value vocabulary.
@@ -168,12 +180,18 @@ pub(crate) fn compile_config_source(
         collect_authored_config_key_name_locations(&sorted.headers, &authored_scope);
 
     // 5. Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
+    let config_resolution = ConfigResolutionServices::new(
+        request.build_config_inputs,
+        request.builder_config_globals,
+        request.project_field_config_policies.clone(),
+    );
     let ast = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            source_build_config_contract_names: std::sync::Arc::new(Default::default()),
         },
         AstBuildContext {
             root_role: ModuleRootRole::Normal,
@@ -183,6 +201,8 @@ pub(crate) fn compile_config_source(
             entry_dir: authored_scope.clone(),
             build_profile: FrontendBuildProfile::Dev,
             file_value_resolution: None,
+            config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
+            build_config_values: std::sync::Arc::new(Default::default()),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
@@ -215,7 +235,10 @@ pub(crate) fn compile_config_source(
         string_table,
     )?;
 
-    Ok(CompiledConfigSource { declarations })
+    Ok(CompiledConfigSource {
+        declarations,
+        resolution_records: config_resolution.take_records(),
+    })
 }
 
 // -------------------------

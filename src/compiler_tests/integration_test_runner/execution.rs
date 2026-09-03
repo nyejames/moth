@@ -6,6 +6,7 @@
 
 use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCaseSpec};
 use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -31,7 +32,7 @@ pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
     };
 
     let execution = catch_unwind(AssertUnwindSafe(|| {
-        build_project(&builder, entry_path, &flags)
+        build_project(&builder, entry_path, &flags, &BuildConfigInputSet::new())
     }));
 
     // Policy: unsupported or incomplete user input must surface structured compiler diagnostics.

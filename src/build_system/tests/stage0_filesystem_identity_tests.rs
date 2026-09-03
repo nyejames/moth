@@ -337,6 +337,30 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
+    fn reserved_project_globals_package_prefix_is_rejected_before_indexing() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("project");
+        fs::create_dir_all(&package_root).expect("should create project package root");
+        fs::write(package_root.join("@home.moth"), "").expect("should write package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages.register_filesystem_root(
+            "project",
+            package_root,
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        );
+
+        let mut string_table = StringTable::new();
+        let messages = build_indexes(&source_packages, &mut string_table)
+            .expect_err("project source-package prefix must remain reserved");
+
+        assert_invalid_config_reason(&messages, |reason| {
+            matches!(reason, InvalidConfigReason::ProjectGlobalsNameReserved)
+        });
+    }
+
+    #[test]
     fn canonical_root_with_single_hash_file_derives_unique_view() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();

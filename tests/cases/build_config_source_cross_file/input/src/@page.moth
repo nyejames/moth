@@ -1,0 +1,4 @@
+@settings configured_result
+
+result = configured_result()
+[:source_config_cross_file result=[result]]

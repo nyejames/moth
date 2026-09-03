@@ -151,6 +151,7 @@ pub(super) fn prepare_file_value_bundle(
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
         project_path_resolver: Some(path_resolver.clone()),
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
     // The request owner's registry receives every source this resolver issues. Watch and

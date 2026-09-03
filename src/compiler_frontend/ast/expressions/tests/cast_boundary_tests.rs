@@ -276,11 +276,11 @@ value = Item(price = 1).add(amount = cast "2")
 fn struct_field_default_rejects_fallible_cast_without_handling() {
     assert_invalid_cast(
         r#"
-Config = |
+Options = |
     count Int = cast "1",
 |
 
-value = Config()
+value = Options()
 "#,
         InvalidCastReason::FallibleEvidenceRequiresHandling,
     );

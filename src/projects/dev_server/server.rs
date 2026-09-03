@@ -9,6 +9,7 @@ use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::output::OutputOwner;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::DevServerOptions;
@@ -36,11 +37,12 @@ pub fn run_dev_server(
     options: DevServerOptions,
 ) -> Result<(), CompilerMessages> {
     let entry_target = validate_dev_entry_path(entry_path)?;
-    let resolved_paths = resolve_dev_runtime_paths(&builder, &entry_target, flags)?;
+    let resolved_paths =
+        resolve_dev_runtime_paths(&builder, &entry_target, flags, &options.inputs)?;
     let mut watch_scope = resolved_paths.watch_scope;
 
     let state = Arc::new(DevServerState::new(resolved_paths.output_dir.clone()));
-    let mut executor = ProjectBuildExecutor::new(builder);
+    let mut executor = ProjectBuildExecutor::new(builder, options.inputs);
 
     let initial_build_report = crate::projects::dev_server::build_loop::run_single_build_cycle(
         &state,
@@ -145,6 +147,7 @@ pub(crate) fn resolve_dev_runtime_paths(
     builder: &ProjectBuilder,
     entry_target: &Path,
     flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
 ) -> Result<DevRuntimePaths, CompilerMessages> {
     if !entry_target.is_dir() {
         let output_dir = entry_target
@@ -158,7 +161,8 @@ pub(crate) fn resolve_dev_runtime_paths(
         });
     }
 
-    let bootstrap = bootstrap_project_build(builder, entry_target.to_path_buf())?;
+    let bootstrap =
+        bootstrap_project_build(builder, entry_target.to_path_buf(), build_config_inputs)?;
     let Some(validated_output_settings) = bootstrap.validated_directory_output_settings else {
         return Err(dev_server_error_messages(
             entry_target,

@@ -252,6 +252,7 @@ fn runtime_template_context_with_style_directives(
             },
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
 
     with_test_path_context(

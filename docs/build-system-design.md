@@ -4,6 +4,10 @@ Moth's build system selects a command and capability surface, bootstraps project
 
 This document is the single source of truth for accepted build-system, project graph, builder, tooling, link and output architecture. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
+The typed direct and source `#Config` contracts, shared primitive command inputs and immutable
+explicit `@project` interface are implemented. Entry-local `config:` blocks remain deferred; other
+accepted end-state contracts are labelled in their owning sections.
+
 `docs/compiler-design-overview.md` is mandatory prerequisite reading. It owns semantic identities, public interfaces, compiler stages, module artefact contents, generated-function compilation, fingerprints and target-validation semantics. This document owns how projects and packages orchestrate those compiler contracts.
 
 Companion authorities:
@@ -204,7 +208,7 @@ The completed `project` record must be available before a builder or tooling sec
 
 ### Direct project `#Config` fields
 
-A direct primitive or optional field of `project` may declare a build-config contract.
+A direct field of `project` may declare a build-config contract only when the selected project schema marks that field `Configurable` and its value has a supported primitive or optional primitive shape. Registered `FixedOnly` identity, source-discovery and compiler-control fields reject `#Config`; a primitive shape alone does not make them configurable.
 
 Accepted build-configuration value types are:
 
@@ -304,7 +308,9 @@ The following may not claim the `@project` root:
 
 Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.
 
-Project field dependencies are recorded at field granularity. A field change invalidates only semantic, implementation, root or link facts that actually depend on it.
+Project field dependencies are recorded at field granularity as semantic facts for future incremental
+reuse. Current dev orchestration does not consume them for targeted invalidation; source locations and
+resolution origins remain provenance, not semantic fingerprint inputs.
 
 ### Source `#Config` contracts
 
@@ -1071,7 +1077,10 @@ It performs target validation, backend lowering and output writing when compilat
 
 The first `dev` build compiles the complete graph required by its selected entries and package policy.
 
-Later rebuilds reuse successful in-memory artefacts according to the fingerprint and invalidation rules below. Dev-server orchestration does not create a second compiler or builder architecture.
+Current dev rebuilds produce a fresh successful graph and recompute semantic fingerprint facts during
+frontend compilation. Those facts are not retained after the build. Retention, comparison and
+dependency-aware targeted in-memory reuse are deferred to `Incremental and persistent artefacts`,
+alongside persistent compatibility work.
 
 ### `check`
 
@@ -1674,6 +1683,8 @@ Pipeline syntax and implementation remain deferred.
 ## Incremental and persistent artefacts
 
 The compiler owns the contents of public-interface, implementation, dormant-root, runtime-dependency and documentation fingerprints. The build system owns invalidation and compatibility policy over them.
+These are deferred build-system policies over compiler-produced semantic facts; computing a fingerprint
+does not mean that the current dev server reuses an artefact.
 
 ### In-memory reuse
 

@@ -9,7 +9,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ReservedNameOwner,
+    ProjectContextEscapeReason, ReservedNameOwner,
 };
 
 pub(crate) struct RenderedPayload {
@@ -354,6 +354,9 @@ fn render_payload_message(
             string_table.resolve(*exported_name),
             diagnostic_type_name(*private_type, context)
         ),
+        DiagnosticPayload::ProjectContextEscape { reason } => {
+            project_context_escape_message(*reason)
+        },
         DiagnosticPayload::UnsupportedTraitFeature {
             trait_name,
             feature,
@@ -558,6 +561,19 @@ fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
         SourceFileKind::Moth => "Moth `.moth` source",
         SourceFileKind::MothTemplate => "Moth template `.mtf` source",
         SourceFileKind::PlainMarkdown => "plain Markdown `.md` source",
+    }
+}
+
+fn project_context_escape_message(reason: ProjectContextEscapeReason) -> String {
+    match reason {
+        ProjectContextEscapeReason::ExportedDeclaration => {
+            "ProjectContext-dependent declaration cannot be exported through a package facade."
+                .to_owned()
+        }
+        ProjectContextEscapeReason::ReachableExecutable => {
+            "ProjectContext-dependent executable function cannot be reached through a package facade."
+                .to_owned()
+        }
     }
 }
 

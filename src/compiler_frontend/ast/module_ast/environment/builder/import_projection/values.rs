@@ -8,7 +8,11 @@ use crate::compiler_frontend::compiler_messages::source_location::SourceLocation
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
-
+use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
 /// Services needed to invert one stable folded value into a fresh AST environment.
 ///
 /// WHAT: keeps canonical-type interning, the active type environment and the active TIR store
@@ -128,8 +132,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let PublicDeclarationSemantics::Constant(constant) = record.semantics else {
                 continue;
             };
-            let declaration =
-                self.project_imported_constant(local_path, &constant, string_table)?;
+            let declaration = self.project_imported_constant(
+                local_path,
+                &constant,
+                &record.synthetic_interface_provenance,
+                &origin,
+                string_table,
+            )?;
             append_projected_constant(
                 &mut self.declaration_table,
                 &mut self.resolved_module_constants,
@@ -143,14 +152,30 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         local_path: InternedPath,
         constant: &PublicConstantSemantics,
+        declaration_provenance: &SyntheticInterfaceProvenance,
+        origin: &OriginDeclarationId,
         string_table: &mut StringTable,
     ) -> Result<Declaration, CompilerError> {
         let type_id = self.intern_imported_canonical_type(&constant.type_identity)?;
-        let value =
+        let mut value =
             self.project_imported_folded_value(&constant.folded_value, type_id, string_table)?;
+        value.synthetic_interface_provenance = value
+            .synthetic_interface_provenance
+            .union(declaration_provenance);
+        if is_project_globals_origin(origin) {
+            let project_member = SyntheticInterfaceMemberIdentity::new(
+                SyntheticInterfaceClass::ProjectContext,
+                PROJECT_GLOBALS_DEPENDENCY_NAME,
+                origin.defining_name(),
+            );
+            value.synthetic_interface_provenance = value
+                .synthetic_interface_provenance
+                .union(&SyntheticInterfaceProvenance::single(project_member));
+        }
         Ok(Declaration {
             id: local_path,
             value,
+            config_qualifier: None,
         })
     }
 
@@ -165,6 +190,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let location = SourceLocation::default();
         materialize_public_folded_value(self, folded, expected_type_id, string_table, &location)
     }
+}
+
+fn is_project_globals_origin(origin: &OriginDeclarationId) -> bool {
+    let module_origin = origin.module_origin();
+    module_origin.role() == ModuleRootRole::ProjectPackageFacade
+        && module_origin.logical_module_path() == "project-globals"
 }
 
 fn append_projected_constant(
@@ -447,6 +478,7 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
                 string_table,
                 location,
             )?,
+            config_qualifier: None,
         });
     }
     Ok(projected)
@@ -481,6 +513,7 @@ fn materialize_public_anonymous_record_fields<M: FoldedValueMaterialiser>(
                 string_table,
                 location,
             )?,
+            config_qualifier: None,
         });
     }
 

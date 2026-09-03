@@ -15,11 +15,16 @@ use crate::compiler_frontend::module_compilation::{
     ProviderMaterialisationRegistry, compile_module,
 };
 
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::build_config::{
+    BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
+    BuildConfigResolutionIndex, BuilderConfigGlobalSet, ResolvedBuildConfigMap,
+};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
@@ -28,6 +33,9 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::project_globals::{
+    ProjectGlobalsInterface, is_project_globals_dependency,
+};
 use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
 };
@@ -46,14 +54,17 @@ use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::FrontendCompilationMode;
 use super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
     CompletedSourcePackageRegistry, DiagnosedModule, PackageBoundaryId, ProjectFrontendCompilation,
 };
+use super::config_boundary;
 use super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 
 use super::file_reference_resolution::{SingleFileReferenceOutcome, SingleFileResolvedReference};
@@ -178,6 +189,7 @@ fn seed_completed_package_materialisations(
 //  Single-File Compilation
 // -------------------------
 
+#[allow(dead_code)]
 /// Compile a single `.moth` file as its own module.
 pub(crate) fn compile_single_file_frontend(
     config: &Config,
@@ -187,6 +199,30 @@ pub(crate) fn compile_single_file_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    compile_single_file_frontend_with_inputs(
+        config,
+        build_profile,
+        style_directives,
+        builder_surface,
+        extension,
+        string_table,
+        &BuildConfigInputSet::new(),
+        FrontendCompilationMode::Canonical,
+    )
+}
+
+/// Compile one source file with an explicit command-owned build-config input set.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compile_single_file_frontend_with_inputs(
+    config: &Config,
+    build_profile: FrontendBuildProfile,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    extension: &OsStr,
+    string_table: &mut StringTable,
+    build_config_inputs: &BuildConfigInputSet,
+    mode: FrontendCompilationMode,
+) -> Result<ProjectFrontendCompilation, CompilerMessages> {
     match compile_single_file_frontend_with_target(
         config,
         build_profile,
@@ -194,6 +230,8 @@ pub(crate) fn compile_single_file_frontend(
         builder_surface,
         extension,
         string_table,
+        build_config_inputs,
+        mode,
         SingleFileFrontendTarget::Normal,
     )? {
         SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
@@ -223,6 +261,8 @@ pub(crate) fn compile_single_file_boracle_frontend(
         builder_surface,
         extension,
         string_table,
+        &BuildConfigInputSet::new(),
+        FrontendCompilationMode::Canonical,
         SingleFileFrontendTarget::Boracle,
     )? {
         SingleFileFrontendResult::Boracle(input) => Ok(*input),
@@ -248,6 +288,7 @@ enum SingleFileFrontendTarget {
     Boracle,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_single_file_frontend_with_target(
     config: &Config,
     build_profile: FrontendBuildProfile,
@@ -255,6 +296,8 @@ fn compile_single_file_frontend_with_target(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
+    build_config_inputs: &BuildConfigInputSet,
+    _mode: FrontendCompilationMode,
     target: SingleFileFrontendTarget,
 ) -> Result<SingleFileFrontendResult, CompilerMessages> {
     let mut resource_inputs = ResourceInputRegistry::new();
@@ -512,6 +555,24 @@ fn compile_single_file_frontend_with_target(
     };
     attach_single_file_resolved_references(&mut prepared, resolved_file_references, string_table)?;
 
+    let source_facts =
+        config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
+    let effective_project_fields = config_boundary::effective_project_fields(config, string_table)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let fixed_project_facts =
+        config_boundary::fixed_project_contract_facts(&effective_project_fields);
+    let direct_project_facts =
+        config_boundary::direct_project_contract_facts(&effective_project_fields);
+    let fallback_location = SourceLocation::from_path(&config.entry_dir, string_table);
+    let build_config_values = config_boundary::resolve_boundary_build_config(
+        &source_facts,
+        &fixed_project_facts,
+        &direct_project_facts,
+        build_config_inputs,
+        builder_surface.config_globals(),
+        fallback_location,
+        string_table,
+    )?;
     // Semantic compilation is one compiler service call. A synthetic single-file module has no
     // completed providers, so it binds against empty provider and materialisation views.
     let source_provider_dependencies = SourceProviderDependencySet::default();
@@ -520,9 +581,11 @@ fn compile_single_file_frontend_with_target(
     let compile_context = ModuleCompilationContext {
         options: config.frontend_options(),
         build_profile,
+        root_role_override: None,
         project_path_resolver: Some(project_path_resolver),
         style_directives,
         external_packages: Arc::clone(&external_packages),
+        build_config_values: Arc::new(build_config_values),
         external_dependency_resolution_table: &builder_surface.external_dependency_resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
@@ -797,6 +860,11 @@ struct DirectoryModuleTaskResult {
 enum DirectoryModuleTaskOutcome {
     Success(Box<ModuleSemanticResult>),
     Diagnosed(ModuleDiagnostics),
+    /// A transient check-only unit whose required canonical provider already failed.
+    ///
+    /// Check-only units have no graph slot, so this outcome is intentionally not retained in the
+    /// final boundary. The provider's own diagnosed/blocked record remains authoritative.
+    Blocked,
     Infrastructure(CompilerError),
 }
 
@@ -814,10 +882,27 @@ struct BoundaryCompilationContext<'a> {
     external_packages: &'a Arc<ExternalPackageRegistry>,
     builder_surface: &'a BuilderSurface,
     completed_packages: &'a CompletedSourcePackageRegistry,
+    /// One immutable resolved configuration namespace for this project/package boundary.
+    build_config_values: Arc<ResolvedBuildConfigMap>,
+    /// Canonical source contracts retained by this boundary.
+    ///
+    /// Check-only jobs borrow this canonical view through an indexed resolver and resolve their
+    /// own transient facts privately; sibling jobs and the retained canonical map never observe
+    /// those transient declarations.
+    canonical_source_facts: Vec<BuildConfigContractFact>,
+    /// Explicit synthetic project-global provider, present only in the owning project boundary.
+    project_globals: Option<&'a ProjectGlobalsInterface>,
+    /// Inputs and facts retained for isolated check-only resolution; canonical jobs already consume
+    /// the authoritative `build_config_values` map directly.
+    build_config_inputs: BuildConfigInputSet,
+    builder_globals: BuilderConfigGlobalSet,
+    fixed_project_facts: Vec<BuildConfigContractFact>,
+    direct_project_facts: Vec<BuildConfigContractFact>,
     implicit_template_package_ids: Vec<PackageBoundaryId>,
 }
 
 impl<'a> BoundaryCompilationContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         config: &'a Config,
         build_profile: FrontendBuildProfile,
@@ -826,6 +911,13 @@ impl<'a> BoundaryCompilationContext<'a> {
         external_packages: &'a Arc<ExternalPackageRegistry>,
         builder_surface: &'a BuilderSurface,
         completed_packages: &'a CompletedSourcePackageRegistry,
+        build_config_values: ResolvedBuildConfigMap,
+        canonical_source_facts: Vec<BuildConfigContractFact>,
+        build_config_inputs: BuildConfigInputSet,
+        builder_globals: BuilderConfigGlobalSet,
+        fixed_project_facts: Vec<BuildConfigContractFact>,
+        direct_project_facts: Vec<BuildConfigContractFact>,
+        project_globals: Option<&'a ProjectGlobalsInterface>,
     ) -> Self {
         let mut implicit_template_package_ids = builder_surface
             .implicit_template_scope_source_packages
@@ -843,6 +935,13 @@ impl<'a> BoundaryCompilationContext<'a> {
             external_packages,
             builder_surface,
             completed_packages,
+            build_config_values: Arc::new(build_config_values),
+            canonical_source_facts,
+            build_config_inputs,
+            builder_globals,
+            fixed_project_facts,
+            direct_project_facts,
+            project_globals,
             implicit_template_package_ids,
         }
     }
@@ -865,11 +964,27 @@ struct SourcePackageModuleInventory {
     root_module_id: ModuleId,
     path_resolver: ProjectPathResolver,
     graph: ProjectModuleGraph,
-    module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
-    provider_bindings: Vec<ResolvedDependencyEdge>,
-    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    schedule: module_inventory::ModuleCompilationSchedule,
+    /// Canonical source facts merged before transient jobs fork their string-table base.
+    canonical_source_facts: Vec<BuildConfigContractFact>,
     #[cfg(feature = "timers")]
     timing_boundary: crate::timing::TimingBoundaryId,
+}
+
+/// Source-package transient jobs retained until every canonical package facade is published.
+///
+/// Check-only package dependencies never participate in canonical package ordering. Keeping this
+/// lane separate lets all canonical packages publish first, after which transient jobs can safely
+/// consume any completed facade without changing the publication graph.
+struct SourcePackageCheckOnlyInventory {
+    dependency_prefix: String,
+    path_resolver: ProjectPathResolver,
+    check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
+    provider_bindings: Vec<ResolvedDependencyEdge>,
+    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    /// Canonical source contracts used to resolve each deferred job independently.
+    canonical_source_facts: Vec<BuildConfigContractFact>,
+    build_config_values: ResolvedBuildConfigMap,
 }
 
 /// Index every resolved provider edge once by consumer module and retained dependency shell.
@@ -963,17 +1078,105 @@ pub(crate) fn build_module_package_dependency_index(
     Ok(dependencies)
 }
 
+/// Find an authored `@project` dependency on the project package facade.
+///
+/// The facade is an API-only root, but its retained dependency clauses still include private and
+/// otherwise unreachable source declarations. Rejecting the exact reserved root here, before
+/// provider binding or AST reachability, enforces the package boundary for every declaration.
+fn facade_project_globals_dependency(
+    prepared: &PreparedModule,
+) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+    let active_origin = prepared
+        .semantic
+        .source_module_origins
+        .origin_for(prepared.semantic.active_root_file_id)?
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "facade dependency validation found no owning origin for the active root",
+            )
+        })?;
+    if active_origin.role() != ModuleRootRole::ProjectPackageFacade {
+        return Ok(None);
+    }
+
+    for clauses in prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .file_dependency_clauses_by_source
+        .values()
+    {
+        for clause in clauses {
+            if is_project_globals_dependency(
+                &clause.dependency.path,
+                &prepared.semantic.string_table,
+            ) {
+                return Ok(Some(CompilerDiagnostic::invalid_dependency_clause(
+                    clause.binding.clause_kind(),
+                    InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
+                    clause.dependency.location.clone(),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     /// Build the per-module provider input set by direct retained-shell lookup.
     ///
-    /// WHAT: resolves every retained dependency shell through the boundary indexes built once per
-    ///       graph, so binding never scans all edges, all source-package dependencies or all
-    ///       completed packages for each shell.
+    /// Canonical jobs use the boundary indexes built once per graph. Check-only jobs instead pass
+    /// their own resolved module/package records; an isolated job never falls back to canonical
+    /// shell indexes, because a shell from another source must not accidentally bind merely due
+    /// to sharing the owner's `ModuleId`.
     fn build_source_provider_dependencies(
         &self,
         consumer_module_id: ModuleId,
         prepared: &PreparedModule,
+        check_only_provider_bindings: Option<&[module_inventory::CheckOnlyProviderBinding]>,
+        check_only_source_package_dependencies: Option<
+            &[module_inventory::CheckOnlySourcePackageDependency],
+        >,
     ) -> Result<SourceProviderDependencySet<'boundary>, CompilerError> {
+        let check_only = check_only_provider_bindings.is_some()
+            || check_only_source_package_dependencies.is_some();
+        let mut transient_provider_index: FxHashMap<DependencyShellId, ModuleId> =
+            FxHashMap::default();
+        let mut transient_package_index: FxHashMap<DependencyShellId, &str> = FxHashMap::default();
+
+        if let Some(bindings) = check_only_provider_bindings {
+            for binding in bindings {
+                if transient_provider_index
+                    .insert(binding.dependency_shell_id, binding.provider_module_id)
+                    .is_some()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "check-only ModuleId {} resolved dependency shell {:?} to more than one provider module",
+                        consumer_module_id.index(),
+                        binding.dependency_shell_id
+                    )));
+                }
+            }
+        }
+        if let Some(dependencies) = check_only_source_package_dependencies {
+            for dependency in dependencies {
+                if transient_provider_index.contains_key(&dependency.dependency_shell_id)
+                    || transient_package_index
+                        .insert(
+                            dependency.dependency_shell_id,
+                            dependency.dependency_prefix.as_str(),
+                        )
+                        .is_some()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "check-only ModuleId {} resolved dependency shell {:?} to more than one provider",
+                        consumer_module_id.index(),
+                        dependency.dependency_shell_id
+                    )));
+                }
+            }
+        }
+
         let mut dependencies = Vec::new();
         for file_dependency_clauses in prepared
             .semantic
@@ -984,6 +1187,70 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         {
             for clause in file_dependency_clauses {
                 let shell_id = clause.dependency.dependency_shell_id;
+                if is_project_globals_dependency(
+                    &clause.dependency.path,
+                    &prepared.semantic.string_table,
+                ) {
+                    let Some(project_globals) = self.boundary.project_globals else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
+                            consumer_module_id.index()
+                        )));
+                    };
+                    dependencies.push(SourceProviderDependency {
+                        kind: ProviderDependencyKind::Authored { shell: shell_id },
+                        interface: project_globals.interface(),
+                    });
+                    continue;
+                }
+                if check_only {
+                    if let Some(provider_module_id) =
+                        transient_provider_index.get(&shell_id).copied()
+                    {
+                        let interface = self
+                            .provider_store
+                            .interface(provider_module_id)?
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(format!(
+                                    "Check-only ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                    consumer_module_id.index(),
+                                    provider_module_id.index()
+                                ))
+                            })?;
+                        dependencies.push(SourceProviderDependency {
+                            kind: ProviderDependencyKind::Authored { shell: shell_id },
+                            interface,
+                        });
+                        continue;
+                    }
+
+                    if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied()
+                    {
+                        let package_id = self
+                            .boundary
+                            .completed_packages
+                            .by_prefix(dependency_prefix)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(format!(
+                                    "Check-only ModuleId {} started semantic binding before source package @{} completed",
+                                    consumer_module_id.index(),
+                                    dependency_prefix
+                                ))
+                            })?;
+                        let completed_package =
+                            self.boundary.completed_packages.package(package_id)?;
+                        dependencies.push(SourceProviderDependency {
+                            kind: ProviderDependencyKind::Authored { shell: shell_id },
+                            interface: completed_package.root_interface()?,
+                        });
+                    }
+
+                    // Same-owner source dependencies and provider clauses handled by the external
+                    // registry intentionally have no transient interface record. Do not consult
+                    // the canonical indexes for this shell.
+                    continue;
+                }
+
                 if let Some(binding_index) = self
                     .provider_binding_index
                     .get(&(consumer_module_id, shell_id))
@@ -1060,6 +1327,67 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         SourceProviderDependencySet::new(dependencies)
     }
 
+    /// Return the first failed canonical provider for a transient job, if any.
+    ///
+    /// Check-only units have no graph slot of their own. A diagnosed or blocked provider therefore
+    /// suppresses the dependent unit instead of letting interface lookup turn the provider's
+    /// authoritative diagnostic into a secondary infrastructure error. An unavailable slot is
+    /// still an internal scheduling failure: canonical publication should have completed first.
+    fn check_only_blocked_provider(
+        &self,
+        consumer_module_id: ModuleId,
+        provider_bindings: &[module_inventory::CheckOnlyProviderBinding],
+        source_package_dependencies: &[module_inventory::CheckOnlySourcePackageDependency],
+    ) -> Result<Option<BlockedProvider>, CompilerError> {
+        for binding in provider_bindings {
+            match self.provider_store.slot(binding.provider_module_id)? {
+                ProviderSlot::Successful(_) => {}
+                ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                    return Ok(Some(BlockedProvider::Module(binding.provider_module_id)));
+                }
+                ProviderSlot::Unavailable => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Check-only ModuleId {} became ready before provider ModuleId {} completed",
+                        consumer_module_id.index(),
+                        binding.provider_module_id.index()
+                    )));
+                }
+            }
+        }
+
+        for dependency in source_package_dependencies {
+            let package_id = self
+                .boundary
+                .completed_packages
+                .by_prefix(dependency.dependency_prefix.as_str())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Check-only ModuleId {} depends on unindexed source package @{}",
+                        consumer_module_id.index(),
+                        dependency.dependency_prefix
+                    ))
+                })?;
+            let package = self.boundary.completed_packages.package(package_id)?;
+            match package.root_slot()? {
+                ProviderSlot::Successful(_) => {}
+                ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                    return Ok(Some(BlockedProvider::SourcePackage(
+                        package.package_identity.clone(),
+                    )));
+                }
+                ProviderSlot::Unavailable => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Check-only ModuleId {} became ready before source package @{} completed its facade",
+                        consumer_module_id.index(),
+                        package.package_prefix()
+                    )));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     fn compile(
         &self,
         job: module_inventory::ModuleCompilationJob,
@@ -1079,30 +1407,230 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         #[cfg(feature = "timers")]
         let module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
+        #[cfg(feature = "timers")]
+        {
+            self.compile_prepared(
+                module_id,
+                base_len,
+                prepared,
+                known_generated,
+                None,
+                None,
+                None,
+                None,
+                None,
+                module_context,
+            )
+        }
+        #[cfg(not(feature = "timers"))]
+        {
+            self.compile_prepared(
+                module_id,
+                base_len,
+                prepared,
+                known_generated,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+    }
+
+    fn compile_check_only(
+        &self,
+        job: module_inventory::CheckOnlyModuleCompilationJob,
+        known_generated: KnownGeneratedFunctions<'_>,
+        build_config_index: &BuildConfigResolutionIndex<'_>,
+    ) -> DirectoryModuleTaskResult {
+        let module_inventory::CheckOnlyModuleCompilationJob {
+            owner_module_id: module_id,
+            string_table_base_len: base_len,
+            provider_bindings,
+            source_package_dependencies,
+            external_packages,
+            external_dependency_resolution_table,
+            mut prepared,
+            ..
+        } = job;
+        match self.check_only_blocked_provider(
+            module_id,
+            &provider_bindings,
+            &source_package_dependencies,
+        ) {
+            Ok(Some(_provider)) => {
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome: DirectoryModuleTaskOutcome::Blocked,
+                };
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+            }
+        }
+
+        // Resolve this transient unit against borrowed canonical facts and only its own source
+        // facts. The transient slice is private to this job: it validates compatibility and
+        // selects values without copying or comparing a sibling check-only unit.
+        let check_only_source_facts =
+            config_boundary::source_contract_facts_for_current_module(&prepared);
+        let check_only_inputs = build_config_index.filter_inputs_to_known_facts(
+            &self.boundary.build_config_inputs,
+            &check_only_source_facts,
+        );
+        let check_only_build_config_values = match build_config_index
+            .resolve_with_transient_source_facts(
+                &check_only_source_facts,
+                &check_only_inputs,
+                &self.boundary.builder_globals,
+            ) {
+            Ok(values) => values,
+            Err(error) => {
+                let fallback_location = error
+                    .contract_location()
+                    .cloned()
+                    .unwrap_or_else(SourceLocation::default);
+                let messages = config_boundary::build_config_resolution_messages(
+                    error,
+                    fallback_location,
+                    &mut prepared.semantic.string_table,
+                );
+                let outcome = match ModuleDiagnostics::from_messages(messages) {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome,
+                };
+            }
+        };
+
+        #[cfg(feature = "timers")]
+        {
+            self.compile_prepared(
+                module_id,
+                base_len,
+                prepared,
+                known_generated,
+                Some(&check_only_build_config_values),
+                Some(&provider_bindings),
+                Some(&source_package_dependencies),
+                Some(external_packages),
+                Some(&external_dependency_resolution_table),
+                None,
+            )
+        }
+        #[cfg(not(feature = "timers"))]
+        {
+            self.compile_prepared(
+                module_id,
+                base_len,
+                prepared,
+                known_generated,
+                Some(&check_only_build_config_values),
+                Some(&provider_bindings),
+                Some(&source_package_dependencies),
+                Some(external_packages),
+                Some(&external_dependency_resolution_table),
+            )
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn compile_prepared(
+        &self,
+        module_id: ModuleId,
+        base_len: usize,
+        prepared: PreparedModule,
+        known_generated: KnownGeneratedFunctions<'_>,
+        build_config_values_override: Option<&ResolvedBuildConfigMap>,
+        check_only_provider_bindings: Option<&[module_inventory::CheckOnlyProviderBinding]>,
+        check_only_source_package_dependencies: Option<
+            &[module_inventory::CheckOnlySourcePackageDependency],
+        >,
+        external_packages: Option<Arc<ExternalPackageRegistry>>,
+        external_dependency_resolution_table: Option<&ExternalImportResolutionTable>,
+        #[cfg(feature = "timers")] module_context: Option<crate::timing::TimingContext>,
+    ) -> DirectoryModuleTaskResult {
+        match facade_project_globals_dependency(&prepared) {
+            Ok(Some(diagnostic)) => {
+                let messages = CompilerMessages::from_diagnostic(
+                    diagnostic,
+                    prepared.semantic.string_table.clone(),
+                );
+                let outcome = match ModuleDiagnostics::from_messages(messages) {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome,
+                };
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+            }
+        }
+
         // Semantic compilation is provider-dependent, so every required provider interface must
-        // already be published before this call. The stage sequence behind it belongs to
-        // `compile_module`; Stage 0 only guarantees the inputs.
-        let source_provider_dependencies =
-            match self.build_source_provider_dependencies(module_id, &prepared) {
-                Ok(dependencies) => dependencies,
-                Err(error) => {
-                    return DirectoryModuleTaskResult {
-                        module_id,
-                        string_table_base_len: base_len,
-                        outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
-                    };
-                }
-            };
+        // already be published before this call. Canonical jobs use the graph indexes; check-only
+        // jobs use the isolated metadata prepared with their own source headers.
+        let source_provider_dependencies = match self.build_source_provider_dependencies(
+            module_id,
+            &prepared,
+            check_only_provider_bindings,
+            check_only_source_package_dependencies,
+        ) {
+            Ok(dependencies) => dependencies,
+            Err(error) => {
+                return DirectoryModuleTaskResult {
+                    module_id,
+                    string_table_base_len: base_len,
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                };
+            }
+        };
+        // Canonical modules consume the one boundary-owned map directly. Only transient
+        // check-only jobs provide an isolated override resolved from their own source facts.
+        let effective_build_config_values = build_config_values_override
+            .map(|values| Arc::new(values.clone()))
+            .unwrap_or_else(|| Arc::clone(&self.boundary.build_config_values));
+
+        let effective_external_packages =
+            external_packages.unwrap_or_else(|| Arc::clone(self.boundary.external_packages));
+        let effective_external_dependency_resolution_table = external_dependency_resolution_table
+            .unwrap_or(
+                &self
+                    .boundary
+                    .builder_surface
+                    .external_dependency_resolution_table,
+            );
         let compile_context = ModuleCompilationContext {
             options: self.boundary.config.frontend_options(),
             build_profile: self.boundary.build_profile,
+            root_role_override: (check_only_provider_bindings.is_some()
+                || check_only_source_package_dependencies.is_some())
+            .then_some(ModuleRootRole::Support),
             project_path_resolver: Some(self.boundary.project_path_resolver.clone()),
             style_directives: self.boundary.style_directives,
-            external_packages: Arc::clone(self.boundary.external_packages),
-            external_dependency_resolution_table: &self
-                .boundary
-                .builder_surface
-                .external_dependency_resolution_table,
+            external_packages: effective_external_packages,
+            build_config_values: effective_build_config_values,
+            external_dependency_resolution_table: effective_external_dependency_resolution_table,
             source_provider_dependencies: &source_provider_dependencies,
             provider_materialisations: self.provider_materialisations,
             builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
@@ -1142,15 +1670,17 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         }
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn compile_module_waves(
     context: BoundaryCompilationContext<'_>,
     graph: ProjectModuleGraph,
     module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
+    check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<CompiledGraphBoundary, CompilerMessages> {
+) -> Result<(CompiledGraphBoundary, Vec<CompilerMessages>), CompilerMessages> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     // The compiler resolves declaring generic templates through this registry, so it never reads a
@@ -1167,6 +1697,13 @@ fn compile_module_waves(
     let source_package_dependency_index =
         build_source_package_dependency_index(&provider_binding_index, source_package_dependencies)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // Canonical fact ownership is indexed once per boundary. Transient units borrow this index
+    // instead of cloning and concatenating the canonical fact vector for every unit.
+    let build_config_index = BuildConfigResolutionIndex::from_validated(
+        &context.canonical_source_facts,
+        &context.fixed_project_facts,
+        &context.direct_project_facts,
+    );
 
     // Index each consumer module's direct package dependencies once per boundary so readiness
     // walks only the packages that module actually depends on and never filters the full dependency
@@ -1179,7 +1716,7 @@ fn compile_module_waves(
 
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
-
+    let mut transient_messages = Vec::new();
     for wave in module_waves {
         add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, wave.len());
         let mut ready = Vec::new();
@@ -1323,9 +1860,87 @@ fn compile_module_waves(
                         diagnostics,
                     });
                 }
+                DirectoryModuleTaskOutcome::Blocked => {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "canonical ModuleId {} unexpectedly became transient-blocked",
+                            outcome.module_id.index()
+                        )),
+                        string_table,
+                    ));
+                }
                 DirectoryModuleTaskOutcome::Infrastructure(error) => {
                     return Err(CompilerMessages::from_error_ref(error, string_table));
                 }
+            }
+        }
+    }
+
+    // Check-only units are semantically compiled after canonical publication, but their
+    // successful artefacts, interfaces, generated deltas and resource associations are discarded.
+    // Only their diagnostics/warnings cross the frontend result boundary.
+    add_frontend_counter(
+        FrontendCounter::ModuleCompilationSerialCount,
+        check_only_jobs.len(),
+    );
+    for check_only_job in check_only_jobs {
+        let outcome = {
+            let compile_context = DirectoryModuleCompileContext {
+                boundary: &context,
+                provider_store: &provider_store,
+                provider_materialisations: &provider_materialisations,
+                provider_bindings,
+                provider_binding_index: &provider_binding_index,
+                source_package_dependencies,
+                source_package_dependency_index: &source_package_dependency_index,
+            };
+            compile_context.compile_check_only(
+                check_only_job,
+                generated_store.known_generated(),
+                &build_config_index,
+            )
+        };
+        match outcome.outcome {
+            DirectoryModuleTaskOutcome::Success(compiled) => {
+                let ModuleSemanticResult {
+                    module,
+                    generated_delta,
+                    string_table: module_string_table,
+                    ..
+                } = *compiled;
+                let mut warnings = module.metadata.warnings;
+                warnings.extend(
+                    generated_delta
+                        .records()
+                        .iter()
+                        .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
+                );
+                if !warnings.is_empty() {
+                    let mut messages =
+                        CompilerMessages::from_diagnostics(warnings, module_string_table);
+                    let remap = string_table
+                        .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
+                    if !remap.is_identity() {
+                        messages.remap_string_ids(&remap);
+                    }
+                    transient_messages.push(messages);
+                }
+            }
+            DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
+                let mut messages = diagnostics.into_messages();
+                let remap = string_table
+                    .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
+                if !remap.is_identity() {
+                    messages.remap_string_ids(&remap);
+                }
+                transient_messages.push(messages);
+            }
+            DirectoryModuleTaskOutcome::Blocked => {
+                // The failed canonical provider's own diagnostics remain authoritative; a
+                // dependent check-only unit contributes no cascade diagnostics.
+            }
+            DirectoryModuleTaskOutcome::Infrastructure(error) => {
+                return Err(CompilerMessages::from_error_ref(error, string_table));
             }
         }
     }
@@ -1354,7 +1969,127 @@ fn compile_module_waves(
     };
     boundary
         .finish()
+        .map(|boundary| (boundary, transient_messages))
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+}
+/// Seed materialisation templates already published in a canonical boundary.
+///
+/// A deferred check-only pass cannot borrow the temporary registry used by canonical compilation,
+/// so it reconstructs the immutable lookup from the retained successful artefacts. No transient
+/// generated result is published into this registry.
+fn seed_boundary_materialisations(
+    registry: &mut ProviderMaterialisationRegistry,
+    modules: &ModuleArtifactStore,
+) -> Result<(), CompilerError> {
+    for artifact in modules.successful_artefacts_in_module_id_order() {
+        if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
+            registry.publish_context(context)?;
+        }
+    }
+    Ok(())
+}
+
+/// Compile one boundary's transient jobs after its canonical artefacts are complete.
+///
+/// This is used for source packages after *all* source-package facades have published. Check-only
+/// jobs can therefore consume any canonical module/package provider without adding package edges
+/// or changing the retained boundary. Successful artefacts, generated deltas and resource
+/// associations are dropped; only diagnostics and warnings are returned.
+fn compile_check_only_jobs_after_canonical(
+    context: BoundaryCompilationContext<'_>,
+    provider_store: &ModuleArtifactStore,
+    generated_store: &BoundaryGeneratedFunctionStore,
+    check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
+    provider_bindings: &[ResolvedDependencyEdge],
+    source_package_dependencies: &[ResolvedSourcePackageDependency],
+    string_table: &mut StringTable,
+) -> Result<Vec<CompilerMessages>, CompilerMessages> {
+    let mut provider_materialisations =
+        seed_completed_package_materialisations(context.completed_packages)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    seed_boundary_materialisations(&mut provider_materialisations, provider_store)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    let provider_binding_index = build_provider_binding_index(provider_bindings)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_package_dependency_index =
+        build_source_package_dependency_index(&provider_binding_index, source_package_dependencies)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // Reuse one borrowed canonical fact index for every deferred transient unit.
+    let build_config_index = BuildConfigResolutionIndex::from_validated(
+        &context.canonical_source_facts,
+        &context.fixed_project_facts,
+        &context.direct_project_facts,
+    );
+
+    add_frontend_counter(
+        FrontendCounter::ModuleCompilationSerialCount,
+        check_only_jobs.len(),
+    );
+    let mut transient_messages = Vec::new();
+    for check_only_job in check_only_jobs {
+        let outcome = {
+            let compile_context = DirectoryModuleCompileContext {
+                boundary: &context,
+                provider_store,
+                provider_materialisations: &provider_materialisations,
+                provider_bindings,
+                provider_binding_index: &provider_binding_index,
+                source_package_dependencies,
+                source_package_dependency_index: &source_package_dependency_index,
+            };
+            compile_context.compile_check_only(
+                check_only_job,
+                generated_store.known_generated(),
+                &build_config_index,
+            )
+        };
+        match outcome.outcome {
+            DirectoryModuleTaskOutcome::Success(compiled) => {
+                let ModuleSemanticResult {
+                    module,
+                    generated_delta,
+                    string_table: module_string_table,
+                    ..
+                } = *compiled;
+                let mut warnings = module.metadata.warnings;
+                warnings.extend(
+                    generated_delta
+                        .records()
+                        .iter()
+                        .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
+                );
+                if !warnings.is_empty() {
+                    let mut messages =
+                        CompilerMessages::from_diagnostics(warnings, module_string_table);
+                    let remap = string_table
+                        .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
+                    if !remap.is_identity() {
+                        messages.remap_string_ids(&remap);
+                    }
+                    transient_messages.push(messages);
+                }
+            }
+            DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
+                let mut messages = diagnostics.into_messages();
+                let remap = string_table
+                    .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
+                if !remap.is_identity() {
+                    messages.remap_string_ids(&remap);
+                }
+                transient_messages.push(messages);
+            }
+            DirectoryModuleTaskOutcome::Blocked => {
+                // The failed canonical provider's own diagnostics remain authoritative; a
+                // dependent check-only unit contributes no cascade diagnostics.
+            }
+            DirectoryModuleTaskOutcome::Infrastructure(error) => {
+                return Err(CompilerMessages::from_error_ref(error, string_table));
+            }
+        }
+    }
+
+    Ok(transient_messages)
 }
 
 fn order_source_package_inventories(
@@ -1365,14 +2100,21 @@ fn order_source_package_inventories(
         .iter()
         .map(|inventory| inventory.dependency_prefix.clone())
         .collect::<Vec<_>>();
+    // Only canonical source-package dependencies participate in package ordering. Check-only
+    // bindings are transient semantic inputs and must not add package graph edges or make a
+    // package appear cyclic; their jobs run after all canonical facades have published.
     let dependency_prefixes = inventories
         .iter()
         .map(|inventory| {
-            inventory
-                .source_package_dependencies
+            let mut dependencies = inventory
+                .schedule
+                .canonical_source_package_dependencies()
                 .iter()
                 .map(|dependency| dependency.dependency_prefix.clone())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            dependencies.sort();
+            dependencies.dedup();
+            dependencies
         })
         .collect::<Vec<_>>();
 
@@ -1483,6 +2225,7 @@ pub(crate) fn order_packages_by_dependency(
 }
 
 /// Discover all entry modules in a directory project and compile each one.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
@@ -1490,6 +2233,8 @@ pub(crate) fn compile_directory_frontend(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+    build_config_inputs: &BuildConfigInputSet,
+    mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
     // Directory inventory owns graph construction, source-package discovery,
     // and deterministic package ordering before any module semantics run.
@@ -1514,6 +2259,7 @@ pub(crate) fn compile_directory_frontend(
         }
     };
     let project_path_resolver = project_setup.resolver;
+    let config_globals = builder_surface.config_globals().clone();
 
     // 2. Build every source-package inventory and the project inventory before semantic
     // compilation. Provider-backed discovery may extend the binding registry, so all boundaries
@@ -1555,7 +2301,7 @@ pub(crate) fn compile_directory_frontend(
             crate::timing::TimingMetric::BoundaryInventory,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
-        let package_waves = match module_inventory::discover_all_modules_in_package(
+        let package_waves = match module_inventory::discover_all_modules_in_package_with_check_only(
             config,
             &package_path_resolver,
             &mut package_graph,
@@ -1563,6 +2309,7 @@ pub(crate) fn compile_directory_frontend(
             &mut external_imports,
             package_resolution,
             &mut resource_inputs,
+            mode.includes_check_only(),
             string_table,
             #[cfg(feature = "timers")]
             timing_boundary,
@@ -1572,6 +2319,12 @@ pub(crate) fn compile_directory_frontend(
                 return Err(messages);
             }
         };
+        // Merge canonical contract locations before any transient package job forks its string
+        // table. Every later transient fact can then share this boundary prefix safely.
+        let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
+            package_waves.waves(),
+            string_table,
+        );
         let root_module_id = package_index
             .module_identities()
             .module_id_for_directory(package_index.entry_root())
@@ -1583,18 +2336,14 @@ pub(crate) fn compile_directory_frontend(
                     string_table,
                 )
             })?;
-        let (module_waves, provider_bindings, source_package_dependencies) =
-            package_waves.into_parts();
-
         source_package_inventories.push(SourcePackageModuleInventory {
             dependency_prefix: dependency_prefix.to_owned(),
             package_identity: package_index.stable_package_identity().clone(),
             root_module_id,
             path_resolver: package_path_resolver,
             graph: package_graph,
-            module_waves,
-            provider_bindings,
-            source_package_dependencies,
+            schedule: package_waves,
+            canonical_source_facts,
             #[cfg(feature = "timers")]
             timing_boundary,
         });
@@ -1619,23 +2368,130 @@ pub(crate) fn compile_directory_frontend(
             project_timing_boundary
         )),
     );
-    let module_waves = match module_inventory::discover_all_modules_in_project(
-        config,
-        &project_path_resolver,
-        &mut project_setup.project_module_graph,
-        style_directives,
-        &mut external_imports,
-        directory_dependency_resolution,
-        &mut resource_inputs,
+    let mut project_schedule =
+        match module_inventory::discover_all_modules_in_project_with_check_only(
+            config,
+            &project_path_resolver,
+            &mut project_setup.project_module_graph,
+            style_directives,
+            &mut external_imports,
+            directory_dependency_resolution,
+            &mut resource_inputs,
+            mode.includes_check_only(),
+            string_table,
+            #[cfg(feature = "timers")]
+            project_timing_boundary,
+        ) {
+            Ok(schedule) => schedule,
+            Err(messages) => {
+                return Err(messages);
+            }
+        };
+    // Merge all canonical project contract locations before transient jobs fork their local
+    // string-table base. Project fixed/direct fields are also materialized now so their locations
+    // belong to the same inherited prefix used by every check-only job.
+    let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
+        project_schedule.waves(),
         string_table,
-        #[cfg(feature = "timers")]
-        project_timing_boundary,
-    ) {
-        Ok(module_waves) => module_waves,
-        Err(messages) => {
-            return Err(messages);
+    );
+    let effective_project_fields = config_boundary::effective_project_fields(config, string_table)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let fixed_project_facts =
+        config_boundary::fixed_project_contract_facts(&effective_project_fields);
+    let direct_project_facts =
+        config_boundary::direct_project_contract_facts(&effective_project_fields);
+    let project_fallback = config.setting_location_or_config_file("project", string_table);
+    // All canonical project and source-package inventories are complete now. Prepare transient
+    // jobs only after that global provider-discovery barrier so each job forks final canonical
+    // external package/cache/resolution state.
+    if mode.includes_check_only() {
+        for inventory in &mut source_package_inventories {
+            let Some((_, package_index)) = project_setup
+                .module_namespace_set
+                .source_package_boundaries()
+                .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
+            else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "Source package @{} disappeared before deferred check-only preparation",
+                        inventory.dependency_prefix
+                    )),
+                    string_table,
+                ));
+            };
+            let package_resolution = DirectoryDependencyResolution::package(
+                &project_setup.module_namespace_set,
+                inventory.dependency_prefix.as_str(),
+                package_index,
+            );
+            inventory.schedule.prepare_check_only_jobs(
+                style_directives,
+                &inventory.path_resolver,
+                &mut external_imports,
+                package_resolution,
+                string_table,
+            )?;
         }
-    };
+    }
+    if mode.includes_check_only() {
+        project_schedule.prepare_check_only_jobs(
+            style_directives,
+            &project_path_resolver,
+            &mut external_imports,
+            directory_dependency_resolution,
+            string_table,
+        )?;
+    }
+
+    let (
+        project_module_waves,
+        project_provider_bindings,
+        project_source_package_dependencies,
+        project_check_only_jobs,
+    ) = project_schedule.into_parts();
+    let mut all_project_source_facts = project_source_facts.clone();
+    if mode.includes_check_only() {
+        all_project_source_facts.extend(
+            config_boundary::source_contract_facts_from_check_only_jobs(
+                &project_check_only_jobs,
+                string_table,
+            ),
+        );
+    }
+    // Canonical resolution must use only canonical source facts, but explicit inputs are checked
+    // against the full analyzed union after canonical values have validated successfully. This
+    // lets a check-only-only name make an input known without retaining that transient contract.
+    let canonical_project_inputs = config_boundary::filter_build_config_inputs_to_known_facts(
+        build_config_inputs,
+        &project_source_facts,
+        &direct_project_facts,
+    );
+    let project_build_config_values = config_boundary::resolve_boundary_build_config(
+        &project_source_facts,
+        &fixed_project_facts,
+        &direct_project_facts,
+        &canonical_project_inputs,
+        &config_globals,
+        project_fallback.clone(),
+        string_table,
+    )?;
+    if let Some(input) = config_boundary::first_unknown_build_config_input(
+        build_config_inputs,
+        &all_project_source_facts,
+        &direct_project_facts,
+    ) {
+        return Err(config_boundary::build_config_resolution_messages(
+            BuildConfigResolutionError::UnknownExplicitInput { input },
+            project_fallback,
+            string_table,
+        ));
+    }
+    let project_globals = config_boundary::build_project_globals_interface(
+        config,
+        &effective_project_fields,
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory_3.finish();
     let source_package_inventories =
@@ -1655,25 +2511,44 @@ pub(crate) fn compile_directory_frontend(
         crate::timing::TimingMetric::Stage0DirectoryCompile
     );
     let mut completed_source_packages = CompletedSourcePackageRegistry::new();
+    let mut transient_messages = Vec::new();
+    let mut source_package_check_only_inventories = Vec::new();
     for inventory in source_package_inventories {
         let SourcePackageModuleInventory {
             package_identity,
             root_module_id,
             path_resolver,
             graph,
-            module_waves,
-            provider_bindings,
-            source_package_dependencies,
-            dependency_prefix: _,
+            schedule,
+            canonical_source_facts: source_facts,
+            dependency_prefix,
             #[cfg(feature = "timers")]
             timing_boundary,
         } = inventory;
+        let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
+            schedule.into_parts();
+        let package_inputs = BuildConfigInputSet::new();
+        let package_fallback = SourceLocation::from_path(path_resolver.entry_root(), string_table);
+        let build_config_values = config_boundary::resolve_boundary_build_config(
+            &source_facts,
+            &[],
+            &[],
+            &package_inputs,
+            &config_globals,
+            package_fallback,
+            string_table,
+        )?;
+        let deferred_path_resolver = path_resolver.clone();
+        let deferred_build_config_values = build_config_values.clone();
         timing_scope_attributed!(
             timing_guard_build_boundary_compile,
             crate::timing::TimingMetric::BoundaryCompile,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
-        let compiled = compile_module_waves(
+        // Canonical package compilation is deliberately independent of the transient lane. In
+        // particular, no check-only job may publish an artefact or make a package ready for
+        // dependency scheduling.
+        let (boundary, mut package_transient_messages) = compile_module_waves(
             BoundaryCompilationContext::new(
                 config,
                 build_profile,
@@ -1682,17 +2557,23 @@ pub(crate) fn compile_directory_frontend(
                 &external_packages,
                 builder_surface,
                 &completed_source_packages,
+                build_config_values,
+                source_facts.clone(),
+                BuildConfigInputSet::new(),
+                config_globals.clone(),
+                Vec::new(),
+                Vec::new(),
+                None,
             ),
             graph,
             module_waves,
+            Vec::new(),
             &provider_bindings,
             &source_package_dependencies,
             &mut resource_inputs,
             string_table,
-        );
-        let boundary = compiled?;
-        #[cfg(feature = "timers")]
-        timing_guard_build_boundary_compile.finish();
+        )?;
+        transient_messages.append(&mut package_transient_messages);
         let mut dependency_prefixes = Vec::new();
         let mut seen_dependency_prefixes = FxHashSet::default();
         for dependency in &source_package_dependencies {
@@ -1712,14 +2593,76 @@ pub(crate) fn compile_directory_frontend(
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         completed_source_packages.reserve_commit(&publication);
         completed_source_packages.commit(publication, package);
+        if mode.includes_check_only() && !check_only_jobs.is_empty() {
+            source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
+                dependency_prefix,
+                path_resolver: deferred_path_resolver,
+                check_only_jobs,
+                provider_bindings,
+                source_package_dependencies,
+                canonical_source_facts: source_facts,
+                build_config_values: deferred_build_config_values,
+            });
+        }
     }
 
     completed_source_packages
         .validate_dependency_edges()
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // Every canonical package facade is now published. Run the deferred transient package jobs
+    // against those immutable boundaries so their package providers can never affect Kahn
+    // ordering or surface as a readiness infrastructure failure.
+    for inventory in source_package_check_only_inventories {
+        let SourcePackageCheckOnlyInventory {
+            dependency_prefix,
+            path_resolver,
+            check_only_jobs,
+            provider_bindings,
+            source_package_dependencies,
+            canonical_source_facts,
+            build_config_values,
+        } = inventory;
+        let package_id = completed_source_packages
+            .by_prefix(dependency_prefix.as_str())
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "deferred check-only source package @{} was not published",
+                        dependency_prefix
+                    )),
+                    string_table,
+                )
+            })?;
+        let package = completed_source_packages
+            .package(package_id)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let package_transient_messages = compile_check_only_jobs_after_canonical(
+            BoundaryCompilationContext::new(
+                config,
+                build_profile,
+                &path_resolver,
+                style_directives,
+                &external_packages,
+                builder_surface,
+                &completed_source_packages,
+                build_config_values,
+                canonical_source_facts,
+                BuildConfigInputSet::new(),
+                config_globals.clone(),
+                Vec::new(),
+                Vec::new(),
+                None,
+            ),
+            &package.boundary.modules,
+            &package.boundary.generated,
+            check_only_jobs,
+            &provider_bindings,
+            &source_package_dependencies,
+            string_table,
+        )?;
+        transient_messages.extend(package_transient_messages);
+    }
 
-    let (project_module_waves, project_provider_bindings, project_source_package_dependencies) =
-        module_waves.into_parts();
     timing_scope_attributed!(
         timing_guard_build_boundary_compile_2,
         crate::timing::TimingMetric::BoundaryCompile,
@@ -1727,7 +2670,7 @@ pub(crate) fn compile_directory_frontend(
             project_timing_boundary
         )),
     );
-    let compiled_project = compile_module_waves(
+    let (project_boundary, mut project_transient_messages) = compile_module_waves(
         BoundaryCompilationContext::new(
             config,
             build_profile,
@@ -1736,20 +2679,32 @@ pub(crate) fn compile_directory_frontend(
             &external_packages,
             builder_surface,
             &completed_source_packages,
+            project_build_config_values,
+            project_source_facts,
+            build_config_inputs.clone(),
+            config_globals.clone(),
+            fixed_project_facts.clone(),
+            direct_project_facts.clone(),
+            project_globals.as_ref(),
         ),
         project_setup.project_module_graph,
         project_module_waves,
+        project_check_only_jobs,
         &project_provider_bindings,
         &project_source_package_dependencies,
         &mut resource_inputs,
         string_table,
-    );
-    let project_boundary = compiled_project?;
+    )?;
+    transient_messages.append(&mut project_transient_messages);
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_compile_2.finish();
     #[cfg(feature = "timers")]
     timing_guard_stage0_directory_compile.finish();
-
-    ProjectFrontendCompilation::new(project_boundary, completed_source_packages, resource_inputs)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+    ProjectFrontendCompilation::new_with_transient_messages(
+        project_boundary,
+        completed_source_packages,
+        resource_inputs,
+        transient_messages,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }

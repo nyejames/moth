@@ -3,9 +3,12 @@
 //! interfaces and retained link facts, so broad module scans or missing nominal roots fail at the
 //! exact handoff where they would otherwise widen or shrink the selected resource set.
 
-use crate::build_system::build::ProjectCompilation;
+use crate::build_system::build::{
+    ProjectAssemblyError, ProjectCompilation, validate_frontend_facade_boundaries,
+};
 use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
+    ProjectFrontendCompilation,
 };
 use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
@@ -20,6 +23,9 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::SourceLocation;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
+};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -50,9 +56,55 @@ use crate::compiler_frontend::public_interface::{
     PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    ExportBinding, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
+    ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTypeCategory,
+    OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
+
+fn assert_project_context_diagnostic(
+    error: ProjectAssemblyError,
+    expected_reason: ProjectContextEscapeReason,
+) {
+    let mut string_table = StringTable::new();
+    let messages = error.into_messages(&mut string_table);
+    assert_eq!(messages.error_count(), 1);
+
+    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics[0];
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape)
+    );
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0086");
+    let expected_reason_key = match expected_reason {
+        ProjectContextEscapeReason::ExportedDeclaration => {
+            "project_context_escape.exported_declaration"
+        }
+        ProjectContextEscapeReason::ReachableExecutable => {
+            "project_context_escape.reachable_executable"
+        }
+    };
+    assert_eq!(diagnostic.identity().reason_key, Some(expected_reason_key));
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::ProjectContextEscape { reason } if *reason == expected_reason
+    ));
+
+    let scope = diagnostic
+        .primary_location
+        .scope
+        .to_portable_string(&messages.string_table);
+    assert!(
+        !scope.is_empty(),
+        "ProjectContext facade diagnostic must retain a source scope"
+    );
+}
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -162,6 +214,11 @@ fn synthetic_module(
             .insert(origin.clone(), function_id);
     }
     hir.start_function = start_function;
+    hir.function_provenance = hir
+        .functions
+        .iter()
+        .map(|function| (function.id, SyntheticInterfaceProvenance::empty()))
+        .collect();
 
     let function_link_facts = collect_module_function_link_facts(&hir)
         .expect("synthetic HIR should produce function link facts");
@@ -265,6 +322,7 @@ fn const_declaration(
             module_origin.clone(),
             name.to_owned(),
         )),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
             type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
             folded_value: PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
@@ -280,6 +338,281 @@ fn exported_binding(
     origin: OriginDeclarationId,
 ) -> ExportBinding {
     ExportBinding::new(facade_origin.clone(), public_name.to_owned(), origin)
+}
+
+#[test]
+fn package_facade_rejects_project_context_declaration_provenance() {
+    let package = StablePackageIdentity::project_local("assembly-provenance-declaration");
+    let facade_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "".to_owned(),
+        ModuleRootRole::ProjectPackageFacade,
+    );
+    let declaration_origin = OriginConstantId::new(facade_origin.clone(), "config".to_owned());
+    let declaration_resource = resource(&facade_origin, "assets/config.svg");
+    let mut declaration = const_declaration(&facade_origin, "config", declaration_resource);
+    declaration.synthetic_interface_provenance =
+        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+            SyntheticInterfaceClass::ProjectContext,
+            "project",
+            "config",
+        ));
+    let mut facade_interface = empty_interface(facade_origin.clone());
+    facade_interface.export_bindings = vec![exported_binding(
+        &facade_origin,
+        "config",
+        OriginDeclarationId::Constant(declaration_origin),
+    )];
+    facade_interface.declarations = vec![declaration];
+
+    let graph = ProjectModuleGraph::from_test_records(vec![module_record(
+        "/synthetic/provenance-declaration",
+        "/synthetic/provenance-declaration/+package.moth",
+        ModuleRootRole::ProjectPackageFacade,
+        "",
+        &package,
+    )]);
+    let project_boundary = boundary(
+        graph,
+        vec![artifact(
+            synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+            facade_interface,
+        )],
+    );
+
+    let frontend = ProjectFrontendCompilation::new(
+        project_boundary,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+    )
+    .expect("synthetic frontend should satisfy retained-boundary invariants");
+    let check_error = validate_frontend_facade_boundaries(&frontend)
+        .expect_err("check facade validation should reject ProjectContext provenance");
+    assert_project_context_diagnostic(check_error, ProjectContextEscapeReason::ExportedDeclaration);
+
+    let ProjectFrontendCompilation {
+        project,
+        source_packages,
+        resource_inputs,
+        ..
+    } = frontend;
+    let build_error = match ProjectCompilation::from_successful_boundaries(
+        project,
+        source_packages,
+        resource_inputs,
+    ) {
+        Ok(_) => {
+            panic!("project facade assembly should reject ProjectContext declaration provenance")
+        }
+        Err(error) => error,
+    };
+    assert_project_context_diagnostic(build_error, ProjectContextEscapeReason::ExportedDeclaration);
+}
+
+#[test]
+fn source_package_facade_rejects_project_context_reachable_private_helper() {
+    let package = StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "external");
+    let root_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "external/@package.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let child_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "external/lib/@lib.moth".to_owned(),
+        ModuleRootRole::Support,
+    );
+    let exported_origin = OriginFunctionId::new_free(child_origin.clone(), "public".to_owned());
+    let private_identity = ModulePrivateExecutableIdentity::new(
+        child_origin.clone(),
+        "@lib.moth".to_owned(),
+        ModulePrivateExecutableCategory::FreeFunction,
+        "helper".to_owned(),
+        None,
+    );
+    let helper_origin = OriginFunctionId::new_free(child_origin.clone(), "helper".to_owned());
+
+    let mut child_module = synthetic_module(
+        "external/lib/@lib.moth",
+        vec![
+            (
+                exported_origin.clone(),
+                vec![CallTarget::ModulePrivate(private_identity.clone())],
+                None,
+            ),
+            (helper_origin, Vec::new(), None),
+        ],
+        None,
+        Vec::new(),
+    );
+    child_module
+        .executable
+        .hir
+        .function_ids_by_private_origin
+        .insert(private_identity, FunctionId(1));
+    child_module.executable.hir.function_provenance.insert(
+        FunctionId(1),
+        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+            SyntheticInterfaceClass::ProjectContext,
+            "project",
+            "helper",
+        )),
+    );
+    child_module.link_facts.functions =
+        collect_module_function_link_facts(&child_module.executable.hir)
+            .expect("source-package helper HIR should refresh link facts");
+
+    let declaration = PublicDeclarationRecord {
+        origin: OriginDeclarationId::Function(exported_origin.clone()),
+        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
+        semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            category: PublicFunctionCategory::ConcreteLocal,
+            parameters: Vec::new(),
+            returns: Vec::new(),
+            error_return: None,
+        }),
+    };
+    let root_interface = PublicSemanticInterface {
+        module_origin: root_origin.clone(),
+        export_bindings: vec![exported_binding(
+            &root_origin,
+            "public",
+            OriginDeclarationId::Function(exported_origin),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![declaration],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+
+    let package_graph = ProjectModuleGraph::from_test_records(vec![
+        module_record(
+            "/synthetic/external",
+            "/synthetic/external/@package.moth",
+            ModuleRootRole::Normal,
+            "external/@package.moth",
+            &package,
+        ),
+        module_record(
+            "/synthetic/external/lib",
+            "/synthetic/external/lib/@lib.moth",
+            ModuleRootRole::Support,
+            "external/lib/@lib.moth",
+            &package,
+        ),
+    ]);
+    let package_boundary = boundary(
+        package_graph,
+        vec![
+            artifact(
+                synthetic_module("external/@package.moth", Vec::new(), None, Vec::new()),
+                root_interface,
+            ),
+            artifact(child_module, empty_interface(child_origin)),
+        ],
+    );
+    let mut source_packages = CompletedSourcePackageRegistry::new();
+    source_packages
+        .publish(
+            CompiledSourcePackage {
+                package_identity: package,
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_boundary,
+            },
+            &[],
+        )
+        .expect("source package should publish before external-facade validation");
+
+    let result = ProjectCompilation::from_successful_boundaries(
+        boundary(
+            ProjectModuleGraph::from_normal_roots(Vec::new()),
+            Vec::new(),
+        ),
+        source_packages,
+        ResourceInputRegistry::new(),
+    );
+    let error = match result {
+        Ok(_) => panic!("source-package facade should reject ProjectContext helper provenance"),
+        Err(error) => error,
+    };
+    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ReachableExecutable);
+}
+
+#[test]
+fn source_package_facade_rejects_project_context_public_declaration() {
+    let package = StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "direct");
+    let root_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "direct/@package.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let constant_origin = OriginConstantId::new(root_origin.clone(), "config".to_owned());
+    let mut declaration = const_declaration(
+        &root_origin,
+        "config",
+        resource(&root_origin, "assets/config.svg"),
+    );
+    declaration.synthetic_interface_provenance =
+        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+            SyntheticInterfaceClass::ProjectContext,
+            "project",
+            "config",
+        ));
+    let root_interface = PublicSemanticInterface {
+        module_origin: root_origin.clone(),
+        export_bindings: vec![exported_binding(
+            &root_origin,
+            "config",
+            OriginDeclarationId::Constant(constant_origin),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![declaration],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    let package_graph = ProjectModuleGraph::from_test_records(vec![module_record(
+        "/synthetic/direct",
+        "/synthetic/direct/@package.moth",
+        ModuleRootRole::Normal,
+        "direct/@package.moth",
+        &package,
+    )]);
+    let package_boundary = boundary(
+        package_graph,
+        vec![artifact(
+            synthetic_module("direct/@package.moth", Vec::new(), None, Vec::new()),
+            root_interface,
+        )],
+    );
+    let mut source_packages = CompletedSourcePackageRegistry::new();
+    source_packages
+        .publish(
+            CompiledSourcePackage {
+                package_identity: package,
+                root_module_id: ModuleId::from_index(0),
+                boundary: package_boundary,
+            },
+            &[],
+        )
+        .expect("source package should publish before external-facade validation");
+
+    let result = ProjectCompilation::from_successful_boundaries(
+        boundary(
+            ProjectModuleGraph::from_normal_roots(Vec::new()),
+            Vec::new(),
+        ),
+        source_packages,
+        ResourceInputRegistry::new(),
+    );
+    let error = match result {
+        Ok(_) => {
+            panic!("source-package facade should reject ProjectContext declaration provenance")
+        }
+        Err(error) => error,
+    };
+    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ExportedDeclaration);
 }
 
 #[test]
@@ -377,6 +710,116 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         !entry_paths.iter().any(|path| path == "assets/linked.svg"),
         "linked module const-fragment resource must not leak into entry union: {entry_paths:?}"
     );
+}
+
+#[test]
+fn package_facade_rejects_project_context_reachable_private_helper() {
+    let package = StablePackageIdentity::project_local("assembly-provenance-helper");
+    let facade_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "".to_owned(),
+        ModuleRootRole::ProjectPackageFacade,
+    );
+    let child_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "provider/@provider.moth".to_owned(),
+        ModuleRootRole::Support,
+    );
+    let exported_origin = OriginFunctionId::new_free(child_origin.clone(), "exported".to_owned());
+    let private_identity = ModulePrivateExecutableIdentity::new(
+        child_origin.clone(),
+        "@provider.moth".to_owned(),
+        ModulePrivateExecutableCategory::FreeFunction,
+        "helper".to_owned(),
+        None,
+    );
+    let helper_origin = OriginFunctionId::new_free(child_origin.clone(), "helper".to_owned());
+
+    let mut child_module = synthetic_module(
+        "provider/+provider.moth",
+        vec![
+            (
+                exported_origin.clone(),
+                vec![CallTarget::ModulePrivate(private_identity.clone())],
+                None,
+            ),
+            (helper_origin, Vec::new(), None),
+        ],
+        None,
+        Vec::new(),
+    );
+    child_module
+        .executable
+        .hir
+        .function_ids_by_private_origin
+        .insert(private_identity.clone(), FunctionId(1));
+    child_module.executable.hir.function_provenance.insert(
+        FunctionId(1),
+        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+            SyntheticInterfaceClass::ProjectContext,
+            "project",
+            "helper",
+        )),
+    );
+    child_module.link_facts.functions =
+        collect_module_function_link_facts(&child_module.executable.hir)
+            .expect("synthetic helper HIR should refresh link facts");
+
+    let declaration = PublicDeclarationRecord {
+        origin: OriginDeclarationId::Function(exported_origin.clone()),
+        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
+        semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            category: PublicFunctionCategory::ConcreteLocal,
+            parameters: Vec::new(),
+            returns: Vec::new(),
+            error_return: None,
+        }),
+    };
+    let mut facade_interface = empty_interface(facade_origin.clone());
+    facade_interface.export_bindings = vec![exported_binding(
+        &facade_origin,
+        "exported",
+        OriginDeclarationId::Function(exported_origin),
+    )];
+    facade_interface.declarations = vec![declaration];
+
+    let graph = ProjectModuleGraph::from_test_records(vec![
+        module_record(
+            "/synthetic/provenance-helper",
+            "/synthetic/provenance-helper/+package.moth",
+            ModuleRootRole::ProjectPackageFacade,
+            "",
+            &package,
+        ),
+        module_record(
+            "/synthetic/provenance-helper/provider",
+            "/synthetic/provenance-helper/provider/+provider.moth",
+            ModuleRootRole::Support,
+            "provider/@provider.moth",
+            &package,
+        ),
+    ]);
+    let project_boundary = boundary(
+        graph,
+        vec![
+            artifact(
+                synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+                facade_interface,
+            ),
+            artifact(child_module, empty_interface(child_origin)),
+        ],
+    );
+
+    let result = ProjectCompilation::from_successful_boundaries(
+        project_boundary,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+    );
+    let error = match result {
+        Ok(_) => panic!("project facade should reject ProjectContext helper provenance"),
+        Err(error) => error,
+    };
+    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ReachableExecutable);
 }
 
 #[test]
@@ -519,6 +962,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
 
     let card_declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(card_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: Vec::new(),
             fields: Vec::new(),
@@ -535,6 +979,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     };
     let make_declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(make_origin.clone()),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),

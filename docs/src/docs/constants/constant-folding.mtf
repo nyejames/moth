@@ -85,8 +85,13 @@ Those facts do not:
 
 ### Static Bool control flow
 
-An ordinary `if` condition may fold to a known `Bool`. Both branches first parse, resolve and type-check as normal source. Stage 4 then selects one branch, preserving the selected branch's lexical scope; inactive executable work does not reach HIR or later analysis. Runtime conditions remain runtime branches.
+An ordinary `if` condition may fold to a known `Bool`, including an implemented `#Config of Bool`
+value. Both branches first parse, resolve and type-check as normal source. Stage 4 then selects one
+branch, preserving the selected branch's lexical scope; inactive executable work does not reach HIR
+or later analysis. Runtime conditions remain runtime branches.
 
-This is not target conditional compilation. `#Config of Bool` will later feed the same general folded constant and ordinary-`if` mechanism. Advisory const facts do not create source constants or structural conditional compilation.
+This is not target conditional compilation. `#Config of Bool` uses the same general folded constant
+and ordinary-`if` mechanism. Advisory const facts do not create source constants or structural
+conditional compilation.
 
 Stage 4 performs this selection after final constant values and full branch validation, then derives terminality and executable facts from the selected AST.

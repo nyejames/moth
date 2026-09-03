@@ -5,6 +5,7 @@
 use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::build_system::output::output_path_identity;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::collections::{BTreeMap, HashMap};
@@ -391,7 +392,8 @@ fn build_single_file_project_includes_reachable_dependency_files() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-        let result = build_project(&builder, "main.moth", &[]).expect("build should succeed");
+        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
+            .expect("build should succeed");
 
         let outputs = BuiltOutputs::index(&result.project);
         assert_eq!(
@@ -440,6 +442,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("project-local JS import should build through generated glue");
 
@@ -521,6 +524,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("fallible project-local JS import should build through generated glue");
 
@@ -566,6 +570,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("non-fallible project-local JS import with runtime helper should build");
 
@@ -605,6 +610,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("fallible project-local JS import without runtime helper should build");
 
@@ -642,6 +648,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("unreachable project-local JS import should not request runtime artifacts");
 
@@ -699,6 +706,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("unused @html canvas helper should not request runtime artifacts");
 
@@ -754,6 +762,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("@web/canvas should build through generated glue");
 
@@ -832,6 +841,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("reachable @html canvas helper should build through generated glue");
 
@@ -891,6 +901,7 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
         &builder,
         root.to_str().expect("temp dir path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     ) else {
         panic!("builder diagnostics should fail the build");
     };

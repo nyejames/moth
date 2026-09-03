@@ -1,21 +1,26 @@
-**Accepted deferred design.** This page defines the final build configuration value contract. The current compiler does not yet implement this surface. See @../progress (Progress) for current status.
+**Implemented build configuration values.** The compiler supports direct and source `#Config` contracts, typed `--input` values for `build`, `check` and `dev`, ordinary static-`if` integration and immutable explicit `@project`. Semantic fingerprints are constructed transiently during frontend compilation; retaining and comparing them for dependency-aware targeted reuse remains deferred to the existing incremental and persistent artefact work. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current status.
 
-Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent project identity, deployment settings, feature choices and similar stable semantic configuration. They do not represent operating-system, architecture, backend or target identity.
+Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent schema-approved project metadata, deployment settings, feature choices and similar stable semantic configuration. They do not represent project identity, source-discovery settings, operating-system, architecture, backend or target identity.
 
 ### Direct project `#Config` fields
 
-A direct primitive or optional field of `project` may use `#Config of T`. `#Config` is a compiler-owned qualifier, not a wrapper type or semantic type constructor: the semantic type is `T`.
+Direct project `#Config` is governed by the selected project schema's per-field policy. Only a direct field marked `Configurable` by that policy, with a supported primitive or optional primitive shape, may use `#Config of T`. A primitive shape alone does not make a field configurable.
 
 [codeblock, $code("moth"):
     project #= |
         name = "moth_docs",
         version #Config of String = "0.1.0",
-        channel #Config of String? = none,
+        author #Config of String? = none,
+        license #Config of String? = none,
         entry_root = "src",
     |
 ]
 
+`name` is the required project identity field and `entry_root` controls source discovery; both are fixed-only. Compiler-control fields such as `template_const_loop_iteration_limit` are also fixed-only. The built-in schema marks ordinary metadata fields such as `version`, `author` and `license` as configurable, and open metadata fields not registered by that schema are configurable too. The exact policy comes from the selected schema; a primitive shape alone never makes a registered fixed-only field configurable.
+
 Direct-field-only placement applies. Nested project fields, builder and tooling sections, entry-local `config:` blocks and runtime declarations cannot use `#Config`. Accepted types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
+
+The grouped `project` record remains open for ordinary metadata: schema-unknown folded fields are accepted and preserved for `@project`. Openness and qualifier eligibility are separate: the selected schema policy decides whether a direct metadata field may carry `#Config`, while fixed-only identity and source-discovery fields remain non-configurable.
 
 ### Source `#Config` contracts
 
@@ -75,9 +80,9 @@ Moth source cannot inspect or branch on operating system, architecture, backend,
 
 ### Resolution and isolation
 
-Direct project `#Config` values resolve from explicit command or programmatic input, a compatible builder primitive global, the declaration default or a missing-input diagnostic. Project-wide source contracts resolve from a compatible fixed direct project field, a resolved direct project `#Config`, explicit source-only input, a compatible builder global, the shared source default or a missing-input diagnostic. A fixed project field is authoritative and blocks an override.
+For a schema-configurable direct project field, `#Config` values resolve from explicit command or programmatic input, a compatible builder primitive global, the declaration default or a missing-input diagnostic. Project-wide source contracts resolve from a compatible fixed direct project field, a resolved direct project `#Config`, explicit source-only input, a compatible builder global, the shared source default or a missing-input diagnostic. A fixed project field is authoritative and blocks an override.
 
-Unknown explicit inputs are diagnosed only after every selected contract is known. Every project or package compilation boundary owns a separate configuration namespace; consumer inputs do not implicitly satisfy dependency contracts. Configuration can specialise executable behaviour, but cannot change source discovery, dependency clauses, declarations, exports, receiver methods, traits, conformances or module/package topology.
+Resolved values carry boundary-local provenance and semantic fingerprints based only on their stable name, contract type and effective value-or-absence during frontend compilation. These facts are not retained after the build. Every project or package compilation boundary owns a separate configuration namespace; consumer inputs do not implicitly satisfy dependency contracts. Configuration can specialise executable behaviour, but cannot change source discovery, dependency clauses, declarations, exports, receiver methods, traits, conformances or module/package topology. Retention, dependency-aware targeted invalidation and reuse are deferred to the existing incremental and persistent artefact work.
 
 ### Related concepts
 

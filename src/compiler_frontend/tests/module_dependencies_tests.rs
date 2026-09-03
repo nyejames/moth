@@ -199,9 +199,9 @@ fn constant_initializer_creates_dependency_sort_edge() {
     // that dependency sorting respects.
     let (headers, mut string_table) = parse_module_headers(
         &[
-            // Config's initializer references Value.
-            // That reference creates a dependency edge from Config to Value.
-            ("src/a.moth", "@b Value\nConfig #= Value\n"),
+            // ValueHolder's initializer references Value.
+            // That reference creates a dependency edge from ValueHolder to Value.
+            ("src/a.moth", "@b Value\nValueHolder #= Value\n"),
             ("src/b.moth", "Value #Int = 42\n"),
         ],
         "src/a.moth",
@@ -218,11 +218,11 @@ fn constant_initializer_creates_dependency_sort_edge() {
         .map(|h| header_name(h, &string_table))
         .collect();
 
-    // Both headers must be present and Value must precede Config.
+    // Both headers must be present and Value must precede ValueHolder.
     assert_eq!(
         non_start_names,
-        vec!["Value", "Config"],
-        "constant initializer dependency must order Value before Config"
+        vec!["Value", "ValueHolder"],
+        "constant initializer dependency must order Value before ValueHolder"
     );
 }
 
@@ -231,7 +231,7 @@ fn same_file_backward_constant_reference_is_accepted() {
     // WHY: a constant that references an earlier constant in the same file is a backward
     // reference and must be accepted in source order.
     let (headers, mut string_table) = parse_module_headers(
-        &[("src/a.moth", "Value #Int = 42\nConfig #= Value\n")],
+        &[("src/a.moth", "Value #Int = 42\nValueHolder #= Value\n")],
         "src/a.moth",
     );
 
@@ -248,7 +248,7 @@ fn same_file_backward_constant_reference_is_accepted() {
 
     assert_eq!(
         non_start_names,
-        vec!["Value", "Config"],
+        vec!["Value", "ValueHolder"],
         "same-file backward constant reference should preserve source order"
     );
 }

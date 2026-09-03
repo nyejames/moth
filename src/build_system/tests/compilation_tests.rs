@@ -17,9 +17,10 @@ use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationConte
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -47,6 +48,9 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
+use crate::projects::settings::ProjectMetadataField;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -464,4 +468,58 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
         resource_inputs, before,
         "module preflight failure must not attach a pending resource association"
     );
+}
+
+#[test]
+fn project_metadata_fingerprint_tracks_name_type_and_value_structure() {
+    let int_type = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
+    let bool_type = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
+    let one = PublicFoldedValue::Int(1);
+    let two = PublicFoldedValue::Int(2);
+
+    assert_eq!(
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &one),
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &one)
+    );
+    assert_ne!(
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &one),
+        super::config_boundary::project_metadata_fingerprint("other", &int_type, &one)
+    );
+    assert_ne!(
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &one),
+        super::config_boundary::project_metadata_fingerprint("count", &bool_type, &one)
+    );
+    assert_ne!(
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &one),
+        super::config_boundary::project_metadata_fingerprint("count", &int_type, &two)
+    );
+}
+
+#[test]
+fn effective_project_fields_exclude_internal_unschematized_defaults() {
+    let mut config = Config::new(PathBuf::from("/project"));
+    config.project_name = "docs".to_owned();
+    config.entry_root = PathBuf::from("src");
+    config.project_config_loaded = true;
+    config.extra_project_fields.push(ProjectMetadataField {
+        name: "DisplayName".to_owned(),
+        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        value: PublicFoldedValue::String(OwnedFoldedString::Text("Docs".to_owned())),
+        location: SourceLocation::default(),
+    });
+    let mut string_table = StringTable::new();
+
+    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
+        .expect("the effective project snapshot should build");
+    let names = fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, vec!["name", "entry_root", "DisplayName"]);
+    let fixed_names = super::config_boundary::fixed_project_contract_facts(&fields)
+        .into_iter()
+        .map(|fact| fact.name().as_str().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(fixed_names, vec!["name", "entry_root"]);
 }

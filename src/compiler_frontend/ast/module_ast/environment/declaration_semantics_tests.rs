@@ -39,6 +39,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
             },
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
     let table = TopLevelDeclarationTable::new(vec![declaration]);
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));

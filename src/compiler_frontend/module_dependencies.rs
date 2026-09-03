@@ -45,6 +45,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Debug)]
 pub(crate) struct SortedHeaders {
     pub(crate) headers: Vec<Header>,
+    pub(crate) source_build_config_contracts:
+        Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
     pub(crate) top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub(crate) entry_runtime_fragment_count: usize,
     pub(crate) const_fragment_count: usize,
@@ -462,6 +464,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 ) -> Result<SortedHeaders, DiagnosticBag> {
     let BoundModuleHeaders {
         headers,
+        source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
@@ -555,6 +558,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 
     Ok(SortedHeaders {
         headers: sorted,
+        source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,

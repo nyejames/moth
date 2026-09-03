@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::function_body_to_ast;
+use crate::compiler_frontend::ast::module_ast::environment::config_resolution::expression_for_resolved_build_config_value;
 use crate::compiler_frontend::ast::statements::collections::new_collection;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, SignatureTypeFallbackPolicy, signature_member_to_declaration,
@@ -34,13 +35,15 @@ use crate::compiler_frontend::ast::{
     statements::value_production::{ValueReceiverKind, try_parse_value_block_at_receiver},
 };
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidCollectionTypeReason,
-    InvalidDeclarationReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
-    TypeMismatchContext,
+    InvalidConfigReason, InvalidDeclarationReason, InvalidExpressionReason,
+    InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 
 use crate::compiler_frontend::ast::expressions::anonymous_const_record::pipe_opens_value_record;
+use crate::compiler_frontend::build_config::BuildInputName;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
@@ -100,6 +103,52 @@ fn initializer_is_compile_time_constant(
             classify_template_from_effective_tir(template, &context.template_ir_store)
         })
         .map(|kind| kind.is_compile_time_value())
+}
+/// Classify config-qualified fields as deferred placeholders while preserving ordinary compile-time
+/// checking for every other field. The compiler config resolver validates and replaces these fields
+/// before the top-level constant is folded.
+fn initializer_is_compile_time_constant_with_config_placeholders(
+    initializer: &Expression,
+    context: &ScopeContext,
+) -> Result<bool, TemplateError> {
+    let ExpressionKind::AnonymousConstRecord { fields } = &initializer.kind else {
+        return initializer_is_compile_time_constant(initializer, context);
+    };
+
+    for field in fields {
+        if field.config_qualifier.is_some() {
+            continue;
+        }
+        if !initializer_is_compile_time_constant(&field.value, context)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Reject config-qualified fields at the owning body-local record declaration.
+///
+/// This intentionally inspects only direct record fields. Nested expression walks are not a
+/// placement boundary: each declaration/record parser owns the metadata it parsed.
+fn reject_config_qualifiers_on_record_fields(
+    initializer: &Expression,
+) -> Result<(), ExpressionParseError> {
+    let ExpressionKind::AnonymousConstRecord { fields } = &initializer.kind else {
+        return Ok(());
+    };
+
+    for field in fields {
+        if let Some(qualifier) = &field.config_qualifier {
+            return Err(CompilerDiagnostic::invalid_config_reason(
+                field.id.name(),
+                InvalidConfigReason::ConfigQualifierInvalidPlacement,
+                qualifier.qualifier_location.clone(),
+            )
+            .into());
+        }
+    }
+
+    Ok(())
 }
 
 /// Apply binding-level reactive identity after the initializer has been fully typed.
@@ -234,6 +283,7 @@ pub(crate) fn new_declaration(
                     function_type_id,
                     token_stream.current_location(),
                 ),
+                config_qualifier: None,
             },
             statement_kind: ResolvedDeclarationStatementKind::Function {
                 signature: function_signature,
@@ -328,6 +378,35 @@ pub fn resolve_declaration_syntax(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> DeclarationResult<Declaration> {
+    let config_qualifier = declaration_syntax.config_qualifier.clone();
+    let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
+    let has_config_resolution = context.shared.config_resolution.is_some();
+    let config_resolution_context = config_constant_context && has_config_resolution;
+    let source_build_config_contract_name = qualified_name
+        .name()
+        .and_then(|name| BuildInputName::new(string_table.resolve(name)).ok());
+    let has_source_build_config_contract = context
+        .shared
+        .source_build_config_contract_names
+        .as_ref()
+        .is_some_and(|names| {
+            source_build_config_contract_name
+                .as_ref()
+                .is_some_and(|name| names.contains(name))
+        });
+    let source_build_config_context = config_constant_context && has_source_build_config_contract;
+    if let Some(qualifier) = &declaration_syntax.config_qualifier
+        && !config_resolution_context
+        && !source_build_config_context
+    {
+        return Err(CompilerDiagnostic::invalid_config_reason(
+            qualified_name.name(),
+            InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            qualifier.qualifier_location.clone(),
+        )
+        .into());
+    }
+
     // ----------------------------
     //  Validate constant-context constraints
     // ----------------------------
@@ -434,10 +513,10 @@ pub fn resolve_declaration_syntax(
             is_reactive_binding,
             &qualified_name,
         );
-
         return Ok(Declaration {
             id: qualified_name,
             value: parsed_initializer,
+            config_qualifier,
         });
     }
 
@@ -482,6 +561,43 @@ pub fn resolve_declaration_syntax(
             Some(context),
         )?
     };
+    if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
+        let name = qualified_name.name().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "source #Config declaration has no terminal declaration name",
+            )
+        })?;
+        let name_text = string_table.resolve(name);
+        let input_name = BuildInputName::new(name_text).map_err(|_| {
+            CompilerError::compiler_error(format!(
+                "source #Config declaration has invalid build-input name '{name_text}'"
+            ))
+        })?;
+        let resolved = context
+            .shared
+            .source_build_config_values
+            .as_ref()
+            .and_then(|values| values.get(&input_name))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "source #Config declaration '{name_text}' has no resolved boundary value"
+                ))
+            })?;
+        let value = expression_for_resolved_build_config_value(
+            resolved,
+            declaration_syntax.config_qualifier.as_ref().map_or_else(
+                || declaration_location.clone(),
+                |qualifier| qualifier.qualifier_location.clone(),
+            ),
+            type_interner,
+            string_table,
+        );
+        return Ok(Declaration {
+            id: qualified_name,
+            value,
+            config_qualifier: None,
+        });
+    }
 
     let mut initializer_tokens = declaration_syntax.initializer_tokens;
     initializer_tokens.push(Token::new(
@@ -636,14 +752,15 @@ pub fn resolve_declaration_syntax(
         }
     };
 
+    if !config_resolution_context {
+        reject_config_qualifiers_on_record_fields(&parsed_initializer)?;
+    }
+
     // Body-local compile-time constants must fully fold after parsing and coercion.
-    // Top-level constants are validated by `ConstantResolutionSession`;
-    // this check covers the body-local path through `resolve_declaration_syntax`.
-    let initializer_is_compile_time_constant = if declaration_syntax.binding_mode.is_compile_time()
-    {
-        initializer_is_compile_time_constant(&parsed_initializer, context)?
+    let initializer_is_compile_time_constant = if context.shared.config_resolution.is_some() {
+        initializer_is_compile_time_constant_with_config_placeholders(&parsed_initializer, context)?
     } else {
-        true
+        initializer_is_compile_time_constant(&parsed_initializer, context)?
     };
 
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
@@ -732,10 +849,10 @@ pub fn resolve_declaration_syntax(
         " ",
         resolved_annotation.diagnostic_type.display_with_table(string_table)
     );
-
     Ok(Declaration {
         id: qualified_name,
         value: parsed_initializer,
+        config_qualifier,
     })
 }
 

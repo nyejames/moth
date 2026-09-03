@@ -6,9 +6,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 pub use crate::compiler_frontend::ast::expressions::expression_kind::{
-    ExpressionKind, MapLiteralEntry, Operator,
+    ExpressionKind, MapLiteralEntry, Operator, ResolvedCastExpression,
 };
 pub use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, PlaceExpression,
@@ -422,9 +421,9 @@ impl Expression {
 
     /// Attach direct synthetic compile-time interface provenance to this value.
     ///
-    /// Compiler-internal: the future synthetic-interface producer (config/provider binding) and
-    /// tests use this to inject explicit member-granular dependencies. Production AST construction
-    /// leaves provenance empty because no real producer exists yet.
+    /// AST config resolution and public-interface/facade projection attach member-granular
+    /// dependencies; AST value transformations preserve them through HIR lowering and per-function
+    /// link-fact collection. Tests also use this helper to inject explicit dependencies.
     pub fn with_synthetic_interface_provenance(
         mut self,
         provenance: SyntheticInterfaceProvenance,

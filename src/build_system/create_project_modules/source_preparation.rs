@@ -207,6 +207,7 @@ fn prepare_discovery_output(
     let options = HeaderParseOptions {
         entry_file_id,
         project_path_resolver: project_path_resolver.clone(),
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
     let prepare_context = FrontendFilePrepareContext {

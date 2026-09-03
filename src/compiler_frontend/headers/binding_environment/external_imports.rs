@@ -9,6 +9,7 @@ use super::BindingEnvironmentError;
 use super::{BindingEnvironmentBuilder, FileVisibility, VisibleNameBinding, VisibleNameRegistry};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
+use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -48,9 +49,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             symbol_id,
         } = input;
 
-        self.emit_alias_case_warning_if_needed(local_alias, symbol_name);
-
         let local_name_location = local_alias.map_or(source_location, |alias| &alias.location);
+        ensure_not_keyword_shadow_identifier(
+            local_name,
+            local_name_location.clone(),
+            self.string_table,
+        )?;
+
+        self.emit_alias_case_warning_if_needed(local_alias, symbol_name);
 
         registry.register(
             local_name,

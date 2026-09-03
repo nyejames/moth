@@ -6,11 +6,16 @@
 //! remaining backend-agnostic.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
-use crate::build_system::create_project_modules::compile_project_frontend;
+use crate::build_system::build::{
+    BuildBootstrap, ProjectBuilder, bootstrap_project_build, validate_frontend_facade_boundaries,
+};
+use crate::build_system::create_project_modules::{
+    FrontendCompilationMode, compile_project_frontend_with_inputs,
+};
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::capture_command_duration;
 use crate::command_timing_scope;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::display_messages::{
     print_compiler_messages, print_terse_compiler_messages,
@@ -24,9 +29,11 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use saying::say;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CheckOptions {
     pub terse: bool,
+    /// The explicit typed build-config inputs this check command started with.
+    pub(crate) inputs: BuildConfigInputSet,
 }
 
 struct CheckOutcome {
@@ -37,7 +44,7 @@ struct CheckOutcome {
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
     let start = Instant::now();
-    let outcome = execute_check(path);
+    let outcome = execute_check(path, &options.inputs);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
@@ -115,7 +122,7 @@ fn run_check_for_tests(
     (status, benchmark_counts)
 }
 
-fn execute_check(path: &str) -> CheckOutcome {
+fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
     let mut path_string_table = StringTable::new();
@@ -136,7 +143,8 @@ fn execute_check(path: &str) -> CheckOutcome {
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
-    } = match bootstrap_project_build(&project_builder, valid_path) {
+        build_config_inputs,
+    } = match bootstrap_project_build(&project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             return CheckOutcome {
@@ -146,16 +154,26 @@ fn execute_check(path: &str) -> CheckOutcome {
         }
     };
 
-    let frontend = compile_project_frontend(
+    let messages = match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    );
-    let messages = match frontend {
-        Ok(frontend) => frontend.into_render_messages(&mut string_table),
+        &build_config_inputs,
+        FrontendCompilationMode::Check,
+    ) {
+        Ok(frontend) => {
+            let facade_validation = validate_frontend_facade_boundaries(&frontend);
+            let mut messages = frontend.into_render_messages(&mut string_table);
+            if let Err(error) = facade_validation {
+                let facade_messages = error.into_messages(&mut string_table);
+                messages.string_table = string_table.clone();
+                messages.append_messages_preserving_context(facade_messages);
+            }
+            messages
+        }
         Err(messages) => messages,
     };
 

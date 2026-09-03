@@ -80,11 +80,14 @@ This avoids mutating the declaring module every time a consumer monomorphises a 
 
 ## Parallelism and reuse
 
-Canonical identity is assigned **before** workers race. Canonical merge order applies **after** workers finish. Semantic, implementation, root, link and documentation changes invalidate different dependents.
+Canonical identity is assigned **before** workers race. Canonical merge order applies **after** workers
+finish. Semantic, implementation, root, link and documentation fingerprints record change readiness.
 
-The second build of the greeting project should reuse an unchanged `greeting` artefact and only rebuild what fingerprints say moved.
+Targeted module/consumer reuse, including dev-server configuration invalidation, is deferred to the
+existing incremental and persistent artefact work; current dev rebuilds do not consume an invalidation
+report.
 
-**Diagram placeholder:** The second build reuses unchanged module artefacts and recompiles affected consumers
+**Diagram placeholder:** Fingerprints identify future reuse boundaries
 
 *Caption: teaching schedule.*
 *Question: what does deterministic reuse mean?*
@@ -108,9 +111,10 @@ The second build of the greeting project should reuse an unchanged `greeting` ar
 
 ## Roadmap and current status
 
-- **Accepted design:** immutable `CompiledModuleArtifact` lanes and fingerprints.
-- **Current implementation:** progress rows for reuse and generated function support.
-- **Queued work:** canonical module compilation and future persistent reuse plans.
+- **Accepted design:** immutable `CompiledModuleArtifact` lanes and semantic fingerprints.
+- **Current implementation:** fingerprint facts are produced; targeted in-memory and persistent
+  artefact reuse remains deferred.
+- **Queued work:** canonical module compilation and the existing incremental/persistent reuse work.
 - **Deferred or outside scope:** a backend-owned source cache as authority.
 
 ## Exit state

@@ -15,6 +15,10 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    parse_build_config_qualifier, starts_build_config_qualifier,
+};
+use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -183,11 +187,11 @@ pub(super) fn parse_anonymous_const_record_expression(
     Ok(finish_record(fields, record_location, type_interner))
 }
 
-/// Parse one `name = value` record field.
+/// Parse one `name = value` or `name #Config of T = value` record field.
 ///
-/// WHAT: reads the field name, requires the `=` separator, parses the value with ordinary
-/// expression semantics, and rejects duplicate names through the shared duplicate
-/// declaration diagnostic.
+/// `#Config` is retained as declaration metadata on the field. It is deliberately not represented
+/// as a type constructor or expression property: the compiler config service validates placement
+/// and resolves the field to an ordinary primitive or optional expression.
 fn parse_record_field(
     field_name: StringId,
     token_stream: &mut FileTokens,
@@ -198,6 +202,8 @@ fn parse_record_field(
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
     let name_location = token_stream.current_location();
+    ensure_not_keyword_shadow_identifier(field_name, name_location.clone(), string_table)
+        .map_err(ExpressionParseError::from)?;
 
     if let Some(first_location) = seen_field_names.get(&field_name) {
         return Err(CompilerDiagnostic::duplicate_declaration(
@@ -208,10 +214,15 @@ fn parse_record_field(
         .into());
     }
     seen_field_names.insert(field_name, name_location);
-
     token_stream.advance(); // past the field name
 
-    if token_stream.current_token_kind() != &TokenKind::Assign {
+    let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
+        Some(parse_build_config_qualifier(token_stream, string_table)?)
+    } else {
+        None
+    };
+    let has_initializer = token_stream.current_token_kind() == &TokenKind::Assign;
+    if !has_initializer && qualifier.is_none() {
         // A field not followed by `=` is positional (`| a, b = 2 |`); report it through
         // the dedicated record-field reason instead of a generic `=` expectation.
         return Err(CompilerDiagnostic::invalid_expression(
@@ -220,43 +231,73 @@ fn parse_record_field(
         )
         .into());
     }
-    token_stream.advance(); // past `=`
-    token_stream.skip_newlines();
 
-    if matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Comma | TokenKind::Eof
-    ) {
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-            token_stream.current_location(),
-        )
-        .into());
-    }
+    let value = if has_initializer {
+        token_stream.advance(); // past `=`
+        token_stream.skip_newlines();
 
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-        if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
+        if matches!(
+            token_stream.current_token_kind(),
+            TokenKind::Comma | TokenKind::Eof
+        ) {
             return Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::NestedAnonymousConstRecord,
+                InvalidExpressionReason::AnonymousRecordFieldNotNamed,
                 token_stream.current_location(),
             )
             .into());
         }
 
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-            token_stream.current_location(),
-        )
-        .into());
-    }
+        if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+            if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
+                return Err(CompilerDiagnostic::invalid_expression(
+                    InvalidExpressionReason::NestedAnonymousConstRecord,
+                    token_stream.current_location(),
+                )
+                .into());
+            }
 
-    let value = parse_record_field_value(token_stream, context, type_interner, string_table)?;
+            return Err(CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                token_stream.current_location(),
+            )
+            .into());
+        }
+
+        // A bare `none` has no inferred option type. The qualifier carries the option contract,
+        // so retain a sentinel and let the config resolver construct the typed OptionNone value.
+        if token_stream.current_token_kind() == &TokenKind::NoneLiteral && qualifier.is_some() {
+            let location = token_stream.current_location();
+            token_stream.advance();
+            if let Some(qualifier) = qualifier.as_mut() {
+                qualifier.default_none = true;
+            }
+            Expression::no_value(
+                location,
+                crate::compiler_frontend::datatypes::DataType::Inferred,
+                ValueMode::ImmutableOwned,
+            )
+        } else {
+            parse_record_field_value(token_stream, context, type_interner, string_table)?
+        }
+    } else {
+        // A qualified required field may omit its initializer so explicit inputs or builder
+        // globals can satisfy it. Optional absence resolves to an ordinary OptionNone.
+        let location = qualifier
+            .as_ref()
+            .map(|qualifier| qualifier.qualifier_location.clone())
+            .unwrap_or_else(|| token_stream.current_location());
+        Expression::no_value(
+            location,
+            crate::compiler_frontend::datatypes::DataType::Inferred,
+            ValueMode::ImmutableOwned,
+        )
+    };
 
     fields.push(Declaration {
         id: InternedPath::from_components(vec![field_name]),
         value,
+        config_qualifier: qualifier,
     });
-
     Ok(())
 }
 

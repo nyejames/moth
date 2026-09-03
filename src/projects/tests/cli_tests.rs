@@ -17,17 +17,23 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection,
 };
+use crate::compiler_frontend::build_config::{
+    BuildCommandLocation, BuildConfigInputSet, BuildConfigValueLocation, BuildInputName,
+    PrimitiveBuildValue,
+};
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
+use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
 use crate::compiler_tests::test_fs::assert_path_missing;
+use crate::projects::check::{CheckOptions, run_check};
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
@@ -45,6 +51,24 @@ use std::time::Duration;
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
+}
+
+fn write_cli_config_input_project() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("should create temporary project");
+    let root = temp.path();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"preview\",\n    release_output = \"release\",\n|\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        source_root.join("@page.moth"),
+        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
+    )
+    .expect("should write config-input source");
+    temp
 }
 
 #[test]
@@ -70,6 +94,7 @@ fn build_command_uses_current_directory_when_path_is_missing() {
         Command::Build {
             path: String::new(),
             flags: Vec::new(),
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -96,10 +121,85 @@ fn build_command_writes_the_validated_directory_output_plan() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
     assert_eq!(status, CommandStatus::Success);
     assert!(root.join("preview/index.html").exists());
     assert_path_missing(&root.join("dev/index.html"));
+}
+
+#[test]
+fn build_command_executes_with_typed_config_input() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = write_cli_config_input_project();
+    let root = temp.path().to_path_buf();
+    let root_text = root
+        .to_str()
+        .expect("temporary project path should be valid UTF-8");
+    let command = get_command(&args(&["build", root_text, "--input", "enabled=true"]))
+        .expect("build command with a typed input should parse");
+    let Command::Build {
+        path,
+        flags,
+        inputs,
+    } = command
+    else {
+        panic!("build command expected");
+    };
+    let enabled = BuildInputName::new("enabled").expect("test input name should validate");
+    assert_eq!(
+        inputs
+            .get(&enabled)
+            .expect("build should retain enabled")
+            .value(),
+        &PrimitiveBuildValue::Bool(true),
+        "build should retain the typed Bool value"
+    );
+
+    let status = run_build_command(&path, &flags, &inputs);
+
+    assert_eq!(status, CommandStatus::Success);
+    assert!(
+        root.join("preview/index.html").exists(),
+        "successful build should emit its configured output"
+    );
+}
+
+#[test]
+fn check_command_executes_with_typed_config_input() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = write_cli_config_input_project();
+    let root = temp.path().to_path_buf();
+    let root_text = root
+        .to_str()
+        .expect("temporary project path should be valid UTF-8");
+    let command = get_command(&args(&["check", root_text, "--input", "enabled=true"]))
+        .expect("check command with a typed input should parse");
+    let Command::Check {
+        path,
+        terse,
+        inputs,
+    } = command
+    else {
+        panic!("check command expected");
+    };
+    let enabled = BuildInputName::new("enabled").expect("test input name should validate");
+    assert_eq!(
+        inputs
+            .get(&enabled)
+            .expect("check should retain enabled")
+            .value(),
+        &PrimitiveBuildValue::Bool(true),
+        "check should retain the typed Bool value"
+    );
+
+    let status = run_check(&path, CheckOptions { terse, inputs });
+
+    assert_eq!(status, CommandStatus::Success);
+    assert!(
+        !root.join("preview").exists(),
+        "check should validate the source without writing build output"
+    );
 }
 
 /// An output-plan failure still reaches the command's single timing finish.
@@ -122,6 +222,7 @@ fn failed_output_plan_records_the_build_command_total() {
             .to_str()
             .expect("temporary path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
         |_| Err(CompilerError::compiler_error("forced output-plan failure")),
     );
     let snapshot = timing_session.finish();
@@ -163,6 +264,7 @@ fn build_command_supports_mixed_path_and_flag_ordering() {
         Command::Build {
             path: String::from("main.moth"),
             flags: vec![Flag::Release],
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -226,6 +328,7 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
                 host: String::from("0.0.0.0"),
                 port: 7777,
                 poll_interval_ms: 120,
+                inputs: BuildConfigInputSet::new(),
             },
             flags: Vec::new(),
         }
@@ -289,6 +392,7 @@ fn dev_command_supports_path_and_flag_ordering() {
                 host: String::from("localhost"),
                 port: 6342,
                 poll_interval_ms: 900,
+                inputs: BuildConfigInputSet::new(),
             },
             flags: Vec::new(),
         }
@@ -541,6 +645,7 @@ fn check_command_uses_default_options() {
         Command::Check {
             path: String::new(),
             terse: false,
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -555,6 +660,7 @@ fn check_command_parses_path_and_terse_flag() {
         Command::Check {
             path: String::from("main.moth"),
             terse: true,
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -569,6 +675,7 @@ fn check_command_supports_mixed_argument_ordering() {
         Command::Check {
             path: String::from("main.moth"),
             terse: true,
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -674,6 +781,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::Release],
+            inputs: BuildConfigInputSet::new(),
         }
     );
 
@@ -683,6 +791,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::HtmlWasm],
+            inputs: BuildConfigInputSet::new(),
         }
     );
 
@@ -693,6 +802,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::Release, Flag::HtmlWasm],
+            inputs: BuildConfigInputSet::new(),
         }
     );
 }
@@ -1007,6 +1117,7 @@ fn successful_build_records_command_build_total() {
     let status = run_build_command(
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
     );
     let snapshot = timing_session.finish();
 
@@ -1048,6 +1159,7 @@ fn build_command_total_excludes_renderer_work() {
     let (status, _) = run_build_command_with_output_plan_for_tests(
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
         super::create_build_output_plan,
         scripted_duration,
         |_outcome, duration| {
@@ -1107,6 +1219,7 @@ fn build_success_counts_emitted_artifacts_not_planned_ones() {
     let (status, _) = run_build_command_with_output_plan_for_tests(
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
         |build_result| {
             build_result.project.output_files = vec![
                 OutputFile::new(
@@ -1155,6 +1268,7 @@ fn failed_output_write_records_build_command_total() {
             .to_str()
             .expect("temporary path should be valid UTF-8"),
         &[],
+        &BuildConfigInputSet::new(),
         |build_result| {
             // Replace the valid output file with an escaping path so the plan
             // succeeds but the filesystem write fails validation.
@@ -1188,4 +1302,313 @@ fn failed_output_write_records_build_command_total() {
         1,
         "the failed output-write path must finish the output segment before the session drains"
     );
+}
+
+// -------------------------
+//  Shared `--input name=value` command parser
+// -------------------------
+
+fn command_inputs(command: &Command) -> &BuildConfigInputSet {
+    match command {
+        Command::Build { inputs, .. } | Command::Check { inputs, .. } => inputs,
+        Command::Dev { options, .. } => &options.inputs,
+        _ => panic!("command variant does not carry build-config inputs"),
+    }
+}
+
+fn single_input(argument: &str) -> (BuildInputName, PrimitiveBuildValue) {
+    let (name_text, value_text) = argument.split_once('=').expect("test argument has '='");
+    (
+        BuildInputName::new(name_text).expect("test input name should validate"),
+        PrimitiveBuildValue::from_command_text(value_text).expect("test input value should infer"),
+    )
+}
+
+fn cli_float(value: f64) -> PrimitiveBuildValue {
+    PrimitiveBuildValue::Float(FiniteFloat::new(value).expect("test float should be finite"))
+}
+
+/// Every command variant shares one parser and one typed carrier: the same argument text
+/// infers the same value with the same command location on build, check and dev, and no
+/// project config, source contract or build-system state exists in this test.
+#[test]
+fn every_command_infers_primitive_values_immediately_from_one_parser() {
+    let cases: &[(&str, PrimitiveBuildValue)] = &[
+        ("analytics=true", PrimitiveBuildValue::Bool(true)),
+        ("channel=false", PrimitiveBuildValue::Bool(false)),
+        ("retries=4", PrimitiveBuildValue::Int(4)),
+        ("offset=-3", PrimitiveBuildValue::Int(-3)),
+        ("ratio=0.75", cli_float(0.75)),
+        ("scale=1e-2", cli_float(1e-2)),
+        ("separator=':'", PrimitiveBuildValue::Char(':')),
+        (
+            "label=\"true\"",
+            PrimitiveBuildValue::String(String::from("true")),
+        ),
+        (
+            "build_number=\"42\"",
+            PrimitiveBuildValue::String(String::from("42")),
+        ),
+        (
+            "channel=alpha",
+            PrimitiveBuildValue::String(String::from("alpha")),
+        ),
+        (
+            "api_url=https://example.com",
+            PrimitiveBuildValue::String(String::from("https://example.com")),
+        ),
+        (
+            "version=1.2.3",
+            PrimitiveBuildValue::String(String::from("1.2.3")),
+        ),
+        ("empty=", PrimitiveBuildValue::String(String::from(""))),
+        (
+            "optional=none",
+            PrimitiveBuildValue::String(String::from("none")),
+        ),
+        (
+            "plus_one=+1",
+            PrimitiveBuildValue::String(String::from("+1")),
+        ),
+    ];
+
+    for command_name in ["build", "check", "dev"] {
+        for (argument, expected_value) in cases {
+            let command = get_command(&args(&[command_name, ".", "--input", argument]))
+                .unwrap_or_else(|error| panic!("{command_name} should parse {argument}: {error}"));
+            let inputs = command_inputs(&command);
+            let (name, _) = single_input(argument);
+            let entry = inputs
+                .get(&name)
+                .unwrap_or_else(|| panic!("{command_name} should retain {argument}"));
+            assert_eq!(entry.value(), expected_value, "{command_name} {argument}");
+            assert_eq!(
+                entry.location(),
+                &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
+                "{command_name} {argument} should carry its --input argument position"
+            );
+        }
+    }
+}
+
+/// Every command rejects the same quote-leading suffixes, including trivia that the ordinary
+/// lexer omits from its token stream. Terminal whitespace is intentionally rejected as well.
+#[test]
+fn every_command_rejects_incomplete_quoted_input_suffixes() {
+    let cases = [
+        (
+            "label=\"alpha\"--ignored",
+            "label",
+            "not a complete Moth String literal",
+        ),
+        (
+            "label=\"alpha\"\nignored",
+            "label",
+            "not a complete Moth String literal",
+        ),
+        (
+            "label=\"alpha\" ",
+            "label",
+            "not a complete Moth String literal",
+        ),
+        (
+            "separator=':'--ignored",
+            "separator",
+            "not a complete Moth Char literal",
+        ),
+        (
+            "separator=':'\nignored",
+            "separator",
+            "not a complete Moth Char literal",
+        ),
+        (
+            "separator=':' ",
+            "separator",
+            "not a complete Moth Char literal",
+        ),
+    ];
+
+    for command_name in ["build", "check", "dev"] {
+        for (argument, name, expected_reason) in cases {
+            let error = get_command(&args(&[command_name, ".", "--input", argument]))
+                .expect_err("a quote-leading value with a suffix must be rejected");
+            assert!(
+                error.contains(&format!("Invalid value for --input '{name}'")),
+                "{command_name} {argument:?}: {error}"
+            );
+            assert!(
+                error.contains(expected_reason),
+                "{command_name} {argument:?}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_command_splits_at_the_first_equals_and_preserves_the_remainder() {
+    let argument = "api_url=https://example.com/?a=1&b=2";
+    for command_name in ["build", "check", "dev"] {
+        let command = get_command(&args(&[command_name, ".", "--input", argument]))
+            .expect("command should parse the URL input");
+        let (name, _) = single_input(argument);
+        let entry = command_inputs(&command)
+            .get(&name)
+            .expect("URL input should be retained");
+        assert_eq!(
+            entry.value(),
+            &PrimitiveBuildValue::String(String::from("https://example.com/?a=1&b=2")),
+            "{command_name} must keep every later '=' inside the value"
+        );
+    }
+}
+
+#[test]
+fn every_command_rejects_duplicate_input_names_deterministically() {
+    for command_name in ["build", "check", "dev"] {
+        let error = get_command(&args(&[
+            command_name,
+            ".",
+            "--input",
+            "retries=4",
+            "--input",
+            "retries=9",
+        ]))
+        .expect_err("duplicate input names must be rejected");
+        assert!(
+            error.contains("Duplicate --input name 'retries'"),
+            "{command_name}: {error}"
+        );
+        assert!(
+            error.contains("argument position 2"),
+            "{command_name}: the earlier argument position must be reported: {error}"
+        );
+    }
+}
+
+#[test]
+fn command_input_names_must_be_lower_snake_case() {
+    for command_name in ["build", "check", "dev"] {
+        for bad_name in ["camelCase=1", "2fast=1", "=1", "with-dash=1"] {
+            let error = get_command(&args(&[command_name, ".", "--input", bad_name]))
+                .expect_err("non lower_snake_case names must be rejected");
+            assert!(
+                error.contains("input names must be lower_snake_case"),
+                "{command_name} {bad_name}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn input_flag_requires_a_value_argument_with_name_equals_separator() {
+    for command_name in ["build", "check", "dev"] {
+        let missing = get_command(&args(&[command_name, ".", "--input"]))
+            .expect_err("a trailing --input must be rejected");
+        assert!(
+            missing.contains("Missing value for --input"),
+            "{command_name}: {missing}"
+        );
+
+        let flag_shaped = get_command(&args(&[command_name, ".", "--input", "--release"]))
+            .expect_err("a flag-shaped value argument must be rejected");
+        assert!(
+            flag_shaped.contains("Missing value for --input"),
+            "{command_name}: {flag_shaped}"
+        );
+
+        let no_separator = get_command(&args(&[command_name, ".", "--input", "retries"]))
+            .expect_err("a value without '=' must be rejected");
+        assert!(
+            no_separator.contains("Expected format is name=value"),
+            "{command_name}: {no_separator}"
+        );
+    }
+}
+
+#[test]
+fn command_inputs_surface_the_compiler_owned_rejections() {
+    let overflow = get_command(&args(&["build", ".", "--input", "retries=2147483648"]))
+        .expect_err("Int overflow must be a diagnostic, not String fallback");
+    assert!(
+        overflow.contains("whole-number value '2147483648' is outside the Int range"),
+        "{overflow}"
+    );
+
+    let non_finite = get_command(&args(&["check", ".", "--input", "ratio=1e400"]))
+        .expect_err("non-finite exponent values must reject");
+    assert!(
+        non_finite.contains("float value '1e400' is not finite"),
+        "{non_finite}"
+    );
+
+    let unterminated = get_command(&args(&["dev", ".", "--input", "label=\"abc"]))
+        .expect_err("an unterminated String quote must be rejected");
+    assert!(
+        unterminated.contains("Invalid value for --input 'label'"),
+        "{unterminated}"
+    );
+    assert!(
+        unterminated.contains("not a complete Moth String literal"),
+        "{unterminated}"
+    );
+    assert!(
+        unterminated.contains("Unterminated string literal"),
+        "{unterminated}"
+    );
+
+    let bad_char = get_command(&args(&["build", ".", "--input", "separator=':'x"]))
+        .expect_err("trailing text after a Char literal must be rejected");
+    assert!(
+        bad_char.contains("not a complete Moth Char literal"),
+        "{bad_char}"
+    );
+}
+
+#[test]
+fn parsed_inputs_stay_on_the_programmatic_command_options() {
+    let build = get_command(&args(&[
+        "build",
+        ".",
+        "--input",
+        "retries=4",
+        "--input",
+        "label=\"42\"",
+    ]))
+    .expect("build should parse repeated inputs");
+    let check = get_command(&args(&["check", ".", "--input", "retries=4"]))
+        .expect("check should parse its input");
+    let dev = get_command(&args(&["dev", ".", "--input", "retries=4"]))
+        .expect("dev should parse its input");
+
+    assert_eq!(command_inputs(&build).len(), 2);
+    assert_eq!(command_inputs(&check).len(), 1);
+
+    let Command::Dev { options, .. } = dev else {
+        panic!("dev command expected");
+    };
+    assert_eq!(options.inputs.len(), 1);
+    let (name, value) = single_input("retries=4");
+    assert_eq!(
+        options
+            .inputs
+            .get(&name)
+            .expect("dev retains retries")
+            .value(),
+        &value
+    );
+}
+
+#[test]
+fn unknown_input_names_remain_in_the_set_for_later_contract_validation() {
+    // No project config or source contract exists in this test: the parser must accept and
+    // retain the typed value under its unknown name so the later selected-contract phases
+    // decide whether it matches a declaration.
+    let argument = "totally_unknown_name=alpha";
+    let command = get_command(&args(&["build", ".", "--input", argument]))
+        .expect("unknown input names parse and stay in the set");
+    let (name, value) = single_input(argument);
+    let entry = command_inputs(&command)
+        .get(&name)
+        .expect("unknown name must remain in the set");
+    assert_eq!(entry.value(), &value);
 }

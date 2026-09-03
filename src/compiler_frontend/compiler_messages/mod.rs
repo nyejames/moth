@@ -62,8 +62,8 @@ pub(crate) use diagnostic_payload::{
     InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
     MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
     NonExhaustiveMatchReason, NumberLiteralErrorReason, OperatorOperandPosition, PathKind,
-    RangeOperandKind, ReceiverCallKind, ReservedNameOwner, SymbolicSpacingConstruct,
-    SymbolicSpacingError, TypeAnnotationContext, TypeMismatchContext,
+    ProjectContextEscapeReason, RangeOperandKind, ReceiverCallKind, ReservedNameOwner,
+    SymbolicSpacingConstruct, SymbolicSpacingError, TypeAnnotationContext, TypeMismatchContext,
     UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;

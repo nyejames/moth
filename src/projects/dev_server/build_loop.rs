@@ -9,6 +9,7 @@ use crate::build_system::output::{
 };
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
@@ -33,8 +34,6 @@ pub struct BuildCycleReport {
     pub build_duration: Duration,
     pub clients_notified: usize,
     pub watch_scope: Option<watch::WatchScope>,
-    /// Structured warnings for successful dev builds, carried to the rebuild loop so terminal
-    /// output can print full diagnostics after the success summary.
     pub success_messages: Option<CompilerMessages>,
     /// Drained timing observations for this cycle, rendered by the caller
     /// after its own status line.
@@ -81,17 +80,20 @@ pub trait DevBuildExecutor: Send {
         flags: &[Flag],
     ) -> Result<BuildResult, CompilerMessages>;
 }
-
 pub struct ProjectBuildExecutor {
     builder: ProjectBuilder,
+    /// The typed explicit build inputs every dev build starts from.
+    build_config_inputs: BuildConfigInputSet,
 }
 
 impl ProjectBuildExecutor {
-    pub fn new(builder: ProjectBuilder) -> Self {
-        Self { builder }
+    pub fn new(builder: ProjectBuilder, build_config_inputs: BuildConfigInputSet) -> Self {
+        Self {
+            builder,
+            build_config_inputs,
+        }
     }
 }
-
 impl DevBuildExecutor for ProjectBuildExecutor {
     fn build_and_write(
         &mut self,
@@ -105,7 +107,8 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             )
         })?;
 
-        let mut build_result = build::build_project(&self.builder, entry_path, flags)?;
+        let mut build_result =
+            build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)?;
         let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
@@ -138,7 +141,6 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             messages.extend_diagnostics(build_result.warnings);
             return Err(messages);
         }
-
         Ok(build_result)
     }
 }

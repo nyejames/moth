@@ -215,6 +215,7 @@ fn declarations_with_receiver_methods(
             let origin = OriginTypeId::new(module_origin(), name, category);
             PublicDeclarationRecord {
                 origin: OriginDeclarationId::Type(origin),
+                synthetic_interface_provenance: Default::default(),
                 semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
                     generic_parameters: vec![],
                     fields: vec![],
@@ -315,6 +316,7 @@ fn project_label_display_evidence_with_method_origins(
         .collect();
     let declarations = vec![PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(struct_origin("Label")),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: vec![],
             fields: vec![],

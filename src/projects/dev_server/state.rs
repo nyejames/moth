@@ -24,7 +24,6 @@ pub struct BuildState {
     pub html_site_config: HtmlSiteConfig,
     pub last_build_messages_summary: String,
 }
-
 impl BuildState {
     pub fn new(output_dir: PathBuf) -> Self {
         Self {

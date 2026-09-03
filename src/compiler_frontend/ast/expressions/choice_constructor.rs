@@ -373,6 +373,7 @@ pub(super) fn parse_choice_construct(
                 choice_fields.push(Declaration {
                     id: field.name.clone(),
                     value,
+                    config_qualifier: None,
                 });
             }
 

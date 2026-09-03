@@ -1,10 +1,8 @@
-Entry config lets each normal module root carry its own builder settings and
-access project-level values through `@project`.
+Entry config covers implemented explicit access to project-level values through `@project` and the
+deferred root-local `config:` block.
 
-**Accepted deferred syntax.** `@project` and entry-local `config:` blocks are
-queued implementation work. The examples below show the accepted end-state
-contract, not current compiler support. See @../progress (Progress) for
-implementation status.
+**Implemented:** `@project` binding reads project fields. **Deferred:** entry-local `config:` blocks
+remain outside current compiler support. See @../progress (Progress) for implementation status.
 
 ### Using `@project`
 

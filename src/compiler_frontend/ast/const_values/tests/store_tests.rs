@@ -40,6 +40,7 @@ fn text_declaration(path: &str, text: StringId, string_table: &mut StringTable) 
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::string_slice(text, SourceLocation::default(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }
 }
 
@@ -67,6 +68,7 @@ fn structural_string_declaration(
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::structural_string(pieces, SourceLocation::default()),
+        config_qualifier: None,
     }
 }
 
@@ -82,6 +84,7 @@ fn template_declaration(path: &str, string_table: &mut StringTable) -> Declarati
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::template(template, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }
 }
 
@@ -343,6 +346,7 @@ fn record_declaration(
             None,
             TypeEnvironment::default().builtins().none,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -350,6 +354,7 @@ fn int_field(name: &str, location: SourceLocation, string_table: &mut StringTabl
     Declaration {
         id: InternedPath::from_single_str(name, string_table),
         value: Expression::int(7, location, ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }
 }
 
@@ -437,6 +442,7 @@ fn const_record_aliases_share_the_target_root() {
             ValueMode::ImmutableOwned,
             ConstRecordState::ConstRecord,
         ),
+        config_qualifier: None,
     };
 
     let store =

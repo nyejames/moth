@@ -5,9 +5,10 @@
 //! WHY: the validator relies on these facts being total and deterministic; the construction
 //! surface is the one place that could break them.
 
+use super::super::BuilderSurface;
 use super::super::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, NamedConfigSectionSchema,
-    UnknownFieldPolicy,
+    ProjectFieldConfigPolicies, ProjectFieldConfigPolicy, UnknownFieldPolicy,
 };
 
 #[test]
@@ -52,6 +53,68 @@ fn keeps_unknown_field_policy_on_nodes() {
     assert_eq!(
         schema.node(open).unknown_fields,
         UnknownFieldPolicy::Preserve
+    );
+}
+
+#[test]
+fn project_policy_snapshot_preserves_known_policies_and_unknown_fallback() {
+    let policies = BuilderSurface::with_mandatory_core()
+        .config_schemas
+        .project()
+        .project_field_config_policies();
+
+    assert_eq!(
+        policies.policy_for("name"),
+        ProjectFieldConfigPolicy::FixedOnly
+    );
+    assert_eq!(
+        policies.policy_for("entry_root"),
+        ProjectFieldConfigPolicy::FixedOnly
+    );
+    assert_eq!(
+        policies.policy_for("version"),
+        ProjectFieldConfigPolicy::Configurable
+    );
+    assert_eq!(
+        policies.policy_for("template_const_loop_iteration_limit"),
+        ProjectFieldConfigPolicy::FixedOnly
+    );
+    assert_eq!(
+        policies.policy_for("unregistered_metadata"),
+        ProjectFieldConfigPolicy::Configurable
+    );
+}
+
+#[test]
+fn project_policy_snapshot_preserves_required_optional_and_unsupported_shapes() {
+    let policies = BuilderSurface::with_mandatory_core()
+        .config_schemas
+        .project()
+        .project_field_config_policies();
+
+    assert_eq!(
+        policies.shape_for("name"),
+        Some(&ConfigFieldShape::String),
+        "required scalar fields retain their scalar shape"
+    );
+    assert_eq!(
+        policies.shape_for("version"),
+        Some(&ConfigFieldShape::Optional(Box::new(
+            ConfigFieldShape::String
+        ))),
+        "optional primitive fields retain their optional wrapper"
+    );
+    assert_eq!(
+        policies.shape_for("template_const_loop_iteration_limit"),
+        Some(&ConfigFieldShape::Int)
+    );
+    assert_eq!(policies.shape_for("unregistered_metadata"), None);
+
+    let default_policies = ProjectFieldConfigPolicies::default();
+    assert_eq!(
+        default_policies.policy_for("unregistered_metadata"),
+        ProjectFieldConfigPolicy::FixedOnly,
+        "the standalone policy default remains conservative"
     );
 }
 

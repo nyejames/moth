@@ -8,12 +8,13 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+    FileFrontendPrepareOutput, FileRole, HeaderKind, PreparedFilePathSyntax,
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::symbols::identity::FileId;
@@ -37,16 +38,31 @@ pub(crate) fn prepare_moth_template_file(
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
-    let structural_file_references = classify_prepared_file_references(
-        path_syntax.table(),
-        [],
-        file_tokens.file_id,
-        string_table,
-    );
     let context = MothTemplatePrepareContext::new(file_tokens, string_table);
     let content_header = context.content_header(string_table);
-
+    let config_owned_path_syntax_ids = match &content_header.kind {
+        HeaderKind::Constant { declaration }
+            if find_config_qualifier_marker(&declaration.initializer_tokens, string_table)
+                .is_some() =>
+        {
+            declaration
+                .initializer_tokens
+                .iter()
+                .filter_map(|token| match token.kind {
+                    TokenKind::Path(path_syntax_id) => Some(path_syntax_id),
+                    _ => None,
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     let mut headers = vec![content_header];
+    let structural_file_references = classify_prepared_file_references(
+        path_syntax.table(),
+        config_owned_path_syntax_ids,
+        context.file_id,
+        string_table,
+    );
 
     // Content sources can reference other content sources, so the synthetic constant's template
     // body takes the same token-level content ordering facts as authored shells.

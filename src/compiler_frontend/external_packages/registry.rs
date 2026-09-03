@@ -17,6 +17,7 @@ use super::ids::{
 };
 use super::{ExternalSymbolPath, ExternalSymbolPathError};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -166,6 +167,17 @@ impl ExternalPackageRegistry {
         origin: crate::builder_surface::PackageOrigin,
     ) -> Result<ExternalPackageId, CompilerError> {
         let path = path.into();
+        let path_without_introducer = path.strip_prefix('@').unwrap_or(&path);
+        if path_without_introducer
+            .split('/')
+            .next()
+            .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "External package path '{}' is reserved for the @project project-globals interface",
+                path
+            )));
+        }
         if self.package_id_by_path.contains_key(&path) {
             return_compiler_error!("External package '{}' is already registered.", path);
         }

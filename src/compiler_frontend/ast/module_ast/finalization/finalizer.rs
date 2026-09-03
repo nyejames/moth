@@ -249,6 +249,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         }
 
         let mut specialization = static_candidate.publish(&mut emitted.ast);
+        let static_if_function_provenance = specialization.function_provenance().clone();
 
         // The authored assertion message must remain available to the authoritative AST
         // type/TIR boundary validation above. Only after that validation succeeds may AST
@@ -449,6 +450,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 type_environment,
                 const_facts,
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
+                static_if_function_provenance,
             },
             module_resources,
             public_interface_projection_input,

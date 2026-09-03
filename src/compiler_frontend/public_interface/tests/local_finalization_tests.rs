@@ -98,6 +98,7 @@ fn function_draft_record(
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters,
@@ -121,6 +122,7 @@ fn receiver_draft_record_with_template(
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Type(receiver_origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
             generic_parameters: vec![],
             fields: vec![],
@@ -142,6 +144,7 @@ fn receiver_draft_record_with_template(
 fn generic_function_draft_record(origin: OriginFunctionId) -> PublicDeclarationRecord {
     PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(origin),
+        synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
                 generic_parameters: vec![],

@@ -334,6 +334,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
             declaration: DeclarationSyntax {
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
+                config_qualifier: None,
                 initializer_tokens: Vec::new(),
                 initializer_references: Vec::new(),
                 location: SourceLocation::default(),
@@ -800,6 +801,7 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }
 }
 

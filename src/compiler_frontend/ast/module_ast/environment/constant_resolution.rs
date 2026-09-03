@@ -13,6 +13,7 @@
 //! Body-local `#` constants are unrelated to this session. They stay on the normal lexical
 //! `ScopeContext` built during body emission.
 
+use super::config_resolution::resolve_direct_project_config_qualifiers;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
@@ -22,11 +23,16 @@ use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ContextKind, FileValueResolutionServices, ScopeContext,
+};
 use crate::compiler_frontend::ast::statements::declarations::resolve_declaration_syntax;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
+use crate::compiler_frontend::build_config::{
+    BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
@@ -44,7 +50,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -63,14 +69,18 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     pub style_directives: StyleDirectiveRegistry,
-    pub file_value_resolution: Option<
-        Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
-    >,
-    pub template_const_loop_iteration_limit: usize,
+    /// Compiler-owned config resolution services for direct project fields.
+    pub config_resolution: Option<Rc<ConfigResolutionServices>>,
+    /// Immutable project/package source `#Config` values for source-header materialization.
+    pub build_config_values: Arc<ResolvedBuildConfigMap>,
+    /// Names of source `#Config` contracts declared by this module.
+    pub source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
+    /// Stage 0 file-reference outcomes and module-local structural resource identity.
+    pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     pub build_profile: FrontendBuildProfile,
+    pub template_const_loop_iteration_limit: usize,
 }
-
 /// State that changes between constants, supplied by the environment builder per call.
 pub(crate) struct ConstantHeaderInput<'a> {
     /// Current declaration table. The builder commits each resolved constant into it, so the
@@ -153,8 +163,18 @@ impl ConstantResolutionSession {
             &mut type_interner,
             string_table,
         );
+        let mut declaration = declaration_result?;
+
+        if let Some(config_resolution) = &self.module_view.config_resolution {
+            resolve_direct_project_config_qualifiers(
+                &mut declaration,
+                &scope_context,
+                &mut type_interner,
+                config_resolution,
+                string_table,
+            )?;
+        }
         warnings.extend(scope_context.take_emitted_warnings());
-        let declaration = declaration_result?;
 
         // After resolution, the initializer must be fully foldable at compile time.
         // Runtime expressions in constants are rejected here. Template payloads keep
@@ -234,8 +254,18 @@ impl ConstantResolutionSession {
         .with_choice_variant_shells_by_path(Rc::clone(&module_view.choice_variant_shells_by_path))
         .with_nominal_type_ids_by_path(Rc::clone(&module_view.nominal_type_ids_by_path))
         .with_trait_environment(Rc::clone(&module_view.trait_environment));
-        if let Some(services) = &module_view.file_value_resolution {
+        if let Some(services) = &self.module_view.file_value_resolution {
             context = context.with_file_value_resolution(Rc::clone(services));
+        }
+        if !module_view.build_config_values.is_empty() {
+            context = context
+                .with_source_build_config_values(Arc::clone(&module_view.build_config_values));
+        }
+        context = context.with_source_build_config_contract_names(Arc::clone(
+            &module_view.source_build_config_contract_names,
+        ));
+        if let Some(services) = &module_view.config_resolution {
+            context = context.with_config_resolution(Rc::clone(services));
         }
         context
     }

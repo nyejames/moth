@@ -163,13 +163,13 @@ origin #= Point(0, 0)
 point_a #= Point(100, 200)
 point_b #= Point(a1, a2)
 
-Config = |
+RetrySettings = |
     max_retries Int,
     timeout_ms Int,
     cache_size Int,
 |
-default_config #= Config(3, 5000, 1000)
-custom_config #= Config(fact5, fact6 * 100, fact7 * 10)
+default_config #= RetrySettings(3, 5000, 1000)
+custom_config #= RetrySettings(fact5, fact6 * 100, fact7 * 10)
 
 Range = | min Int, max Int |
 range_1 #= Range(0, 100)

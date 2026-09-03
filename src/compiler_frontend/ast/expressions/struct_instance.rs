@@ -222,6 +222,7 @@ pub(super) fn parse_struct_constructor_expression(
         struct_fields.push(Declaration {
             id: field.name.clone(),
             value,
+            config_qualifier: None,
         });
     }
 

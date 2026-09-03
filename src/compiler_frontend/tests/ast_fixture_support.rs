@@ -60,7 +60,11 @@ pub(crate) fn test_if_branch_metadata(has_else: bool) -> IfBranchMetadata {
 }
 
 pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {
-    Declaration { id: name, value }
+    Declaration {
+        id: name,
+        value,
+        config_qualifier: None,
+    }
 }
 
 pub(crate) fn param(
@@ -79,6 +83,7 @@ pub(crate) fn param(
     Declaration {
         id: name,
         value: Expression::new(ExpressionKind::NoValue, location, id, data_type, value_mode),
+        config_qualifier: None,
     }
 }
 

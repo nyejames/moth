@@ -229,6 +229,31 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).file_value_resolution = Some(services);
         self
     }
+    /// Attach immutable source `#Config` values for constant-header materialization.
+    pub(crate) fn with_source_build_config_values(
+        mut self,
+        values: Arc<ResolvedBuildConfigMap>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).source_build_config_values = Some(values);
+        self
+    }
+    /// Attach this module's own source `#Config` contract names.
+    pub(crate) fn with_source_build_config_contract_names(
+        mut self,
+        names: Arc<FxHashSet<BuildInputName>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).source_build_config_contract_names = Some(names);
+        self
+    }
+
+    /// Attach compiler-owned config resolution services for constant-header folding.
+    pub(crate) fn with_config_resolution(
+        mut self,
+        services: Rc<ConfigResolutionServices>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).config_resolution = Some(services);
+        self
+    }
 
     /// Identify the authored source file for path-syntax table joins.
     pub(crate) fn with_declaring_file_id(mut self, file_id: Option<FileId>) -> ScopeContext {

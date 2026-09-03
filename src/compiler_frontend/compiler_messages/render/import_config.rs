@@ -65,7 +65,7 @@ pub(crate) fn invalid_config_message(
             )
         }
         InvalidConfigReason::UnsupportedStatement => {
-            "`config.moth` supports known setting declarations plus `#Import`/type support declarations only.".to_owned()
+            "`config.moth` supports grouped project and builder settings plus private compile-time helper constants only.".to_owned()
         }
         InvalidConfigReason::StandaloneTemplateUnsupported => {
             "`config.moth` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
@@ -75,6 +75,74 @@ pub(crate) fn invalid_config_message(
         }
         InvalidConfigReason::UnsupportedScalarValue => {
             format!("Unsupported value for config constant '{key_label}'.")
+        }
+        InvalidConfigReason::ConfigQualifierFixedField => format!(
+            "Project field '{key_label}' is fixed-only and cannot use `#Config`."
+        ),
+        InvalidConfigReason::ConfigQualifierSchemaTypeMismatch { declared, expected } => format!(
+            "Project field '{key_label}' declares `#Config of {}` but its schema requires {}.",
+            string_table.resolve(*declared),
+            string_table.resolve(*expected)
+        ),
+        InvalidConfigReason::ProjectGlobalsNameReserved => {
+            "The name `project` is reserved for the explicit `@project` project-globals dependency and cannot be claimed by a module or source package.".to_owned()
+        }
+        InvalidConfigReason::ConfigContractNameInvalid => format!(
+            "Config field '{key_label}' must use a lower_snake_case name so it can be supplied as a build input."
+        ),
+        InvalidConfigReason::ConfigQualifierInvalidPlacement => {
+            "`#Config` is valid only on a top-level source compile-time declaration or a direct field of the grouped `project` record.".to_owned()
+        }
+        InvalidConfigReason::ConfigQualifierInvalidProjectPlacement => {
+            "`config.moth` permits `#Config` only on a direct field of the grouped `project` record.".to_owned()
+        }
+        InvalidConfigReason::ConfigQualifierUnsupportedType => {
+            "`#Config` accepts only String, Int, Float, Bool, Char and matching optional forms."
+                .to_owned()
+        }
+        InvalidConfigReason::ConfigContractConflict {
+            first,
+            conflicting,
+        } => format!(
+            "Config contract '{key_label}' conflicts with another contract: {} versus {}.",
+            string_table.resolve(*first),
+            string_table.resolve(*conflicting)
+        ),
+        InvalidConfigReason::UnknownBuildConfigInput {
+            key,
+            provided_argument_index,
+        } => {
+            let location = provided_argument_index
+                .map(|index| format!(" The supplied value came from --input argument position {index}."))
+                .unwrap_or_default();
+            format!(
+                "Unknown build-config input '{}'. No selected project or source contract declares this name.{location}",
+                string_table.resolve(*key)
+            )
+        }
+        InvalidConfigReason::ConfigInputTypeMismatch {
+            provided,
+            expected,
+            provided_argument_index,
+        } => {
+            let location = provided_argument_index
+                .map(|index| format!(" The supplied value came from --input argument position {index}."))
+                .unwrap_or_default();
+            let provided_name = string_table.resolve(*provided);
+            let expected_name = string_table.resolve(*expected);
+            let string_hint = if matches!(expected_name, "String" | "String?")
+                && provided_name != "String"
+            {
+                " Quote the value, for example `\"42\"`, to force String interpretation."
+            } else {
+                ""
+            };
+            format!(
+                "Config input for '{key_label}' has type {provided_name}, but the contract requires {expected_name}.{location}{string_hint}"
+            )
+        }
+        InvalidConfigReason::MissingConfigInput => {
+            format!("Missing input for required config field '{key_label}'.")
         }
         InvalidConfigReason::NotCompileTimeConstant => {
             format!(
@@ -687,6 +755,15 @@ pub(crate) fn invalid_dependency_clause_message(
         }
         InvalidDependencyClauseReason::DependencyClauseNotAllowed => {
             "Dependency clauses are not allowed in this file kind."
+        }
+        InvalidDependencyClauseReason::ProjectGlobalsPathReserved => {
+            "The `@project` dependency namespace is reserved; only the exact `@project` root may be bound by the owning project boundary."
+        }
+        InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed => {
+            "The project package facade cannot declare a dependency on its own `@project` globals."
+        }
+        InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed => {
+            "The reserved `@project` interface cannot be directly re-exported."
         }
         InvalidDependencyClauseReason::ProviderRequiresBinding => {
             "An explicit-extension provider clause requires a namespace alias or at least one direct selection."

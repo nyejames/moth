@@ -49,6 +49,7 @@
 
 mod compilation;
 pub(crate) mod compiled_boundary;
+mod config_boundary;
 pub(crate) mod file_reference_resolution;
 pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;
@@ -83,6 +84,7 @@ pub(crate) use std::fs;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
@@ -90,21 +92,36 @@ use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-use crate::build_system::BuildProfile;
-use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 use crate::timed_stage;
 
+use crate::build_system::BuildProfile;
+use crate::builder_surface::BuilderSurface;
+/// Whether the frontend should compile only canonical modules or also transient check-only
+/// semantic units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FrontendCompilationMode {
+    Canonical,
+    Check,
+}
+
+impl FrontendCompilationMode {
+    fn includes_check_only(self) -> bool {
+        matches!(self, Self::Check)
+    }
+}
 pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 
 // -------------------------
 //  Compilation Entry Point
 // -------------------------
 
-/// Compile all project modules through the frontend pipeline.
+/// Compile all project modules through the frontend pipeline with no explicit build-config inputs.
 ///
-/// WHAT: dispatches to single-file or directory-project flow depending on the entry path.
-/// WHY: separating the two flows keeps each path readable as orchestration over named steps.
+/// Production build/check/dev callers use [`compile_project_frontend_with_inputs`] so the typed
+/// input set remains attached to its owning command boundary. This entry point remains useful for
+/// compiler-internal callers that deliberately compile a config-free fixture.
+#[allow(dead_code)]
 pub fn compile_project_frontend(
     config: &mut Config,
     build_profile: BuildProfile,
@@ -112,6 +129,30 @@ pub fn compile_project_frontend(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    compile_project_frontend_with_inputs(
+        config,
+        build_profile,
+        validated_output_settings,
+        style_directives,
+        builder_surface,
+        string_table,
+        &BuildConfigInputSet::new(),
+        FrontendCompilationMode::Canonical,
+    )
+}
+
+/// Compile all project modules with one command-owned typed input set and frontend mode.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compile_project_frontend_with_inputs(
+    config: &mut Config,
+    build_profile: BuildProfile,
+    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    string_table: &mut StringTable,
+    build_config_inputs: &BuildConfigInputSet,
+    mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
     // Frontend counters are command-scoped and gated by `benchmark_counters`.
     // The counter storage is atomic so directory module compilation can update
@@ -136,15 +177,19 @@ pub fn compile_project_frontend(
                 style_directives,
                 builder_surface,
                 string_table,
+                build_config_inputs,
+                mode,
             )
         } else if let Some(extension) = config.entry_dir.extension() {
-            compilation::compile_single_file_frontend(
+            compilation::compile_single_file_frontend_with_inputs(
                 config,
                 frontend_build_profile,
                 style_directives,
                 builder_surface,
                 extension,
                 string_table,
+                build_config_inputs,
+                mode,
             )
         } else {
             use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -156,7 +201,6 @@ pub fn compile_project_frontend(
                 ),
                 string_table,
             );
-
             Err(CompilerMessages::from_error_ref(err, string_table))
         }
     });
@@ -209,3 +253,7 @@ mod stage0_filesystem_identity_tests;
 #[cfg(test)]
 #[path = "../tests/compile_project_frontend_tests.rs"]
 mod compile_project_frontend_tests;
+
+#[cfg(test)]
+#[path = "../tests/config_boundary_tests.rs"]
+mod config_boundary_tests;

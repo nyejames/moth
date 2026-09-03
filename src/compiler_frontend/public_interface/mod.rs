@@ -85,6 +85,7 @@ pub(in crate::compiler_frontend) use direct_projection::{
 };
 #[cfg(test)]
 pub(crate) use export_projection::DirectExportSeed;
+pub(crate) use export_projection::portable_source_location;
 pub(in crate::compiler_frontend) use export_projection::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,

@@ -4,6 +4,7 @@ use super::{DevServerOptions, resolve_dev_runtime_paths, validate_dev_entry_path
 use crate::build_system::build::{BackendBuilder, Project, ProjectBuilder};
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidDependencyClauseReason,
 };
@@ -91,6 +92,10 @@ fn defaults_match_dev_server_contract() {
     assert_eq!(defaults.host, "127.0.0.1");
     assert_eq!(defaults.port, 6342);
     assert_eq!(defaults.poll_interval_ms, 300);
+    assert!(
+        defaults.inputs.is_empty(),
+        "default dev options start with no explicit build inputs"
+    );
 }
 
 #[test]
@@ -149,7 +154,7 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
     .expect("should write config");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let resolved = resolve_dev_runtime_paths(&builder, &root, &[])
+    let resolved = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect("directory output dir should resolve");
 
     assert_eq!(resolved.output_dir, root.join("preview"));
@@ -192,7 +197,7 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         .expect("should write config");
 
         let builder = ProjectBuilder::new(Box::new(NoopBuilder));
-        let messages = resolve_dev_runtime_paths(&builder, &root, &[])
+        let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
             .expect_err("dev startup must reject symlinked output roots");
         assert!(messages.error_diagnostics().any(|diagnostic| {
             matches!(
@@ -223,7 +228,7 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
     .expect("should write config");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let result = resolve_dev_runtime_paths(&builder, &root, &[]);
+    let result = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new());
 
     assert!(
         result.is_err(),
@@ -239,7 +244,7 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
     fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
     let builder = ProjectBuilder::new(Box::new(NoopBuilder));
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[])
+    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("bad config should fail directory bootstrap");
 
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
@@ -263,7 +268,7 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
     let root = _temp.path().to_path_buf();
 
     let builder = ProjectBuilder::new(Box::new(ConflictingDirectiveBuilder));
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[])
+    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("conflicting directives should fail bootstrap");
 
     assert_eq!(messages.error_count(), 1);

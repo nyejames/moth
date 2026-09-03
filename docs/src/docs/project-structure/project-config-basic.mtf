@@ -1,4 +1,4 @@
-**Implemented grouped config.** This page teaches the grouped config shape the compiler accepts today. Retired flat keys are rejected. Former top-level builder fields no longer configure the builder. See @../progress (Progress) for current support.
+**Implemented grouped config and build-config values.** This page teaches the grouped config shape, direct and source `#Config` contracts and explicit `@project` access supported today. Retired flat keys are rejected. Former top-level builder fields no longer configure the builder. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current support.
 
 `config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source dependencies.
 

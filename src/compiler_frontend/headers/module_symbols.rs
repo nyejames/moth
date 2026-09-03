@@ -429,6 +429,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     ValueMode::ImmutableReference,
                 )
             },
+            config_qualifier: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.tokens.src_path,
@@ -450,6 +451,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     ValueMode::ImmutableReference,
                 )
             },
+            config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
             id: header.tokens.src_path.to_owned(),
@@ -467,6 +469,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     ValueMode::ImmutableReference,
                 )
             },
+            config_qualifier: None,
         }),
         HeaderKind::StartFunction => {
             // The implicit start function is a compiler-owned synthetic declaration scoped under
@@ -494,6 +497,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                         ValueMode::ImmutableReference,
                     )
                 },
+                config_qualifier: None,
             })
         }
         HeaderKind::TypeAlias { .. } => None,
@@ -521,6 +525,7 @@ fn constant_declaration_placeholder(
                 declaration.value_mode(),
             )
         },
+        config_qualifier: None,
     }
 }
 

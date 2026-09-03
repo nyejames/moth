@@ -193,6 +193,9 @@ pub(super) fn build_module(
     module.blocks = blocks;
     module.start_function = Some(function_id);
     module.functions = vec![function];
+    module
+        .function_provenance
+        .insert(function_id, Default::default());
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.choices = vec![HirChoice {
         id: ChoiceId(0),

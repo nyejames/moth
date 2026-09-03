@@ -284,6 +284,7 @@ fn loop_binding(name: &str, type_id: TypeId, string_table: &mut StringTable) -> 
             crate::compiler_frontend::datatypes::DataType::Inferred,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -2646,6 +2647,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
     let expr_fields = vec![Declaration {
         id: field_path.clone(),
         value: Expression::int(42, location.clone(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     }];
 
     let expression = Expression::struct_instance(
@@ -2700,6 +2702,7 @@ fn rejects_const_record_struct_instance_runtime_lowering() {
                 location.clone(),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         }],
         location.clone(),
         ValueMode::ImmutableOwned,
@@ -2868,6 +2871,7 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
                 location.clone(),
                 ValueMode::ImmutableOwned,
             ),
+            config_qualifier: None,
         }],
         location.clone(),
         ValueMode::ImmutableOwned,
@@ -2940,6 +2944,7 @@ fn const_record_module_constant_field_access_lowers_field_value_without_struct_c
         vec![Declaration {
             id: red_field,
             value: Expression::string_slice(red_value, location.clone(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }],
         location.clone(),
         ValueMode::ImmutableOwned,

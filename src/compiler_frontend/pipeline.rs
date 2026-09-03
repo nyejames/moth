@@ -185,6 +185,8 @@ pub(crate) struct AstBuildRequest<'a> {
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) build_config_values:
+        Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
 
 /// Stable identity facts for one source file as seen by the frontend.
@@ -418,6 +420,7 @@ impl CompilerFrontend {
             capacity_estimate,
             resolved_file_references,
             module_origin,
+            build_config_values,
         } = request;
 
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
@@ -451,6 +454,13 @@ impl CompilerFrontend {
 
         Ast::new(
             AstBuildInput {
+                source_build_config_contract_names: Arc::new(
+                    sorted
+                        .source_build_config_contracts
+                        .iter()
+                        .map(|contract| contract.name.clone())
+                        .collect(),
+                ),
                 headers: sorted.headers,
                 module_symbols: sorted.module_symbols,
                 binding_environment: sorted.binding_environment,
@@ -464,6 +474,8 @@ impl CompilerFrontend {
                 root_role,
                 build_profile,
                 file_value_resolution,
+                config_resolution: None,
+                build_config_values,
                 template_const_loop_iteration_limit: self
                     .options
                     .template_const_loop_iteration_limit,
@@ -486,12 +498,41 @@ impl CompilerFrontend {
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     ) -> Result<HirLoweringResult, CompilerMessages> {
-        lower_module(
+        let static_if_function_provenance = ast.static_if_function_provenance.clone();
+        let mut result = lower_module(
             ast,
             &mut self.string_table,
             function_origin_lookup,
             module_resources,
-        )
+        )?;
+        for (function_path, provenance) in static_if_function_provenance {
+            let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
+                (result.hir_module.side_table.function_name_path(function.id)
+                    == Some(&function_path))
+                .then_some(function.id)
+            }) else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "Static configuration provenance has no lowered HIR function for path {:?}",
+                        function_path
+                    )),
+                    &self.string_table,
+                ));
+            };
+            let Some(existing_provenance) =
+                result.hir_module.function_provenance.get_mut(&function_id)
+            else {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "HIR function {:?} is missing its provenance fact while applying static configuration provenance",
+                        function_id
+                    )),
+                    &self.string_table,
+                ));
+            };
+            existing_provenance.merge(&provenance);
+        }
+        Ok(result)
     }
 
     // ------------------------------

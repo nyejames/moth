@@ -216,6 +216,10 @@ impl<'a> DirectoryDependencyResolution<'a> {
         }
     }
 
+    pub(crate) fn is_project_boundary(self) -> bool {
+        matches!(self.boundary, NamespaceBoundary::Project)
+    }
+
     pub(crate) fn resolve_dependency(
         self,
         provider: &RetainedDependencyPath,

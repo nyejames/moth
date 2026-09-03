@@ -27,6 +27,8 @@
 //! - [`public_interface`]: the projected interface a provider publishes
 //! - [`hir`]: HIR lowering, validation and reachability
 //! - [`analysis`]: borrow validation over validated HIR
+//! - [`build_config`]: the compiler-owned typed build-input carriers later command-input and
+//!   `#Config` phases fill and consume
 //!
 //! # What this module does NOT own
 //! - Which source belongs to a module, when it is prepared and what happens to a compiled result,
@@ -44,11 +46,13 @@ pub(crate) mod source_packages;
 pub(crate) mod style_directives;
 pub(crate) mod tokenizer;
 
+pub(crate) mod build_config;
 pub(crate) mod builtins;
 pub(crate) mod canonical_type_identity;
 pub(crate) mod folded_value;
 pub(crate) mod instrumentation;
 pub(crate) mod keywords;
+pub(crate) mod project_globals;
 pub(crate) mod public_interface;
 pub(crate) mod semantic_identity;
 pub(crate) mod source_module_origin;
@@ -118,6 +122,7 @@ pub enum FrontendBuildProfile {
 pub(crate) mod tests {
     pub(crate) mod ast_fixture_support;
     pub(crate) mod borrow_fixture_support;
+    mod build_config_tests;
     mod canonical_type_identity_tests;
     pub(crate) mod external_package_support;
     mod frontend_pipeline_tests;

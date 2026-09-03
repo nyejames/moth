@@ -33,6 +33,10 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+};
+
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use std::path::Path;
 
@@ -233,6 +237,98 @@ fn per_function_facts_build_the_exact_reachable_union() {
         !reachability
             .reachable_external_functions
             .contains(&unreachable_external_function)
+    );
+}
+
+#[test]
+fn reachable_function_provenance_unions_only_reachable_functions() {
+    let mut module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+            function(FunctionId(2), BlockId(2)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                Vec::new(),
+                HirTerminator::Return(unit_expression(1)),
+            ),
+            block(
+                BlockId(2),
+                Vec::new(),
+                HirTerminator::Return(unit_expression(2)),
+            ),
+        ],
+    );
+    let root_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "root",
+    );
+    let helper_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "helper",
+    );
+    let unreachable_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "unreachable",
+    );
+    module.function_provenance.insert(
+        FunctionId(0),
+        SyntheticInterfaceProvenance::single(root_member.clone()),
+    );
+    module.function_provenance.insert(
+        FunctionId(1),
+        SyntheticInterfaceProvenance::single(helper_member.clone()),
+    );
+    module.function_provenance.insert(
+        FunctionId(2),
+        SyntheticInterfaceProvenance::single(unreachable_member),
+    );
+
+    let function_facts = collect_module_function_link_facts(&module)
+        .expect("per-function link facts should retain provenance");
+    let reachability =
+        collect_reachability_from_function_link_facts(&function_facts, &[FunctionId(0)])
+            .expect("reachable function provenance should be collected");
+
+    let expected = SyntheticInterfaceProvenance::from_members(vec![root_member, helper_member]);
+    assert_eq!(
+        reachability.reachable_function_provenance().members(),
+        expected.members(),
+        "only reachable functions should contribute provenance"
+    );
+}
+
+#[test]
+fn function_link_facts_reject_missing_function_provenance() {
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            Vec::new(),
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let mut module_without_provenance = module;
+    module_without_provenance.function_provenance.clear();
+
+    let error = collect_module_function_link_facts(&module_without_provenance)
+        .expect_err("missing function provenance must be an invariant error");
+    assert!(
+        error.msg.contains("provenance"),
+        "error should identify missing function provenance: {}",
+        error.msg
     );
 }
 
@@ -893,6 +989,11 @@ fn hir_module(
     module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
+    module.function_provenance = module
+        .functions
+        .iter()
+        .map(|function| (function.id, SyntheticInterfaceProvenance::empty()))
+        .collect();
     module
 }
 

@@ -74,6 +74,44 @@ fn unknown_key_renders_authored_key() {
         "UnknownKey should render the exact authored key name"
     );
 }
+#[test]
+fn config_input_string_mismatch_suggests_quoting() {
+    let mut string_table = StringTable::new();
+    let key = string_table.intern("version");
+    let provided = string_table.intern("Int");
+    let expected = string_table.intern("String");
+    let message = invalid_config_message(
+        Some(key),
+        &InvalidConfigReason::ConfigInputTypeMismatch {
+            provided,
+            expected,
+            provided_argument_index: Some(1),
+        },
+        &string_table,
+    );
+
+    assert!(
+        message.contains("Quote the value"),
+        "String mismatches should explain how to force String interpretation: {message}"
+    );
+    assert!(
+        message.contains("--input argument position 1"),
+        "the command argument position should remain visible: {message}"
+    );
+}
+
+#[test]
+fn unsupported_statement_message_has_no_retired_import_spelling() {
+    let string_table = StringTable::new();
+    let message = invalid_config_message(
+        None,
+        &InvalidConfigReason::UnsupportedStatement,
+        &string_table,
+    );
+
+    assert!(!message.contains("#Import"));
+    assert!(message.contains("grouped project"));
+}
 
 #[test]
 fn resource_output_conflicts_render_typed_facts() {

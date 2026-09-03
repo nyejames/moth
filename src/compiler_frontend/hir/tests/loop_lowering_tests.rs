@@ -336,6 +336,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         NodeKind::VariableDeclaration(Declaration {
             id: step_symbol.clone(),
             value: Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+            config_qualifier: None,
         }),
         location.clone(),
     );
@@ -436,6 +437,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                                     location.clone(),
                                     ValueMode::ImmutableOwned,
                                 ),
+                                config_qualifier: None,
                             }),
                             location.clone(),
                         )],
@@ -448,6 +450,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                     NodeKind::VariableDeclaration(Declaration {
                         id: tail_value,
                         value: Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                        config_qualifier: None,
                     }),
                     location.clone(),
                 ),

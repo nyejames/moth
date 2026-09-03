@@ -3,7 +3,7 @@
 default_size #= 10
 Size as Int
 
-Config type T = |
+Frozen type T = |
     value T,
     size Int = default_size,
 |
@@ -14,8 +14,8 @@ private_helper |value Size = default_size| -> Size:
 
 identity type T |value T| -> T:
     fallback Size = default_size
-    config = Config(value)
-    configured_size = config.size
+    frozen = Frozen(value)
+    configured_size = frozen.size
     ignored = private_helper()
     return support.identity(value)
 ;

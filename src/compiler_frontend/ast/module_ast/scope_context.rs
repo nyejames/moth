@@ -41,6 +41,9 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
+use crate::compiler_frontend::build_config::{
+    BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ReceiverKey;
@@ -398,9 +401,14 @@ pub struct ScopeShared {
 
     pub(crate) generic_function_instantiation_requests:
         Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
-    // Path resolution and source identity.
     pub(crate) source_file_scope: Option<InternedPath>,
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
+    /// Immutable project/package source `#Config` values for constant-header materialization.
+    pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
+    /// Names of source `#Config` contracts declared by this module.
+    pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
+    /// Optional compiler-owned direct-project config resolver for constant-header folding.
+    pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
     pub(crate) declaring_file_id: Option<FileId>,
     pub(crate) template_const_loop_iteration_limit: usize,
 
@@ -707,6 +715,9 @@ impl ScopeContext {
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             source_file_scope: None,
             file_value_resolution: None,
+            source_build_config_values: None,
+            source_build_config_contract_names: None,
+            config_resolution: None,
             declaring_file_id: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),

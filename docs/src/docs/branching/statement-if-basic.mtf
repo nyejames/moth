@@ -20,4 +20,5 @@ One semicolon closes the whole structure.
 
 Moth does not have an `else if` chain. Nest another `if` inside `else`, or use pattern matching when several cases belong to one value.
 
-A known Bool may later specialise this same ordinary `if` before HIR; both branches remain valid source. `#Config if` is not a Moth form.
+A `#Config of Bool` value can specialise this same ordinary `if` before HIR; both branches remain
+valid source. `#Config if` is not a Moth form.

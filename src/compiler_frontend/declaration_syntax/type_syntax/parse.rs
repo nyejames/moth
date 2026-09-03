@@ -32,8 +32,8 @@ pub(crate) fn parse_type_annotation(
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
-    // Regular declarations can be inferred datatypes, so they can break out early
-    // if the next token indicates an assignment or boundary.
+    // Only ordinary declaration targets may omit a type. Build-config contracts intentionally use
+    // a required context so `#Config of = value` is rejected at the authored `=` token.
     if matches!(context, TypeAnnotationContext::DeclarationTarget)
         && matches!(
             token_stream.current_token_kind(),
@@ -1013,6 +1013,7 @@ fn type_keyword_deferred_error(
 fn compilation_stage(context: TypeAnnotationContext) -> &'static str {
     match context {
         TypeAnnotationContext::DeclarationTarget => "Variable Declaration",
+        TypeAnnotationContext::BuildConfigContract => "Build-Configuration Contract",
         TypeAnnotationContext::SignatureParameter => "Parameter Type Parsing",
         TypeAnnotationContext::SignatureReturn => "Function Signature Parsing",
         TypeAnnotationContext::TypeAliasTarget => "Type Alias Parsing",

@@ -923,6 +923,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         DataType::runtime_struct(path.clone(), struct_type_id),
                         ValueMode::ImmutableReference,
                     ),
+                    config_qualifier: None,
                 },
             )
             .map_err(|error| self.error_messages(error, string_table))?;

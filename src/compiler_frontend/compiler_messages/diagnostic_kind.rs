@@ -255,8 +255,9 @@ pub enum RuleDiagnosticKind {
     ExportOutsideModuleRoot,
     InvalidExportTarget,
     DuplicatePublicExport,
-    DuplicateExportBlock,
     PrivateTypeInExportedApi,
+    DuplicateExportBlock,
+    ProjectContextEscape,
 }
 
 #[cfg(test)]
@@ -331,6 +332,7 @@ impl RuleDiagnosticKind {
             Self::DuplicatePublicExport,
             Self::DuplicateExportBlock,
             Self::PrivateTypeInExportedApi,
+            Self::ProjectContextEscape,
         ]
         .into_iter()
     }

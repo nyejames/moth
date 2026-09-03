@@ -46,7 +46,7 @@ Do not infer activation from the presence of this file.
 - canonical project/package graph and immutable artefact architecture
 - dependency-clause and path-syntax migration
 - grouped project config and recursive schema support
-- build configuration values and project-boundary isolation
+- delivered typed build configuration values, immutable `@project` and project-boundary isolation
 - stable package, module, public-interface and capability fingerprints
 - completed HTML mixed-target backend boundary where required by package compatibility policy
 

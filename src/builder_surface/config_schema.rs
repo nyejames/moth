@@ -29,6 +29,57 @@ pub enum UnknownFieldPolicy {
     Reject,
 }
 
+/// Whether a direct field of the grouped `project` record may carry `#Config`.
+///
+/// Structural fields that affect project identity or source discovery stay fixed-only. Builders
+/// opt ordinary metadata into the compiler-owned direct-project configuration resolution path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectFieldConfigPolicy {
+    FixedOnly,
+    Configurable,
+}
+
+/// Schema-derived direct-project qualifier policy passed to compiler config folding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectFieldConfigPolicies {
+    by_name: std::collections::BTreeMap<&'static str, ProjectFieldConfigPolicy>,
+    /// Policy applied to direct project fields that are not declared by the schema.
+    unknown_policy: ProjectFieldConfigPolicy,
+    /// Value shapes for every direct project field declared by the schema.
+    shapes: std::collections::BTreeMap<&'static str, ConfigFieldShape>,
+}
+
+impl Default for ProjectFieldConfigPolicies {
+    fn default() -> Self {
+        Self {
+            by_name: std::collections::BTreeMap::new(),
+            unknown_policy: ProjectFieldConfigPolicy::FixedOnly,
+            shapes: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl ProjectFieldConfigPolicies {
+    pub(crate) fn policy_for(&self, field_name: &str) -> ProjectFieldConfigPolicy {
+        self.by_name
+            .get(field_name)
+            .copied()
+            .unwrap_or(self.unknown_policy)
+    }
+
+    pub(crate) fn shape_for(&self, field_name: &str) -> Option<&ConfigFieldShape> {
+        self.shapes.get(field_name)
+    }
+
+    pub(crate) fn insert(&mut self, field_name: &'static str, policy: ProjectFieldConfigPolicy) {
+        self.by_name.insert(field_name, policy);
+    }
+
+    fn insert_shape(&mut self, field_name: &'static str, shape: ConfigFieldShape) {
+        self.shapes.insert(field_name, shape);
+    }
+}
+
 /// The value shape one schema field accepts.
 ///
 /// WHAT: scalar leaves are named directly; record-valued fields point at the schema node whose
@@ -40,13 +91,14 @@ pub enum UnknownFieldPolicy {
 pub enum ConfigFieldShape {
     String,
     Int,
+    Float,
     Bool,
-    /// A record value whose fields validate against the referenced schema node.
+    Char,
     Record(ConfigSchemaNodeId),
     /// A collection whose elements each validate against the inner shape. A scalar value
     /// is not promoted to a one-element collection.
     Collection(Box<ConfigFieldShape>),
-    /// An optional value: `none` is accepted, present values validate against the inner shape.
+    /// An optional value: `none` is accepted and present values validate against the inner shape.
     Optional(Box<ConfigFieldShape>),
 }
 
@@ -61,6 +113,9 @@ pub struct ConfigSchemaField {
     pub required: bool,
     /// Value used when an authored record omits this optional field.
     pub(crate) default: Option<PublicFoldedValue>,
+    /// Direct-project qualifier policy. Non-project section fields remain fixed-only in the
+    /// compiler config service regardless of this value.
+    pub config_policy: ProjectFieldConfigPolicy,
 }
 
 /// One schema node: a record surface with its declared fields and unknown-field policy.
@@ -271,6 +326,22 @@ impl ConfigSchema {
         &self.fields[id.0]
     }
 
+    /// Snapshot the root field policy and shape for the compiler-owned direct-project qualifier
+    /// pass. Unknown direct project metadata remains configurable; the standalone default stays
+    /// conservative for callers that do not have the open builtin project schema.
+    pub(crate) fn project_field_config_policies(&self) -> ProjectFieldConfigPolicies {
+        let mut policies = ProjectFieldConfigPolicies {
+            unknown_policy: ProjectFieldConfigPolicy::Configurable,
+            ..ProjectFieldConfigPolicies::default()
+        };
+        for field_id in self.node(self.root).field_ids() {
+            let field = self.field(*field_id);
+            policies.insert(field.name, field.config_policy);
+            policies.insert_shape(field.name, field.shape.clone());
+        }
+        policies
+    }
+
     fn validate_construction(&self) -> Result<(), CompilerError> {
         if self.root.0 >= self.nodes.len() {
             return Err(CompilerError::compiler_error(
@@ -353,7 +424,9 @@ fn shape_accepts_closed_strings(shape: &ConfigFieldShape) -> bool {
         ConfigFieldShape::String => true,
         ConfigFieldShape::Optional(inner) => shape_accepts_closed_strings(inner),
         ConfigFieldShape::Int
+        | ConfigFieldShape::Float
         | ConfigFieldShape::Bool
+        | ConfigFieldShape::Char
         | ConfigFieldShape::Record(_)
         | ConfigFieldShape::Collection(_) => false,
     }
@@ -380,7 +453,11 @@ fn validate_shape_node_references(
             validate_shape_node_references(inner, node_count, field_name)
         }
 
-        ConfigFieldShape::String | ConfigFieldShape::Int | ConfigFieldShape::Bool => Ok(()),
+        ConfigFieldShape::String
+        | ConfigFieldShape::Int
+        | ConfigFieldShape::Float
+        | ConfigFieldShape::Bool
+        | ConfigFieldShape::Char => Ok(()),
     }
 }
 
@@ -399,7 +476,9 @@ fn default_matches_shape(
         },
 
         ConfigFieldShape::Int => matches!(value, PublicFoldedValue::Int(_)),
+        ConfigFieldShape::Float => matches!(value, PublicFoldedValue::Float(_)),
         ConfigFieldShape::Bool => matches!(value, PublicFoldedValue::Bool(_)),
+        ConfigFieldShape::Char => matches!(value, PublicFoldedValue::Char(_)),
         ConfigFieldShape::Record(node_id) => default_matches_record(schema, *node_id, value),
 
         ConfigFieldShape::Collection(element) => match value {
@@ -483,8 +562,16 @@ impl ConfigSchemaField {
         Self::leaf(name, ConfigFieldShape::Int)
     }
 
+    pub fn float(name: &'static str) -> Self {
+        Self::leaf(name, ConfigFieldShape::Float)
+    }
+
     pub fn bool(name: &'static str) -> Self {
         Self::leaf(name, ConfigFieldShape::Bool)
+    }
+
+    pub fn char(name: &'static str) -> Self {
+        Self::leaf(name, ConfigFieldShape::Char)
     }
 
     /// A string field whose values must belong to one closed set of allowed strings.
@@ -517,6 +604,12 @@ impl ConfigSchemaField {
         Self::leaf(name, ConfigFieldShape::Optional(Box::new(inner)))
     }
 
+    /// Allows `#Config of T` on this direct project field.
+    pub fn configurable(mut self) -> Self {
+        self.config_policy = ProjectFieldConfigPolicy::Configurable;
+        self
+    }
+
     /// Marks the field as required on its owning node.
     pub fn required(mut self) -> Self {
         self.required = true;
@@ -542,6 +635,7 @@ impl ConfigSchemaField {
             allowed_strings: None,
             required: false,
             default: None,
+            config_policy: ProjectFieldConfigPolicy::FixedOnly,
         }
     }
 }
@@ -552,7 +646,9 @@ impl ConfigFieldShape {
         match self {
             ConfigFieldShape::String => "a string value".to_owned(),
             ConfigFieldShape::Int => "an integer value".to_owned(),
+            ConfigFieldShape::Float => "a floating-point value".to_owned(),
             ConfigFieldShape::Bool => "a boolean value".to_owned(),
+            ConfigFieldShape::Char => "a character value".to_owned(),
             ConfigFieldShape::Record(_) => "a record value".to_owned(),
             ConfigFieldShape::Collection(element) => {
                 format!("a collection of {}", element.plural_description())
@@ -565,7 +661,9 @@ impl ConfigFieldShape {
         match self {
             ConfigFieldShape::String => "strings".to_owned(),
             ConfigFieldShape::Int => "integers".to_owned(),
+            ConfigFieldShape::Float => "floating-point values".to_owned(),
             ConfigFieldShape::Bool => "booleans".to_owned(),
+            ConfigFieldShape::Char => "characters".to_owned(),
             ConfigFieldShape::Record(_) => "records".to_owned(),
             ConfigFieldShape::Collection(element) => {
                 format!("collections of {}", element.plural_description())

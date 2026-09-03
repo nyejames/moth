@@ -20,6 +20,8 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -49,14 +51,19 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
     pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
+    reachable_function_provenance: SyntheticInterfaceProvenance,
     backend_selection: HirBackendSelection,
 }
 
 /// Deterministic direct link facts for one base HIR function.
+///
+/// In addition to the entry block, each row carries the complete direct synthetic-interface
+/// provenance retained for its local function.
 #[derive(Clone, Debug)]
 pub(crate) struct HirFunctionLinkFacts {
     pub(crate) function_id: FunctionId,
     entry_block: BlockId,
+    pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
 }
 
 /// Deterministic direct link facts for one reachable block inside a base HIR function.
@@ -448,11 +455,21 @@ pub(crate) fn collect_module_function_link_facts(
                     "Unknown HIR function id {function_id:?} reached HIR reachability analysis"
                 ))
             })?;
+        let synthetic_interface_provenance = hir
+            .function_provenance
+            .get(&function_id)
+            .cloned()
+            .ok_or_else(|| {
+                hir_reachability_error(format!(
+                    "HIR function {function_id:?} is missing a synthetic-interface provenance fact"
+                ))
+            })?;
         let context = HirReachabilityContext::new(&index, function_id, function.entry);
         let function_block_facts = context.collect()?;
         functions.push(HirFunctionLinkFacts {
             function_id,
             entry_block: function.entry,
+            synthetic_interface_provenance,
         });
         blocks.extend(function_block_facts);
     }
@@ -486,11 +503,12 @@ pub(crate) fn collect_reachability_from_function_link_facts(
                     "Function link facts are missing HIR function id {function_id:?}"
                 )));
             };
-
             visited_function_order.push(function_id);
+            reachability
+                .reachable_function_provenance
+                .merge(&function.synthetic_interface_provenance);
             block_worklist.push_back(function.entry_block);
         }
-
         while let Some(block_id) = block_worklist.pop_front() {
             if !visited_blocks.insert(block_id) {
                 continue;
@@ -549,6 +567,13 @@ pub(crate) fn collect_reachability_from_function_link_facts(
 impl HirReachability {
     pub(crate) fn backend_selection(&self) -> &HirBackendSelection {
         &self.backend_selection
+    }
+    /// Provenance union for every local function reached from the selected roots.
+    ///
+    /// The value is retained separately from block runtime facts so boundary policy can inspect
+    /// all reached functions, including helpers with no reachable runtime statements.
+    pub(crate) fn reachable_function_provenance(&self) -> &SyntheticInterfaceProvenance {
+        &self.reachable_function_provenance
     }
 
     fn merge(&mut self, direct: &HirBlockRuntimeFacts) {

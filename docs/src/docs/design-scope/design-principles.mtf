@@ -90,7 +90,9 @@ source-language obligations.
 
 Source expresses stable semantics rather than target identity. Source cannot inspect the OS,
 architecture, backend or target, and cannot condition imports, declarations, exports or bodies on
-target identity. `#Config` is for typed project/build configuration, not platform detection.
+target identity. Implemented `#Config` values provide typed project/build configuration, and
+explicit `@project` provides immutable project fields; neither is platform detection. Entry-local
+`config:` blocks remain deferred.
 
 Builders cannot expose target identity as pseudo-config values. A selected builder may expose stable
 capability APIs, and compiler target validation rejects unsupported reachable capability use. Project

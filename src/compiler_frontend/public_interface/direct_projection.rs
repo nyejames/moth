@@ -33,7 +33,7 @@ use super::trait_projection::DirectTraitProjection;
 use super::type_projection::{
     RootIndex, TransientGenericParameterOriginResolver, TransientNominalOriginResolver,
     project_alias_target, project_choice_parts, project_constant_type_identity,
-    project_free_function_semantics, project_struct_parts,
+    project_defaults_provenance, project_free_function_semantics, project_struct_parts,
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
@@ -44,7 +44,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
-    convert_const_value_to_folded_value,
+    convert_const_value_to_folded_value_with_provenance,
 };
 use crate::compiler_frontend::hir::functions::FunctionOriginSeed;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -53,6 +53,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Typed pre-HIR result carrying the draft and its transient exact declaration-path metadata.
@@ -464,6 +465,7 @@ fn project_declaration_records<'a>(
                         "function", binding,
                     ));
                 };
+                let default_provenance = project_defaults_provenance(&signature.parameters);
                 let semantics = project_free_function_semantics(
                     function_origin.clone(),
                     *generic_parameter_list_id,
@@ -477,6 +479,7 @@ fn project_declaration_records<'a>(
                 )?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
+                    synthetic_interface_provenance: default_provenance,
                     semantics: PublicDeclarationSemantics::Function(semantics),
                 });
             }
@@ -492,6 +495,7 @@ fn project_declaration_records<'a>(
                             "struct", binding,
                         ));
                     };
+                    let field_default_provenance = project_defaults_provenance(fields);
                     let (generic_parameters, projected_fields) = project_struct_parts(
                         type_origin.clone(),
                         *type_id,
@@ -503,13 +507,17 @@ fn project_declaration_records<'a>(
                         type_context.string_table,
                         type_context.folded_value_context,
                     )?;
-                    let receiver_methods = receiver_methods_for_origin(
-                        type_origin,
-                        state.receiver_seeds_by_receiver,
-                        state.receiver_method_signatures,
-                    )?;
+                    let (receiver_methods, receiver_default_provenance) =
+                        receiver_methods_for_origin(
+                            type_origin,
+                            state.receiver_seeds_by_receiver,
+                            state.receiver_method_signatures,
+                        )?;
+                    let synthetic_interface_provenance =
+                        field_default_provenance.union(&receiver_default_provenance);
                     declarations.push(PublicDeclarationRecord {
                         origin: binding.origin().clone(),
+                        synthetic_interface_provenance,
                         semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
                             generic_parameters,
                             fields: projected_fields,
@@ -536,13 +544,15 @@ fn project_declaration_records<'a>(
                         type_context.public_source_trait_origins,
                         type_context.string_table,
                     )?;
-                    let receiver_methods = receiver_methods_for_origin(
-                        type_origin,
-                        state.receiver_seeds_by_receiver,
-                        state.receiver_method_signatures,
-                    )?;
+                    let (receiver_methods, synthetic_interface_provenance) =
+                        receiver_methods_for_origin(
+                            type_origin,
+                            state.receiver_seeds_by_receiver,
+                            state.receiver_method_signatures,
+                        )?;
                     declarations.push(PublicDeclarationRecord {
                         origin: binding.origin().clone(),
+                        synthetic_interface_provenance,
                         semantics: PublicDeclarationSemantics::Choice(PublicChoiceSemantics {
                             generic_parameters,
                             variants,
@@ -567,6 +577,7 @@ fn project_declaration_records<'a>(
                     )?;
                     declarations.push(PublicDeclarationRecord {
                         origin: binding.origin().clone(),
+                        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
                         semantics: PublicDeclarationSemantics::TransparentAlias(
                             PublicAliasSemantics {
                                 target_type_identity,
@@ -589,13 +600,14 @@ fn project_declaration_records<'a>(
                     type_context.type_environment,
                     type_context.type_projection_context,
                 )?;
-                let folded_value = fold_constant_value(
+                let (folded_value, synthetic_interface_provenance) = fold_constant_value(
                     &root.path,
                     state.consumed_const_values,
                     state.folded_value_context,
                 )?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
+                    synthetic_interface_provenance,
                     semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                         type_identity,
                         folded_value,
@@ -606,6 +618,7 @@ fn project_declaration_records<'a>(
                 let semantics = state.trait_projection.project_binding(binding)?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
+                    synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
                     semantics: PublicDeclarationSemantics::Trait(semantics),
                 });
             }
@@ -652,6 +665,9 @@ fn project_declaration_records<'a>(
 
 /// Take the receiver-method seeds for one nominal origin and project each into a
 /// [`super::model::PublicReceiverMethodSemantics`] attached to that record.
+///
+/// The returned provenance is the aggregate of every receiver parameter default. It is kept on
+/// the declaration record rather than on the folded-value payload or method semantic leaf.
 fn receiver_methods_for_origin(
     type_origin: &OriginTypeId,
     receiver_seeds_by_receiver: &mut FxHashMap<OriginTypeId, Vec<&CallableSeed>>,
@@ -659,27 +675,60 @@ fn receiver_methods_for_origin(
         usize,
         super::type_projection::ProjectedReceiverMethodSignature,
     >,
-) -> Result<Vec<super::model::PublicReceiverMethodSemantics>, CompilerError> {
+) -> Result<
+    (
+        Vec<super::model::PublicReceiverMethodSemantics>,
+        SyntheticInterfaceProvenance,
+    ),
+    CompilerError,
+> {
     let seeds = receiver_seeds_by_receiver
         .remove(type_origin)
         .unwrap_or_default();
-    seeds
-        .into_iter()
-        .map(|seed| receiver_method_semantics_from_seed(seed, receiver_method_signatures))
-        .collect()
+    let mut provenance = SyntheticInterfaceProvenance::empty();
+    let mut methods = Vec::with_capacity(seeds.len());
+
+    for seed in seeds {
+        let method_index = match &seed.kind {
+            CallableSeedKind::ReceiverMethod { method_index, .. } => *method_index,
+            CallableSeedKind::FreeFunction => {
+                return Err(CompilerError::compiler_error(format!(
+                    "public-interface draft join: free-function callable seed {:?} was indexed \
+                     under receiver origin {:?}",
+                    seed.origin, type_origin
+                )));
+            }
+        };
+        let signature = receiver_method_signatures
+            .get(&method_index)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "public-interface draft join: receiver-method seed with method_index {} has no \
+                 projected signature",
+                    method_index
+                ))
+            })?;
+        provenance.merge(&signature.default_provenance);
+        methods.push(receiver_method_semantics_from_seed(
+            seed,
+            receiver_method_signatures,
+        )?);
+    }
+
+    Ok((methods, provenance))
 }
 
-/// Fold one public constant root's value by exact defining path.
+/// Fold one public constant root's value by exact defining path and collect its value provenance.
 ///
 /// WHAT: looks up the root's defining `InternedPath` in the module-local store, marks the
-/// resulting value ID consumed, and converts it through the shared store visitor. A missing
-/// match is a `CompilerError`: a public constant with no matching finalized value cannot be
-/// projected.
+/// resulting value ID consumed, and converts it through the shared store visitor. The conversion
+/// returns the canonical union of the root metadata and every nested folded value node, while the
+/// public folded payload remains unchanged.
 fn fold_constant_value(
     defining_path: &InternedPath,
     consumed_const_values: &mut FxHashSet<ConstValueId>,
     context: &FoldedValueJoinContext,
-) -> Result<PublicFoldedValue, CompilerError> {
+) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
     let Some(value_id) = context.const_values.value_for_path(defining_path) else {
         let defining_path =
             defining_path.to_path_buf(context.folded_value_projection_context.string_table);
@@ -703,7 +752,7 @@ fn fold_constant_value(
         )));
     }
 
-    convert_const_value_to_folded_value(
+    convert_const_value_to_folded_value_with_provenance(
         context.const_values,
         value_id,
         context.folded_value_projection_context,

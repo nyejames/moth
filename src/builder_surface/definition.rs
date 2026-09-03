@@ -5,15 +5,18 @@
 //! WHY: builders provide both binding-backed package metadata and source-backed package roots;
 //!      the compiler needs both during different stages.
 
+use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::config_schema::{
-    ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
+    ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
 };
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
-use crate::builder_surface::source_package_registry::SourcePackageRegistry;
+use crate::compiler_frontend::build_config::{
+    BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -22,12 +25,13 @@ use std::path::PathBuf;
 ///
 /// WHAT: collects every package kind the frontend and backends need.
 /// WHY: one unified builder return type instead of separate APIs for binding-backed
-///      packages and source-backed packages.
 #[derive(Clone, Debug)]
 pub struct BuilderSurface {
     pub binding_packages: ExternalPackageRegistry,
     pub source_packages: SourcePackageRegistry,
     pub config_schemas: ConfigSchemas,
+    /// Typed, platform-neutral primitive globals available during config folding.
+    config_globals: BuilderConfigGlobalSet,
     pub external_import_providers: ExternalImportProviderRegistry,
     pub external_import_cache: ExternalImportProviderCache,
     pub external_dependency_resolution_table: ExternalImportResolutionTable,
@@ -56,6 +60,7 @@ impl BuilderSurface {
             binding_packages: ExternalPackageRegistry::new(),
             source_packages: SourcePackageRegistry::default(),
             config_schemas: ConfigSchemas::new(compiler_project_record_schema()),
+            config_globals: BuilderConfigGlobalSet::new(),
             external_import_providers: ExternalImportProviderRegistry::empty(),
             external_import_cache: ExternalImportProviderCache::new(),
             external_dependency_resolution_table: ExternalImportResolutionTable::new(),
@@ -79,6 +84,23 @@ impl BuilderSurface {
     ) {
         self.implicit_template_scope_source_packages
             .insert(package_prefix.into());
+    }
+    /// Typed primitive globals this surface contributes while compiler config constants fold.
+    pub(crate) fn config_globals(&self) -> &BuilderConfigGlobalSet {
+        &self.config_globals
+    }
+
+    /// Register one typed, platform-neutral builder global.
+    ///
+    /// The underlying carrier rejects backend and platform identity names before they can enter
+    /// the builder surface.
+    #[allow(dead_code)]
+    pub(crate) fn register_config_global(
+        &mut self,
+        name: BuildInputName,
+        value: PrimitiveBuildValue,
+    ) -> Result<Option<PrimitiveBuildValue>, BuilderConfigGlobalError> {
+        self.config_globals.insert(name, value)
     }
 
     /// Exposes the currently supported optional core packages for the HTML builder.
@@ -128,14 +150,25 @@ fn compiler_project_record_schema() -> ConfigSchema {
         )
         .expect("project schema is under construction");
     schema
-        .register_field(root, ConfigSchemaField::string("version"))
+        .register_field(
+            root,
+            ConfigSchemaField::optional("version", ConfigFieldShape::String).configurable(),
+        )
         .expect("project schema is under construction");
     schema
-        .register_field(root, ConfigSchemaField::string("author"))
+        .register_field(
+            root,
+            ConfigSchemaField::optional("author", ConfigFieldShape::String).configurable(),
+        )
         .expect("project schema is under construction");
     schema
-        .register_field(root, ConfigSchemaField::string("license"))
+        .register_field(
+            root,
+            ConfigSchemaField::optional("license", ConfigFieldShape::String).configurable(),
+        )
         .expect("project schema is under construction");
+    // Keep the template-loop limit fixed-only: it controls compiler expansion work rather than
+    // ordinary project metadata, so configuration must not alter compilation topology/resources.
     schema
         .register_field(
             root,

@@ -4,7 +4,10 @@
 //! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
 //! high-level loop over classified items.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason,
+};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
@@ -68,14 +71,31 @@ fn handle_top_level_const_template(
     if context.file_role == FileRole::ImportedModuleRoot {
         let template_token = token_stream.current_token();
         token_stream.advance();
-
         let mut discarded_body = Vec::new();
+
         crate::compiler_frontend::headers::start_capture::push_runtime_template_tokens_to_start_function(
             template_token,
             token_stream,
             &mut discarded_body,
             context.string_table,
         )?;
+        if let Some((location, adjacent)) =
+            find_config_qualifier_marker(&discarded_body, context.string_table)
+        {
+            let diagnostic = if adjacent {
+                CompilerDiagnostic::invalid_config_reason(
+                    None,
+                    InvalidConfigReason::ConfigQualifierInvalidPlacement,
+                    location,
+                )
+            } else {
+                CompilerDiagnostic::common_syntax_mistake(
+                    CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
+                    location,
+                )
+            };
+            return Err(Box::new(diagnostic));
+        }
         return Ok(());
     }
 

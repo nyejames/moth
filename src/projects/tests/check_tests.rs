@@ -4,6 +4,7 @@
 use super::run_check_for_tests;
 use super::{execute_check, format_terse_summary_line};
 use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -37,6 +38,7 @@ fn check_compiles_single_file_without_writing_artifacts() {
         entry_file
             .to_str()
             .expect("temp file path should be valid UTF-8 for this test"),
+        &BuildConfigInputSet::new(),
     );
     assert!(
         !outcome.messages.has_errors(),
@@ -51,6 +53,148 @@ fn check_compiles_single_file_without_writing_artifacts() {
         fs::read_dir(&root).expect("should read temp root").count(),
         1,
         "check should not write output artifacts to the source folder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn check_rejects_config_filename_namesake_source_contract() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config file");
+    fs::write(
+        source_root.join("@page.moth"),
+        "enabled #Config of Bool = true\n",
+    )
+    .expect("should write page source");
+    fs::write(
+        source_root.join("config.moth"),
+        "enabled #Config of Bool = false\n",
+    )
+    .expect("should write namesake source");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+    );
+
+    assert!(outcome.messages.has_errors());
+    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
+                ..
+            }
+        )
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn check_reports_missing_config_input_from_unselected_source() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config file");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(
+        source_root.join("orphan.moth"),
+        "required_value #Config of Bool\n",
+    )
+    .expect("should write unselected config source");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+    );
+
+    assert!(outcome.messages.has_errors());
+    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::MissingConfigInput,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn check_rejects_unselected_runtime_template_as_non_root_source() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config file");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(source_root.join("helper.moth"), "[\"hello\"]\n")
+        .expect("should write non-root source");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+    );
+
+    assert!(
+        outcome
+            .messages
+            .error_diagnostics()
+            .any(|diagnostic| { diagnostic.identity().code == "MOTH-RULE-0023" })
+    );
+}
+
+#[test]
+fn check_compiles_unselected_same_module_source_closure() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config file");
+    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(
+        source_root.join("orphan.moth"),
+        "@helper identity\nconsume |value Int| -> Int:\n    return identity(value)\n;\n",
+    )
+    .expect("should write unselected consumer source");
+    fs::write(
+        source_root.join("helper.moth"),
+        "identity |value Int| -> Int:\n    return value\n;\n",
+    )
+    .expect("should write unselected provider source");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+    );
+
+    assert!(
+        !outcome.messages.has_errors(),
+        "same-module source closure should compile in check mode"
     );
 }
 
@@ -70,6 +214,7 @@ fn successful_check_finishes_bootstrap_before_frontend() {
         entry_file
             .to_str()
             .expect("temporary path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
     );
     let snapshot = timing_session.finish();
 
@@ -100,7 +245,10 @@ fn config_ast_timers_use_dedicated_identities() {
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let outcome = execute_check(root.to_str().expect("temporary path should be valid UTF-8"));
+    let outcome = execute_check(
+        root.to_str().expect("temporary path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+    );
     let snapshot = timing_session.finish();
 
     assert!(!outcome.messages.has_errors());
@@ -159,6 +307,7 @@ fn check_retains_source_package_warning() {
     let outcome = execute_check(
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
     );
     assert!(
         !outcome.messages.has_errors(),
@@ -211,6 +360,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
         let outcome = execute_check(
             root.to_str()
                 .expect("temporary project path should be valid UTF-8"),
+            &BuildConfigInputSet::new(),
         );
         assert!(outcome.messages.has_errors());
         assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
@@ -310,6 +460,7 @@ if value is:
         warning_root
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
+        &BuildConfigInputSet::new(),
     );
     assert!(
         !check_warning_outcome.messages.has_errors(),
@@ -335,6 +486,7 @@ if value is:
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &[],
+        &BuildConfigInputSet::new(),
     )
     .expect("warning fixture should build successfully");
 
@@ -384,6 +536,7 @@ increment(count)
         error_root
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
+        &BuildConfigInputSet::new(),
     );
     assert!(
         check_error_outcome.messages.has_errors(),
@@ -396,6 +549,7 @@ increment(count)
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &[],
+        &BuildConfigInputSet::new(),
     ) else {
         panic!("error fixture should fail the build frontend");
     };

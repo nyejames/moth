@@ -239,6 +239,20 @@ pub(crate) struct StableModuleOriginIdentity {
 }
 
 impl StableModuleOriginIdentity {
+    /// Construct the stable origin for the synthetic project-global context.
+    ///
+    /// Project globals have no source file or filesystem-backed module root. The reserved
+    /// `project-globals` logical marker keeps this synthetic origin distinct from the real
+    /// project-package facade, whose logical path is empty, while reusing the existing
+    /// project-local package and facade-role identity vocabulary.
+    pub(crate) fn project_context(package: StablePackageIdentity) -> Self {
+        Self {
+            package,
+            logical_module_path: "project-globals".to_owned(),
+            role: ModuleRootRole::ProjectPackageFacade,
+        }
+    }
+
     /// Build the cross-build identity from a base-relative logical module path.
     ///
     /// `relative_logical_path` is the `PathBuf` produced by stripping the canonical root

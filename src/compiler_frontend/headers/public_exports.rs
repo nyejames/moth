@@ -19,8 +19,8 @@
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ImportPublicSurfaceType, InvalidReceiverDeclarationReason,
-    ReservedNameOwner,
+    CompilerDiagnostic, ImportPublicSurfaceType, InvalidDependencyClauseReason,
+    InvalidReceiverDeclarationReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -36,6 +36,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderExportMode};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -93,11 +94,10 @@ fn intern_public_surface_path(
 /// Whether a header is a public authored module-root export.
 ///
 /// WHAT: only declarations marked public by a strict module-root file `export:` block become
-///       public export entries. The declaration-kind gate is the shared
-///       [`HeaderKind::is_authored_public_export_declaration`] owner so the header, AST and
-///       semantic-origin public-export predicates cannot drift; this predicate keeps the
-///       stage-local file-role and export-mode policy (export-capable roots plus explicit
-///       `Public` mode).
+///       public export entries. The shared declaration gate also excludes source `#Config`
+///       contract shells, which are resolved before ordinary declarations exist.
+/// WHY: the stage-local file-role and export-mode policy remains here while declaration-kind and
+///       contract-shell eligibility stay centralized on `HeaderKind`.
 fn is_authored_public_export(header: &Header) -> bool {
     header.file_role.is_export_capable()
         && header.export_mode == HeaderExportMode::Public
@@ -380,6 +380,25 @@ fn build_module_root_public_dependencies(
         .collect();
 
     for root_source in root_sources {
+        let dependencies = module_symbols
+            .file_dependency_clauses_by_source
+            .get(&root_source)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        for dependency in dependencies {
+            if dependency.export_mode != HeaderExportMode::Public
+                || !is_project_globals_dependency(&dependency.dependency.path, string_table)
+            {
+                continue;
+            }
+            let clause_kind = dependency.binding.clause_kind();
+            return Err(Box::new(CompilerDiagnostic::invalid_dependency_clause(
+                clause_kind,
+                InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed,
+                dependency.location.clone(),
+            )));
+        }
+
         let Some(canonical_export_path) =
             module_symbols.canonical_os_path_by_source.get(&root_source)
         else {
@@ -408,11 +427,6 @@ fn build_module_root_public_dependencies(
             &current_exports,
             export_locations.get(&module_root_interned),
         );
-        let dependencies = module_symbols
-            .file_dependency_clauses_by_source
-            .get(&root_source)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
 
         for dependency in dependencies {
             if dependency.export_mode != HeaderExportMode::Public {

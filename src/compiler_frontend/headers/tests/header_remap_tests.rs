@@ -415,6 +415,7 @@ fn header_kind_constant_remaps_declaration() {
             name: type_name,
             location: make_location("test.moth", &mut local),
         },
+        config_qualifier: None,
         initializer_tokens: vec![],
         initializer_references: vec![],
         location: make_location("test.moth", &mut local),
@@ -960,6 +961,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             name: string_table.intern("Value"),
             location: provisional_location.clone(),
         },
+        config_qualifier: None,
         initializer_tokens: vec![Token::new(
             TokenKind::Symbol(string_table.intern("initializer")),
             provisional_location.clone(),

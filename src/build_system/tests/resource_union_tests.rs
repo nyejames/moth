@@ -168,6 +168,7 @@ fn package_exported_folded_resource_is_selected_but_private_unused_origin_is_not
         declarations: vec![
             PublicDeclarationRecord {
                 origin: OriginDeclarationId::Constant(exported_constant.clone()),
+                synthetic_interface_provenance: Default::default(),
                 semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                     type_identity: CanonicalTypeIdentity::Builtin(
                         crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType::String,
@@ -179,6 +180,7 @@ fn package_exported_folded_resource_is_selected_but_private_unused_origin_is_not
             },
             PublicDeclarationRecord {
                 origin: OriginDeclarationId::Constant(private_constant),
+                synthetic_interface_provenance: Default::default(),
                 semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                     type_identity: CanonicalTypeIdentity::Builtin(
                         crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType::String,

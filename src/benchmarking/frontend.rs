@@ -12,8 +12,14 @@ use std::time::Instant;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
-use crate::build_system::create_project_modules::compile_project_frontend;
+use crate::build_system::create_project_modules::{
+    FrontendCompilationMode, compile_project_frontend_with_inputs,
+};
 use crate::build_system::path_validation::check_if_valid_path;
+use crate::compiler_frontend::build_config::{
+    BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
+    BuildInputName, PrimitiveBuildValue,
+};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
@@ -29,12 +35,41 @@ pub enum FrontendBenchmarkBuildProfile {
     Dev,
     Release,
 }
+/// One typed build-config input supplied to a frontend benchmark.
+///
+/// The benchmark adapter converts this value directly into the compiler-owned primitive carrier;
+/// it never reparses benchmark text or waits for a source contract to infer a type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FrontendBenchmarkInputValue {
+    String(String),
+    Int(i32),
+    Float(f64),
+    Bool(bool),
+    Char(char),
+}
+
+/// One named typed build-config input for a frontend benchmark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrontendBenchmarkInput {
+    pub name: String,
+    pub value: FrontendBenchmarkInputValue,
+}
+
+impl FrontendBenchmarkInput {
+    pub fn new(name: impl Into<String>, value: FrontendBenchmarkInputValue) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+}
 
 /// Input options for a single frontend benchmark run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FrontendBenchmarkOptions {
     pub entry_path: PathBuf,
     pub build_profile: FrontendBenchmarkBuildProfile,
+    pub build_config_inputs: Vec<FrontendBenchmarkInput>,
 }
 
 /// Report produced by a successful frontend benchmark run.
@@ -86,6 +121,8 @@ pub struct FrontendBenchmarkError {
 pub enum FrontendBenchmarkFailureKind {
     /// The raw benchmark timing session could not be acquired.
     TimingSession,
+    /// The public benchmark options contained an invalid typed build-config input.
+    BuildConfigInput,
     /// The entry path is not valid UTF-8.
     InvalidUtf8Path,
     /// The entry path failed validation (e.g. missing file).
@@ -100,6 +137,57 @@ impl std::fmt::Display for FrontendBenchmarkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
+}
+
+fn build_config_inputs_from_options(
+    inputs: &[FrontendBenchmarkInput],
+) -> Result<BuildConfigInputSet, FrontendBenchmarkError> {
+    let mut typed_inputs = BuildConfigInputSet::new();
+
+    for (index, input) in inputs.iter().enumerate() {
+        let name = BuildInputName::new(&input.name).map_err(|_| FrontendBenchmarkError {
+            kind: FrontendBenchmarkFailureKind::BuildConfigInput,
+            diagnostic_codes: Vec::new(),
+            message: format!(
+                "Frontend benchmark build-config input name '{}' is not lower_snake_case.",
+                input.name
+            ),
+        })?;
+        let value = match &input.value {
+            FrontendBenchmarkInputValue::String(value) => {
+                PrimitiveBuildValue::String(value.clone())
+            }
+            FrontendBenchmarkInputValue::Int(value) => PrimitiveBuildValue::Int(*value),
+            FrontendBenchmarkInputValue::Float(value) => PrimitiveBuildValue::float(*value)
+                .map_err(|_| FrontendBenchmarkError {
+                    kind: FrontendBenchmarkFailureKind::BuildConfigInput,
+                    diagnostic_codes: Vec::new(),
+                    message: format!(
+                        "Frontend benchmark build-config input '{}' must use a finite Float.",
+                        input.name
+                    ),
+                })?,
+            FrontendBenchmarkInputValue::Bool(value) => PrimitiveBuildValue::Bool(*value),
+            FrontendBenchmarkInputValue::Char(value) => PrimitiveBuildValue::Char(*value),
+        };
+
+        typed_inputs
+            .insert(BuildConfigInputEntry::new(
+                name,
+                value,
+                BuildConfigValueLocation::Command(BuildCommandLocation::new(index)),
+            ))
+            .map_err(|_| FrontendBenchmarkError {
+                kind: FrontendBenchmarkFailureKind::BuildConfigInput,
+                diagnostic_codes: Vec::new(),
+                message: format!(
+                    "Frontend benchmark build-config input '{}' is repeated.",
+                    input.name
+                ),
+            })?;
+    }
+
+    Ok(typed_inputs)
 }
 
 impl std::error::Error for FrontendBenchmarkError {}
@@ -130,6 +218,7 @@ pub fn run_frontend_benchmark(
             message: format!("Could not start frontend benchmark timing session: {error}"),
         }
     })?;
+    let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
 
     let path = options
         .entry_path
@@ -160,14 +249,14 @@ pub fn run_frontend_benchmark(
     };
 
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-
     let BuildBootstrap {
         mut config,
         style_directives,
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
-    } = match bootstrap_project_build(&project_builder, valid_path) {
+        build_config_inputs,
+    } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             let diagnostic_codes = collect_diagnostic_codes(&messages);
@@ -184,13 +273,15 @@ pub fn run_frontend_benchmark(
         FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
     };
 
-    let messages = match compile_project_frontend(
+    let messages = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
     ) {
         Ok(frontend) => frontend.into_render_messages(&mut string_table),
         Err(messages) => messages,

@@ -253,7 +253,10 @@ fn collect_binding_exports<'a>(
         return Ok(Vec::new());
     }
 
-    let active_module_root = resolve_active_module_root_membership(module_symbols)?;
+    let Some(active_module_root) = resolve_optional_active_module_root_membership(module_symbols)?
+    else {
+        return Ok(Vec::new());
+    };
     let active_root_source = resolve_active_root_source(module_symbols, active_module_root)?;
     let mut entries = Vec::new();
 
@@ -773,7 +776,7 @@ fn collect_free_export_bindings(
     Ok((export_bindings, export_diagnostic_provenance))
 }
 
-fn portable_source_location(
+pub(crate) fn portable_source_location(
     location: &SourceLocation,
     string_table: &StringTable,
 ) -> PublicDiagnosticLocation {
@@ -814,9 +817,10 @@ fn collect_reexport_bindings(
     if module_symbols.file_module_membership.is_empty() {
         return Ok(Vec::new());
     }
-
-    let active_module_root = resolve_active_module_root_membership(module_symbols)?;
-    // Build a lookup from canonical source path to header so re-export targets can find their
+    let Some(active_module_root) = resolve_optional_active_module_root_membership(module_symbols)?
+    else {
+        return Ok(Vec::new());
+    };
     // declaration header without iterating the full header list for each entry.
     let mut header_by_path: FxHashMap<&InternedPath, &Header> = FxHashMap::default();
     for header in sorted_headers {
@@ -881,23 +885,6 @@ fn resolve_active_root_source<'a>(
                 "re-export binding construction: active module-root membership has no active root source",
             )
         })
-}
-
-/// Resolve the one module-root membership owned by the active compilation.
-///
-/// WHAT: joins the header-owned active-root file role to the canonical module-membership table.
-/// WHY: retained provider headers may currently carry the same preliminary stable origin as the
-/// active root on compatibility compilation paths. Module membership is already the authoritative
-/// header-stage boundary, so same-module re-export collection must use it rather than `FileRole`
-/// or stable-origin equality alone.
-fn resolve_active_module_root_membership(
-    module_symbols: &ModuleSymbols,
-) -> Result<&InternedPath, CompilerError> {
-    resolve_optional_active_module_root_membership(module_symbols)?.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "re-export binding construction: active root source has no module-root membership",
-        )
-    })
 }
 
 fn resolve_optional_active_module_root_membership(

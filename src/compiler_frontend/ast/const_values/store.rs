@@ -919,6 +919,7 @@ impl ConstValueStore {
                             id: field.name.clone(),
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
+                            config_qualifier: None,
                         })
                     })
                     .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -942,6 +943,7 @@ impl ConstValueStore {
                             id: field.name.clone(),
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
+                            config_qualifier: None,
                         })
                     })
                     .collect::<Result<Vec<_>, CompilerError>>()?,

@@ -868,6 +868,7 @@ fn declare_loop_binding(
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     };
 
     let binding_location = declaration.value.location.clone();

@@ -120,7 +120,6 @@ impl HeaderFileParseState {
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
-
         Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
             file_id: token_stream.file_id,

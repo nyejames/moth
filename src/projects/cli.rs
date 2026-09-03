@@ -15,6 +15,10 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::analysis::borrow_checker::{
     BoracleDump, BoracleExperiment, BoracleRuleSelection,
 };
+use crate::compiler_frontend::build_config::{
+    BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
+    BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
 use crate::compiler_tests::integration_test_runner::{
@@ -39,6 +43,72 @@ use std::{env, process};
 /// Build-profile flags accepted by both `build` and `dev`.
 const BUILD_FLAGS: &[&str] = &["--release", "--html-wasm"];
 
+/// The error text used when an `--input` flag carries no `name=value` argument.
+const MISSING_COMMAND_INPUT_VALUE: &str = "Missing value for --input.";
+
+/// Parse one shared `--input name=value` value argument and insert its typed entry.
+///
+/// WHAT: the one input parser build, check and dev share. It rejects a missing or flag-shaped
+///       value argument, splits the argument at the first `=` so every later `=` stays inside
+///       the value, validates the lower_snake_case name, and infers the primitive value
+///       immediately through the compiler-owned carrier without consulting any project or
+///       source contract. The inserted entry carries the zero-based position of the `--input`
+///       argument, and a repeated name is rejected deterministically while the earlier entry
+///       keeps its place.
+/// WHY:  all three commands must share one parser and one typed carrier — no command owns a
+///       second conversion or defaulting path, and unknown input names stay in the set for the
+///       later selected-contract validation phases.
+fn parse_command_input_argument(
+    value_argument: Option<&String>,
+    argument_index: usize,
+    inputs: &mut BuildConfigInputSet,
+) -> Result<(), String> {
+    let Some(value_argument) = value_argument.filter(|argument| !argument.starts_with("--")) else {
+        return Err(String::from(MISSING_COMMAND_INPUT_VALUE));
+    };
+
+    let Some((name_text, value_text)) = value_argument.split_once('=') else {
+        return Err(format!(
+            "Invalid value for --input: '{value_argument}'. Expected format is name=value."
+        ));
+    };
+
+    let name = BuildInputName::new(name_text).map_err(|_| {
+        format!("Invalid --input name '{name_text}': input names must be lower_snake_case.")
+    })?;
+    let value = PrimitiveBuildValue::from_command_text(value_text)
+        .map_err(|error| format!("Invalid value for --input '{name_text}': {error}."))?;
+
+    let entry = BuildConfigInputEntry::new(
+        name,
+        value,
+        BuildConfigValueLocation::Command(BuildCommandLocation::new(argument_index)),
+    );
+
+    if let Err(duplicate) = inputs.insert(entry) {
+        return Err(command_input_duplicate_message(&duplicate));
+    }
+
+    Ok(())
+}
+
+/// Render the deterministic duplicate-input rejection for the command error surface.
+///
+/// Command inputs have no source span, so the carrier's retained command location — the
+/// earlier `--input` argument position — is the provenance a duplicate diagnostic reports.
+fn command_input_duplicate_message(duplicate: &BuildConfigInputDuplicate) -> String {
+    let name = duplicate.rejected().name().as_str();
+    match duplicate.existing_location() {
+        BuildConfigValueLocation::Command(location) => format!(
+            "Duplicate --input name '{name}': an earlier value was given at argument position {}.",
+            location.argument_index()
+        ),
+        BuildConfigValueLocation::Source(_) => {
+            format!("Duplicate --input name '{name}': an earlier value was already given.")
+        }
+    }
+}
+
 enum BuildOutputStageError {
     OutputPlan(CompilerError),
     Write(CompilerMessages),
@@ -51,11 +121,13 @@ enum Command {
     Build {
         path: String,
         flags: Vec<Flag>,
+        inputs: BuildConfigInputSet,
     }, // Builds a file or project
 
     Check {
         path: String,
         terse: bool,
+        inputs: BuildConfigInputSet,
     }, // Runs frontend-only compilation without writing artefacts
 
     #[cfg(feature = "boracle")]
@@ -122,10 +194,12 @@ pub fn start_cli() -> process::ExitCode {
                     }
                 }
 
-                Command::Build { path, flags } => run_build_command(&path, &flags),
+                Command::Build { path, flags, inputs } => {
+                    run_build_command(&path, &flags, &inputs)
+                }
 
-                Command::Check { path, terse } => {
-                    check::run_check(&path, CheckOptions { terse })
+                Command::Check { path, terse, inputs } => {
+                    check::run_check(&path, CheckOptions { terse, inputs })
                 }
 
                 #[cfg(feature = "boracle")]
@@ -208,8 +282,12 @@ enum BuildCommandOutcome {
     },
 }
 
-fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
-    run_build_command_with_output_plan(path, flags, create_build_output_plan)
+fn run_build_command(
+    path: &str,
+    flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
+) -> CommandStatus {
+    run_build_command_with_output_plan(path, flags, build_config_inputs, create_build_output_plan)
 }
 
 /// Run a build command with one command-total lifecycle and one output-plan decision.
@@ -219,12 +297,19 @@ fn run_build_command(path: &str, flags: &[Flag]) -> CommandStatus {
 fn run_build_command_with_output_plan(
     path: &str,
     flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
 ) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let outcome = build_command_outcome(&project_builder, path, flags, output_plan_builder);
+    let outcome = build_command_outcome(
+        &project_builder,
+        path,
+        flags,
+        build_config_inputs,
+        output_plan_builder,
+    );
 
     // Capture the single command duration before any terminal rendering.
     let duration =
@@ -249,9 +334,10 @@ fn build_command_outcome(
     project_builder: &build::ProjectBuilder,
     path: &str,
     flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
 ) -> BuildCommandOutcome {
-    match build::build_project(project_builder, path, flags) {
+    match build::build_project(project_builder, path, flags, build_config_inputs) {
         Ok(mut build_result) => {
             // Output planning and filesystem emission form one build-pipeline
             // segment. Terminal diagnostics and success rendering remain part
@@ -366,12 +452,19 @@ fn render_build_outcome(
 fn run_build_command_with_output_plan_for_tests(
     path: &str,
     flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
     duration: Duration,
     renderer: impl FnOnce(&BuildCommandOutcome, Duration),
 ) -> (CommandStatus, Option<(usize, usize)>) {
     let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let outcome = build_command_outcome(&project_builder, path, flags, output_plan_builder);
+    let outcome = build_command_outcome(
+        &project_builder,
+        path,
+        flags,
+        build_config_inputs,
+        output_plan_builder,
+    );
     crate::timing::record_command_total_timing(
         crate::timing::TimingMetric::CommandBuildTotal,
         duration,
@@ -521,6 +614,7 @@ fn parse_new_command(args: &[String]) -> Result<Command, String> {
 fn parse_build_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut flags = Vec::new();
+    let mut inputs = BuildConfigInputSet::new();
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -533,9 +627,13 @@ fn parse_build_command(args: &[String]) -> Result<Command, String> {
                 flags.push(Flag::HtmlWasm);
                 index += 1;
             }
+            "--input" => {
+                parse_command_input_argument(args.get(index + 1), index, &mut inputs)?;
+                index += 2;
+            }
             _ if arg.starts_with("--") => {
                 return Err(format!(
-                    "Unknown build flag: '{arg}'. Supported build flags are {}.",
+                    "Unknown build flag: '{arg}'. Supported build flags are {} and --input name=value.",
                     BUILD_FLAGS.join(", ")
                 ));
             }
@@ -552,7 +650,11 @@ fn parse_build_command(args: &[String]) -> Result<Command, String> {
         }
     }
 
-    Ok(Command::Build { path, flags })
+    Ok(Command::Build {
+        path,
+        flags,
+        inputs,
+    })
 }
 
 fn parse_tests_command(args: &[String]) -> Result<Command, String> {
@@ -669,6 +771,7 @@ fn parse_tests_command(args: &[String]) -> Result<Command, String> {
 fn parse_check_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut terse = false;
+    let mut inputs = BuildConfigInputSet::new();
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -677,9 +780,13 @@ fn parse_check_command(args: &[String]) -> Result<Command, String> {
                 terse = true;
                 index += 1;
             }
+            "--input" => {
+                parse_command_input_argument(args.get(index + 1), index, &mut inputs)?;
+                index += 2;
+            }
             _ if arg.starts_with("--") => {
                 return Err(format!(
-                    "Unknown check flag: '{arg}'. Supported check flag is --terse."
+                    "Unknown check flag: '{arg}'. Supported check flags are --terse and --input name=value."
                 ));
             }
             _ => {
@@ -695,7 +802,11 @@ fn parse_check_command(args: &[String]) -> Result<Command, String> {
         }
     }
 
-    Ok(Command::Check { path, terse })
+    Ok(Command::Check {
+        path,
+        terse,
+        inputs,
+    })
 }
 
 #[cfg(feature = "boracle")]
@@ -835,9 +946,13 @@ fn parse_dev_command(args: &[String]) -> Result<Command, String> {
                 flags.push(Flag::HtmlWasm);
                 index += 1;
             }
+            "--input" => {
+                parse_command_input_argument(args.get(index + 1), index, &mut options.inputs)?;
+                index += 2;
+            }
             _ if arg.starts_with("--") => {
                 return Err(format!(
-                    "Unknown dev flag: '{arg}'. Supported dev flags are --host, --port, --poll-interval-ms, --release, and --html-wasm."
+                    "Unknown dev flag: '{arg}'. Supported dev flags are --host, --port, --poll-interval-ms, --release, --html-wasm, and --input name=value."
                 ));
             }
             _ => {
@@ -865,9 +980,9 @@ fn help_build_flag_entries() -> &'static [&'static str] {
     &[
         "  --release               (selects the release build profile and output folder)",
         "  --html-wasm             (uses the experimental HTML-Wasm backend)",
+        "  --input name=value      (repeatable; supplies a typed build configuration value)",
     ]
 }
-
 fn print_help() {
     say!(Green Bold "Moth", Reset " is version ", Blue Bold env!("CARGO_PKG_VERSION"));
 
@@ -894,6 +1009,7 @@ fn print_help() {
     say!("  --terse                (compact summary and one-line failure diagnostics)");
     say!("\nCheck command options:");
     say!("  --terse                (compact one-line diagnostics)");
+    say!("  --input name=value      (repeatable; supplies a typed build configuration value)");
     #[cfg(feature = "boracle")]
     {
         say!("\nBoracle command options (internal and unstable):");

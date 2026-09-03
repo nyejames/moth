@@ -103,6 +103,7 @@ pub(crate) fn param_declaration(
             DataType::Inferred,
             value_mode,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -699,6 +700,7 @@ pub(crate) fn build_ast_with_choices(
         const_facts: AstConstFacts::default(),
         imported_functions_by_local_path: Default::default(),
         imported_struct_definitions: vec![],
+        static_if_function_provenance: Default::default(),
     }
 }
 

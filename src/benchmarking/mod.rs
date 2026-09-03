@@ -64,6 +64,7 @@ pub fn timing_metric_label(name: &str) -> &str {
 
 pub use frontend::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkCounter, FrontendBenchmarkError,
+    FrontendBenchmarkFailureKind, FrontendBenchmarkInput, FrontendBenchmarkInputValue,
     FrontendBenchmarkOptions, FrontendBenchmarkReport, FrontendBenchmarkStage,
     run_frontend_benchmark,
 };

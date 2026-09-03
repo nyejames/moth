@@ -1,6 +1,6 @@
 use crate::benchmarking::frontend::{
-    FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkOptions,
-    run_frontend_benchmark,
+    FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkInput,
+    FrontendBenchmarkInputValue, FrontendBenchmarkOptions, run_frontend_benchmark,
 };
 use std::io::Write;
 
@@ -29,6 +29,7 @@ fn frontend_benchmark_runs_for_simple_file() {
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     };
 
     let report = run_frontend_benchmark(options).expect("benchmark should succeed");
@@ -54,6 +55,28 @@ fn frontend_benchmark_runs_for_simple_file() {
         !report.counters.is_empty(),
         "counters should be collected when timers and benchmark_counters are enabled"
     );
+}
+
+#[test]
+fn frontend_benchmark_threads_typed_build_config_inputs() {
+    let _guard = benchmark_test_guard();
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let file_path = temp_dir.path().join("config_input.moth");
+    std::fs::write(
+        &file_path,
+        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
+    )
+    .expect("should write config-input source");
+
+    run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path: file_path,
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: vec![FrontendBenchmarkInput::new(
+            "enabled",
+            FrontendBenchmarkInputValue::Bool(true),
+        )],
+    })
+    .expect("typed benchmark input should satisfy the source contract");
 }
 
 /// Assert the stage rows a successful single-file frontend benchmark must report.
@@ -136,6 +159,7 @@ if value is:
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     };
 
     let report = run_frontend_benchmark(options).expect("warnings should remain successful");
@@ -171,6 +195,7 @@ fn frontend_benchmark_retains_source_package_warning() {
     let options = FrontendBenchmarkOptions {
         entry_path: root.to_path_buf(),
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     };
 
     let report = run_frontend_benchmark(options)
@@ -200,6 +225,7 @@ fn frontend_benchmark_fails_for_missing_file() {
     let options = FrontendBenchmarkOptions {
         entry_path: missing_file,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     };
 
     let result = run_frontend_benchmark(options);
@@ -237,6 +263,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_path_validation() {
     let error = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path: missing_entry,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     })
     .expect_err("busy raw benchmark should fail before the entry path is validated");
     drop(outer);
@@ -273,6 +300,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
     let error = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     })
     .expect_err("busy raw benchmark should fail before compiler work");
     drop(outer);
@@ -305,6 +333,7 @@ fn frontend_benchmark_fails_for_invalid_syntax() {
     let options = FrontendBenchmarkOptions {
         entry_path: file_path,
         build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
     };
 
     let result = run_frontend_benchmark(options);

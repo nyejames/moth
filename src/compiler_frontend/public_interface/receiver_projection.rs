@@ -17,7 +17,8 @@ use super::model::{
 };
 use super::type_projection::{
     ProjectedReceiverMethodSignature, RootIndex, origin_category_mismatch_error,
-    project_folded_default, project_parameter_access, project_return_slots,
+    project_defaults_provenance, project_folded_default, project_parameter_access,
+    project_return_slots,
 };
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::{
@@ -271,7 +272,8 @@ pub(super) struct ReceiverProjectionContext<'a> {
 /// [`ProjectedReceiverMethodSignature`] keyed by `method_index`. Free-function seeds are
 /// skipped; their signatures are projected by the free-function projection owner.
 /// WHY: the seed carries only an index, not a copied signature, so the canonical projection
-///      happens exactly once through this owner.
+/// happens exactly once through this owner. The parameter-default provenance is retained on the
+/// transient projected signature for aggregation onto the owning nominal record.
 pub(crate) fn project_receiver_method_signatures(
     callable_seeds: &[CallableSeed],
     receiver_method_entries: &[ReceiverMethodEntry],
@@ -296,6 +298,7 @@ pub(crate) fn project_receiver_method_signatures(
             ))
         })?;
 
+        let default_provenance = project_defaults_provenance(&entry.signature.parameters);
         let parameters = entry
             .signature
             .parameters
@@ -335,6 +338,7 @@ pub(crate) fn project_receiver_method_signatures(
                     parameters,
                     returns,
                     error_return,
+                    default_provenance,
                 },
             )
             .is_some()

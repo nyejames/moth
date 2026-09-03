@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -29,6 +30,9 @@ pub(crate) use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 pub struct Declaration {
     pub id: InternedPath,
     pub value: Expression,
+    /// Declaration-owned `#Config of T` syntax metadata, consumed by config resolution when
+    /// applicable and otherwise retained for source-contract header consumers.
+    pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
 }
 
 impl Declaration {

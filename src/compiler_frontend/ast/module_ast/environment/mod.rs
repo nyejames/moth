@@ -6,6 +6,7 @@
 //! partially valid accumulator fields.
 
 pub(in crate::compiler_frontend::ast) mod builder;
+pub(in crate::compiler_frontend::ast) mod config_resolution;
 pub(in crate::compiler_frontend::ast) mod constant_resolution;
 mod declaration_semantics;
 #[cfg(test)]

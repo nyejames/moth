@@ -193,7 +193,7 @@ fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() 
     let (ast, string_table) = compile_fixture(
         &[(
             "@page.moth",
-            "Config = |\n    drawing_url String = @vendor/drawing.js,\n|\nvalue #= Config()\n",
+            "Drawing = |\n    drawing_url String = @vendor/drawing.js,\n|\nvalue #= Drawing()\n",
         )],
         &[],
     );
@@ -337,6 +337,7 @@ fn compile_fixture(
     let options = HeaderParseOptions {
         entry_file_id: Some(file_id_for("@page.moth")),
         project_path_resolver: None,
+        entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
     let mut prepared_outputs =
@@ -493,6 +494,7 @@ fn compile_fixture(
                 capacity_estimate: Default::default(),
                 resolved_file_references: resolved_references,
                 module_origin: Some(test_module_origin()),
+                build_config_values: Arc::new(Default::default()),
             },
             #[cfg(feature = "timers")]
             None,

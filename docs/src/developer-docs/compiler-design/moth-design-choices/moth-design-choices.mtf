@@ -108,8 +108,8 @@ When you propose an example, ask whether the progress matrix already supports it
 ## Roadmap and current status
 
 - **Accepted design:** design-scope, compiler and memory authorities agree on the bias above.
-- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias.
-- **Queued work:** config shape cleanup, canonical modules, numeric semantics and mixed backend plans remain labelled by plan status.
+- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias; grouped config, typed build values and explicit `@project` are implemented.
+- **Queued work:** numeric semantics, mixed backend plans and entry-local config remain labelled by plan status.
 - **Deferred or outside scope:** rejected language families stay outside scope even when a neighbouring language loves them.
 
 ## Exit state

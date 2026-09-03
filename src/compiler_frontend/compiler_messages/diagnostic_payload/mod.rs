@@ -581,6 +581,10 @@ pub enum DiagnosticPayload {
         private_type: TypeId,
     },
 
+    ProjectContextEscape {
+        reason: ProjectContextEscapeReason,
+    },
+
     InvalidTraitConformance {
         target_name: StringId,
         trait_name: Option<StringId>,
@@ -709,6 +713,7 @@ impl DiagnosticPayload {
             Self::InvalidLoopHeader { reason } => reason.stable_reason_key(),
             Self::InvalidStatementPosition { reason } => reason.stable_reason_key(),
             Self::CommonSyntaxMistake { reason } => reason.stable_reason_key(),
+            Self::ProjectContextEscape { reason } => reason.stable_reason_key(),
             _ => return None,
         };
 

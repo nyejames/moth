@@ -21,6 +21,9 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::build_config::{
+    BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -28,6 +31,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[cfg(feature = "timers")]
 use crate::timing::TimingMetric;
+use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -156,6 +160,12 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
 
+    /// Compiler-owned direct-project config resolution services, present only for config.moth.
+    pub config_resolution: Option<Rc<ConfigResolutionServices>>,
+
+    /// Immutable project/package source `#Config` values resolved before AST construction.
+    pub build_config_values: Arc<ResolvedBuildConfigMap>,
+
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
 
@@ -188,6 +198,12 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
+    /// Compiler-owned direct-project config resolution services, present only for config.moth.
+    pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
+    /// Immutable project/package source `#Config` values resolved before AST construction.
+    pub(crate) build_config_values: Arc<ResolvedBuildConfigMap>,
+    /// Names of source `#Config` contracts declared by this module.
+    pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
@@ -214,15 +230,18 @@ impl<'a> AstPhaseContext<'a> {
     ///      resolving Rust's borrow checker constraints across phase boundaries.
     pub(in crate::compiler_frontend) fn from_build_context(
         context: AstBuildContext<'a>,
+        source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     ) -> (Self, &'a mut StringTable) {
         let AstBuildContext {
+            build_profile,
             external_package_registry,
             style_directives,
             string_table,
             entry_dir,
             root_role,
-            build_profile,
             file_value_resolution,
+            config_resolution,
+            build_config_values,
             template_const_loop_iteration_limit,
             capacity_estimate,
             #[cfg(feature = "timers")]
@@ -234,7 +253,6 @@ impl<'a> AstPhaseContext<'a> {
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::with_capacity_estimate(
             capacity_estimate,
         )));
-
         (
             Self {
                 external_package_registry,
@@ -243,6 +261,9 @@ impl<'a> AstPhaseContext<'a> {
                 root_role,
                 build_profile,
                 file_value_resolution,
+                config_resolution,
+                build_config_values,
+                source_build_config_contract_names,
                 template_const_loop_iteration_limit,
                 capacity_estimate,
                 template_ir_store,

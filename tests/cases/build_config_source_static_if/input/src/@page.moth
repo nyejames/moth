@@ -1,0 +1,8 @@
+enabled #Config of Bool = true
+result ~= 0
+if enabled:
+    result = 1
+else
+    result = 2
+;
+[:source_config result=[result]]

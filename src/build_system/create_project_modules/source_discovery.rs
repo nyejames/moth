@@ -16,8 +16,10 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::dependency_target::{
@@ -31,6 +33,9 @@ use crate::compiler_frontend::paths::path_normalization::{
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_resolution::ResolvedDependencyFile;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::project_globals::{
+    is_project_globals_dependency, is_project_globals_namespace,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -103,6 +108,7 @@ pub(super) enum StructuralProviderAction {
 /// It never scans tokens or source text.
 pub(super) fn resolve_structural_provider_reference(
     provider: &RetainedDependencyPath,
+    clause_kind: DependencyClauseKind,
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -113,6 +119,7 @@ pub(super) fn resolve_structural_provider_reference(
         ProviderCapableDependencyInput {
             dependency_path: &provider.path,
             dependency_location: &provider.location,
+            clause_kind,
             target: &provider.target,
             canonical_file,
             project_path_resolver,
@@ -630,6 +637,7 @@ enum DependencyPolicy<'a, 'b> {
 struct ProviderCapableDependencyInput<'a> {
     dependency_path: &'a InternedPath,
     dependency_location: &'a SourceLocation,
+    clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
     canonical_file: &'a Path,
     project_path_resolver: &'a ProjectPathResolver,
@@ -875,6 +883,7 @@ fn traverse_reachable_source_files(
             let action = policy.handle_dependency(ProviderCapableDependencyInput {
                 dependency_path,
                 dependency_location: &provider.location,
+                clause_kind: clause.binding.clause_kind(),
                 target: &provider.target,
                 canonical_file: &canonical_file,
                 project_path_resolver,
@@ -1145,12 +1154,30 @@ fn handle_provider_capable_dependency(
     let ProviderCapableDependencyInput {
         dependency_path,
         dependency_location,
+        clause_kind,
         target,
         canonical_file,
         project_path_resolver,
         directory_dependency_resolution,
         string_table,
     } = input;
+    // `@project` is a reserved synthetic provider, not a source/package path. Keep the exact
+    // root out of filesystem discovery and external-package registration only for the owning
+    // project boundary; source packages must receive the structured reserved-path diagnostic.
+    if is_project_globals_namespace(dependency_path, string_table) {
+        let is_owning_project_root = directory_dependency_resolution
+            .is_none_or(|resolution| resolution.is_project_boundary());
+        if is_project_globals_dependency(dependency_path, string_table) && is_owning_project_root {
+            return Ok(DependencyPolicyAction::Skip);
+        }
+        return Err(CompilerDiagnostic::invalid_dependency_clause(
+            clause_kind,
+            InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
+            dependency_location.clone(),
+        )
+        .into());
+    }
+
     // Skip virtual package dependencies — AST resolution handles those.
     if external_imports
         .external_packages

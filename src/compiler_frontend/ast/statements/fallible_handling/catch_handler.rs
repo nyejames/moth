@@ -231,6 +231,7 @@ fn parse_catch_fallible_handler_body(
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
+                config_qualifier: None,
             },
             error_binding_location,
         );
@@ -387,6 +388,7 @@ fn parse_inline_catch_handler_body(
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
+                config_qualifier: None,
             },
             error_binding_location,
         );

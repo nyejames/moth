@@ -54,8 +54,17 @@ impl InitializerReference {
 /// shallow reference facts without duplicating the scan logic.
 pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerReference> {
     let mut references = Vec::new();
+    let mut in_config_qualifier = false;
 
     for (index, token) in tokens.iter().enumerate() {
+        if in_config_qualifier {
+            if matches!(token.kind, TokenKind::Assign | TokenKind::Comma) {
+                in_config_qualifier = false;
+            } else {
+                continue;
+            }
+        }
+
         let TokenKind::Symbol(name) = &token.kind else {
             continue;
         };
@@ -70,6 +79,23 @@ pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerRefe
 
         let next = tokens.get(index + 1).map(|next_token| &next_token.kind);
         if matches!(next, Some(TokenKind::Assign)) {
+            continue;
+        }
+
+        // A direct anonymous-record field target is syntax, not a value dependency. Skip the
+        // target, `#Config of T` qualifier and its type spelling; resume scanning at the authored
+        // default after `=` so references used by that default still create dependency edges.
+        if matches!(next, Some(TokenKind::Hash))
+            && matches!(
+                tokens.get(index + 2).map(|token| &token.kind),
+                Some(TokenKind::Symbol(_))
+            )
+            && matches!(
+                tokens.get(index + 3).map(|token| &token.kind),
+                Some(TokenKind::Of)
+            )
+        {
+            in_config_qualifier = true;
             continue;
         }
 

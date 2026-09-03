@@ -50,6 +50,16 @@ fn keyword_shadow_policy_shares_the_canonical_keyword_set() {
     assert_eq!(keyword_shadow_match("cast"), Some("cast"));
     assert_eq!(keyword_shadow_match("CAST"), Some("cast"));
     assert_eq!(keyword_shadow_match("_cast"), Some("cast"));
+
+    // The `config` identifier family is reserved for the compiler-owned build-config
+    // vocabulary without becoming a tokenizer keyword.
+    assert_eq!(keyword_shadow_match("config"), Some("config"));
+    assert_eq!(keyword_shadow_match("Config"), Some("config"));
+    assert_eq!(keyword_shadow_match("CONFIG"), Some("config"));
+    assert_eq!(keyword_shadow_match("_config"), Some("config"));
+    assert_eq!(keyword_shadow_match("_Config"), Some("config"));
+    assert!(!is_keyword("config"));
+    assert!(!is_keyword("Config"));
 }
 
 #[test]

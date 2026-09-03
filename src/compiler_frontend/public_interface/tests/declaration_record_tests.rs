@@ -137,6 +137,7 @@ fn param_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
             type_id,
             ValueMode::default(),
         ),
+        config_qualifier: None,
     }
 }
 
@@ -172,6 +173,7 @@ fn field_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        config_qualifier: None,
     }
 }
 
@@ -464,6 +466,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        config_qualifier: None,
     }
 }
 

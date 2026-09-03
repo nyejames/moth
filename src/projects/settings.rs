@@ -5,6 +5,7 @@
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
 
+use crate::compiler_frontend::build_config::ConfigResolutionRecord;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
@@ -115,9 +116,9 @@ pub struct Config {
     pub entry_root: PathBuf,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
-    pub version: String,
-    pub author: String,
-    pub license: String,
+    pub version: Option<String>,
+    pub author: Option<String>,
+    pub license: Option<String>,
 
     /// Source locations for each config key, used for precise error reporting
     pub setting_locations: HashMap<String, SourceLocation>,
@@ -127,22 +128,29 @@ pub struct Config {
 
     /// Additional open `project` fields retained for later `@project` publication.
     pub(crate) extra_project_fields: Vec<ProjectMetadataField>,
+    /// Whether this config was loaded from an actual `config.moth` file. Synthetic single-file
+    /// defaults must not become fixed project providers for source build-config contracts.
+    pub(crate) project_config_loaded: bool,
+    /// Direct project `#Config` resolution records retained only until build-boundary projection.
+    /// Successful build results clear this transient bootstrap handoff.
+    pub(crate) config_resolution_records: Vec<ConfigResolutionRecord>,
 }
 
 impl Config {
     pub fn new(user_specified_path: PathBuf) -> Self {
         Config {
+            project_name: String::new(),
             entry_dir: user_specified_path,
             entry_root: PathBuf::from(""),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            project_name: String::new(),
-            version: String::from("0.1.0"),
-            author: String::new(),
-            license: String::from("MIT"),
-
+            version: None,
+            author: None,
+            license: None,
             setting_locations: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
+            project_config_loaded: false,
+            config_resolution_records: Vec::new(),
         }
     }
 
@@ -248,13 +256,15 @@ impl Default for Config {
             entry_root: PathBuf::from("src"),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             project_name: String::from("html_project"),
-            version: String::from("0.1.0"),
-            author: String::new(),
-            license: String::from("MIT"),
+            version: None,
+            author: None,
+            license: None,
 
             setting_locations: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
+            project_config_loaded: false,
+            config_resolution_records: Vec::new(),
         }
     }
 }

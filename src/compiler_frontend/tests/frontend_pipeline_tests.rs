@@ -176,6 +176,7 @@ impl FrontendProject {
         let options = HeaderParseOptions {
             entry_file_id,
             project_path_resolver: self.frontend.project_path_resolver.clone(),
+            entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
 
@@ -232,6 +233,7 @@ impl FrontendProject {
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
                     module_origin: None,
+                    build_config_values: Arc::new(Default::default()),
                 },
                 #[cfg(feature = "timers")]
                 None,
@@ -432,6 +434,7 @@ fn frontend_diagnostics_preserve_string_table_context() {
             build_profile: FrontendBuildProfile::Dev,
             capacity_estimate: Default::default(),
             resolved_file_references: ResolvedFileReferenceTable::default(),
+            build_config_values: Arc::new(Default::default()),
             module_origin: None,
         },
         #[cfg(feature = "timers")]

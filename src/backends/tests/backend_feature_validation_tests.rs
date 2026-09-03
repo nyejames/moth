@@ -500,6 +500,11 @@ fn hir_module(
     module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
+    for function in &module.functions {
+        module
+            .function_provenance
+            .insert(function.id, Default::default());
+    }
     module
 }
 

@@ -10,10 +10,13 @@
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use super::project_structure_diagnostics::project_structure_messages;
 use super::source_tree_index::SourceTreeIndex;
 
 use std::fs;
@@ -96,6 +99,21 @@ pub(crate) fn build_source_package_boundary_indexes(
 
     for package in source_packages.iter() {
         let ProvidedSourceRoot::Filesystem(path) = &package.root;
+        let package_prefix_without_introducer = package
+            .package_prefix
+            .strip_prefix('@')
+            .unwrap_or(&package.package_prefix);
+        if package_prefix_without_introducer
+            .split('/')
+            .next()
+            .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
+        {
+            return Err(project_structure_messages(
+                path,
+                InvalidConfigReason::ProjectGlobalsNameReserved,
+                string_table,
+            ));
+        }
 
         // Canonicalize each registered filesystem root before traversal so the package index
         // never proceeds against a path whose canonicalization failed. This preserves the

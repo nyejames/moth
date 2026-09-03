@@ -267,6 +267,7 @@ impl<'a> HirBuilder<'a> {
         let declaration = Declaration {
             id: name.clone(),
             value,
+            config_qualifier: None,
         };
         self.module_const_values
             .insert_test_declaration(declaration, &self.type_environment);

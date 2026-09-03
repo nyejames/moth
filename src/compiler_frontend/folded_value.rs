@@ -12,6 +12,8 @@
 //! storage. Keeping their portable string representation here prevents a second parallel piece
 //! enum or duplicate conversion implementation at either boundary.
 
+use std::hash::{Hash, Hasher};
+
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
@@ -28,6 +30,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 // ===========================================================================
 //  Owned folded-value vocabulary
@@ -42,7 +45,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// identities are unavailable. The type identity lets import materialize nested values
 /// without donor field declarations: a nested anonymous const record projects to
 /// `AnonymousConstRecord` and a nested named struct to its source nominal identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicFoldedField {
     pub(crate) name: String,
     pub(crate) type_identity: CanonicalTypeIdentity,
@@ -56,7 +59,7 @@ pub(crate) struct PublicFoldedField {
 /// [`crate::compiler_frontend::paths::module_resources::ResourceId`].
 /// WHY: URL context is assigned by the consuming builder, so a resource-bearing string must not be
 /// flattened to rendered text during any projection or runtime handoff.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OwnedFoldedStringPiece {
     Text(String),
     Resource(StableResourceOriginId),
@@ -69,7 +72,7 @@ pub(crate) enum OwnedFoldedStringPiece {
 /// pieces when a value contains a resource origin or site root.
 /// WHY: every owned string consumer must confront unresolved resource structure instead of
 /// accidentally treating only a separate structural variant as a complete vocabulary.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OwnedFoldedString {
     Text(String),
     Pieces(Vec<OwnedFoldedStringPiece>),
@@ -180,6 +183,12 @@ impl PartialEq for FiniteFloat {
 
 impl Eq for FiniteFloat {}
 
+impl Hash for FiniteFloat {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
 /// The owned, backend-neutral, recursive folded value for one directly exported constant or
 /// retained default.
 ///
@@ -199,7 +208,7 @@ impl Eq for FiniteFloat {}
 /// cross-module consumers read one backend-neutral value shape instead of donor-local AST
 /// expression identity. The vocabulary is recursive so nested const-record fields, choice
 /// payloads, collection elements and option payloads all project through the same conversion.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
     Int(i32),
     Float(FiniteFloat),
@@ -290,14 +299,14 @@ impl PublicFoldedValue {
 /// WHY: a template's text runs use the same portable owned string vocabulary as ordinary folded
 /// strings, so resource and site-root pieces cannot be flattened while slots cross a module
 /// boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicConstTemplate {
     pub(crate) kind: PublicConstTemplateKind,
     pub(crate) pieces: Vec<PublicConstTemplatePiece>,
     pub(crate) conditional_child_wrappers: Vec<PublicConstTemplate>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicConstTemplateKind {
     Wrapper,
     SlotInsert(PublicTemplateSlotKey),
@@ -308,7 +317,7 @@ pub(crate) enum PublicConstTemplateKind {
 /// WHAT: carries one contiguous [`OwnedFoldedString`] run or one unresolved slot in authored order.
 /// WHY: grouping non-slot pieces lets plain text keep its fast path while structural runs reuse the
 /// one portable string vocabulary shared with public constants and runtime handoff.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicConstTemplatePiece {
     Text(OwnedFoldedString),
     Slot(PublicConstTemplateSlot),
@@ -321,7 +330,7 @@ pub(crate) enum PublicTemplateSlotKey {
     Positional(usize),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicConstTemplateSlot {
     pub(crate) key: PublicTemplateSlotKey,
     pub(crate) applied_child_wrappers: Vec<PublicConstTemplate>,
@@ -502,19 +511,37 @@ pub(crate) fn convert_expression_to_folded_value(
 
 /// Convert one module-store value to the owned public folded-value vocabulary.
 ///
-/// WHAT: consumes the store's postorder visitor rather than walking an AST expression tree.
-/// WHY: module constants have one folded-value owner; public projection must not reconstruct or
-/// recursively reinterpret a second declaration-shaped value tree.
+/// This compatibility wrapper discards the aggregate provenance returned by
+/// [`convert_const_value_to_folded_value_with_provenance`]. Callers that publish a declaration
+/// record should use the provenance-aware variant so nested folded nodes remain represented in the
+/// declaration's aggregate fact.
 pub(crate) fn convert_const_value_to_folded_value(
     const_values: &ConstValueStore,
     value_id: ConstValueId,
     context: &FoldedValueProjectionContext<'_>,
 ) -> Result<PublicFoldedValue, CompilerError> {
+    convert_const_value_to_folded_value_with_provenance(const_values, value_id, context)
+        .map(|(value, _)| value)
+}
+
+/// Convert one module-store value to the owned public folded-value vocabulary and collect the
+/// synthetic-interface provenance of every visited value node.
+///
+/// WHAT: consumes the store's postorder visitor exactly once. The returned provenance is the
+/// canonical union of the root metadata and every nested folded node's metadata; the folded-value
+/// payload itself remains the existing [`PublicFoldedValue`] vocabulary.
+pub(crate) fn convert_const_value_to_folded_value_with_provenance(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    context: &FoldedValueProjectionContext<'_>,
+) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
     let type_environment = context.type_environment;
     let string_table = context.string_table;
     let projection_context = context.projection_context;
+    let mut provenance = SyntheticInterfaceProvenance::empty();
 
-    const_values.fold_value(value_id, &mut |metadata, visit| {
+    let value = const_values.fold_value(value_id, &mut |metadata, visit| {
+        provenance.merge(&metadata.synthetic_interface_provenance);
         increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
 
         match visit {
@@ -612,7 +639,9 @@ pub(crate) fn convert_const_value_to_folded_value(
                 Ok(PublicFoldedValue::ConstTemplate(template.clone()))
             }
         }
-    })
+    })?;
+
+    Ok((value, provenance))
 }
 
 /// Convert a slice of [`Declaration`] fields to owned [`PublicFoldedField`] values.

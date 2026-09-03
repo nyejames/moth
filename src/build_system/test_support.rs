@@ -7,7 +7,7 @@
 //!       support owns the synthetic origin and empty public interface instead.
 //! MUST NOT: be used outside `#[cfg(test)]` code or claim to be a production construction path.
 
-use crate::build_system::build::ProjectCompilation;
+use crate::build_system::build::{ProjectAssemblyError, ProjectCompilation};
 use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompletedSourcePackageRegistry,
 };
@@ -16,7 +16,6 @@ use crate::build_system::create_project_modules::module_artifact_store::ModuleAr
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -27,7 +26,7 @@ use std::path::PathBuf;
 /// Assemble one success-only project compilation from bare test modules.
 pub(crate) fn project_compilation_from_test_modules(
     modules: Vec<Module>,
-) -> Result<ProjectCompilation, CompilerError> {
+) -> Result<ProjectCompilation, ProjectAssemblyError> {
     project_compilation_from_test_modules_with_resources(modules, ResourceInputRegistry::new())
 }
 
@@ -35,7 +34,7 @@ pub(crate) fn project_compilation_from_test_modules(
 pub(crate) fn project_compilation_from_test_modules_with_resources(
     modules: Vec<Module>,
     resource_inputs: ResourceInputRegistry,
-) -> Result<ProjectCompilation, CompilerError> {
+) -> Result<ProjectCompilation, ProjectAssemblyError> {
     let module_count = modules.len();
     let graph = ProjectModuleGraph::from_normal_roots(
         (0..module_count)

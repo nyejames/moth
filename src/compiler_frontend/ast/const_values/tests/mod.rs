@@ -332,6 +332,7 @@ fn mutable_declaration_fails_private_const_resolution() {
     let declaration = Declaration {
         id: InternedPath::from_single_str("value", &mut string_table),
         value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
+        config_qualifier: None,
     };
 
     let env = ConstValueEnvironment::default();
@@ -442,6 +443,7 @@ fn body_local_immutable_literal_resolves() {
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
         value: Expression::int(99, SourceLocation::default(), ValueMode::ImmutableOwned),
+        config_qualifier: None,
     };
 
     let env = ConstValueEnvironment::default();
@@ -468,6 +470,7 @@ fn body_local_mutable_declaration_fails() {
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
         value: Expression::int(99, SourceLocation::default(), ValueMode::MutableOwned),
+        config_qualifier: None,
     };
 
     let env = ConstValueEnvironment::default();
