@@ -652,9 +652,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Type aliases</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad builtin, imported, collection, option, generic instance, alias-to-alias, remap, and diagnostic coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad builtin, imported, collection, option, generic instance, alias-to-alias, remap, fixed-capacity constant, trait-requirement, and diagnostic coverage.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend</td>
- <td style="padding: 0.1em 0.5em; "> Transparent aliases to builtins, source and imported source types, collections, maps, options and concrete generic instances are supported. The compiler still rejects aliases to external opaque types despite the accepted transparent-alias contract.</td>
+ <td style="padding: 0.1em 0.5em; "> Transparent aliases to builtins, source and imported source types, collections, maps, options and concrete generic instances are supported, including targets whose fixed collection capacity folds a module constant. Alias targets keep local nominal identity through generic materialisation. The compiler still rejects aliases to external opaque types despite the accepted transparent-alias contract.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
