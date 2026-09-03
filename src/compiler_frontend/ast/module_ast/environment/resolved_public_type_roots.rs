@@ -15,9 +15,11 @@ use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationT
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::ast::type_resolution::{
+    ResolvedFunctionSignature, ResolvedTypeAlias,
+};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -63,14 +65,12 @@ pub(crate) enum ResolvedPublicTypeRootKind {
     /// Public nominal choice with its canonical `TypeId`.
     Choice { type_id: TypeId },
 
-    /// Public transparent type alias with its resolved target `TypeId`.
+    /// Public transparent type alias with its completed target `TypeId`.
     ///
-    /// WHAT: the target `TypeId` is materialized once by the public-surface validation owner
-    /// and retained on the resolved annotation. This table consumes the retained fact; it
-    /// does not resolve the alias target a second time. The alias does not introduce its own
-    /// type identity; only the resolved target `TypeId` is carried.
+    /// WHAT: consumes the required target identity already produced by AST alias resolution.
+    /// WHY: public projection must not resolve an alias target again or manufacture identity for
+    /// the transparent alias itself.
     TransparentAlias { target_type_id: TypeId },
-
     /// Public compile-time constant with its resolved `TypeId`.
     Constant { type_id: TypeId },
 }
@@ -135,7 +135,7 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub resolved_function_signatures_by_path:
         &'a FxHashMap<InternedPath, ResolvedFunctionSignature>,
     pub nominal_type_ids_by_path: &'a FxHashMap<InternedPath, TypeId>,
-    pub resolved_type_aliases_by_path: &'a FxHashMap<InternedPath, ResolvedTypeAnnotation>,
+    pub resolved_type_aliases_by_path: &'a FxHashMap<InternedPath, ResolvedTypeAlias>,
     pub declaration_table: &'a TopLevelDeclarationTable,
     pub generic_function_templates_by_path: &'a FxHashMap<InternedPath, GenericFunctionTemplate>,
     pub receiver_methods: &'a ReceiverMethodCatalog,
@@ -197,7 +197,12 @@ pub(crate) fn build_resolved_public_type_roots(
         match &header.kind {
             HeaderKind::Function { .. } => {
                 let Some(resolved) = resolved_function_signatures_by_path.get(path) else {
-                    return Err(missing_resolved_function_signature(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "active-root function signature",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
 
                 // Receiver methods are not free export bindings. They are selected in the
@@ -221,13 +226,25 @@ pub(crate) fn build_resolved_public_type_roots(
 
             HeaderKind::Struct { .. } => {
                 let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
-                    return Err(missing_nominal_type_id(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "active-root nominal type handle",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 public_nominal_paths.insert(path.to_owned());
                 let fields = resolved_struct_fields_by_path
                     .get(path)
                     .cloned()
-                    .ok_or_else(|| missing_resolved_struct_fields(path, string_table))?;
+                    .ok_or_else(|| {
+                        missing_public_root_fact(
+                            "active-root struct field declarations",
+                            path,
+                            &header.name_location,
+                            string_table,
+                        )
+                    })?;
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
                     kind: ResolvedPublicTypeRootKind::Struct { type_id, fields },
@@ -236,7 +253,12 @@ pub(crate) fn build_resolved_public_type_roots(
 
             HeaderKind::Choice { .. } => {
                 let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
-                    return Err(missing_nominal_type_id(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "active-root nominal type handle",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 public_nominal_paths.insert(path.to_owned());
                 roots.push(ResolvedPublicTypeRoot {
@@ -246,24 +268,30 @@ pub(crate) fn build_resolved_public_type_roots(
             }
 
             HeaderKind::TypeAlias { .. } => {
-                let Some(annotation) = resolved_type_aliases_by_path.get(path) else {
-                    return Err(missing_resolved_alias(path, string_table));
-                };
-                // The public-surface validation owner materializes and retains the alias
-                // target `TypeId`. This table consumes the retained fact; a missing `TypeId`
-                // here is an internal invariant failure, not a reason to resolve again.
-                let Some(target_type_id) = annotation.type_id else {
-                    return Err(missing_resolved_alias_type_id(path, string_table));
+                let Some(alias) = resolved_type_aliases_by_path.get(path) else {
+                    return Err(missing_public_root_fact(
+                        "active-root transparent alias",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
-                    kind: ResolvedPublicTypeRootKind::TransparentAlias { target_type_id },
+                    kind: ResolvedPublicTypeRootKind::TransparentAlias {
+                        target_type_id: alias.target_type_id,
+                    },
                 });
             }
 
             HeaderKind::Constant { .. } => {
                 let Some(declaration) = declaration_table.get_by_path(path) else {
-                    return Err(missing_resolved_constant(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "active-root constant declaration",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
@@ -304,7 +332,12 @@ pub(crate) fn build_resolved_public_type_roots(
         match &header.kind {
             HeaderKind::Function { .. } => {
                 let Some(resolved) = resolved_function_signatures_by_path.get(path) else {
-                    return Err(missing_resolved_function_signature(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "re-exported function signature",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
 
                 // Receiver methods are not free export bindings. They travel with their receiver
@@ -328,13 +361,25 @@ pub(crate) fn build_resolved_public_type_roots(
 
             HeaderKind::Struct { .. } => {
                 let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
-                    return Err(missing_nominal_type_id(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "re-exported nominal type handle",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 public_nominal_paths.insert(path.to_owned());
                 let fields = resolved_struct_fields_by_path
                     .get(path)
                     .cloned()
-                    .ok_or_else(|| missing_resolved_struct_fields(path, string_table))?;
+                    .ok_or_else(|| {
+                        missing_public_root_fact(
+                            "re-exported struct field declarations",
+                            path,
+                            &header.name_location,
+                            string_table,
+                        )
+                    })?;
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
                     kind: ResolvedPublicTypeRootKind::Struct { type_id, fields },
@@ -343,7 +388,12 @@ pub(crate) fn build_resolved_public_type_roots(
 
             HeaderKind::Choice { .. } => {
                 let Some(&type_id) = nominal_type_ids_by_path.get(path) else {
-                    return Err(missing_nominal_type_id(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "re-exported nominal type handle",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 public_nominal_paths.insert(path.to_owned());
                 roots.push(ResolvedPublicTypeRoot {
@@ -353,21 +403,30 @@ pub(crate) fn build_resolved_public_type_roots(
             }
 
             HeaderKind::TypeAlias { .. } => {
-                let Some(annotation) = resolved_type_aliases_by_path.get(path) else {
-                    return Err(missing_resolved_alias(path, string_table));
-                };
-                let Some(target_type_id) = annotation.type_id else {
-                    return Err(missing_resolved_alias_type_id(path, string_table));
+                let Some(alias) = resolved_type_aliases_by_path.get(path) else {
+                    return Err(missing_public_root_fact(
+                        "re-exported transparent alias",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
-                    kind: ResolvedPublicTypeRootKind::TransparentAlias { target_type_id },
+                    kind: ResolvedPublicTypeRootKind::TransparentAlias {
+                        target_type_id: alias.target_type_id,
+                    },
                 });
             }
 
             HeaderKind::Constant { .. } => {
                 let Some(declaration) = declaration_table.get_by_path(path) else {
-                    return Err(missing_resolved_constant(path, string_table));
+                    return Err(missing_public_root_fact(
+                        "re-exported constant declaration",
+                        path,
+                        &header.name_location,
+                        string_table,
+                    ));
                 };
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
@@ -401,7 +460,12 @@ pub(crate) fn build_resolved_public_type_roots(
         // AST environment construction resolves every function signature before this table, so
         // a function whose receiver is selected below must have a resolved signature.
         let Some(resolved) = resolved_function_signatures_by_path.get(path) else {
-            return Err(missing_resolved_function_signature(path, string_table));
+            return Err(missing_public_root_fact(
+                "receiver method function signature",
+                path,
+                &header.name_location,
+                string_table,
+            ));
         };
         let Some(receiver) = resolved.receiver.as_ref() else {
             continue;
@@ -414,7 +478,12 @@ pub(crate) fn build_resolved_public_type_roots(
         }
 
         let Some(entry) = receiver_methods.by_function_path.get(path) else {
-            return Err(missing_receiver_method_entry(path, string_table));
+            return Err(missing_public_root_fact(
+                "receiver method catalog entry",
+                path,
+                &header.name_location,
+                string_table,
+            ));
         };
         receiver_method_entries.push(entry.clone());
     }
@@ -629,60 +698,23 @@ fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&InternedPath> {
     }
 }
 
-fn missing_resolved_function_signature(
+/// Build the located internal error for a public root fact that was never published.
+///
+/// WHY: these are AST invariant failures rather than user diagnostics, but each one names a real
+/// declaration. Carrying its declaration location keeps the report pointing at that line instead
+/// of the start of the file, and one constructor keeps the wording consistent across root kinds.
+fn missing_public_root_fact(
+    description: &str,
     path: &InternedPath,
+    location: &SourceLocation,
     string_table: &StringTable,
 ) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Active-root function '{}' had no resolved signature during root-table construction.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_nominal_type_id(path: &InternedPath, string_table: &StringTable) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public active-root nominal declaration '{}' had no canonical TypeId during root-table construction.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_resolved_struct_fields(
-    path: &InternedPath,
-    string_table: &StringTable,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public active-root struct '{}' had no resolved field declarations during root-table construction; every public struct must have an entry, including an empty vector for an empty struct.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_resolved_alias(path: &InternedPath, string_table: &StringTable) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public active-root transparent alias '{}' had no resolved annotation during root-table construction.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_resolved_alias_type_id(
-    path: &InternedPath,
-    string_table: &StringTable,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public active-root transparent alias '{}' had no retained target TypeId during root-table construction; the public-surface owner should have materialized and retained it.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_resolved_constant(path: &InternedPath, string_table: &StringTable) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public active-root constant '{}' had no resolved declaration during root-table construction.",
-        path.to_string(string_table)
-    ))
-}
-
-fn missing_receiver_method_entry(path: &InternedPath, string_table: &StringTable) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public receiver method '{}' was missing from the receiver catalog during root-table construction.",
-        path.to_string(string_table)
-    ))
+    CompilerError::new(
+        format!(
+            "Public {description} '{}' was not published before root-table construction.",
+            path.to_string(string_table)
+        ),
+        location.clone(),
+        ErrorType::Compiler,
+    )
 }

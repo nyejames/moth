@@ -21,7 +21,7 @@
 //!
 //! This module does NOT own:
 //! - `TypeResolutionContext` construction or result types (live in `context.rs`).
-//! - type alias target re-resolution (lives in `aliases.rs`).
+//! - completed alias lookup and use-site projection (lives in `aliases.rs`).
 //! - lazy generic struct/choice instance materialization or bound-evidence validation
 //!   (lives in `generics.rs`).
 //! - diagnostic-type-to-`TypeId` conversion helpers (live in `resolve_type.rs`).

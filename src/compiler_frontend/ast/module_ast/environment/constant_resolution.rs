@@ -1,11 +1,13 @@
 //! AST constant semantic resolution.
 //!
-//! WHAT: owns [`ConstantResolutionSession`], the single module-scoped session that parses and
-//! folds every top-level constant initializer in header dependency order.
-//! WHY: headers are already sorted by the dependency stage, so the whole pass reads one
-//! unchanging view of the module. Building that view once means a module with many constants
-//! prepares its side tables, canonical file scopes and compatibility cache a fixed number of
-//! times instead of once per constant.
+//! WHAT: owns [`ConstantResolutionSession`], the session that parses and folds top-level
+//! constant initializers for one Stage 3 declaration walk in header dependency order.
+//! WHY: headers are already sorted by the dependency stage, so a walk reads one unchanging view
+//! of the module. Building that view once means a module with many constants prepares its side
+//! tables, canonical file scopes and compatibility cache a fixed number of times instead of once
+//! per constant. A module with constant-dependent aliases runs a bounded prefix walk before user
+//! traits resolve and then the full walk, so it owns one session per walk rather than one per
+//! module.
 //! MUST NOT: rebuild dependency visibility, or hold the declaration table across a constant. The
 //! environment builder commits each resolved constant into the table in place, which requires
 //! sole ownership between calls.
@@ -29,7 +31,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
 use crate::compiler_frontend::ast::statements::declarations::resolve_declaration_syntax;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
+use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
@@ -61,10 +63,7 @@ use std::sync::Arc;
 /// what is genuinely module-wide, and keeps `resolve_constant_header` down to the state that
 /// really does change between constants.
 pub(crate) struct ConstantResolutionSessionInput {
-    pub resolved_type_aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
     pub generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
-    pub resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
-    pub choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
     pub nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
@@ -82,18 +81,35 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub template_const_loop_iteration_limit: usize,
 }
 /// State that changes between constants, supplied by the environment builder per call.
+///
+/// WHY: the Stage 3 walk publishes aliases and constructor scaffolds between constants, so the
+/// session must not retain handles to those tables. Holding one would both go stale and force
+/// the builder's next `Rc::make_mut` to clone the whole table.
 pub(crate) struct ConstantHeaderInput<'a> {
     /// Current declaration table. The builder commits each resolved constant into it, so the
     /// session takes a fresh handle per constant rather than retaining one.
     pub top_level_declarations: Rc<TopLevelDeclarationTable>,
     /// Paths of the constants resolved so far, shared rather than copied into the scope frame.
     pub resolved_constants: Rc<ResolvedConstantSet>,
+    pub resolved_type_aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    pub resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
+    pub choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
     pub file_visibility: &'a Arc<FileVisibility>,
     pub type_environment: &'a mut TypeEnvironment,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
 }
 
-/// One module-owned session for the dependency-ordered top-level constant pass.
+/// The declaring-module tables one constant header scope reads.
+struct ConstantHeaderScopeInput<'a> {
+    top_level_declarations: Rc<TopLevelDeclarationTable>,
+    resolved_constants: Rc<ResolvedConstantSet>,
+    resolved_type_aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
+    resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
+    choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
+    file_visibility: &'a Arc<FileVisibility>,
+}
+
+/// One session for a single dependency-ordered Stage 3 declaration walk.
 pub(crate) struct ConstantResolutionSession {
     module_view: ConstantResolutionSessionInput,
 
@@ -132,6 +148,9 @@ impl ConstantResolutionSession {
         let ConstantHeaderInput {
             top_level_declarations,
             resolved_constants,
+            resolved_type_aliases,
+            resolved_struct_fields_by_path,
+            choice_variant_shells_by_path,
             file_visibility,
             type_environment,
             warnings,
@@ -146,9 +165,14 @@ impl ConstantResolutionSession {
 
         let mut scope_context = self.constant_header_scope(
             header,
-            top_level_declarations,
-            resolved_constants,
-            file_visibility,
+            ConstantHeaderScopeInput {
+                top_level_declarations,
+                resolved_constants,
+                resolved_type_aliases,
+                resolved_struct_fields_by_path,
+                choice_variant_shells_by_path,
+                file_visibility,
+            },
             string_table,
         );
 
@@ -211,16 +235,23 @@ impl ConstantResolutionSession {
     ///
     /// Constant headers are parsed while the AST environment is still being assembled, so this
     /// scope carries explicit visibility and alias services instead of the completed
-    /// `AstModuleLookups` package used by later body emission. Everything except the declaration
-    /// table and the scope path is a shared handle prepared once by the session.
+    /// `AstModuleLookups` package used by later body emission. Tables the environment builder
+    /// still mutates arrive per call; the rest are shared handles prepared once by the session.
     fn constant_header_scope(
         &mut self,
         header: &Header,
-        top_level_declarations: Rc<TopLevelDeclarationTable>,
-        resolved_constants: Rc<ResolvedConstantSet>,
-        file_visibility: &Arc<FileVisibility>,
+        input: ConstantHeaderScopeInput<'_>,
         string_table: &mut StringTable,
     ) -> ScopeContext {
+        let ConstantHeaderScopeInput {
+            top_level_declarations,
+            resolved_constants,
+            resolved_type_aliases,
+            resolved_struct_fields_by_path,
+            choice_variant_shells_by_path,
+            file_visibility,
+        } = input;
+
         increment_ast_counter(AstCounter::ConstantResolutionContextsCreated);
 
         let module_view = &self.module_view;
@@ -247,11 +278,11 @@ impl ConstantResolutionSession {
         .with_file_visibility(Arc::clone(file_visibility))
         .with_source_file_scope(source_file_scope.to_owned())
         .with_declaring_file_id(header.tokens.file_id)
-        .with_resolved_type_aliases(Rc::clone(&module_view.resolved_type_aliases))
+        .with_resolved_type_aliases(resolved_type_aliases)
         .with_resolved_module_constants(resolved_constants)
         .with_generic_declarations(Rc::clone(&module_view.generic_declarations_by_path))
-        .with_resolved_struct_fields_by_path(Rc::clone(&module_view.resolved_struct_fields_by_path))
-        .with_choice_variant_shells_by_path(Rc::clone(&module_view.choice_variant_shells_by_path))
+        .with_resolved_struct_fields_by_path(resolved_struct_fields_by_path)
+        .with_choice_variant_shells_by_path(choice_variant_shells_by_path)
         .with_nominal_type_ids_by_path(Rc::clone(&module_view.nominal_type_ids_by_path))
         .with_trait_environment(Rc::clone(&module_view.trait_environment));
         if let Some(services) = &self.module_view.file_value_resolution {

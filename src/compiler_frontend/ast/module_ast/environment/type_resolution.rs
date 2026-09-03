@@ -21,9 +21,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     StructFieldResolutionError, collect_type_parameter_ids_from_choice_variants,
     collect_type_parameter_ids_from_declarations, resolve_choice_variant_payload_types,
-    resolve_diagnostic_type_to_type_id_checked, resolve_struct_constructor_shell_types,
-    resolve_struct_field_types, validate_generic_parameters_used,
-    validate_no_recursive_generic_type, validate_no_recursive_runtime_structs,
+    resolve_struct_constructor_shell_types, resolve_struct_field_types,
+    validate_generic_parameters_used, validate_no_recursive_generic_type,
+    validate_no_recursive_runtime_structs,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
@@ -44,6 +44,7 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -57,6 +58,15 @@ use std::rc::Rc;
 enum MemberShellSemanticContext {
     StructField,
     ChoicePayloadField,
+}
+
+/// How far one Stage 3 constant walk runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConstantWalkScope {
+    /// Stop once every constant-dependent alias is published, before trait metadata exists.
+    UntilAliasesPublished,
+    /// Cover the whole ordered sequence with trait metadata available.
+    WholeModule,
 }
 
 struct NominalBoundSurfaceValidationContext<'a> {
@@ -92,15 +102,18 @@ fn is_non_constant_struct_default_diagnostic(diagnostic: &CompilerDiagnostic) ->
 }
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
-    /// Register struct and choice identities early so later phases (trait definitions,
-    /// constant parsing, field resolution) can reference nominal types by canonical `TypeId`.
+    /// Register local struct and choice identities before alias targets may name them.
     ///
-    /// WHAT: registers every struct and choice in `TypeEnvironment` with empty members,
-    /// then stores unresolved field/variant shells in AST-owned side tables.
-    /// WHY: split from member resolution so trait metadata can be built while nominal
-    /// identities are already available, without forcing trait definitions to wait for
-    /// fully resolved fields.
-    pub(in crate::compiler_frontend::ast) fn register_nominal_shells(
+    /// WHAT: creates canonical `TypeId`s, generic parameter list identity, path maps, and
+    /// identity-bearing declaration rows with empty members.
+    /// WHY: local aliases such as `TaskList as {Task}` need the nominal identity, while
+    /// fields such as `id TaskId` still need resolved aliases before member shells.
+    ///
+    /// ```text
+    /// nominal identity -> local aliases may target the nominal
+    /// resolved aliases -> nominal members may use aliases
+    /// ```
+    pub(in crate::compiler_frontend::ast) fn register_nominal_identities(
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
@@ -112,18 +125,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?;
             match &header.kind {
                 HeaderKind::Struct {
-                    fields,
-                    generic_parameters,
+                    generic_parameters, ..
                 } => {
-                    let unresolved_fields = self.unresolved_member_syntax_to_declarations(
-                        header,
-                        fields,
-                        MemberShellSemanticContext::StructField,
-                        string_table,
-                        SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
-                        true,
-                    )?;
-
                     let generic_param_list_id = if generic_parameters.is_empty() {
                         None
                     } else {
@@ -149,9 +152,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
                         .insert(header.tokens.src_path.clone(), struct_type_id);
 
-                    Rc::make_mut(&mut self.resolved_struct_fields_by_path)
-                        .insert(header.tokens.src_path.to_owned(), unresolved_fields);
-
                     self.replace_declaration(
                         declaration_id,
                         Declaration {
@@ -172,8 +172,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .map_err(|error| self.error_messages(error, string_table))?;
                 }
                 HeaderKind::Choice {
-                    variants,
-                    generic_parameters,
+                    generic_parameters, ..
                 } => {
                     let generic_param_list_id = if generic_parameters.is_empty() {
                         None
@@ -187,16 +186,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             .insert(header.tokens.src_path.clone(), registered);
                         Some(list_id)
                     };
-
-                    let unresolved_variants = self.unresolved_choice_variants_for_header(
-                        header,
-                        variants,
-                        string_table,
-                        SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
-                        true,
-                    )?;
-                    Rc::make_mut(&mut self.choice_variant_shells_by_path)
-                        .insert(header.tokens.src_path.to_owned(), unresolved_variants);
 
                     let choice_def = ChoiceTypeDefinition {
                         id: NominalTypeId(0),
@@ -236,6 +225,70 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
+    /// Build unresolved member shells after local aliases are available.
+    ///
+    /// WHAT: stores unresolved struct field and choice payload shells used as constructor
+    /// scaffold. Final TypeIds still come from the later constant-aware member pass.
+    /// WHY: member types may name same-module aliases, so this must follow alias resolution
+    /// without waiting for folded constant capacities.
+    pub(in crate::compiler_frontend::ast) fn prepare_nominal_member_shells(
+        &mut self,
+        declaration_lanes: &DeclarationPassLanes,
+        sorted_headers: &[Header],
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        for &declaration_id in &declaration_lanes.nominals {
+            let header = declaration_lanes
+                .header(declaration_id, sorted_headers)
+                .map_err(|error| self.error_messages(error, string_table))?;
+            self.prepare_nominal_member_shell(header, true, string_table)?;
+        }
+
+        Ok(())
+    }
+
+    /// Build the unresolved member shells for one nominal declaration.
+    ///
+    /// WHY: the Stage 3 constant walk repeats this for a nominal once its member aliases and
+    /// capacity constants are published, so the constructor scaffold it feeds is never built
+    /// from a provisional alias target. A repeat pass sets `emit_warnings` to false because the
+    /// first pass already reported every member warning.
+    fn prepare_nominal_member_shell(
+        &mut self,
+        header: &Header,
+        emit_warnings: bool,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        match &header.kind {
+            HeaderKind::Struct { fields, .. } => {
+                let unresolved_fields = self.unresolved_member_syntax_to_declarations(
+                    header,
+                    fields,
+                    MemberShellSemanticContext::StructField,
+                    string_table,
+                    SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
+                    emit_warnings,
+                )?;
+                Rc::make_mut(&mut self.resolved_struct_fields_by_path)
+                    .insert(header.tokens.src_path.to_owned(), unresolved_fields);
+            }
+            HeaderKind::Choice { variants, .. } => {
+                let unresolved_variants = self.unresolved_choice_variants_for_header(
+                    header,
+                    variants,
+                    string_table,
+                    SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
+                    emit_warnings,
+                )?;
+                Rc::make_mut(&mut self.choice_variant_shells_by_path)
+                    .insert(header.tokens.src_path.to_owned(), unresolved_variants);
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// Resolves constants and nominal member types in header dependency order.
     ///
     /// WHY: headers are already dependency-sorted; constants are parsed in that order.
@@ -247,17 +300,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
+        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        // -------------------------------------------------
-        //  Resolve constructor shell types for constants
-        // -------------------------------------------------
-        self.resolve_constructor_shells_for_constants(
-            declaration_lanes,
-            sorted_headers,
-            trait_environment,
-            string_table,
-        )?;
+        // Constructor scaffolds are built inside the Stage 3 walk below, so each nominal's
+        // shells follow the aliases and capacity constants its members use.
 
         // -------------------
         //  Resolve constants
@@ -273,10 +320,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .constant_header_resolution(),
                 self.context.timing_context
             );
-            self.resolve_constant_headers(
+            self.walk_stage_three_declarations(
                 declaration_lanes,
                 sorted_headers,
+                ConstantWalkScope::WholeModule,
                 trait_environment,
+                aliases_waiting_for_constants,
                 string_table,
             )?;
         }
@@ -650,23 +699,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             match &header.kind {
                 HeaderKind::TypeAlias { .. } => {
-                    let Some(annotation) = self
+                    let Some(alias) = self
                         .resolved_type_aliases_by_path
                         .get(&header.tokens.src_path)
                     else {
                         continue;
                     };
-                    let type_id = match annotation.type_id {
-                        Some(type_id) => type_id,
-                        None => resolve_diagnostic_type_to_type_id_checked(
-                            &annotation.diagnostic_type,
-                            &mut self.type_environment,
-                            &header.name_location,
-                        )
-                        .map_err(|diagnostic| {
-                            self.diagnostic_messages(*diagnostic, string_table)
-                        })?,
-                    };
+                    let type_id = alias.target_type_id;
 
                     self.validate_nominal_generic_bound_type_id(
                         type_id,
@@ -784,21 +823,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     /// Resolve struct field and choice variant types needed for constant constructor parsing.
     ///
-    /// WHAT: runs a lightweight type-resolution pass over struct fields and choice variant
-    /// payloads before constants are evaluated.
+    /// WHAT: resolves one nominal's member shells into constructor scaffold types.
     /// WHY: constant initializers may contain struct or choice constructors; those constructors
-    /// need resolved member types to validate arity and field compatibility at parse time.
-    fn resolve_constructor_shells_for_constants(
+    /// need resolved member types to validate arity and field compatibility at parse time. The
+    /// Stage 3 constant walk calls this at the nominal's own position, after its member aliases
+    /// and capacity constants exist.
+    fn resolve_constructor_shell_for_nominal(
         &mut self,
-        declaration_lanes: &DeclarationPassLanes,
-        sorted_headers: &[Header],
+        header: &Header,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        for &declaration_id in &declaration_lanes.nominals {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+        {
             match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
@@ -905,32 +941,68 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    /// Resolve every top-level constant initializer in header dependency order.
+    /// Publish constant-dependent aliases before user trait definitions resolve.
     ///
-    /// WHAT: drives one [`ConstantResolutionSession`] across the whole constant pass and commits
-    /// each folded constant to the declaration table and module constant list.
-    /// WHY: the session owns the module view the pass reads, so const-heavy modules prepare
-    /// their visibility packages, side tables and compatibility cache a fixed number of times
-    /// instead of once per constant.
-    fn resolve_constant_headers(
+    /// WHAT: walks the Stage 3 sequence only as far as the last alias waiting for a constant,
+    /// folding the constants it passes so every alias target is complete.
+    /// WHY: a trait requirement may name such an alias (`names |This| -> Names`), and trait
+    /// resolution runs before the main constant pass. Without this prefix walk that requirement
+    /// would see no completed alias and report an unknown type name for legal source. Core traits
+    /// are already registered, so member shells resolved here keep their trait-name diagnostics.
+    pub(in crate::compiler_frontend::ast) fn resolve_constant_dependent_aliases(
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
-        trait_environment: &TraitEnvironment,
+        core_traits: &TraitEnvironment,
+        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        if declaration_lanes.constants.is_empty() {
+        if aliases_waiting_for_constants.is_empty() {
             return Ok(());
         }
 
-        // Constant parsing reads these side tables but does not mutate them, so the session takes
-        // one shared handle to each for the whole pass. The builder owns them behind `Rc`, so a
-        // handle costs a refcount rather than a copy of the module.
+        self.walk_stage_three_declarations(
+            declaration_lanes,
+            sorted_headers,
+            ConstantWalkScope::UntilAliasesPublished,
+            core_traits,
+            aliases_waiting_for_constants,
+            string_table,
+        )
+    }
+
+    /// Walk the ordered Stage 3 declaration sequence for one scope.
+    ///
+    /// WHAT: drives one [`ConstantResolutionSession`] across the ordered declaration sequence,
+    /// publishing each waiting alias, rebuilding each nominal's member shells and constructor
+    /// scaffold, and committing each folded constant at its own position.
+    /// WHY: Stage 3 already orders a `#capacity` constant before `Items as {capacity T}` and that
+    /// alias before a constant typed by it. Walking one sequence honours both edges, so no
+    /// consumer sees a provisional alias target. The session owns the module view the pass reads,
+    /// so const-heavy modules prepare their side tables a fixed number of times.
+    ///
+    /// A module with constant-dependent aliases runs this walk twice: the bounded prefix walk
+    /// with core traits only, then the whole-module walk with full trait metadata. Constants the
+    /// prefix already committed are skipped, and a nominal reached by both walks has its member
+    /// shells rebuilt in each, with warnings emitted only by the initial shell pass. Shell
+    /// preparation is idempotent. Later declarations inside the prefix walk do consume the
+    /// prefix scaffold, and the full walk then rebuilds it with complete trait metadata before
+    /// whole-module consumers proceed.
+    fn walk_stage_three_declarations(
+        &mut self,
+        declaration_lanes: &DeclarationPassLanes,
+        sorted_headers: &[Header],
+        scope: ConstantWalkScope,
+        trait_environment: &TraitEnvironment,
+        aliases_waiting_for_constants: &FxHashSet<InternedPath>,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerMessages> {
+        if declaration_lanes.constants.is_empty() && aliases_waiting_for_constants.is_empty() {
+            return Ok(());
+        }
+
         let mut session = ConstantResolutionSession::new(ConstantResolutionSessionInput {
-            resolved_type_aliases: Rc::clone(&self.resolved_type_aliases_by_path),
             generic_declarations_by_path: Rc::clone(&self.generic_declarations_by_path),
-            resolved_struct_fields_by_path: Rc::clone(&self.resolved_struct_fields_by_path),
-            choice_variant_shells_by_path: Rc::clone(&self.choice_variant_shells_by_path),
             nominal_type_ids_by_path: Rc::clone(&self.nominal_type_ids_by_path),
             trait_environment: Rc::new(trait_environment.clone()),
             external_package_registry: Arc::clone(&self.context.external_package_registry),
@@ -946,38 +1018,73 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             build_profile: self.context.build_profile,
         });
 
-        for &declaration_id in &declaration_lanes.constants {
+        let mut aliases_left = aliases_waiting_for_constants.len();
+
+        for &declaration_id in &declaration_lanes.ordered {
             let header = declaration_lanes
                 .header(declaration_id, sorted_headers)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            let HeaderKind::Constant { .. } = &header.kind else {
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(
-                        "Constant declaration lane contained a different header kind.",
-                    ),
-                    string_table,
-                ));
-            };
 
-            let visibility = self.header_visibility(header, string_table)?;
+            match &header.kind {
+                HeaderKind::TypeAlias { .. }
+                    if aliases_waiting_for_constants.contains(&header.tokens.src_path) =>
+                {
+                    if !self
+                        .resolved_type_aliases_by_path
+                        .contains_key(&header.tokens.src_path)
+                    {
+                        self.resolve_one_type_alias(header, string_table)?;
+                    }
 
-            let declaration = session
-                .resolve_constant_header(
-                    header,
-                    ConstantHeaderInput {
-                        top_level_declarations: Rc::clone(&self.declaration_table),
-                        resolved_constants: Rc::clone(&self.resolved_module_constants),
-                        file_visibility: &visibility,
-                        type_environment: &mut self.type_environment,
-                        warnings: &mut self.warnings,
-                    },
-                    string_table,
-                )
-                .map_err(|error| self.expression_error_messages(error, string_table))?;
+                    aliases_left -= 1;
+                    if scope == ConstantWalkScope::UntilAliasesPublished && aliases_left == 0 {
+                        break;
+                    }
+                }
+                HeaderKind::Struct { .. } | HeaderKind::Choice { .. } => {
+                    // Rebuild this nominal's constructor scaffold now that every alias and
+                    // capacity constant it depends on is published.
+                    self.prepare_nominal_member_shell(header, false, string_table)?;
+                    self.resolve_constructor_shell_for_nominal(
+                        header,
+                        trait_environment,
+                        string_table,
+                    )?;
+                }
+                HeaderKind::Constant { .. }
+                    if !self.resolved_module_constants.contains(declaration_id) =>
+                {
+                    let visibility = self.header_visibility(header, string_table)?;
 
-            self.replace_declaration(declaration_id, declaration)
-                .map_err(|error| self.error_messages(error, string_table))?;
-            self.publish_resolved_module_constant(declaration_id);
+                    let declaration = session
+                        .resolve_constant_header(
+                            header,
+                            ConstantHeaderInput {
+                                top_level_declarations: Rc::clone(&self.declaration_table),
+                                resolved_constants: Rc::clone(&self.resolved_module_constants),
+                                resolved_type_aliases: Rc::clone(
+                                    &self.resolved_type_aliases_by_path,
+                                ),
+                                resolved_struct_fields_by_path: Rc::clone(
+                                    &self.resolved_struct_fields_by_path,
+                                ),
+                                choice_variant_shells_by_path: Rc::clone(
+                                    &self.choice_variant_shells_by_path,
+                                ),
+                                file_visibility: &visibility,
+                                type_environment: &mut self.type_environment,
+                                warnings: &mut self.warnings,
+                            },
+                            string_table,
+                        )
+                        .map_err(|error| self.expression_error_messages(error, string_table))?;
+
+                    self.replace_declaration(declaration_id, declaration)
+                        .map_err(|error| self.error_messages(error, string_table))?;
+                    self.publish_resolved_module_constant(declaration_id);
+                }
+                _ => {}
+            }
         }
 
         Ok(())

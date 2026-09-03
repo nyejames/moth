@@ -53,10 +53,11 @@ pub(crate) use recursive_types::{
 // importing them from `ast::type_resolution` without knowing which submodule owns them.
 pub(crate) use collections::fold_collection_capacity;
 pub(crate) use context::{
-    ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
+    ResolvedTypeAlias, ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
 };
 pub(crate) use maps::validate_map_key_type;
 pub(crate) use resolve_type::resolve_diagnostic_type_to_type_id;
+#[cfg(test)]
 pub(crate) use resolve_type::resolve_diagnostic_type_to_type_id_opt;
 pub(crate) use resolve_type::{
     resolve_diagnostic_type_to_type_id_checked, resolve_parsed_type_annotation, resolve_type,

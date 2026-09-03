@@ -119,15 +119,16 @@ impl ScopeContext {
     //  Type resolution metadata
     // --------------------------
 
-    /// Register resolved type alias metadata.
+    /// Register completed type alias metadata.
     ///
-    /// WHAT: maps type alias declaration paths to their `ResolvedTypeAnnotation`,
-    /// which carries the parsed source ref, diagnostic spelling, and canonical `TypeId`
-    /// when available. Used during type checking to expand aliases transparently while
-    /// preserving fixed-collection capacity syntax.
+    /// WHAT: maps type alias declaration paths to their completed `ResolvedTypeAlias` records,
+    /// which carry the diagnostic spelling, declaration location and required canonical target
+    /// `TypeId`.
+    /// WHY: use-site type resolution can project the target identity without reopening source or
+    /// treating an unresolved annotation as the builtin `None` type.
     pub(crate) fn with_resolved_type_aliases(
         mut self,
-        aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+        aliases: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).resolved_type_aliases = Some(aliases);
         self

@@ -19,7 +19,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
 };
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
@@ -27,6 +26,7 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -45,11 +45,11 @@ pub(crate) struct TypeResolutionContext<'a> {
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
-    /// Resolved type alias metadata: parsed source ref, diagnostic spelling, and canonical
-    /// `TypeId` when available. This is the single owner of alias metadata; callers should use
-    /// `annotation.type_id` for semantic checks and `annotation.diagnostic_type` for diagnostics
-    /// or for re-resolving the original parsed annotation when needed.
-    pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+    /// Completed type alias metadata. Every entry has a canonical target `TypeId`.
+    ///
+    /// Alias consumers use the required target identity directly. The diagnostic spelling and
+    /// declaration location remain attached for use-site type text and declaration diagnostics.
+    pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
     pub generic_declarations_by_path:
         Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
     pub generic_parameters: Option<&'a GenericParameterScope>,
@@ -78,7 +78,7 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
-    pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+    pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
     pub generic_declarations_by_path:
         Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
@@ -156,18 +156,29 @@ impl<'a> TypeResolutionContext<'a> {
     }
 }
 
+/// A completed top-level type alias after semantic resolution.
+///
+/// WHAT: carries the diagnostic spelling, canonical target identity and declaration location
+/// for one alias.
+/// WHY: a completed alias cannot represent an unresolved target. Keeping the required `TypeId`
+/// separate from the general annotation result prevents later consumers from mistaking an
+/// unresolved annotation placeholder for the builtin `None` type.
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedTypeAlias {
+    pub(crate) diagnostic_type: DataType,
+    pub(crate) target_type_id: TypeId,
+    pub(crate) declaration_location: SourceLocation,
+}
+
 /// A parsed type annotation after semantic resolution.
 ///
-/// WHAT: carries the original parsed spelling, the resolved diagnostic spelling,
-/// and the canonical `TypeId` when the source actually declared a type.
-/// WHY: new AST paths should not re-derive semantic identity from `DataType`
-/// after resolution. Keeping both values together makes `DataType` a diagnostic
-/// companion instead of the semantic source of truth.
+/// WHAT: carries the resolved diagnostic spelling and the canonical `TypeId` when the source
+/// actually declared a type.
+/// WHY: new AST paths should not re-derive semantic identity from `DataType` after resolution.
+/// Keeping both values together makes `DataType` a diagnostic companion instead of the semantic
+/// source of truth.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedTypeAnnotation {
-    /// Kept with the resolved annotation so follow-up refactors can preserve source
-    /// spelling through diagnostics without re-parsing or reverse-converting `DataType`.
-    pub(crate) source_ref: ParsedTypeRef,
     /// Diagnostic spelling stays attached to the `TypeId` for user-facing type text.
     pub(crate) diagnostic_type: DataType,
     pub(crate) type_id: Option<TypeId>,

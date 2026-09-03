@@ -28,10 +28,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext, TemplateWrapperReference, TirSlotPlaceholder, summarize_existing_root,
 };
-use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::{
-    GenericParameterScopeBuildInput, ResolvedTypeAnnotation, TypeResolutionContext,
-    TypeResolutionContextInputs, build_generic_parameter_scope,
+    GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
+    TypeResolutionContext, TypeResolutionContextInputs, build_generic_parameter_scope,
     resolve_diagnostic_type_to_type_id_checked,
 };
 use crate::compiler_frontend::ast::{
@@ -56,7 +55,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     FunctionTypeKey, GenericParameterId, NominalTypeId, TypeId, builtin_type_ids,
 };
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::folded_value::{
@@ -330,7 +328,7 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     // the next write, so the builder is the sole owner at write time and no copy is made.
     pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
-    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
     /// Generic declaration metadata, moved out of `module_symbols` when the builder starts.
     ///
     /// WHY: it is read by every environment pass and written by none of them, so the builder owns
@@ -467,17 +465,65 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.project_imported_function_declarations(string_table)?;
         self.project_imported_receiver_method_declarations(string_table)?;
 
+        // -------------------------------------
+        //  Register local nominal identities
+        // -------------------------------------
+        // WHAT: give every local struct and choice a canonical TypeId before aliases resolve.
+        // WHY: local aliases may target those nominals (`TaskList as {Task}`), while nominal
+        // members may still use aliases (`id TaskId`). Identity must precede aliases; member
+        // shells must follow them.
+        //
+        // ```text
+        // nominal identity -> local aliases may target the nominal
+        // resolved aliases -> nominal members may use aliases
+        // ```
+        self.register_nominal_identities(&declaration_lanes, sorted_headers, string_table)?;
+
         // ----------------------
         //  Resolve type aliases
         // ----------------------
-        self.resolve_type_aliases(&declaration_lanes, sorted_headers, string_table)?;
+        // Aliases whose targets fold a `#capacity` constant (and aliases naming those) wait for
+        // the constant pass, which publishes them at their own Stage 3 position. No consumer ever
+        // observes a provisional alias target.
+        let aliases_waiting_for_constants =
+            self.aliases_waiting_for_constants(&declaration_lanes, sorted_headers, string_table)?;
+        self.resolve_type_aliases(
+            &declaration_lanes,
+            sorted_headers,
+            &aliases_waiting_for_constants,
+            string_table,
+        )?;
 
-        // --------------------------------------------
-        //  Register nominal struct and choice shells
-        // --------------------------------------------
-        // WHAT: register identities early so trait requirement signatures and dynamic
-        // trait annotations can reference nominal types before fields are resolved.
-        self.register_nominal_shells(&declaration_lanes, sorted_headers, string_table)?;
+        // -----------------------------------
+        //  Prepare nominal member shells
+        // -----------------------------------
+        self.prepare_nominal_member_shells(&declaration_lanes, sorted_headers, string_table)?;
+
+        // ----------------------------------------------
+        //  Publish constant-dependent alias targets
+        // ----------------------------------------------
+        // Trait requirements may name an alias whose target folds a `#capacity` constant, so the
+        // Stage 3 walk runs as far as the last waiting alias before user traits are resolved. The
+        // main constant pass below continues the same sequence with full trait metadata. Core
+        // traits are registered first so member shells reached by this prefix keep rejecting
+        // trait names in ordinary type positions.
+        let core_traits = self.register_core_traits(string_table)?;
+        self.resolve_constant_dependent_aliases(
+            &declaration_lanes,
+            sorted_headers,
+            &core_traits,
+            &aliases_waiting_for_constants,
+            string_table,
+        )?;
+
+        // Every alias-lane declaration now has a published target, either from the alias pass or
+        // from the bounded prefix walk above. Establish that here, before trait resolution reads
+        // the first alias, so every consumer reads a local alias row as a fact.
+        self.validate_resolved_alias_completeness(
+            &declaration_lanes,
+            sorted_headers,
+            string_table,
+        )?;
 
         // --------------------------
         //  Resolve trait metadata
@@ -488,8 +534,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // type positions can be rejected with the trait-specific diagnostic.
         // Evidence validation stays after receiver catalog construction because it needs
         // resolved receiver methods.
-        let trait_environment =
-            self.resolve_trait_definitions(&declaration_lanes, sorted_headers, string_table)?;
+        let trait_environment = self.resolve_trait_definitions(
+            &declaration_lanes,
+            sorted_headers,
+            core_traits,
+            string_table,
+        )?;
         self.resolve_dependencyed_generic_parameter_bounds(&trait_environment)
             .map_err(|error| self.error_messages(error, string_table))?;
 
@@ -504,6 +554,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &declaration_lanes,
             sorted_headers,
             &trait_environment,
+            &aliases_waiting_for_constants,
             string_table,
         )?;
 

@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedFunctionSignature, ResolvedTypeAnnotation,
+    ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::ast::{AstBuildContext, AstBuildResult, AstImportedFunctionContract};
 use crate::compiler_frontend::canonical_type_identity::{
@@ -41,7 +41,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     GenericDeclarationOrigin, ModulePrivateNominalIdentity, ModulePrivateTraitIdentity,
     NominalOriginResolver, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -324,6 +324,7 @@ struct StableLocalConstant {
 struct StableLocalAlias {
     local_path: Box<[String]>,
     target_type_identity: CanonicalTypeIdentity,
+    declaration_location: StableSourceLocation,
 }
 
 #[derive(Clone)]
@@ -778,6 +779,34 @@ fn stable_body_symbol_names(tokens: &FileTokens, string_table: &StringTable) -> 
             _ => None,
         })
         .collect()
+}
+
+/// Collect every nominal identity one canonical type reaches, including generic-instance bases.
+///
+/// WHY: `CanonicalTypeIdentity::visit` yields an instance and its arguments, but reconstructing
+/// `Box of Int` inside a generated sidecar also needs the blueprint of `Box` itself. Blueprint
+/// type trees already record that base explicitly; canonical identities carry it on the instance.
+fn collect_reachable_nominal_identities(
+    identity: &CanonicalTypeIdentity,
+    identities: &mut FxHashSet<CanonicalTypeIdentity>,
+) {
+    identity.visit(&mut |nested| {
+        identities.insert(nested.clone());
+
+        match nested {
+            CanonicalTypeIdentity::GenericInstance(instance) => {
+                identities.insert(CanonicalTypeIdentity::SourceNominal(
+                    instance.base().clone(),
+                ));
+            }
+            CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
+                identities.insert(CanonicalTypeIdentity::ModulePrivateNominal(
+                    instance.base().clone(),
+                ));
+            }
+            _ => {}
+        }
+    });
 }
 
 fn collect_namespace_source_paths(
@@ -1365,14 +1394,13 @@ impl GenericTemplateArtefact {
                 }
                 Rc::make_mut(&mut lookups.resolved_type_aliases_by_path).insert(
                     local_path.clone(),
-                    ResolvedTypeAnnotation {
-                        source_ref:
-                            crate::compiler_frontend::datatypes::parsed::ParsedTypeRef::Inferred,
+                    ResolvedTypeAlias {
                         diagnostic_type: diagnostic_type_spelling(
                             type_id,
                             &environment.type_environment,
                         ),
-                        type_id: Some(type_id),
+                        target_type_id: type_id,
+                        declaration_location: alias.declaration_location.materialise(string_table),
                     },
                 );
                 Rc::make_mut(&mut lookups.declaration_semantics)
@@ -2803,7 +2831,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
         FxHashMap<InternedPath, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
     generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, InternedPath>,
-    pub(crate) resolved_type_aliases_by_path: FxHashMap<InternedPath, ResolvedTypeAnnotation>,
+    pub(crate) resolved_type_aliases_by_path: FxHashMap<InternedPath, ResolvedTypeAlias>,
     pub(crate) choice_variant_shells_by_path: FxHashMap<InternedPath, Vec<ChoiceVariant>>,
     pub(crate) declaration_semantics: DeclarationSemanticTable,
     pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
@@ -3266,15 +3294,15 @@ impl ModuleMaterialisationPreparation {
                     .imported_declarations_by_local_path
                     .contains_key(*path)
             })
-            .map(|(path, annotation)| {
-                let type_id = annotation.type_id.ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Retained local type alias has no resolved target type",
-                    )
-                })?;
+            .map(|(path, alias)| {
+                let target_type_identity = self.stable_alias_target_identity(path, alias)?;
                 Ok(StableLocalAlias {
                     local_path: stable_path(path, &self.string_table),
-                    target_type_identity: self.stable_type_identity(type_id)?,
+                    target_type_identity,
+                    declaration_location: StableSourceLocation::capture(
+                        &alias.declaration_location,
+                        &self.string_table,
+                    ),
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -3289,6 +3317,25 @@ impl ModuleMaterialisationPreparation {
             traits,
             evidence,
         })
+    }
+    fn stable_alias_target_identity(
+        &self,
+        path: &InternedPath,
+        alias: &ResolvedTypeAlias,
+    ) -> Result<CanonicalTypeIdentity, CompilerError> {
+        self.stable_type_identity(alias.target_type_id)
+            .map_err(|error| {
+                CompilerError::new(
+                    format!(
+                        "Retained local type alias '{}' violated the completed-target invariant: {}",
+                        path.to_string(&self.string_table),
+                        error.msg,
+                    ),
+                    alias.declaration_location.clone(),
+                    ErrorType::Compiler,
+                )
+                .with_render_context(self.string_table.clone())
+            })
     }
 
     fn stable_private_traits(&self) -> Result<Box<[StablePrivateTrait]>, CompilerError> {
@@ -4047,6 +4094,15 @@ impl ModuleMaterialisationPreparation {
         Ok(callables.into_boxed_slice())
     }
 
+    /// Collect the nominal blueprints one template's generated sidecar can need.
+    ///
+    /// WHAT: gathers every canonical identity the artefact reaches (signature, selected nominals,
+    /// selected constants and their folded values, selected alias targets, private traits and
+    /// retained evidence) and keeps the blueprint of each one that has one.
+    /// WHY: this is the single owner of blueprint closure collection. Every canonical identity
+    /// source runs through [`collect_reachable_nominal_identities`], because a concrete
+    /// `Box of Int` identity also needs the `Box` blueprint and canonical identities carry that
+    /// base on the instance rather than as a nested identity.
     fn stable_nominal_blueprints(
         &self,
         selected_paths: &FxHashSet<InternedPath>,
@@ -4063,26 +4119,21 @@ impl ModuleMaterialisationPreparation {
                     .type_environment
                     .canonical_identity_for_type_id(*type_id)
             {
-                identities.insert(identity.clone());
+                collect_reachable_nominal_identities(identity, &mut identities);
             }
             if let Some(value_id) = self.const_values.value_for_path(path) {
                 if let Some(metadata) = self.const_values.metadata(value_id)
                     && let Ok(identity) = self.stable_type_identity(metadata.type_id)
                 {
-                    identities.insert(identity);
+                    collect_reachable_nominal_identities(&identity, &mut identities);
                 }
                 if let Ok(value) = self.stable_folded_value_at_path(path, resources) {
                     value.visit_type_identities(&mut |identity| {
-                        identities.insert(identity.clone());
+                        collect_reachable_nominal_identities(identity, &mut identities);
                     });
                 }
             }
-            if let Some(alias) = self.resolved_type_aliases_by_path.get(path)
-                && let Some(type_id) = alias.type_id
-                && let Ok(identity) = self.stable_type_identity(type_id)
-            {
-                identities.insert(identity);
-            }
+            self.collect_selected_alias_identities(path, semantic_closure, &mut identities);
         }
         for trait_definition in &semantic_closure.traits {
             for requirement in &trait_definition.requirements {
@@ -4099,15 +4150,7 @@ impl ModuleMaterialisationPreparation {
             }
         }
         for evidence in &semantic_closure.evidence {
-            evidence.target_type_identity.visit(&mut |identity| {
-                if matches!(
-                    identity,
-                    CanonicalTypeIdentity::SourceNominal(_)
-                        | CanonicalTypeIdentity::ModulePrivateNominal(_)
-                ) {
-                    identities.insert(identity.clone());
-                }
-            });
+            collect_reachable_nominal_identities(&evidence.target_type_identity, &mut identities);
         }
         let mut blueprints = FxHashMap::default();
         for identity in identities {
@@ -4116,6 +4159,35 @@ impl ModuleMaterialisationPreparation {
             }
         }
         Ok(blueprints)
+    }
+
+    /// Add the nominal identities one selected alias target reaches.
+    ///
+    /// WHY: alias rows are installed per artefact from the module-wide closure, so a template
+    /// only needs blueprints for the aliases its own local-declaration list installs. Scanning
+    /// every module alias for every template retained unrelated blueprints in each sidecar. The
+    /// closure projected each target once and is sorted by local path, so the row is looked up
+    /// rather than re-projected.
+    fn collect_selected_alias_identities(
+        &self,
+        path: &InternedPath,
+        semantic_closure: &StableSemanticClosure,
+        identities: &mut FxHashSet<CanonicalTypeIdentity>,
+    ) {
+        if !self.resolved_type_aliases_by_path.contains_key(path) {
+            return;
+        }
+
+        let components = stable_path(path, &self.string_table);
+        if let Ok(index) = semantic_closure
+            .aliases
+            .binary_search_by(|row| row.local_path.cmp(&components))
+        {
+            collect_reachable_nominal_identities(
+                &semantic_closure.aliases[index].target_type_identity,
+                identities,
+            );
+        }
     }
 
     fn stable_nominal_bindings(
@@ -6374,3 +6446,7 @@ mod blueprint_tests;
 #[cfg(test)]
 #[path = "tests/frozen_body_tests.rs"]
 mod frozen_body_tests;
+
+#[cfg(test)]
+#[path = "tests/semantic_closure_tests.rs"]
+mod semantic_closure_tests;

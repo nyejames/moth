@@ -40,7 +40,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
+use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
@@ -389,7 +389,7 @@ pub struct ScopeShared {
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
-    pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>>,
+    pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>>,
     pub(crate) generic_declarations_by_path:
         Option<Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>>,
     pub(crate) resolved_struct_fields_by_path:

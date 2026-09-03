@@ -1,0 +1,8 @@
+capacity #Int = 2
+
+Names as {capacity String}
+MoreNames as Names
+
+names MoreNames = {"a", "b", "c"}
+
+[: [names.length()]]

@@ -1,0 +1,4 @@
+@provider identity
+
+result = identity(1)
+[: identity [result]]

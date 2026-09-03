@@ -1,0 +1,17 @@
+capacity #Int = 2
+Names as {capacity String}
+
+NAMED must:
+    names |This| -> Names
+;
+
+Person = |
+    name String,
+|
+
+names |this Person| -> Names:
+    return {this.name}
+;
+
+p = Person("Priya")
+[: named count [p.names().length()]]

@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_in_order = ["boxed 1", "identity 1"]
+rendered_output_contains_exactly_once = ["boxed 1", "identity 1"]

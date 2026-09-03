@@ -793,7 +793,8 @@ After ordering:
 
 - AST consumes declarations linearly
 - AST does not rebuild visibility
-- nominal identities may be registered before their members are resolved
+- local nominal identities are registered before alias targets resolve, and each nominal's final member shells are built after the alias targets and capacity constants its members use
+- alias targets that fold a module constant are published at their own Stage 3 position, so no consumer observes a provisional alias target
 - missing local edges are fixed in header syntax preparation
 - missing providers are fixed in the Stage 0 graph
 - dormant `start` is never a dependency participant

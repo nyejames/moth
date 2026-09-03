@@ -12,8 +12,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     DeclarationSemanticTable, ResolvedConstantSet, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
-use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAnnotation;
+use crate::compiler_frontend::ast::type_resolution::{
+    ResolvedFunctionSignature, ResolvedTypeAlias,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
 use super::resolved_public_trait_roots::ResolvedPublicTraitRoot;
@@ -73,7 +74,7 @@ pub(crate) struct AstModuleLookups {
     // AST finalization can move it straight into the `AstBuildResult` generic-template side
     // result without an `Rc::try_unwrap` dance.
     pub(crate) generic_function_templates_by_path: FxHashMap<InternedPath, GenericFunctionTemplate>,
-    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAnnotation>>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
 
     // Semantic declaration classification.

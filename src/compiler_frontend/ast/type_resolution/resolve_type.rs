@@ -12,7 +12,7 @@
 //!
 //! This module does NOT own:
 //! - `TypeResolutionContext`, its inputs, or `ResolvedTypeAnnotation` (live in `context.rs`)
-//! - type alias lookup and alias-target re-resolution (live in `aliases.rs`)
+//! - type alias lookup and completed-alias use-site projection (live in `aliases.rs`)
 //! - source-visible type-name lookup and trait-name rejection (live in `lookup.rs`)
 //! - generic nominal instantiation and bound-evidence checks (live in `generics.rs`)
 //! - token-to-parsed-ref parsing (lives in `declaration_syntax::type_syntax`)
@@ -51,8 +51,8 @@ use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
 
 /// Resolve a parsed type annotation through the parsed-ref-aware path.
 ///
-/// WHAT: folds fixed-collection capacity syntax, re-resolves type aliases from their
-///       stored `ParsedTypeRef`, and produces canonical `TypeId` identity.
+/// WHAT: folds fixed-collection capacity syntax, projects completed type aliases to their
+///       required target identity, and produces canonical `TypeId` identity.
 /// WHY: this is the semantic entry point for all type annotations that start as
 ///      `ParsedTypeRef`; it must not hide capacity folding inside `parsed_ref_to_data_type`.
 pub(crate) fn resolve_parsed_type_annotation(
@@ -132,7 +132,6 @@ fn resolve_parsed_type_annotation_inner(
                 arguments: vec![element_annotation.diagnostic_type],
             };
             return Ok(ResolvedTypeAnnotation {
-                source_ref,
                 diagnostic_type,
                 type_id: Some(type_id),
             });
@@ -184,24 +183,16 @@ fn resolve_parsed_type_annotation_inner(
                 ],
             };
             return Ok(ResolvedTypeAnnotation {
-                source_ref,
                 diagnostic_type,
                 type_id: Some(type_id),
             });
         }
 
         ParsedTypeRef::Named { name, .. } => {
-            if let Some((alias_path, annotation)) =
+            if let Some((_alias_path, alias)) =
                 aliases::visible_type_alias_annotation(*name, context)
             {
-                return aliases::resolve_alias_annotation(
-                    alias_path,
-                    annotation,
-                    location,
-                    context,
-                    string_table,
-                    scope_context,
-                );
+                return aliases::resolve_alias_annotation(alias);
             }
         }
 
@@ -211,17 +202,10 @@ fn resolve_parsed_type_annotation_inner(
             // `namespace.Alias`. Longer paths cannot name a source alias.
             let namespace = path[0];
             let name = path[1];
-            if let Some((alias_path, annotation)) =
+            if let Some((_alias_path, alias)) =
                 aliases::visible_namespaced_type_alias_annotation(namespace, name, context)
             {
-                return aliases::resolve_alias_annotation(
-                    alias_path,
-                    annotation,
-                    location,
-                    context,
-                    string_table,
-                    scope_context,
-                );
+                return aliases::resolve_alias_annotation(alias);
             }
         }
 
@@ -255,7 +239,6 @@ fn fallback_parsed_ref_to_data_type(
     };
 
     Ok(ResolvedTypeAnnotation {
-        source_ref,
         diagnostic_type: resolved_diagnostic_type,
         type_id,
     })

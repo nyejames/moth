@@ -10,7 +10,6 @@
 use super::builder::AstModuleEnvironmentBuilder;
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::type_resolution::resolve_diagnostic_type_to_type_id_checked;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTraitIncompatibilityReason,
@@ -27,7 +26,6 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitIncompatibilitySyntax;
 
 use rustc_hash::FxHashSet;
-use std::rc::Rc;
 use std::sync::Arc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
@@ -136,47 +134,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
 
                 HeaderKind::TypeAlias { .. } => {
-                    let alias_path = header.tokens.src_path.clone();
-                    let Some(annotation) = self.resolved_type_aliases_by_path.get(&alias_path)
+                    let Some(alias) = self
+                        .resolved_type_aliases_by_path
+                        .get(&header.tokens.src_path)
                     else {
                         continue;
                     };
 
-                    let type_id = match annotation.type_id {
-                        Some(type_id) => type_id,
-                        None => {
-                            let resolved_type_id = resolve_diagnostic_type_to_type_id_checked(
-                                &annotation.diagnostic_type,
-                                &mut self.type_environment,
-                                &header.name_location,
-                            )
-                            .map_err(|diagnostic| {
-                                self.diagnostic_messages(*diagnostic, string_table)
-                            })?;
-
-                            // Retain the materialized target TypeId so the resolved public
-                            // type-root table consumes the retained fact instead of resolving
-                            // the alias target a second time. The entry was proven present
-                            // above; an absent entry here is an internal invariant failure.
-                            let Some(alias_annotation) =
-                                Rc::make_mut(&mut self.resolved_type_aliases_by_path)
-                                    .get_mut(&alias_path)
-                            else {
-                                return Err(self.error_messages(
-                                    CompilerError::compiler_error(
-                                        "Public transparent alias annotation was absent during target TypeId writeback.",
-                                    ),
-                                    string_table,
-                                ));
-                            };
-                            alias_annotation.type_id = Some(resolved_type_id);
-                            resolved_type_id
-                        }
-                    };
-
                     self.validate_public_type_id(
                         exported_name,
-                        type_id,
+                        alias.target_type_id,
                         &header.source_file,
                         header.name_location.clone(),
                         trait_environment,

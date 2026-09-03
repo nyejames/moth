@@ -510,5 +510,9 @@ mod parser_error_recovery_tests;
 mod type_resolution_tests;
 
 #[cfg(test)]
+#[path = "tests/type_alias_resolution_tests.rs"]
+mod type_alias_resolution_tests;
+
+#[cfg(test)]
 #[path = "tests/file_value_resolution_tests.rs"]
 mod file_value_resolution_tests;

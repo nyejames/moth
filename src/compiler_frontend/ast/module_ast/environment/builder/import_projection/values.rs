@@ -101,10 +101,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let type_id = self.intern_imported_canonical_type(&alias.target_type_identity)?;
             Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 local_path,
-                ResolvedTypeAnnotation {
-                    source_ref: ParsedTypeRef::Inferred,
+                ResolvedTypeAlias {
                     diagnostic_type: diagnostic_type_spelling(type_id, &self.type_environment),
-                    type_id: Some(type_id),
+                    target_type_id: type_id,
+                    declaration_location: Default::default(),
                 },
             );
         }

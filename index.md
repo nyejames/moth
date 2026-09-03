@@ -97,7 +97,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.
     - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): orchestration + diagnostic TypeId bridge.
     - [lookup.rs](src/compiler_frontend/ast/type_resolution/lookup.rs): names/namespaces/trait-name rejection.
-    - [aliases.rs](src/compiler_frontend/ast/type_resolution/aliases.rs): alias re-resolution.
+    - [aliases.rs](src/compiler_frontend/ast/type_resolution/aliases.rs): completed alias lookup and use-site projection.
     - [collections.rs](src/compiler_frontend/ast/type_resolution/collections.rs): fixed capacity.
     - [maps.rs](src/compiler_frontend/ast/type_resolution/maps.rs): map key/nesting.
     - [generics.rs](src/compiler_frontend/ast/type_resolution/generics.rs): nominal instances.

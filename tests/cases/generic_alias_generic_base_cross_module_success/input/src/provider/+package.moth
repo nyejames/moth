@@ -1,0 +1,17 @@
+Box type T = |
+    value T,
+|
+
+IntBox as Box of Int
+
+make_box || -> IntBox:
+    return Box(1)
+;
+
+export:
+    identity type T |value T| -> T:
+        boxed IntBox = make_box()
+        io.line([: boxed [boxed.value]])
+        return value
+    ;
+;

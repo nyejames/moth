@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedTypeAnnotation, TypeResolutionContext, resolve_diagnostic_type_to_type_id,
+    ResolvedTypeAlias, TypeResolutionContext, resolve_diagnostic_type_to_type_id,
     resolve_diagnostic_type_to_type_id_checked, resolve_diagnostic_type_to_type_id_opt,
     resolve_parsed_type_annotation, resolve_type,
 };
@@ -570,10 +570,10 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut resolved_type_aliases = FxHashMap::default();
     resolved_type_aliases.insert(
         maybe_path,
-        ResolvedTypeAnnotation {
-            source_ref: ParsedTypeRef::Inferred,
+        ResolvedTypeAlias {
             diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
-            type_id: None,
+            target_type_id: type_environment.intern_option(type_environment.builtins().string),
+            declaration_location: SourceLocation::default(),
         },
     );
 

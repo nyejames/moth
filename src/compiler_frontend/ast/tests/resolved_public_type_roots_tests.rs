@@ -19,9 +19,10 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedFunctionSignature, ResolvedTypeAnnotation,
+    ResolvedFunctionSignature, ResolvedTypeAlias,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -150,11 +151,11 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     }
 }
 
-fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAnnotation {
-    ResolvedTypeAnnotation {
-        source_ref: ParsedTypeRef::Inferred,
+fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
+    ResolvedTypeAlias {
         diagnostic_type: DataType::Inferred,
-        type_id: Some(target_type_id),
+        target_type_id,
+        declaration_location: SourceLocation::default(),
     }
 }
 
@@ -191,7 +192,7 @@ fn build_table(
     headers: Vec<Header>,
     signatures: FxHashMap<InternedPath, ResolvedFunctionSignature>,
     nominal_ids: FxHashMap<InternedPath, TypeId>,
-    aliases: FxHashMap<InternedPath, ResolvedTypeAnnotation>,
+    aliases: FxHashMap<InternedPath, ResolvedTypeAlias>,
     declarations: Vec<Declaration>,
     struct_fields: FxHashMap<InternedPath, Vec<Declaration>>,
     receiver_methods: ReceiverMethodCatalog,
@@ -575,38 +576,38 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
 }
 
 #[test]
-fn missing_alias_type_id_is_internal_error() {
+fn missing_alias_entry_is_a_located_internal_error() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
     let alias_path = path("unretained_alias", &mut string_table);
-    let headers = vec![header(
+    let mut alias_header = header(
         alias_kind(),
         alias_path.to_owned(),
         FileRole::ActiveModuleRoot,
         HeaderExportMode::Public,
         &mut string_table,
-    )];
-
-    let mut aliases = FxHashMap::default();
-    // The public-surface validation owner should have materialized and retained the target
-    // TypeId. A None here is an internal invariant failure; the table must not resolve the
-    // alias target a second time.
-    aliases.insert(
-        alias_path.to_owned(),
-        ResolvedTypeAnnotation {
-            source_ref: ParsedTypeRef::Inferred,
-            diagnostic_type: DataType::Int,
-            type_id: None,
+    );
+    // A non-default position proves the shared missing-fact constructor carries the declaration
+    // location for the whole root-fact family, not just an error type.
+    alias_header.name_location = SourceLocation::new(
+        InternedPath::from_single_str("root.moth", &mut string_table),
+        CharPosition {
+            line_number: 7,
+            char_column: 3,
+        },
+        CharPosition {
+            line_number: 7,
+            char_column: 19,
         },
     );
 
     let result = build_table(
-        headers,
+        vec![alias_header],
         FxHashMap::default(),
         FxHashMap::default(),
-        aliases,
+        FxHashMap::default(),
         Vec::new(),
         FxHashMap::default(),
         ReceiverMethodCatalog::default(),
@@ -615,9 +616,24 @@ fn missing_alias_type_id_is_internal_error() {
         &string_table,
     );
 
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("a public alias without a completed alias fact must be an internal error"),
+    };
+    assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(
-        matches!(result, Err(CompilerError { .. })),
-        "a public alias without a retained target TypeId must be an internal error"
+        error.msg.contains("active-root transparent alias"),
+        "the error must name the missing fact, got: {}",
+        error.msg
+    );
+    assert_eq!(
+        (
+            error.location.start_pos.line_number,
+            error.location.start_pos.char_column
+        ),
+        (7, 3),
+        "the missing-fact error must report the alias declaration position, got {:?}",
+        error.location
     );
 }
 
@@ -1137,7 +1153,7 @@ fn missing_resolved_struct_fields_is_internal_error() {
         }
     };
     assert!(
-        msg.contains("no resolved field declarations"),
+        msg.contains("struct field declarations") && msg.contains("was not published"),
         "expected a missing-struct-fields diagnostic, got: {msg}"
     );
 }

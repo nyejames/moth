@@ -8764,6 +8764,41 @@ contract = "language.aliases.type_alias_collection_acceptance"
 role = "primary"
 
 [[case]]
+id = "local_nominal_alias_survives_generic_materialisation"
+path = "local_nominal_alias_survives_generic_materialisation"
+tags = ["integration", "aliases", "generics", "types"]
+contract = "language.aliases.local_nominal_target_survives_generic_materialisation"
+role = "primary"
+
+[[case]]
+id = "type_alias_capacity_constant_overflow_rejected"
+path = "type_alias_capacity_constant_overflow_rejected"
+tags = ["integration", "aliases", "collections", "diagnostics"]
+contract = "language.aliases.capacity_constant_alias_rejection"
+role = "boundary"
+
+[[case]]
+id = "trait_requirement_capacity_alias_success"
+path = "trait_requirement_capacity_alias_success"
+tags = ["integration", "aliases", "traits", "collections"]
+contract = "language.aliases.capacity_constant_alias_in_trait_requirement"
+role = "primary"
+
+[[case]]
+id = "core_trait_type_with_capacity_alias_rejected"
+path = "core_trait_type_with_capacity_alias_rejected"
+tags = ["integration", "aliases", "traits", "diagnostics"]
+contract = "language.generics.trait_name_as_type_rejected"
+role = "boundary"
+
+[[case]]
+id = "generic_alias_generic_base_cross_module_success"
+path = "generic_alias_generic_base_cross_module_success"
+tags = ["integration", "aliases", "generics", "types"]
+contract = "language.aliases.generic_instance_alias_base_survives_generated_request"
+role = "primary"
+
+[[case]]
 id = "nested_option_alias_rejected"
 path = "nested_option_alias_rejected"
 tags = ["integration", "language", "aliases", "diagnostics"]

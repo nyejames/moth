@@ -1,0 +1,18 @@
+TaskId as Int
+
+Task = |
+    id TaskId,
+|
+
+TaskList as {Task}
+MaybeTask as Task?
+
+identity type T |value T| -> T:
+    return value
+;
+
+task = Task(identity(1))
+list TaskList = {task}
+maybe MaybeTask = none
+
+[: [task.id]|[list.length()]]

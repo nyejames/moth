@@ -64,10 +64,15 @@ struct TraitRequirementResolutionInput<'a> {
 }
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
-    pub(in crate::compiler_frontend::ast) fn resolve_trait_definitions(
+    /// Register the compiler-owned core traits for this module.
+    ///
+    /// WHAT: returns a trait environment holding `DISPLAYABLE` and the core cast traits.
+    /// WHY: passes that run before user trait declarations resolve still need core trait names
+    /// so an ordinary type annotation naming one is rejected as a static contract instead of
+    /// falling through to an unknown-type diagnostic. Registration happens once because each
+    /// core trait interns a synthetic `This` parameter in the module type environment.
+    pub(in crate::compiler_frontend::ast) fn register_core_traits(
         &mut self,
-        declaration_lanes: &DeclarationPassLanes,
-        sorted_headers: &[Header],
         string_table: &mut StringTable,
     ) -> Result<TraitEnvironment, CompilerMessages> {
         let mut trait_environment = TraitEnvironment::new();
@@ -77,6 +82,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut self.type_environment,
             string_table,
         )?;
+
+        Ok(trait_environment)
+    }
+
+    pub(in crate::compiler_frontend::ast) fn resolve_trait_definitions(
+        &mut self,
+        declaration_lanes: &DeclarationPassLanes,
+        sorted_headers: &[Header],
+        mut trait_environment: TraitEnvironment,
+        string_table: &mut StringTable,
+    ) -> Result<TraitEnvironment, CompilerMessages> {
         self.project_imported_trait_declarations(&mut trait_environment, string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
 
