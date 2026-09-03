@@ -189,9 +189,7 @@ fn resolve_parsed_type_annotation_inner(
         }
 
         ParsedTypeRef::Named { name, .. } => {
-            if let Some((_alias_path, alias)) =
-                aliases::visible_type_alias_annotation(*name, context)
-            {
+            if let Some(alias) = aliases::visible_type_alias_annotation(*name, context) {
                 return aliases::resolve_alias_annotation(alias);
             }
         }
@@ -202,7 +200,7 @@ fn resolve_parsed_type_annotation_inner(
             // `namespace.Alias`. Longer paths cannot name a source alias.
             let namespace = path[0];
             let name = path[1];
-            if let Some((_alias_path, alias)) =
+            if let Some(alias) =
                 aliases::visible_namespaced_type_alias_annotation(namespace, name, context)
             {
                 return aliases::resolve_alias_annotation(alias);

@@ -95,9 +95,7 @@ pub(super) fn resolve_named_type_from_context(
     // Reuse the alias module's lookup helper so the same visibility rules apply here and in
     // parsed-ref alias expansion. Aliases are resolved before they are stored, so the cached
     // diagnostic spelling is already the expanded target.
-    if let Some((_alias_path, annotation)) =
-        aliases::visible_type_alias_annotation(type_name, context)
-    {
+    if let Some(annotation) = aliases::visible_type_alias_annotation(type_name, context) {
         return Ok(annotation.diagnostic_type.clone());
     }
 

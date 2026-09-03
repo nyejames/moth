@@ -24,18 +24,17 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::headers::binding_environment::NamespaceTypeMember;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 /// Look up a visible type alias by bare name.
 ///
-/// WHAT: returns the alias's canonical path and completed metadata when the name resolves to a
-/// type alias in the current context.
+/// WHAT: returns completed metadata when the name resolves to a type alias in the current
+/// context.
 /// WHY: aliases are published only after their target `TypeId` is complete, so every use-site
 /// projection can consume the required identity without retrying resolution.
 pub(super) fn visible_type_alias_annotation(
     name: StringId,
     context: &TypeResolutionContext<'_>,
-) -> Option<(InternedPath, ResolvedTypeAlias)> {
+) -> Option<ResolvedTypeAlias> {
     increment_ast_counter(AstCounter::VisibleTypeAliasLookupAttempts);
 
     let alias_path = context.visible_type_aliases?.get(&name)?;
@@ -44,18 +43,18 @@ pub(super) fn visible_type_alias_annotation(
         .get(alias_path.local_path())?
         .clone();
 
-    Some((alias_path.local_path().clone(), alias))
+    Some(alias)
 }
 
 /// Look up a visible type alias by namespace-qualified name.
 ///
-/// WHAT: returns the alias's canonical path and completed metadata when the namespace record
-/// exposes a source declaration that is a resolved type alias.
+/// WHAT: returns completed metadata when the namespace record exposes a source declaration that
+/// is a resolved type alias.
 pub(super) fn visible_namespaced_type_alias_annotation(
     namespace: StringId,
     name: StringId,
     context: &TypeResolutionContext<'_>,
-) -> Option<(InternedPath, ResolvedTypeAlias)> {
+) -> Option<ResolvedTypeAlias> {
     increment_ast_counter(AstCounter::VisibleTypeAliasLookupAttempts);
 
     let alias_path = context
@@ -70,7 +69,7 @@ pub(super) fn visible_namespaced_type_alias_annotation(
         .get(alias_path.local_path())?
         .clone();
 
-    Some((alias_path.local_path().clone(), alias))
+    Some(alias)
 }
 
 /// Project completed alias metadata into the general annotation result used by type resolution.
