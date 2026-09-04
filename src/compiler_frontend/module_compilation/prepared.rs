@@ -84,7 +84,7 @@ impl PreparedModuleInput {
     ) -> Result<&'a Path, CompilerError> {
         source_files
             .get(self.active_root_file_id)
-            .map(|identity| identity.canonical_os_path.as_path())
+            .and_then(|identity| identity.canonical_os_path.as_deref())
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "prepared module: active root file id {} is not in the source file table",

@@ -533,11 +533,21 @@ impl ModulePreparationContext<'_> {
                         string_table,
                     )
                 })?;
+
+            let canonical_os_path = identity.canonical_os_path.clone().ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "module source identity table has no canonical path for retained synthetic file {:?}",
+                        source_path
+                    )),
+                    string_table,
+                )
+            })?;
             output
                 .rebind_source_identity(
                     identity.id,
                     identity.logical_path.clone(),
-                    identity.canonical_os_path.clone(),
+                    canonical_os_path,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             output

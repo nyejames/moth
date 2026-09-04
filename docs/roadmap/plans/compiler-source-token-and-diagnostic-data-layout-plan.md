@@ -634,6 +634,18 @@ continue to. `directory_module_external_import_candidates_are_scoped_to_owned_so
 regression guard; it fails if that derivation widens again. This vector is the ID-set module input
 1B5 asks for, arriving early because the widening required it.
 
+**Root reservation, recorded against 1B1.** `SourceId(1)` is now the deterministic
+`CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance` and
+an optional `canonical_os_path`; it does not yet carry `text`, `line_starts`, `extended_spans` or
+`kind`, which arrive in 1B-gamma3 and 1C where they are first read. `SourceDatabase::get` and
+`iter` both exclude the root, so a physical-only consumer holding a root identity fails in its own
+lane instead of reading a pathless record as a file; `SourceId::physical_index` is the one place
+that knows the offset. The root is inert storage until a slice gives it text and a span — the
+reservation is what matters, because token identities already derive from this domain and shifting
+it later would invalidate them. Config tokenization passes `file_id: None` rather than the
+fabricated `SourceId::from_index(0)` it previously shared with the root; registering config into
+the project identity context is 1B-gamma1b.
+
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
 Slice order note, recorded at activation: the encoding cannot be selected before byte offsets exist.

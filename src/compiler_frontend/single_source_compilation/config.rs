@@ -50,7 +50,6 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
-use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -505,19 +504,16 @@ fn prepare_config_file(
     errors: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> Result<Option<FileFrontendPrepareOutput>, CompilerMessages> {
-    // The authored scope identity is already interned, so tokenization reuses it directly without a
-    // second `InternedPath::try_from_filesystem_path` round-trip.
-    // Config is one self-contained file and never participates in provider binding, so the
-    // placeholder file identity only stamps shells that are rejected as `ConfigImportUnsupported`
-    // immediately after preparation. It is intentionally isolated from every module/package
-    // identity space.
+    // Config is one self-contained file and is not registered in a source database. It therefore
+    // passes no `SourceId`; config diagnostics retain their authored scope and canonical path
+    // instead of borrowing a fabricated source identity.
     let mut token_stream = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
-        Some(SourceId::from_index(0)),
+        None,
     ) {
         Ok(tokens) => tokens,
         Err(error) => {

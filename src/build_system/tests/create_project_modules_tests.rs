@@ -569,7 +569,7 @@ fn synthetic_prepared_identity_snapshot(
                 assert_eq!(header.tokens.file_id, Some(file_id));
                 assert_eq!(
                     header.tokens.canonical_os_path.as_deref(),
-                    Some(identity.canonical_os_path.as_path())
+                    identity.canonical_os_path.as_deref()
                 );
                 assert!(
                     header
@@ -728,17 +728,17 @@ fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independe
     assert_eq!(
         forward.iter().map(|file| file.file_id).collect::<Vec<_>>(),
         vec![
-            SourceId::from_index(0),
             SourceId::from_index(1),
             SourceId::from_index(2),
+            SourceId::from_index(3),
         ],
         "final SourceIds must come from the sorted complete closure"
     );
     assert_eq!(
         forward[2].shell_ids,
         vec![
-            DependencyShellId::new(SourceId::from_index(2), 0),
-            DependencyShellId::new(SourceId::from_index(2), 1)
+            DependencyShellId::new(SourceId::from_index(3), 0),
+            DependencyShellId::new(SourceId::from_index(3), 1)
         ]
     );
     assert_eq!(forward[2].selected_source_names, vec!["greet", "greet"]);
@@ -2667,7 +2667,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
         shells,
         vec![
             crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-                crate::compiler_frontend::source::SourceId::from_index(0),
+                crate::compiler_frontend::source::SourceId::from_index(1),
                 0
             )
         ],

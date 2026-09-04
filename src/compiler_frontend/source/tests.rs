@@ -1,4 +1,4 @@
-use super::{SourceDatabase, SourceId};
+use super::{SourceDatabase, SourceId, SourceProvenance};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::mem::{align_of, size_of};
 use std::path::{Path, PathBuf};
@@ -8,6 +8,66 @@ fn source_id_uses_the_non_zero_option_niche() {
     assert_eq!(size_of::<SourceId>(), 4);
     assert_eq!(align_of::<SourceId>(), 4);
     assert_eq!(size_of::<Option<SourceId>>(), 4);
+}
+
+#[test]
+fn source_database_reserves_compilation_root_before_physical_sources() {
+    let physical_path = PathBuf::from("/project/main.moth");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        std::iter::once(&physical_path),
+        &physical_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+
+    let root_id = SourceId::from_index(0);
+    assert!(
+        database.get(root_id).is_none(),
+        "the reserved compilation root is not a physical source record"
+    );
+
+    let physical_records = database.iter().collect::<Vec<_>>();
+    assert_eq!(physical_records.len(), 1);
+    let physical = physical_records[0];
+    assert_eq!(
+        physical.id,
+        SourceId::from_index(1),
+        "physical sources begin after the reserved root"
+    );
+    assert_eq!(physical.provenance, SourceProvenance::AuthoredPhysical);
+    assert_eq!(
+        database.get(physical.id).map(|record| record.id),
+        Some(physical.id),
+        "a physical identity must address its own record"
+    );
+}
+
+#[test]
+fn appended_sources_also_begin_after_the_reserved_root() {
+    // `empty` backs the single-file and template temporary databases, which register by insertion
+    // rather than from an ordered inventory. Their first source must still not claim the root ID.
+    let mut database = SourceDatabase::empty();
+    let mut string_table = StringTable::new();
+    let canonical_path = PathBuf::from("/project/main.moth");
+
+    let id = database
+        .insert(
+            canonical_path.clone(),
+            &canonical_path,
+            None,
+            &mut string_table,
+        )
+        .expect("an appended source should register");
+
+    assert_eq!(id, SourceId::from_index(1));
+    assert_eq!(
+        database
+            .get_by_canonical_path(&canonical_path)
+            .map(|record| record.id),
+        Some(id)
+    );
 }
 
 #[test]
@@ -46,7 +106,7 @@ fn source_database_build_orders_records_by_portable_logical_path() {
     );
 
     for (index, record) in first.iter().enumerate() {
-        assert_eq!(record.id, SourceId::from_index(index));
+        assert_eq!(record.id, SourceId::from_index(index + 1));
     }
 }
 
@@ -85,7 +145,12 @@ fn source_ids_are_distinct_and_same_module_sources_follow_portable_order() {
 
     let alpha_logical_paths = database
         .iter()
-        .filter(|record| record.canonical_os_path.starts_with("/project/alpha"))
+        .filter(|record| {
+            record
+                .canonical_os_path
+                .as_deref()
+                .is_some_and(|path| path.starts_with("/project/alpha"))
+        })
         .map(|record| record.logical_path.to_portable_string(&string_table))
         .collect::<Vec<_>>();
     assert_eq!(alpha_logical_paths, vec!["a.moth", "z.moth"]);
@@ -128,7 +193,7 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
         .expect("module B should resolve the shared source");
     let shared_record_count = database
         .iter()
-        .filter(|record| record.canonical_os_path == shared_source)
+        .filter(|record| record.canonical_os_path.as_deref() == Some(shared_source.as_path()))
         .count();
 
     assert_eq!(module_a_view, module_b_view);

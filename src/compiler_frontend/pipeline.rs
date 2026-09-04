@@ -217,7 +217,7 @@ fn source_file_identity(
         Some(identity) => Ok(FrontendSourceFileIdentity {
             logical_path: identity.logical_path.clone(),
             file_id: Some(identity.id),
-            canonical_os_path: Some(identity.canonical_os_path.clone()),
+            canonical_os_path: identity.canonical_os_path.clone(),
         }),
         None => {
             let logical_path =

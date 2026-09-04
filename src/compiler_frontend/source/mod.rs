@@ -6,7 +6,7 @@
 //! build-lifetime registration barrier; those belong to later slices.
 //!
 //! - [`id`] defines the four-byte source identity.
-//! - [`record`] defines one source identity and its canonical/logical paths.
+//! - [`record`] defines one source identity, its provenance and its canonical/logical paths.
 //! - [`database`] owns deterministic lookup and traversal-time insertion.
 
 mod database;
@@ -18,4 +18,4 @@ mod tests;
 
 pub(crate) use database::SourceDatabase;
 pub(crate) use id::SourceId;
-pub(crate) use record::SourceRecord;
+pub(crate) use record::{SourceProvenance, SourceRecord};

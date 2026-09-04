@@ -254,6 +254,25 @@ fn out_of_range_file_id_is_an_internal_error() {
 }
 
 #[test]
+fn compilation_root_id_is_rejected_by_origin_lookup() {
+    let table = SourceDatabase::empty();
+    let origin = synthetic_origin("project");
+    let origins = SourceModuleOriginTable::from_synthetic_origin(&table, &origin);
+
+    let result = origins.origin_for(SourceId::from_index(0));
+    assert!(
+        result.is_err(),
+        "the compilation root has no physical module origin"
+    );
+    let error = result.unwrap_err();
+    assert!(
+        error.msg.contains("compilation-root"),
+        "the root lookup error must identify the invalid identity, got: {}",
+        error.msg
+    );
+}
+
+#[test]
 fn empty_source_file_table_produces_empty_origin_table() {
     let table = SourceDatabase::empty();
     let origin = synthetic_origin("project");

@@ -25,4 +25,11 @@ impl SourceId {
     pub(crate) fn index(self) -> usize {
         self.0.get() as usize - 1
     }
+
+    /// Return the dense index of a physical source, excluding the compilation root.
+    ///
+    /// `None` identifies the reserved compilation-root record rather than a physical source.
+    pub(crate) fn physical_index(self) -> Option<usize> {
+        self.index().checked_sub(1)
+    }
 }

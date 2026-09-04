@@ -4,7 +4,7 @@
 //! spans and build-lifetime registration remain outside this slice and are deliberately not stored
 //! here.
 
-use super::{SourceId, SourceRecord};
+use super::{SourceId, SourceProvenance, SourceRecord};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -16,10 +16,19 @@ use std::path::{Path, PathBuf};
 ///
 /// The database is not `Clone`. One boundary registers it once and shares it as an `Arc`, so a
 /// deep copy would silently duplicate identities that are meant to be unique for the build.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceDatabase {
     files: Vec<SourceRecord>,
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
+}
+
+impl Default for SourceDatabase {
+    fn default() -> Self {
+        Self {
+            files: vec![compilation_root_record()],
+            canonical_to_id: FxHashMap::default(),
+        }
+    }
 }
 
 impl SourceDatabase {
@@ -83,7 +92,7 @@ impl SourceDatabase {
     where
         I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
     {
-        let mut files = Vec::new();
+        let mut files = vec![compilation_root_record()];
         let mut canonical_to_id = FxHashMap::default();
 
         for (canonical, logical) in rows {
@@ -98,8 +107,9 @@ impl SourceDatabase {
             canonical_to_id.insert(canonical.clone(), id);
             files.push(SourceRecord {
                 id,
-                canonical_os_path: canonical,
+                canonical_os_path: Some(canonical),
                 logical_path: logical.interned,
+                provenance: SourceProvenance::AuthoredPhysical,
             });
         }
 
@@ -141,19 +151,43 @@ impl SourceDatabase {
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.files.push(SourceRecord {
             id,
-            canonical_os_path: canonical_path,
+            canonical_os_path: Some(canonical_path),
             logical_path,
+            provenance: SourceProvenance::AuthoredPhysical,
         });
         Ok(id)
     }
 
+    /// Resolve one physical source record.
+    ///
+    /// The compilation root is addressed by `SourceId(1)` but is not a physical source, so it is
+    /// never returned here. A consumer that reaches this with the root holds an identity from the
+    /// wrong domain, and absence lets it fail in its own lane rather than reading a pathless
+    /// record as though it were a file.
     pub fn get(&self, id: SourceId) -> Option<&SourceRecord> {
-        self.files.get(id.index())
+        let record = self.files.get(id.index())?;
+        (record.provenance != SourceProvenance::CompilationRoot).then_some(record)
     }
 
-    /// Iterate source identities in deterministic logical-path order.
+    /// Iterate physical source identities in deterministic logical-path order.
+    ///
+    /// The compilation-root record is addressed by `SourceId(1)` but is not a physical source and
+    /// therefore does not appear in this iterator.
     pub fn iter(&self) -> std::slice::Iter<'_, SourceRecord> {
-        self.files.iter()
+        debug_assert_eq!(
+            self.files.first().map(|record| record.provenance),
+            Some(SourceProvenance::CompilationRoot)
+        );
+        self.files[1..].iter()
+    }
+}
+
+fn compilation_root_record() -> SourceRecord {
+    SourceRecord {
+        id: SourceId::from_index(0),
+        canonical_os_path: None,
+        logical_path: InternedPath::new(),
+        provenance: SourceProvenance::CompilationRoot,
     }
 }
 
