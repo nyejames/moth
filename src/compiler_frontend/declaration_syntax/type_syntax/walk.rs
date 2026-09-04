@@ -8,20 +8,27 @@ use super::*;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
+/// One named type reference preserved from parsed type syntax.
+///
+/// WHAT: keeps a bare type name distinct from the complete namespace-qualified path while
+/// borrowing the parsed path in place.
+/// WHY: dependency ordering and alias waiting must resolve qualified names through the declaring
+/// file's visibility records instead of collapsing them to a terminal component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParsedNamedTypeReference<'a> {
+    Bare(StringId),
+    Qualified(&'a [StringId]),
+}
+
 /// Visit every named type reference inside a `ParsedTypeRef`.
-pub(crate) fn for_each_named_type_in_parsed_ref(
-    parsed: &ParsedTypeRef,
-    visitor: &mut impl FnMut(StringId),
+pub(crate) fn for_each_named_type_in_parsed_ref<'a>(
+    parsed: &'a ParsedTypeRef,
+    visitor: &mut impl FnMut(ParsedNamedTypeReference<'a>),
 ) {
     match parsed {
-        ParsedTypeRef::Named { name, .. } => visitor(*name),
+        ParsedTypeRef::Named { name, .. } => visitor(ParsedNamedTypeReference::Bare(*name)),
         ParsedTypeRef::Qualified { path, .. } => {
-            // Dependency discovery only needs the final nominal type name.
-            // Intermediate namespace components are dependency-namespace labels, not
-            // declaration dependencies.
-            if let Some(name) = path.last() {
-                visitor(*name);
-            }
+            visitor(ParsedNamedTypeReference::Qualified(path.as_slice()));
         }
         ParsedTypeRef::Applied {
             base, arguments, ..

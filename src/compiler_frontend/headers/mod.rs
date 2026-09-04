@@ -8,6 +8,9 @@ pub(crate) mod binding_environment;
 mod const_fragments;
 mod constant_dependencies;
 mod dependency_canonicalization;
+pub(crate) use dependency_canonicalization::{
+    VisibleNamedTypeResolution, resolve_visible_named_type_path,
+};
 pub(crate) mod dependency_clause_syntax;
 mod dependency_paths;
 pub(crate) mod dependency_target;

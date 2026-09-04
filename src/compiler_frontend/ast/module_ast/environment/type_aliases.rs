@@ -26,6 +26,9 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::for_each_named_type_in_parsed_ref;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::headers::{
+    VisibleNamedTypeResolution, resolve_visible_named_type_path,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -42,13 +45,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// is folded, and no consumer may observe a provisional target. Stage 3 already sorts the
     /// alias lane by dependency, so one forward pass closes the dependency set.
     ///
-    /// Membership is resolved from the target's bare type names, matching the name-level edges
-    /// Stage 3 records. `for_each_named_type_in_parsed_ref` drops the namespace of a qualified
-    /// reference, and a namespace-bound name lives in `visible_namespace_records` rather than
-    /// `visible_type_alias_names`, so a qualified dependency on a waiting alias can be
-    /// misclassified. This classifier therefore shares the existing qualified-name ordering
-    /// limitation, and the qualified-name fix must update this classifier and Stage 3 ordering
-    /// together. It is tracked as one roadmap follow-up rather than worked around here.
+    /// Membership is resolved from the target's parsed named references through the declaration
+    /// file's visibility package. Bare and qualified references both compare their canonical
+    /// declaration paths, so aliases with the same terminal name under different namespaces do
+    /// not collide.
     pub(in crate::compiler_frontend::ast) fn aliases_waiting_for_constants(
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
@@ -69,9 +69,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let visibility = self.header_visibility(header, string_table)?;
             let mut depends_on_waiting = false;
-            for_each_named_type_in_parsed_ref(target, &mut |name| {
-                if let Some(alias_target) = visibility.visible_type_alias_names.get(&name)
-                    && waiting.contains(alias_target.local_path())
+            for_each_named_type_in_parsed_ref(target, &mut |type_reference| {
+                if let VisibleNamedTypeResolution::Declaration(alias_path) =
+                    resolve_visible_named_type_path(type_reference, &visibility)
+                    && waiting.contains(&alias_path)
                 {
                     depends_on_waiting = true;
                 }

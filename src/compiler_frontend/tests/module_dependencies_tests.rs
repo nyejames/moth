@@ -508,6 +508,167 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
 }
 
 #[test]
+fn qualified_alias_target_orders_provider_declaration_before_alias() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            (
+                "src/app.moth",
+                "@models as models\nAlias as models.Target\n",
+            ),
+            ("src/models.moth", "Target = |value Int|\n"),
+        ],
+        "src/app.moth",
+    );
+
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("qualified alias target should create a sortable dependency edge");
+    let non_start_names: Vec<_> = sorted
+        .headers
+        .iter()
+        .filter(|header| !matches!(header.kind, HeaderKind::StartFunction))
+        .map(|header| header_name(header, &string_table))
+        .collect();
+
+    assert_eq!(
+        non_start_names,
+        vec!["Target", "Alias"],
+        "qualified alias target must order the provider declaration first"
+    );
+}
+
+#[test]
+fn qualified_alias_in_struct_field_orders_provider_declaration_before_struct() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            (
+                "src/app.moth",
+                "@models as models\nHolder = |value models.Target|\n",
+            ),
+            ("src/models.moth", "Target = |value Int|\n"),
+        ],
+        "src/app.moth",
+    );
+
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("qualified struct field type should create a sortable dependency edge");
+    let non_start_names: Vec<_> = sorted
+        .headers
+        .iter()
+        .filter(|header| !matches!(header.kind, HeaderKind::StartFunction))
+        .map(|header| header_name(header, &string_table))
+        .collect();
+
+    assert_eq!(
+        non_start_names,
+        vec!["Target", "Holder"],
+        "qualified struct field type must order the provider declaration first"
+    );
+}
+
+#[test]
+fn qualified_alias_transitively_waits_for_fixed_capacity_constant() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            ("src/app.moth", "@limits as limits\nNames as limits.Fixed\n"),
+            (
+                "src/limits.moth",
+                "limit #Int = 2\nFixed as {limit String}\n",
+            ),
+        ],
+        "src/app.moth",
+    );
+
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("qualified fixed-capacity alias should create sortable dependency edges");
+    let non_start_names: Vec<_> = sorted
+        .headers
+        .iter()
+        .filter(|header| !matches!(header.kind, HeaderKind::StartFunction))
+        .map(|header| header_name(header, &string_table))
+        .collect();
+
+    assert_eq!(
+        non_start_names,
+        vec!["limit", "Fixed", "Names"],
+        "qualified alias must retain the provider alias's transitive capacity ordering"
+    );
+}
+
+#[test]
+fn qualified_aliases_with_duplicate_terminal_names_keep_distinct_edges() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            (
+                "src/app.moth",
+                "@left as left\n\
+                 @right as right\n\
+                 Holder = |left left.Shared, right right.Shared|\n",
+            ),
+            ("src/left.moth", "Shared = |value Int|\n"),
+            ("src/right.moth", "Shared = |value Int|\n"),
+        ],
+        "src/app.moth",
+    );
+
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("qualified duplicate terminal names should remain sortable");
+    let positions: Vec<_> = sorted
+        .headers
+        .iter()
+        .enumerate()
+        .filter(|(_, header)| !matches!(header.kind, HeaderKind::StartFunction))
+        .map(|(index, header)| (header_name(header, &string_table), index))
+        .collect();
+    let holder_position = positions
+        .iter()
+        .find(|(name, _)| name == "Holder")
+        .map(|(_, index)| *index)
+        .expect("expected Holder declaration");
+    let shared_positions: Vec<_> = positions
+        .iter()
+        .filter(|(name, _)| name == "Shared")
+        .map(|(_, index)| *index)
+        .collect();
+
+    assert_eq!(shared_positions.len(), 2);
+    assert!(
+        shared_positions
+            .iter()
+            .all(|index| *index < holder_position),
+        "both namespace-qualified Shared declarations must precede Holder"
+    );
+}
+
+#[test]
+fn qualified_alias_cycle_reports_circular_dependency() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            ("src/app.moth", "@a as a\nCycle as a.A\n"),
+            ("src/a.moth", "@b as b\nA as b.B\n"),
+            ("src/b.moth", "@a as a\nB as a.A\n"),
+        ],
+        "src/app.moth",
+    );
+
+    let diagnostics =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect_err("qualified aliases that reference each other must form a cycle");
+    assert!(
+        diagnostics.diagnostics().iter().any(|diagnostic| {
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::CircularDependency { .. }
+            )
+        }),
+        "qualified alias cycle should retain the circular-dependency diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn trait_requirement_type_dependencies_order_required_type_before_trait() {
     let (headers, mut string_table) = parse_module_headers(
         &[

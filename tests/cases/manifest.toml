@@ -8820,6 +8820,13 @@ contract = "language.aliases.type_alias_cycle_rejected"
 role = "primary"
 
 [[case]]
+id = "qualified_alias_namespace_identity_success"
+path = "qualified_alias_namespace_identity_success"
+tags = ["integration", "language", "aliases", "dependencies", "namespaces"]
+contract = "language.aliases.qualified_namespace_identity"
+role = "primary"
+
+[[case]]
 id = "dependency_clause_missing_alias_rejected"
 path = "dependency_clause_missing_alias_rejected"
 tags = ["integration", "language", "aliases", "diagnostics"]

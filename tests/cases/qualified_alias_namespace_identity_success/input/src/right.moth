@@ -1,0 +1,2 @@
+Shared = |value Int|
+Alias as Shared

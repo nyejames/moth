@@ -1,0 +1,2 @@
+limit #Int = 2
+Fixed as {limit String}

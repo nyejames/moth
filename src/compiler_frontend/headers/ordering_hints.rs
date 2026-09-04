@@ -12,7 +12,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    collect_capacity_references_in_parsed_ref, for_each_named_type_in_parsed_ref,
+    ParsedNamedTypeReference, collect_capacity_references_in_parsed_ref,
+    for_each_named_type_in_parsed_ref,
 };
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
@@ -48,12 +49,12 @@ pub(super) fn collect_constant_type_hints(
     if declaration_syntax.config_qualifier.is_some() {
         return Ok(());
     }
-
     let mut selection_error = None;
-    for_each_named_type_in_parsed_ref(&declaration_syntax.type_annotation, &mut |type_name| {
+
+    for_each_named_type_in_parsed_ref(&declaration_syntax.type_annotation, &mut |type_reference| {
         if selection_error.is_none() {
             selection_error = collect_named_type_ordering_hint(
-                type_name,
+                type_reference,
                 context.file_dependency_clauses,
                 context.dependency_selections,
                 context.source_file,
@@ -75,37 +76,55 @@ pub(super) fn collect_constant_type_hints(
 
 /// Record one conservative local declaration-ordering hint for a named type reference.
 ///
-/// WHAT: records the dependency spelling when the name matches a file dependency, otherwise records the
-/// same-file spelling. Builtin symbol names are excluded as compiler-owned syntax policy.
+/// WHAT: records the dependency spelling when a bare name matches a file dependency, otherwise
+/// records the same-file spelling. Qualified names retain their complete local namespace spelling
+/// for binding-time resolution through `FileVisibility`.
 /// WHY: syntax preparation must not consult provider availability to decide whether a named type
-/// reference is a virtual or provider dependency. Binding later canonicalizes or drops dependency-spelled
-/// hints using bound visibility; Stage 3 resolves retained local hints into graph edges.
+/// reference is a virtual or provider dependency. Binding later resolves qualified namespace paths
+/// to canonical declaration paths or drops external symbols; Stage 3 resolves retained local hints
+/// into graph edges.
 pub(super) fn collect_named_type_ordering_hint(
-    type_name: StringId,
+    type_reference: ParsedNamedTypeReference<'_>,
     file_dependency_clauses: &[RetainedDependencyClause],
     dependency_selections: &[DependencySelection],
     source_file: &InternedPath,
     string_table: &mut StringTable,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
 ) -> Result<(), CompilerError> {
-    if is_reserved_builtin_symbol(string_table.resolve(type_name)) {
-        return Ok(());
-    }
+    match type_reference {
+        ParsedNamedTypeReference::Bare(type_name) => {
+            if is_reserved_builtin_symbol(string_table.resolve(type_name)) {
+                return Ok(());
+            }
 
-    // WHY: match by local name, which is either the explicit dependency alias or
-    // the original symbol name from the path. This records the dependency spelling
-    // when a dependency alias is used as a type reference.
-    let dependency_path = dependency_path_for_local_name(
-        type_name,
-        file_dependency_clauses,
-        dependency_selections,
-        string_table,
-    )?;
-    let hint = match dependency_path {
-        Some(path) => LocalDeclarationOrderingHint::provider_spelling(path),
-        None => LocalDeclarationOrderingHint::source_owned(source_file.append(type_name)),
-    };
-    hints.insert(hint);
+            // WHY: match by local name, which is either the explicit dependency alias or
+            // the original symbol name from the path. This records the dependency spelling
+            // when a dependency alias is used as a type reference.
+            let dependency_path = dependency_path_for_local_name(
+                type_name,
+                file_dependency_clauses,
+                dependency_selections,
+                string_table,
+            )?;
+            let hint = match dependency_path {
+                Some(path) => LocalDeclarationOrderingHint::provider_spelling(path),
+                None => LocalDeclarationOrderingHint::source_owned(source_file.append(type_name)),
+            };
+            hints.insert(hint);
+        }
+        ParsedNamedTypeReference::Qualified(path) => {
+            if path.is_empty() {
+                return Ok(());
+            }
+
+            // Keep every namespace component in the retained spelling. The declaration-file
+            // visibility environment owns the mapping from this local path to its canonical
+            // source declaration once provider binding has completed.
+            hints.insert(LocalDeclarationOrderingHint::provider_spelling(
+                InternedPath::from_components(path.to_vec()),
+            ));
+        }
+    }
     Ok(())
 }
 

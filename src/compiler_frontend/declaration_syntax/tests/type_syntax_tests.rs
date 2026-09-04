@@ -28,7 +28,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation,
+    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata,
@@ -1898,10 +1898,38 @@ fn map_type_walker_visits_named_types_in_key_and_value() {
     let mut found = Vec::new();
     crate::compiler_frontend::declaration_syntax::type_syntax::for_each_named_type_in_parsed_ref(
         &parsed,
-        &mut |name| found.push(name),
+        &mut |reference| found.push(reference),
     );
 
-    assert_eq!(found, vec![key_name, value_name]);
+    assert_eq!(
+        found,
+        vec![
+            ParsedNamedTypeReference::Bare(key_name),
+            ParsedNamedTypeReference::Bare(value_name),
+        ]
+    );
+}
+
+#[test]
+fn named_type_walker_preserves_qualified_path() {
+    let mut string_table = StringTable::new();
+    let root = string_table.intern("models");
+    let member = string_table.intern("Names");
+    let parsed = ParsedTypeRef::Qualified {
+        path: vec![root, member],
+        location: SourceLocation::default(),
+    };
+
+    let mut found = Vec::new();
+    crate::compiler_frontend::declaration_syntax::type_syntax::for_each_named_type_in_parsed_ref(
+        &parsed,
+        &mut |reference| found.push(reference),
+    );
+
+    assert_eq!(
+        found,
+        vec![ParsedNamedTypeReference::Qualified(&[root, member])]
+    );
 }
 
 #[test]

@@ -23,7 +23,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::parse_funct
 
 use crate::compiler_frontend::declaration_syntax::r#struct::parse_struct_shell;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, collect_capacity_references_in_parsed_ref,
+    ParsedNamedTypeReference, TypeAnnotationContext, collect_capacity_references_in_parsed_ref,
     for_each_named_type_in_parsed_ref, parse_type_annotation,
 };
 
@@ -487,10 +487,11 @@ pub(super) fn create_header(
             )?;
 
             let mut selection_error = None;
-            for_each_named_type_in_parsed_ref(&target, &mut |type_name| {
+
+            for_each_named_type_in_parsed_ref(&target, &mut |type_reference| {
                 if selection_error.is_none() {
                     selection_error = collect_named_type_ordering_hint(
-                        type_name,
+                        type_reference,
                         context.file_dependency_clauses,
                         context.dependency_selections,
                         context.source_file,
@@ -568,17 +569,26 @@ fn collect_type_ordering_hints(
     capacity_references: &mut Vec<InitializerReference>,
 ) -> Result<(), CompilerError> {
     let mut selection_error = None;
-    for_each_named_type_in_parsed_ref(type_ref, &mut |type_name| {
-        if selection_error.is_some() || generic_parameters.contains_name(type_name) {
+    for_each_named_type_in_parsed_ref(type_ref, &mut |type_reference| {
+        if selection_error.is_some() {
             return;
         }
 
-        if context.source_file.append(type_name) == *current_header_path {
-            return;
+        match type_reference {
+            // Generic parameters are bare local names. A qualified path must remain intact even
+            // when its terminal component happens to share a generic parameter's spelling.
+            ParsedNamedTypeReference::Bare(type_name) => {
+                if generic_parameters.contains_name(type_name)
+                    || context.source_file.append(type_name) == *current_header_path
+                {
+                    return;
+                }
+            }
+            ParsedNamedTypeReference::Qualified(_) => {}
         }
 
         selection_error = collect_named_type_ordering_hint(
-            type_name,
+            type_reference,
             context.file_dependency_clauses,
             context.dependency_selections,
             context.source_file,

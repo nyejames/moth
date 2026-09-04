@@ -1,0 +1,15 @@
+@left as left
+@right as right
+@limits as limits
+
+LeftAlias as left.Alias
+RightAlias as right.Alias
+FixedAlias as limits.Fixed
+
+Holder = |
+    left left.Alias,
+    right right.Alias,
+    fixed FixedAlias,
+|
+
+io.line("qualified alias identity")
