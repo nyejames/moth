@@ -10,9 +10,10 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 # Plans
 
-- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md)
+- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
+- [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
