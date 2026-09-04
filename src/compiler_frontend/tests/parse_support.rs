@@ -31,8 +31,8 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -59,7 +59,7 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
 /// as missing-target diagnostics while site roots and source-kind-only paths keep their structural
 /// outcomes. This exercises the same AST handoff as a prepared module.
 fn test_file_value_resolution_services(
-    source_file: FileId,
+    source_file: SourceId,
     references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
 ) -> Rc<FileValueResolutionServices> {
@@ -102,7 +102,7 @@ fn test_file_value_resolution_services(
     Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
-            SourceFileTable::empty(),
+            SourceDatabase::empty(),
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
@@ -132,7 +132,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )?;
 
     let output =
@@ -147,7 +147,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             })?;
     let source_file_id = output
         .file_id
-        .expect("single-file parser fixture should assign a source FileId");
+        .expect("single-file parser fixture should assign a source SourceId");
     let file_value_resolution = test_file_value_resolution_services(
         source_file_id,
         &output.structural_file_references,

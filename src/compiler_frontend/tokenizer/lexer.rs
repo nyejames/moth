@@ -16,8 +16,8 @@ use crate::compiler_frontend::keywords::{
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::newline_handling::normalize_consumed_carriage_return_newline;
@@ -460,7 +460,7 @@ fn greater_than_is_template_tag_end(
 
 /// Tokenize one source file and optionally attach stable file identity metadata.
 ///
-/// WHAT: wraps lexing output in `FileTokens` carrying both logical path and optional `FileId`.
+/// WHAT: wraps lexing output in `FileTokens` carrying both logical path and optional `SourceId`.
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
 pub fn tokenize(
     source_code: &str,
@@ -468,7 +468,7 @@ pub fn tokenize(
     entry_mode: TokenizerEntryMode,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
 ) -> LexerResult<FileTokens> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.

@@ -57,9 +57,10 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -444,7 +445,7 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: SourceLocation::default(),
         dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-            crate::compiler_frontend::symbols::identity::FileId(0),
+            crate::compiler_frontend::source::SourceId::from_index(0),
             0,
         ),
     }
@@ -491,7 +492,7 @@ fn collect_synthetic_inputs_for_test(
 #[derive(Debug, PartialEq, Eq)]
 struct SyntheticPreparedIdentitySnapshot {
     logical_path: String,
-    file_id: FileId,
+    file_id: SourceId,
     shell_ids: Vec<DependencyShellId>,
     selected_source_names: Vec<String>,
 }
@@ -508,7 +509,7 @@ fn synthetic_prepared_identity_snapshot(
         .iter()
         .map(|identity| {
             let logical_path = &identity.logical_path;
-            let file_id = identity.file_id;
+            let file_id = identity.id;
             for header in prepared
                 .semantic
                 .prepared_header_syntax
@@ -667,14 +668,18 @@ fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independe
     );
     assert_eq!(
         forward.iter().map(|file| file.file_id).collect::<Vec<_>>(),
-        vec![FileId(0), FileId(1), FileId(2)],
-        "final FileIds must come from the sorted complete closure"
+        vec![
+            SourceId::from_index(0),
+            SourceId::from_index(1),
+            SourceId::from_index(2),
+        ],
+        "final SourceIds must come from the sorted complete closure"
     );
     assert_eq!(
         forward[2].shell_ids,
         vec![
-            DependencyShellId::new(FileId(2), 0),
-            DependencyShellId::new(FileId(2), 1)
+            DependencyShellId::new(SourceId::from_index(2), 0),
+            DependencyShellId::new(SourceId::from_index(2), 1)
         ]
     );
     assert_eq!(forward[2].selected_source_names, vec!["greet", "greet"]);
@@ -2595,7 +2600,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
         shells,
         vec![
             crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-                crate::compiler_frontend::symbols::identity::FileId(0),
+                crate::compiler_frontend::source::SourceId::from_index(0),
                 0
             )
         ],
@@ -7444,7 +7449,7 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
 
 #[test]
 fn provider_binding_index_rejects_duplicate_shell_edges() {
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let edges = vec![
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(1),
@@ -7472,7 +7477,7 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
 
 #[test]
 fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() {
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider_edge = ResolvedDependencyEdge {
         provider_module_id: ModuleId::from_index(1),
         consumer_module_id: ModuleId::from_index(0),
@@ -7759,7 +7764,7 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         .expect("consumer package publishes");
 
     let consumer_module_id = ModuleId::from_index(5);
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let dependencies = vec![ResolvedSourcePackageDependency {
         consumer_module_id,
         dependency_prefix: "b".to_owned(),
@@ -8031,7 +8036,7 @@ mod file_reference_resolution_tests {
         PreparedFileReference, PreparedFileReferenceClass,
     };
     use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-    use crate::compiler_frontend::symbols::identity::FileId;
+    use crate::compiler_frontend::source::SourceId;
     use crate::compiler_frontend::symbols::interned_path::InternedPath;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::fs;
@@ -8073,7 +8078,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            source_file: Some(SourceId::from_index(0)),
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8115,7 +8120,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("missing.moth", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            source_file: Some(SourceId::from_index(0)),
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::SourceKindNoFileValue,
@@ -8157,7 +8162,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            source_file: Some(SourceId::from_index(0)),
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ContentSource,
@@ -8209,7 +8214,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            source_file: Some(SourceId::from_index(0)),
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8269,7 +8274,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            source_file: Some(SourceId::from_index(0)),
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8336,7 +8341,7 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
             let reference = PreparedFileReference {
-                source_file: Some(FileId(0)),
+                source_file: Some(SourceId::from_index(0)),
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),
                 class: PreparedFileReferenceClass::ResourceFile,
@@ -8427,7 +8432,7 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
             let reference = PreparedFileReference {
-                source_file: Some(FileId(0)),
+                source_file: Some(SourceId::from_index(0)),
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),
                 class,

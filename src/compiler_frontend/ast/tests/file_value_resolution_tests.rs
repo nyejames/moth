@@ -48,8 +48,8 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -324,12 +324,12 @@ fn compile_fixture(
 
     let mut string_table = StringTable::new();
     let source_files =
-        SourceFileTable::build(all_paths.iter(), &entry_path, None, &mut string_table)
+        SourceDatabase::build(all_paths.iter(), &entry_path, None, &mut string_table)
             .expect("fixture source identities should build");
     let file_id_for = |path: &str| {
         source_files
             .get_by_canonical_path(&PathBuf::from(path))
-            .map(|identity| identity.file_id)
+            .map(|identity| identity.id)
             .unwrap_or_else(|| panic!("fixture file {path} should have a source identity"))
     };
 
@@ -413,7 +413,7 @@ fn compile_fixture(
         for reference in output.structural_file_references.iter() {
             let source_file = reference
                 .source_file
-                .expect("prepared rows carry a source FileId");
+                .expect("prepared rows carry a source SourceId");
             let authored_path = output
                 .path_syntax
                 .table()
@@ -426,7 +426,7 @@ fn compile_fixture(
                     let target_path = PathBuf::from(&authored_path);
                     let target = source_files
                         .get_by_canonical_path(&target_path)
-                        .map(|identity| identity.file_id)
+                        .map(|identity| identity.id)
                         .unwrap_or_else(|| panic!("content target {target_path:?} should exist"));
                     ResolvedFileReferenceOutcome::Target(
                         ResolvedFileReferenceTarget::ContentSource { source: target },
@@ -556,7 +556,7 @@ fn resolve_file_value_fixture(
 > {
     let mut string_table = StringTable::new();
     let source_path_buf = PathBuf::from("@page.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(&source_path_buf),
         &source_path_buf,
         None,
@@ -566,7 +566,7 @@ fn resolve_file_value_fixture(
     let source_file = source_files
         .get_by_canonical_path(&source_path_buf)
         .expect("fixture source identity should be present")
-        .file_id;
+        .id;
     let source_path = InternedPath::try_from_filesystem_path(&source_path_buf, &mut string_table)
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();

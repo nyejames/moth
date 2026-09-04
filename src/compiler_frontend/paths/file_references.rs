@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -36,7 +36,7 @@ pub(crate) enum PreparedFileReferenceClass {
 /// One graph-active file-value path occurrence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PreparedFileReference {
-    pub(crate) source_file: Option<FileId>,
+    pub(crate) source_file: Option<SourceId>,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) location: SourceLocation,
     pub(crate) class: PreparedFileReferenceClass,
@@ -63,7 +63,11 @@ impl PreparedFileReferenceTable {
         }
     }
 
-    pub(crate) fn rebind_source_identity(&mut self, file_id: FileId, logical_path: &InternedPath) {
+    pub(crate) fn rebind_source_identity(
+        &mut self,
+        file_id: SourceId,
+        logical_path: &InternedPath,
+    ) {
         for reference in &mut self.references {
             reference.source_file = Some(file_id);
             reference.location.rebind_source_identity(logical_path);
@@ -80,7 +84,7 @@ impl PreparedFileReferenceTable {
 pub(crate) fn classify_prepared_file_references(
     path_syntax: &PathSyntaxTable,
     consumed_by_dependency_clauses: impl IntoIterator<Item = PathSyntaxId>,
-    source_file: Option<FileId>,
+    source_file: Option<SourceId>,
     string_table: &StringTable,
 ) -> PreparedFileReferenceTable {
     let consumed: FxHashSet<PathSyntaxId> = consumed_by_dependency_clauses
@@ -160,7 +164,7 @@ impl ResourceSourceId {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResolvedFileReferenceTarget {
     ContentSource {
-        source: FileId,
+        source: SourceId,
     },
     ResourceSource {
         source: ResourceSourceId,
@@ -187,13 +191,13 @@ pub(crate) enum ResolvedFileReferenceOutcome {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResolvedFileReferenceTable {
     targets: Vec<ResolvedFileReference>,
-    by_key: FxHashMap<(FileId, PathSyntaxId), ResolvedFileReferenceId>,
+    by_key: FxHashMap<(SourceId, PathSyntaxId), ResolvedFileReferenceId>,
 }
 
 /// One resolved file-value occurrence, keyed by the preparing file and its path-syntax handle.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedFileReference {
-    pub(crate) source_file: FileId,
+    pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: ResolvedFileReferenceOutcome,
@@ -246,8 +250,8 @@ impl ResolvedFileReferenceTable {
         let key = (reference.source_file, reference.path_syntax);
         if self.by_key.contains_key(&key) {
             return Err(CompilerError::compiler_error(format!(
-                "duplicate resolved file reference for FileId {} and PathSyntaxId {:?}",
-                reference.source_file.0, reference.path_syntax
+                "duplicate resolved source reference for {:?} and PathSyntaxId {:?}",
+                reference.source_file, reference.path_syntax
             )));
         }
 
@@ -259,7 +263,7 @@ impl ResolvedFileReferenceTable {
 
     pub(crate) fn get(
         &self,
-        source_file: FileId,
+        source_file: SourceId,
         path_syntax: PathSyntaxId,
     ) -> Option<&ResolvedFileReference> {
         let reference_id = self.by_key.get(&(source_file, path_syntax))?;

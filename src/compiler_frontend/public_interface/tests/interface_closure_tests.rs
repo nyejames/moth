@@ -27,7 +27,8 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
@@ -184,7 +185,7 @@ fn close(
             .map(|(index, interface)| SourceProviderDependency {
                 kind:
                     crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-                        shell: DependencyShellId::new(FileId(0), index as u32),
+                        shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
                     },
                 interface,
             })
@@ -487,13 +488,13 @@ fn disagreeing_provider_declarations_fail_deterministically() {
     let error = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &second,
         },
@@ -538,13 +539,13 @@ fn disagreeing_provider_summaries_fail_deterministically() {
     let error = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &second,
         },
@@ -575,7 +576,7 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
 
     let error = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-            shell: DependencyShellId::new(FileId(0), 0),
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
         },
         interface: &duplicate,
     }])

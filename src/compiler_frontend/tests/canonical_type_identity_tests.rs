@@ -1634,7 +1634,7 @@ fn canonical_trait_identity_carries_no_local_ids_or_paths() {
         assert!(
             !debug.contains("TraitId(")
                 && !debug.contains("StringId(")
-                && !debug.contains("FileId("),
+                && !debug.contains("SourceId("),
             "canonical trait identity must not embed local IDs: {debug}"
         );
         assert!(

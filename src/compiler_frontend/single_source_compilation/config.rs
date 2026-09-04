@@ -50,8 +50,8 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -517,7 +517,7 @@ fn prepare_config_file(
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     ) {
         Ok(tokens) => tokens,
         Err(error) => {

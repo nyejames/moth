@@ -17,7 +17,7 @@ use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, HeaderKind, PreparedFilePathSyntax,
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -99,7 +99,7 @@ pub(crate) fn prepare_moth_template_file(
 /// threading the same path, location, and interned names through every helper.
 struct MothTemplatePrepareContext {
     source_file: InternedPath,
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
     canonical_os_path: Option<PathBuf>,
     body_tokens: Vec<Token>,
     synthetic_location: SourceLocation,

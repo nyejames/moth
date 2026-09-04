@@ -15,7 +15,7 @@ use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
 };
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, Token, TokenKind};
@@ -28,7 +28,7 @@ use std::path::PathBuf;
 pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) source_file: InternedPath,
-    pub(crate) file_id: Option<FileId>,
+    pub(crate) file_id: Option<SourceId>,
     pub(crate) canonical_os_path: Option<PathBuf>,
 }
 

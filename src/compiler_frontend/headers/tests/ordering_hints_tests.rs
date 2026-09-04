@@ -13,8 +13,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::HeaderParseOptions;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -38,7 +38,7 @@ fn prepare_source(
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
     let output = prepare_file_from_tokens(

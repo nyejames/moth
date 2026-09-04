@@ -1041,7 +1041,7 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+        Some(crate::compiler_frontend::source::SourceId::from_index(0)),
     )
     .expect("classifier fixture should tokenize");
 
@@ -1106,7 +1106,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+            Some(crate::compiler_frontend::source::SourceId::from_index(0)),
         )
         .expect("classifier fixture should tokenize");
         while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {

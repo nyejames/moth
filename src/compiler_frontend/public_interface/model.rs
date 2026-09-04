@@ -78,7 +78,7 @@ pub(crate) struct PublicReturnTypeSlot {
 /// the bounds are a separate fact on this entry.
 /// WHY: the exported generic parameter must carry both identity and bounds so a cross-module
 /// consumer can see the full constraint shape without donor-local `TraitId`,
-/// `GenericParameterId`, `InternedPath`, `StringId`, `FileId`, `CoreTraitKind` registry handle
+/// `GenericParameterId`, `InternedPath`, `StringId`, `SourceId`, `CoreTraitKind` registry handle
 /// or source location.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicGenericParameterSurface {

@@ -27,11 +27,11 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
@@ -93,7 +93,7 @@ impl FrontendProject {
         .expect("project path resolver should build");
 
         let mut string_table = StringTable::new();
-        let source_files = SourceFileTable::build(
+        let source_files = SourceDatabase::build(
             &canonical_files,
             &entry_file,
             Some(&resolver),
@@ -171,7 +171,7 @@ impl FrontendProject {
             .frontend
             .source_files
             .get_by_canonical_path(&self.entry_file)
-            .map(|identity| identity.file_id);
+            .map(|identity| identity.id);
 
         let options = HeaderParseOptions {
             entry_file_id,

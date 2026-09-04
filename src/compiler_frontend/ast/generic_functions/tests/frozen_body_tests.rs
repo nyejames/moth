@@ -54,7 +54,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
@@ -196,13 +196,13 @@ fn capture_test_body(
     source_table: &StringTable,
 ) -> StableBodySyntax {
     let mut tokens = original.clone();
-    tokens.file_id = Some(FileId(0));
+    tokens.file_id = Some(SourceId::from_index(0));
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     for (path_syntax, _) in tokens.path_syntax.iter() {
         resolved_references
             .push(ResolvedFileReference {
-                source_file: FileId(0),
+                source_file: SourceId::from_index(0),
                 path_syntax,
                 class: PreparedFileReferenceClass::ResourceFile,
                 outcome: ResolvedFileReferenceOutcome::Target(
@@ -217,7 +217,7 @@ fn capture_test_body(
             })
             .expect("test path rows should be unique");
     }
-    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceFileTable::empty());
+    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
     let no_content_value = |_path: &InternedPath| -> Result<PublicFoldedValue, CompilerError> {
         Err(CompilerError::compiler_error(
             "test body has no content value resolver",
@@ -252,13 +252,13 @@ fn direct_content_body_fixture() -> (
     let tokens = vec![Token::new(TokenKind::Path(path_id), path_location)];
     let body = FileTokens::new_with_identity(
         source_file.clone(),
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
         None,
         tokens,
         path_syntax,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [PathBuf::from("@mod.moth"), PathBuf::from("@private.mtf")],
         Path::new("@mod.moth"),
         None,
@@ -268,11 +268,13 @@ fn direct_content_body_fixture() -> (
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
-            source_file: FileId(0),
+            source_file: SourceId::from_index(0),
             path_syntax: path_id,
             class: PreparedFileReferenceClass::ContentSource,
             outcome: ResolvedFileReferenceOutcome::Target(
-                ResolvedFileReferenceTarget::ContentSource { source: FileId(1) },
+                ResolvedFileReferenceTarget::ContentSource {
+                    source: SourceId::from_index(1),
+                },
             ),
         })
         .expect("content fixture path rows should be unique");
@@ -536,7 +538,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let source_file = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
     let original = FileTokens::new_with_identity(
         source_file.clone(),
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
         None,
         vec![
             Token::new(TokenKind::Path(second_donor_path), base_location.clone()),
@@ -553,7 +555,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     ] {
         resolved_references
             .push(ResolvedFileReference {
-                source_file: FileId(0),
+                source_file: SourceId::from_index(0),
                 path_syntax,
                 class: PreparedFileReferenceClass::ResourceFile,
                 outcome: ResolvedFileReferenceOutcome::Target(
@@ -568,7 +570,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
             })
             .expect("remapping fixture path rows should be unique");
     }
-    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceFileTable::empty());
+    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
     let frozen = StableBodySyntax::capture(
         &original,
         &source_file,
@@ -1002,7 +1004,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .context
         .stage0_resolution_facts = Some(Arc::new(Stage0ResolutionFacts::ordinary(
         resolved_references,
-        SourceFileTable::empty(),
+        SourceDatabase::empty(),
     )));
 
     let mut preparation = build_result
@@ -1205,7 +1207,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         );
         let body = FileTokens::new_with_identity(
             source_file.clone(),
-            Some(FileId(0)),
+            Some(SourceId::from_index(0)),
             None,
             vec![Token::new(TokenKind::Path(path_id), path_location)],
             path_syntax,
@@ -1213,7 +1215,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let mut resolved_references = ResolvedFileReferenceTable::new();
         resolved_references
             .push(ResolvedFileReference {
-                source_file: FileId(0),
+                source_file: SourceId::from_index(0),
                 path_syntax: path_id,
                 class: PreparedFileReferenceClass::ResourceFile,
                 outcome: ResolvedFileReferenceOutcome::Target(
@@ -1227,7 +1229,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
                 ),
             })
             .expect("collision fixture path rows should be unique");
-        let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceFileTable::empty());
+        let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
         let frozen =
             StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
                 Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(

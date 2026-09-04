@@ -598,7 +598,7 @@ fn compile_single_file_frontend_with_target(
 /// Rebind synthetic Stage 0 file-reference rows to the final module source identities.
 ///
 /// Synthetic discovery must resolve paths before the complete source closure is known, so it
-/// retains canonical target paths until `prepare_module` builds the authoritative `SourceFileTable`.
+/// retains canonical target paths until `prepare_module` builds the authoritative `SourceDatabase`.
 /// This helper performs that one identity join and publishes the same resolved table consumed by
 /// directory modules; it does not probe the filesystem or reinterpret any path syntax.
 fn attach_single_file_resolved_references(
@@ -613,7 +613,7 @@ fn attach_single_file_resolved_references(
             .semantic
             .source_files
             .get_by_canonical_path(&reference.source_path)
-            .map(|identity| identity.file_id)
+            .map(|identity| identity.id)
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
@@ -645,7 +645,7 @@ fn attach_single_file_resolved_references(
                     .semantic
                     .source_files
                     .get_by_canonical_path(&canonical)
-                    .map(|identity| identity.file_id)
+                    .map(|identity| identity.id)
                     .ok_or_else(|| {
                         CompilerMessages::from_error_ref(
                             CompilerError::compiler_error(format!(

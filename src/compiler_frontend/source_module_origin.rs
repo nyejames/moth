@@ -1,7 +1,7 @@
 //! Module-local source-origin side table mapping prepared source files to owning module origins.
 //!
 //! WHAT: owns the immutable, remap-free side table that resolves each prepared source file
-//!       identity (`FileId`) to its owning `StableModuleOriginIdentity`. The table is
+//! identity (`SourceId`) to its owning `StableModuleOriginIdentity`. The table is
 //!       populated from the build-system-owned central `SourceTreeIndex` through the
 //!       `ProjectModuleGraph` for directory modules, or from the single synthetic normal-module
 //!       origin for single-file compilation. It carries no `StringId` values, so it requires no
@@ -22,7 +22,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 
 use rustc_hash::FxHashMap;
 
@@ -31,7 +31,7 @@ use std::path::PathBuf;
 /// Immutable module-local side table mapping each prepared source file to its owning stable
 /// module origin.
 ///
-/// Keyed by `FileId` (the deterministic local source-file identity from `SourceFileTable`).
+/// Keyed by `SourceId` (the deterministic local source identity from `SourceDatabase`).
 /// Values are `StableModuleOriginIdentity` (the graph-owned cross-build origin). Entries for
 /// source files not owned by any project module (source-package files) are `None`.
 ///
@@ -52,7 +52,7 @@ impl SourceModuleOriginTable {
     /// error: they are not directly defined public exports and do not participate in
     /// active-root origin projection.
     pub(crate) fn from_graph_ownership(
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
     ) -> Self {
         let origins = source_files
@@ -72,7 +72,7 @@ impl SourceModuleOriginTable {
     /// Every prepared source file maps to the same synthetic origin, matching the single-file
     /// compilation path's one-module semantics.
     pub(crate) fn from_synthetic_origin(
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         origin: &StableModuleOriginIdentity,
     ) -> Self {
         let origins = source_files.iter().map(|_| Some(origin.clone())).collect();
@@ -84,24 +84,24 @@ impl SourceModuleOriginTable {
     ///
     /// Returns `Ok(Some(origin))` for a project-module-owned source file and `Ok(None)` for an
     /// in-range source-package file not owned by the current project module graph (an explicit
-    /// migration state until separate package graphs exist). An out-of-range `FileId` is an
+    /// migration state until separate package graphs exist). An out-of-range `SourceId` is an
     /// internal invariant violation surfaced through `Err(CompilerError)` rather than silently
     /// returning `None`, so callers cannot conflate an unowned file with a corrupt identity.
     pub(crate) fn origin_for(
         &self,
-        file_id: FileId,
+        source_id: SourceId,
     ) -> Result<Option<&StableModuleOriginIdentity>, CompilerError> {
-        match self.origins.get(file_id.0 as usize) {
+        match self.origins.get(source_id.index()) {
             Some(origin) => Ok(origin.as_ref()),
             None => Err(CompilerError::compiler_error(format!(
-                "source module origin table: out-of-range FileId {} (table has {} entries)",
-                file_id.0,
+                "source module origin table: out-of-range {source_id:?} at index {} (table has {} entries)",
+                source_id.index(),
                 self.origins.len()
             ))),
         }
     }
 
-    /// The number of source file entries in the table (one per `FileId`).
+    /// The number of source entries in the table (one per `SourceId`).
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.origins.len()

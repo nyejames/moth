@@ -24,8 +24,8 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -80,18 +80,18 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 
     let template_path = Path::new(TEMPLATE_PATH);
     let markdown_path = Path::new(MARKDOWN_PATH);
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [template_path, markdown_path],
         template_path,
         None,
         &mut string_table,
     )
     .expect("bundle source identities should build");
-    let file_id = |source_files: &SourceFileTable, path: &Path| {
+    let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
             .unwrap_or_else(|| panic!("bundle file {path:?} should have a source identity"))
-            .file_id
+            .id
     };
 
     // The template names a nested Markdown content source, a resource file and the site root.
@@ -117,7 +117,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     for reference in prepared_template.structural_file_references.references() {
         let source_file = reference
             .source_file
-            .expect("prepared rows carry a source FileId");
+            .expect("prepared rows carry a source SourceId");
         let outcome = match reference.class {
             PreparedFileReferenceClass::ContentSource => {
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
@@ -207,7 +207,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 }
 
 fn prepare_bundle_source(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     source_path: &Path,
     source_code: &str,
     style_directives: &StyleDirectiveRegistry,

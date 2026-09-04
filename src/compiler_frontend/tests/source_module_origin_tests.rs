@@ -11,8 +11,8 @@
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -27,11 +27,11 @@ fn touch(dir: &std::path::Path, name: &str) -> PathBuf {
     fs::canonicalize(&path).expect("temp file should canonicalize after creation")
 }
 
-/// Build a `SourceFileTable` from canonical paths in single-file mode (no project path resolver).
-fn build_source_file_table(canonical_paths: &[PathBuf]) -> (SourceFileTable, StringTable) {
+/// Build a `SourceDatabase` from canonical paths in single-file mode (no project path resolver).
+fn build_source_database(canonical_paths: &[PathBuf]) -> (SourceDatabase, StringTable) {
     let mut string_table = StringTable::new();
     let entry = &canonical_paths[0];
-    let table = SourceFileTable::build(
+    let table = SourceDatabase::build(
         canonical_paths.iter().cloned(),
         entry,
         None,
@@ -74,7 +74,7 @@ fn single_file_maps_every_source_file_to_one_synthetic_origin() {
     let entry = touch(dir.path(), "entry.moth");
     let helper = touch(dir.path(), "helper.moth");
 
-    let (table, _string_table) = build_source_file_table(&[entry.clone(), helper.clone()]);
+    let (table, _string_table) = build_source_database(&[entry.clone(), helper.clone()]);
     let origin = synthetic_origin("single");
 
     let origins = SourceModuleOriginTable::from_synthetic_origin(&table, &origin);
@@ -87,8 +87,8 @@ fn single_file_maps_every_source_file_to_one_synthetic_origin() {
     for identity in table.iter() {
         assert_eq!(
             origins
-                .origin_for(identity.file_id)
-                .expect("in-range FileId must not error"),
+                .origin_for(identity.id)
+                .expect("in-range SourceId must not error"),
             Some(&origin),
             "every source file in single-file mode must map to the one synthetic origin"
         );
@@ -104,7 +104,7 @@ fn directory_active_and_imported_files_map_to_distinct_graph_origins() {
     let imported_root = touch(&nested_dir, "@other.moth");
 
     let (table, _string_table) =
-        build_source_file_table(&[active_root.clone(), imported_root.clone()]);
+        build_source_database(&[active_root.clone(), imported_root.clone()]);
 
     let active_origin = synthetic_origin("project");
     let imported_origin = nested_origin("project", "sub");
@@ -119,33 +119,33 @@ fn directory_active_and_imported_files_map_to_distinct_graph_origins() {
     let active_id = table
         .get_by_canonical_path(&active_root)
         .expect("active root should be in the source file table")
-        .file_id;
+        .id;
     let imported_id = table
         .get_by_canonical_path(&imported_root)
         .expect("imported root should be in the source file table")
-        .file_id;
+        .id;
 
     assert_eq!(
         origins
             .origin_for(active_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         Some(&active_origin),
         "the active root must map to its own graph origin"
     );
     assert_eq!(
         origins
             .origin_for(imported_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         Some(&imported_origin),
         "the imported root must map to its own distinct graph origin"
     );
     assert_ne!(
         origins
             .origin_for(active_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         origins
             .origin_for(imported_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         "active and imported origins must be distinct"
     );
 }
@@ -162,7 +162,7 @@ fn source_package_files_outside_the_graph_map_to_none() {
     let source_package_root = touch(&package_dir, "@mod.moth");
 
     let (table, _string_table) =
-        build_source_file_table(&[active_root.clone(), source_package_root.clone()]);
+        build_source_database(&[active_root.clone(), source_package_root.clone()]);
 
     let active_origin = synthetic_origin("project");
     let lookup = graph_lookup(&[(active_root.clone(), active_origin.clone())]);
@@ -172,23 +172,23 @@ fn source_package_files_outside_the_graph_map_to_none() {
     let active_id = table
         .get_by_canonical_path(&active_root)
         .expect("active root should be in the source file table")
-        .file_id;
+        .id;
     let package_id = table
         .get_by_canonical_path(&source_package_root)
         .expect("source package root should be in the source file table")
-        .file_id;
+        .id;
 
     assert_eq!(
         origins
             .origin_for(active_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         Some(&active_origin),
         "the active root must map to its graph origin"
     );
     assert_eq!(
         origins
             .origin_for(package_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         None,
         "a source-package file outside the project module graph must map to None"
     );
@@ -204,8 +204,7 @@ fn ordinary_donor_files_map_to_their_nearest_owning_module() {
     fs::create_dir_all(&nested_dir).expect("nested dir should be created");
     let donor_file = touch(&nested_dir, "helper.moth");
 
-    let (table, _string_table) =
-        build_source_file_table(&[active_root.clone(), donor_file.clone()]);
+    let (table, _string_table) = build_source_database(&[active_root.clone(), donor_file.clone()]);
 
     let active_origin = synthetic_origin("project");
     let donor_origin = nested_origin("project", "nested");
@@ -220,12 +219,12 @@ fn ordinary_donor_files_map_to_their_nearest_owning_module() {
     let donor_id = table
         .get_by_canonical_path(&donor_file)
         .expect("donor file should be in the source file table")
-        .file_id;
+        .id;
 
     assert_eq!(
         origins
             .origin_for(donor_id)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         Some(&donor_origin),
         "an ordinary donor file must map to its nearest owning module origin"
     );
@@ -236,15 +235,15 @@ fn out_of_range_file_id_is_an_internal_error() {
     let dir = tempfile::tempdir().expect("temp dir");
     let entry = touch(dir.path(), "entry.moth");
 
-    let (table, _string_table) = build_source_file_table(&[entry]);
+    let (table, _string_table) = build_source_database(&[entry]);
     let origin = synthetic_origin("project");
 
     let origins = SourceModuleOriginTable::from_synthetic_origin(&table, &origin);
 
-    let result = origins.origin_for(FileId(999));
+    let result = origins.origin_for(SourceId::from_index(999));
     assert!(
         result.is_err(),
-        "an out-of-range FileId must return an internal CompilerError, not None"
+        "an out-of-range SourceId must return an internal CompilerError, not None"
     );
     let error = result.unwrap_err();
     let message = &error.msg;
@@ -256,7 +255,7 @@ fn out_of_range_file_id_is_an_internal_error() {
 
 #[test]
 fn empty_source_file_table_produces_empty_origin_table() {
-    let table = SourceFileTable::empty();
+    let table = SourceDatabase::empty();
     let origin = synthetic_origin("project");
 
     let origins = SourceModuleOriginTable::from_synthetic_origin(&table, &origin);
@@ -281,8 +280,8 @@ fn checkout_root_movement_does_not_alter_stable_module_origin() {
     let file_a = touch(dir_a.path(), "@main.moth");
     let file_b = touch(dir_b.path(), "@main.moth");
 
-    let (table_a, _string_a) = build_source_file_table(std::slice::from_ref(&file_a));
-    let (table_b, _string_b) = build_source_file_table(std::slice::from_ref(&file_b));
+    let (table_a, _string_a) = build_source_database(std::slice::from_ref(&file_a));
+    let (table_b, _string_b) = build_source_database(std::slice::from_ref(&file_b));
 
     let lookup_a = graph_lookup(&[(file_a, origin.clone())]);
     let lookup_b = graph_lookup(&[(file_b, origin.clone())]);
@@ -296,28 +295,28 @@ fn checkout_root_movement_does_not_alter_stable_module_origin() {
                 .expect("canonical path should exist"),
         )
         .expect("file should be in table A")
-        .file_id;
+        .id;
     let id_b = table_b
         .get_by_canonical_path(
             &std::fs::canonicalize(dir_b.path().join("@main.moth"))
                 .expect("canonical path should exist"),
         )
         .expect("file should be in table B")
-        .file_id;
+        .id;
 
     assert_eq!(
         origins_a
             .origin_for(id_a)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         origins_b
             .origin_for(id_b)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         "the stable module origin must be identical after a checkout-root move"
     );
     assert_eq!(
         origins_a
             .origin_for(id_a)
-            .expect("in-range FileId must not error"),
+            .expect("in-range SourceId must not error"),
         Some(&origin),
         "the origin must be the graph-owned value, not a path-derived fallback"
     );

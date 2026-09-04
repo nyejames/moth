@@ -17,7 +17,7 @@ use std::sync::Arc;
 ///
 /// WHAT: preserves the already-tokenized body as canonical [`Token`] values whose `StringId`
 ///       payloads index one context-local immutable frozen string pool.
-/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `FileId`, filesystem
+/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `SourceId`, filesystem
 ///      paths, or a mutable string table. Freezing remaps donor IDs into the pool once.
 ///      Materialisation merges the pool into the fresh generated-local table once and remaps every
 ///      token payload through that single pool remap, without running tokenization again.

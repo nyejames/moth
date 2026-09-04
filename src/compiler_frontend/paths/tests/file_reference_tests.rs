@@ -7,7 +7,7 @@ use super::{
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::dependency_resolution::exact_case_mismatch_for_components;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -110,7 +110,7 @@ fn resolved_references_are_lookupable_by_file_and_path_handle() {
     );
     let mut table = ResolvedFileReferenceTable::new();
     let reference = ResolvedFileReference {
-        source_file: FileId(7),
+        source_file: SourceId::from_index(7),
         path_syntax,
         class: PreparedFileReferenceClass::SourceKindNoFileValue,
         outcome: ResolvedFileReferenceOutcome::Target(
@@ -123,8 +123,8 @@ fn resolved_references_are_lookupable_by_file_and_path_handle() {
         .expect("first composite key should be unique");
 
     assert_eq!(table.iter().count(), 1);
-    assert!(table.get(FileId(7), path_syntax).is_some());
-    assert!(table.get(FileId(8), path_syntax).is_none());
+    assert!(table.get(SourceId::from_index(7), path_syntax).is_some());
+    assert!(table.get(SourceId::from_index(8), path_syntax).is_none());
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn resolved_reference_duplicate_composite_keys_are_rejected() {
     );
     let mut table = ResolvedFileReferenceTable::new();
     let make_reference = || ResolvedFileReference {
-        source_file: FileId(7),
+        source_file: SourceId::from_index(7),
         path_syntax,
         class: PreparedFileReferenceClass::SourceKindNoFileValue,
         outcome: ResolvedFileReferenceOutcome::Target(
@@ -162,7 +162,7 @@ fn resolved_reference_validation_rejects_class_outcome_mismatch() {
     let mut table = ResolvedFileReferenceTable::new();
     table
         .push(ResolvedFileReference {
-            source_file: FileId(7),
+            source_file: SourceId::from_index(7),
             path_syntax,
             class: PreparedFileReferenceClass::ResourceFile,
             outcome: ResolvedFileReferenceOutcome::Target(

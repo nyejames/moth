@@ -465,7 +465,7 @@ impl ExportedGenericParameterIdentity {
 /// WHAT: carries only stable, owned values. It distinguishes source-declared traits
 /// (`Source(OriginTraitId)`) from compiler-owned core traits
 /// (`Core(CanonicalCoreTraitIdentity)`). It never embeds `TraitId`, `StringId`,
-/// `InternedPath`, `FileId`, source location, rendered display name or a
+/// `InternedPath`, `SourceId`, source location, rendered display name or a
 /// `CoreTraitKind` registry handle.
 /// WHY: cross-module generic bound surfaces must compare trait identities rather than
 /// donor-local `TraitId` values. A source trait and a core trait with the same source

@@ -42,7 +42,8 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
@@ -110,7 +111,7 @@ fn make_file_tokens(symbol_name: &str, string_table: &mut StringTable) -> FileTo
 
 fn make_prepared_header(
     source_file: &InternedPath,
-    file_id: FileId,
+    file_id: SourceId,
     canonical_os_path: &Path,
     tokens: Vec<Token>,
 ) -> Header {
@@ -137,7 +138,7 @@ fn make_prepared_header(
 
 fn make_prepared_output(
     source_file: InternedPath,
-    file_id: FileId,
+    file_id: SourceId,
     canonical_os_path: PathBuf,
     headers: Vec<Header>,
 ) -> FileFrontendPrepareOutput {
@@ -200,7 +201,7 @@ fn file_dependency_clause_remaps_all_fields_without_alias() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: path_location,
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
     };
     let mut dependency = RetainedDependencyClause {
         dependency: provider.clone(),
@@ -241,7 +242,7 @@ fn file_dependency_clause_remaps_all_fields_with_alias() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: path_location,
-        dependency_shell_id: DependencyShellId::new(FileId(0), 1),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 1),
     };
     let mut dependency = RetainedDependencyClause {
         dependency: provider.clone(),
@@ -289,7 +290,7 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     let location = make_location("file.moth", &mut local);
     let path_location = make_location("file.moth", &mut local);
     let alias_location = make_location("file.moth", &mut local);
-    let original_shell = DependencyShellId::new(FileId(0), 2);
+    let original_shell = DependencyShellId::new(SourceId::from_index(0), 2);
 
     let provider = RetainedDependencyPath {
         path: header_path,
@@ -749,7 +750,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: make_location("test.moth", &mut local),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
     };
     let dependency = RetainedDependencyClause {
         dependency: provider.clone(),
@@ -1008,13 +1009,13 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: provisional_location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(7), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(7), 0),
     };
     let clause_location = provisional_location.clone();
 
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source.clone(),
-        file_id: Some(FileId(7)),
+        file_id: Some(SourceId::from_index(7)),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 3,
         token_stats: TokenStats::default(),
@@ -1040,7 +1041,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(FileId(7)),
+                    Some(SourceId::from_index(7)),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("function_body")),
@@ -1066,7 +1067,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(FileId(7)),
+                    Some(SourceId::from_index(7)),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("constant_body")),
@@ -1091,7 +1092,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(FileId(7)),
+                    Some(SourceId::from_index(7)),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("trait_body")),
@@ -1115,20 +1116,24 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
 
     let final_os_path = PathBuf::from("/project/src/main.moth");
     output
-        .rebind_source_identity(FileId(42), final_source.clone(), final_os_path.clone())
+        .rebind_source_identity(
+            SourceId::from_index(42),
+            final_source.clone(),
+            final_os_path.clone(),
+        )
         .expect("complete retained output should rebind atomically");
     output
         .freeze_path_syntax(&string_table)
         .expect("the fully rebound retained output should satisfy the file invariant gate");
 
     assert_eq!(output.source_file, final_source);
-    assert_eq!(output.file_id, Some(FileId(42)));
+    assert_eq!(output.file_id, Some(SourceId::from_index(42)));
     assert_eq!(output.canonical_os_path, Some(final_os_path.clone()));
 
     for header in &output.headers {
         assert_eq!(header.source_file, output.source_file);
         assert_eq!(header.tokens.src_path, output.source_file);
-        assert_eq!(header.tokens.file_id, Some(FileId(42)));
+        assert_eq!(header.tokens.file_id, Some(SourceId::from_index(42)));
         assert_eq!(header.tokens.canonical_os_path, Some(final_os_path.clone()));
         assert_eq!(header.name_location.scope, output.source_file);
         assert!(
@@ -1236,7 +1241,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let clause = &output.file_dependency_clauses[0];
     assert_eq!(
         clause.dependency.dependency_shell_id,
-        DependencyShellId::new(FileId(42), 0)
+        DependencyShellId::new(SourceId::from_index(42), 0)
     );
     assert_eq!(clause.location.scope, output.source_file);
     assert_eq!(clause.dependency.path, provider_path);
@@ -1258,11 +1263,11 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(3), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(3), 0),
     };
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source,
-        file_id: Some(FileId(3)),
+        file_id: Some(SourceId::from_index(3)),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1286,14 +1291,14 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
 
     output
         .rebind_source_identity(
-            FileId(19),
+            SourceId::from_index(19),
             final_source.clone(),
             PathBuf::from("/project/src/main.moth"),
         )
         .expect("complete retained output should rebind atomically");
     let rebound = &output.file_dependency_clauses[0].dependency;
     let shell = rebound.dependency_shell_id;
-    assert_eq!(shell, DependencyShellId::new(FileId(19), 0));
+    assert_eq!(shell, DependencyShellId::new(SourceId::from_index(19), 0));
     assert_eq!(rebound.location.scope, output.source_file);
     assert_eq!(output.source_file, final_source);
     assert_eq!(rebound.path.to_portable_string(&string_table), "provider");
@@ -1340,7 +1345,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: dependency_location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
     };
     let dependency = RetainedDependencyClause {
         dependency: provider.clone(),
@@ -1415,8 +1420,18 @@ fn prepared_file_invariant_anchors_header_identity_to_file_id() {
     let mut string_table = StringTable::new();
     let source_file = InternedPath::from_single_str("logical/main.moth", &mut string_table);
     let canonical_os_path = PathBuf::from("/project/src/main.moth");
-    let header = make_prepared_header(&source_file, FileId(7), &canonical_os_path, Vec::new());
-    let mut output = make_prepared_output(source_file, FileId(6), canonical_os_path, vec![header]);
+    let header = make_prepared_header(
+        &source_file,
+        SourceId::from_index(7),
+        &canonical_os_path,
+        Vec::new(),
+    );
+    let mut output = make_prepared_output(
+        source_file,
+        SourceId::from_index(6),
+        canonical_os_path,
+        vec![header],
+    );
 
     let error = output
         .freeze_path_syntax(&string_table)
@@ -1443,11 +1458,11 @@ fn prepared_file_invariant_anchors_clause_shell_identity_to_file_id() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(7), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(7), 0),
     };
     let mut output = make_prepared_output(
         source_file,
-        FileId(6),
+        SourceId::from_index(6),
         PathBuf::from("/project/src/main.moth"),
         Vec::new(),
     );
@@ -1486,7 +1501,7 @@ fn prepared_file_invariant_rejects_duplicate_clause_shell_ordinals() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(6), ordinal),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(6), ordinal),
     };
     let clause = |provider: RetainedDependencyPath| RetainedDependencyClause {
         dependency: provider.clone(),
@@ -1496,7 +1511,7 @@ fn prepared_file_invariant_rejects_duplicate_clause_shell_ordinals() {
     };
     let mut output = make_prepared_output(
         source_file,
-        FileId(6),
+        SourceId::from_index(6),
         PathBuf::from("/project/src/main.moth"),
         Vec::new(),
     );
@@ -1523,11 +1538,16 @@ fn prepared_file_invariant_rejects_stale_path_handles() {
     );
     let header = make_prepared_header(
         &source_file,
-        FileId(6),
+        SourceId::from_index(6),
         &canonical_os_path,
         vec![Token::new(TokenKind::Path(PathSyntaxId::NONE), location)],
     );
-    let mut output = make_prepared_output(source_file, FileId(6), canonical_os_path, vec![header]);
+    let mut output = make_prepared_output(
+        source_file,
+        SourceId::from_index(6),
+        canonical_os_path,
+        vec![header],
+    );
 
     let error = output
         .freeze_path_syntax(&string_table)
@@ -1549,7 +1569,7 @@ fn prepared_file_invariant_rejects_unclaimed_dependency_selection_rows() {
     );
     let mut output = make_prepared_output(
         source_file,
-        FileId(6),
+        SourceId::from_index(6),
         PathBuf::from("/project/src/main.moth"),
         Vec::new(),
     );
@@ -1581,7 +1601,7 @@ fn prepared_file_invariant_rejects_malformed_provider_prefix_count() {
     );
     let mut output = make_prepared_output(
         source_file,
-        FileId(6),
+        SourceId::from_index(6),
         PathBuf::from("/project/src/main.moth"),
         Vec::new(),
     );
@@ -1594,7 +1614,7 @@ fn prepared_file_invariant_rejects_malformed_provider_prefix_count() {
                 extension: string_table.intern("js"),
             },
             location: location.clone(),
-            dependency_shell_id: DependencyShellId::new(FileId(6), 0),
+            dependency_shell_id: DependencyShellId::new(SourceId::from_index(6), 0),
         },
         binding: DependencyBindingSyntax::Namespace { alias: None },
         location,
@@ -1621,7 +1641,7 @@ fn prepared_file_invariant_rejects_empty_retained_dependency_path() {
     );
     let mut output = make_prepared_output(
         source_file,
-        FileId(6),
+        SourceId::from_index(6),
         PathBuf::from("/project/src/main.moth"),
         Vec::new(),
     );
@@ -1634,7 +1654,7 @@ fn prepared_file_invariant_rejects_empty_retained_dependency_path() {
             target:
                 crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
             location: location.clone(),
-            dependency_shell_id: DependencyShellId::new(FileId(6), 0),
+            dependency_shell_id: DependencyShellId::new(SourceId::from_index(6), 0),
         },
         binding: DependencyBindingSyntax::Namespace { alias: None },
         location,
@@ -1670,7 +1690,7 @@ fn prepared_file_rebinding_preflights_required_paths_without_partial_mutation() 
         ),
         tokens: FileTokens::new_deferred_with_identity(
             malformed_header_path.clone(),
-            Some(FileId(6)),
+            Some(SourceId::from_index(6)),
             Some(provisional_os_path.clone()),
             Vec::new(),
         ),
@@ -1679,20 +1699,20 @@ fn prepared_file_rebinding_preflights_required_paths_without_partial_mutation() 
     };
     let mut output = make_prepared_output(
         provisional_source.clone(),
-        FileId(6),
+        SourceId::from_index(6),
         provisional_os_path.clone(),
         vec![header],
     );
 
     let error = output
-        .rebind_source_identity(FileId(9), final_source, final_os_path)
+        .rebind_source_identity(SourceId::from_index(9), final_source, final_os_path)
         .expect_err("a source-owned header path must carry the provisional source prefix");
     assert!(
         error.msg.contains("missing its provisional source prefix"),
         "unexpected rebind error: {error:?}"
     );
     assert_eq!(output.source_file, provisional_source);
-    assert_eq!(output.file_id, Some(FileId(6)));
+    assert_eq!(output.file_id, Some(SourceId::from_index(6)));
     assert_eq!(output.canonical_os_path, Some(provisional_os_path));
     assert_eq!(output.headers[0].source_file, output.source_file);
     assert_eq!(output.headers[0].tokens.src_path, malformed_header_path);
@@ -1708,7 +1728,7 @@ fn prepared_file_rebinding_keeps_provider_spelling_prefix_free() {
     let provider_spelling = InternedPath::from_single_str("@core/math", &mut string_table);
     let mut header = make_prepared_header(
         &provisional_source,
-        FileId(6),
+        SourceId::from_index(6),
         &provisional_os_path,
         Vec::new(),
     );
@@ -1719,13 +1739,13 @@ fn prepared_file_rebinding_keeps_provider_spelling_prefix_free() {
         ));
     let mut output = make_prepared_output(
         provisional_source,
-        FileId(6),
+        SourceId::from_index(6),
         provisional_os_path,
         vec![header],
     );
 
     output
-        .rebind_source_identity(FileId(9), final_source, final_os_path)
+        .rebind_source_identity(SourceId::from_index(9), final_source, final_os_path)
         .expect("provider spellings intentionally remain outside the source prefix");
     assert_eq!(
         output.headers[0]

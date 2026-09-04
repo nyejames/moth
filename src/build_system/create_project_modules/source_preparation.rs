@@ -11,8 +11,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -44,7 +44,7 @@ pub(super) fn prepare_discovery_source(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
     let source =
@@ -67,7 +67,7 @@ pub(super) fn prepare_discovery_source_text(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
     let interned_path = match InternedPath::try_from_filesystem_path(file_path, string_table) {
@@ -128,7 +128,7 @@ pub(super) fn prepare_discovery_template_source(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
     let source =
@@ -172,7 +172,7 @@ fn prepare_discovery_file(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, SourceDiscoveryError> {
     prepare_discovery_output(
@@ -193,7 +193,7 @@ fn prepare_discovery_output(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, SourceDiscoveryError> {
     // Fork a local string table so preparation never mutates the shared table while merging.
@@ -203,7 +203,7 @@ fn prepare_discovery_output(
 
     let entry_file_id = source_files
         .get_by_canonical_path(entry_file_path)
-        .map(|identity| identity.file_id);
+        .map(|identity| identity.id);
     let options = HeaderParseOptions {
         entry_file_id,
         project_path_resolver: project_path_resolver.clone(),

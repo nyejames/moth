@@ -72,8 +72,8 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -125,7 +125,7 @@ pub(crate) struct Stage0ResolutionFacts {
 enum Stage0ResolutionFactsBacking {
     Ordinary {
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceFileTable,
+        source_files: SourceDatabase,
     },
     FrozenGeneric {
         references: FxHashMap<PathSyntaxId, FrozenResolvedFileReference>,
@@ -181,7 +181,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
 impl Stage0ResolutionFacts {
     pub(crate) fn ordinary(
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceFileTable,
+        source_files: SourceDatabase,
     ) -> Self {
         Self {
             backing: Stage0ResolutionFactsBacking::Ordinary {
@@ -217,7 +217,7 @@ impl Stage0ResolutionFacts {
 
     pub(crate) fn lookup(
         &self,
-        source_file: Option<FileId>,
+        source_file: Option<SourceId>,
         path_syntax: PathSyntaxId,
     ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
         match &self.backing {
@@ -227,7 +227,7 @@ impl Stage0ResolutionFacts {
             } => {
                 let source_file = source_file.ok_or_else(|| {
                     CompilerError::compiler_error(
-                        "ordinary Stage 0 file-reference lookup has no declaring FileId",
+                        "ordinary Stage 0 file-reference lookup has no declaring SourceId",
                     )
                 })?;
                 let Some(reference) = resolved_file_references.get(source_file, path_syntax) else {
@@ -244,7 +244,7 @@ impl Stage0ResolutionFacts {
 
 fn ordinary_reference_view<'a>(
     reference: &'a crate::compiler_frontend::paths::file_references::ResolvedFileReference,
-    source_files: &'a SourceFileTable,
+    source_files: &'a SourceDatabase,
 ) -> Result<Stage0ResolvedFileReferenceView<'a>, CompilerError> {
     let outcome = match &reference.outcome {
         ResolvedFileReferenceOutcome::NoPhysicalTarget => {
@@ -409,7 +409,7 @@ pub struct ScopeShared {
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
     /// Optional compiler-owned direct-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
-    pub(crate) declaring_file_id: Option<FileId>,
+    pub(crate) declaring_file_id: Option<SourceId>,
     pub(crate) template_const_loop_iteration_limit: usize,
 
     // Receiver method catalog for dispatch.

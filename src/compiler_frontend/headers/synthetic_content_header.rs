@@ -12,7 +12,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::types::{FileRole, Header, HeaderExportMode, HeaderKind};
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
@@ -28,7 +28,7 @@ const SYNTHETIC_CONTENT_NAME: &str = "content";
 ///      source-identity and initializer facts while this helper owns the repetitive header shape.
 pub(crate) struct SyntheticContentHeaderInput {
     pub(crate) source_file: InternedPath,
-    pub(crate) file_id: Option<FileId>,
+    pub(crate) file_id: Option<SourceId>,
     pub(crate) canonical_os_path: Option<PathBuf>,
     pub(crate) location: SourceLocation,
     pub(crate) initializer_tokens: Vec<Token>,

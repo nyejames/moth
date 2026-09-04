@@ -257,7 +257,7 @@ impl ScopeContext {
     }
 
     /// Identify the authored source file for path-syntax table joins.
-    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<FileId>) -> ScopeContext {
+    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<SourceId>) -> ScopeContext {
         Rc::make_mut(&mut self.shared).declaring_file_id = file_id;
         self
     }

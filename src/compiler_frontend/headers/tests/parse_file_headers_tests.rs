@@ -30,9 +30,9 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -71,7 +71,7 @@ pub(crate) fn prepare_single_file(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
 
@@ -95,7 +95,7 @@ fn prepare_test_source_file(
         TokenizerEntryMode::SourceFile,
         context.style_directives,
         string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     ) {
         Ok(file_tokens) => file_tokens,
         Err(diagnostic) => {
@@ -173,7 +173,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
     let path_token = file_tokens
@@ -237,7 +237,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
     let other_path = InternedPath::from_single_str("other.moth", &mut string_table);
@@ -247,7 +247,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(1)),
+        Some(SourceId::from_index(1)),
     )
     .expect("other file should tokenize");
     let swapped = FileTokens::new_with_identity(
@@ -391,7 +391,7 @@ fn parse_single_file_headers_with_entry(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
 
@@ -4971,7 +4971,7 @@ fn malformed_direct_selection_clause(range: DependencySelectionRange) -> Retaine
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: SourceLocation::default(),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
     };
     RetainedDependencyClause {
         dependency: provider,

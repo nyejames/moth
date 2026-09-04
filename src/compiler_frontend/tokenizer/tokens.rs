@@ -11,7 +11,7 @@ pub use crate::compiler_frontend::compiler_messages::source_location::{
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::token_log;
@@ -250,7 +250,7 @@ pub struct FileTokens {
     ///
     /// WHAT: carries frontend file identity into downstream parsing stages.
     /// WHY: entry-file detection and diagnostics should not rely on comparing path text.
-    pub file_id: Option<FileId>,
+    pub file_id: Option<SourceId>,
     /// Canonical filesystem source path for IO/path-resolution-only logic.
     pub canonical_os_path: Option<PathBuf>,
     // WHAT: Cheap token classification gathered during lexing.
@@ -270,7 +270,7 @@ impl FileTokens {
     /// Construct the sole mutable path-table owner for a newly tokenized source file.
     pub fn new_with_identity(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
@@ -291,7 +291,7 @@ impl FileTokens {
     /// source's immutable shared table.
     pub(crate) fn new_frozen_with_identity(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
@@ -309,7 +309,7 @@ impl FileTokens {
     /// prepared-file owner.
     pub fn new_deferred_with_identity(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -324,7 +324,7 @@ impl FileTokens {
 
     fn with_path_syntax(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
@@ -348,7 +348,7 @@ impl FileTokens {
     pub fn new_substream(
         source: &FileTokens,
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         tokens: Vec<Token>,
     ) -> FileTokens {
         Self::with_path_syntax(
@@ -370,7 +370,7 @@ impl FileTokens {
     ///      file owner from remapping or rebinding its one table.
     pub(crate) fn new_path_free_substream(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -389,7 +389,7 @@ impl FileTokens {
     /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
     pub fn new_from_slice(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         source_path_syntax: &FilePathSyntax,
@@ -569,8 +569,8 @@ impl FileTokens {
     ///       location scope, and every path-syntax table row location scope with the
     ///       supplied logical path and file identity.
     /// WHY: Stage 0 tokenizes each `.moth` file once against a filesystem identity. After the
-    ///      complete module file set is known, `SourceFileTable` assigns the module logical
-    ///      path, deterministic `FileId`, and canonical OS path. Retained tokens must adopt
+    ///      `SourceDatabase` assigns the module logical path, deterministic `SourceId`, and
+    ///      canonical OS path. Retained tokens must adopt
     ///      that identity so downstream header parsing, diagnostics, and dependency shells see
     ///      the same logical source scope as freshly tokenized files.
     ///
@@ -579,7 +579,7 @@ impl FileTokens {
     pub fn rebind_source_identity(
         &mut self,
         logical_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
     ) -> Result<(), CompilerError> {
         // Acquire the unique mutable owner before changing any identity field so an invalid
@@ -601,7 +601,7 @@ impl FileTokens {
     pub fn rebind_file_identity(
         &mut self,
         logical_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
     ) {
         self.file_id = file_id;

@@ -20,8 +20,8 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -32,7 +32,9 @@ use std::path::{Path, PathBuf};
 
 use super::module_identity::ModuleId;
 use super::resource_inputs::ResourceInputRegistry;
-use super::source_tree_index::{SourceClassification, SourceId, SourceOwnership, SourceTreeIndex};
+use super::source_tree_index::{
+    SourceClassification, SourceId as IndexedSourceId, SourceOwnership, SourceTreeIndex,
+};
 
 /// One directory-boundary physical file-reference resolver.
 ///
@@ -92,12 +94,12 @@ impl<'a> FileReferenceResolver<'a> {
         consumer_module_id: ModuleId,
         path_syntax: &PathSyntaxTable,
         reference: &PreparedFileReference,
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         string_table: &mut StringTable,
-        discovered_content_sources: &mut Vec<SourceId>,
+        discovered_content_sources: &mut Vec<IndexedSourceId>,
     ) -> Result<ResolvedFileReference, CompilerError> {
         let source_file = reference.source_file.ok_or_else(|| {
-            CompilerError::compiler_error("graph-active file reference has no preparing FileId")
+            CompilerError::compiler_error("graph-active file reference has no preparing SourceId")
         })?;
         let authored_path = &path_syntax
             .try_path_for_token(reference.path_syntax, &reference.location)?
@@ -260,10 +262,10 @@ impl<'a> FileReferenceResolver<'a> {
                 discovered_content_sources.push(target_source_id);
                 let target_file_id = source_files
                     .get_by_canonical_path(&canonical)
-                    .map(|identity| identity.file_id)
+                    .map(|identity| identity.id)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(
-                            "indexed content target is absent from the module SourceFileTable",
+                            "indexed content target is absent from the module SourceDatabase",
                         )
                     })?;
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
@@ -349,7 +351,7 @@ impl<'a> FileReferenceResolver<'a> {
         consumer_module_id: ModuleId,
         canonical: &Path,
         expected_kind: Option<SourceFileKind>,
-    ) -> Result<SourceId, CompilerError> {
+    ) -> Result<IndexedSourceId, CompilerError> {
         let source_id = self
             .source_tree_index
             .source_id_for_canonical_path(canonical)
@@ -391,7 +393,7 @@ impl<'a> FileReferenceResolver<'a> {
 
     fn diagnostic_outcome(
         &self,
-        source_file: FileId,
+        source_file: SourceId,
         reference: &PreparedFileReference,
         authored_path: &InternedPath,
         reason: InvalidCompileTimePathReason,
@@ -771,7 +773,7 @@ fn invalid_path_outcome(
 }
 
 /// A Stage 0 outcome retained while synthetic single-file discovery is still assembling its
-/// source closure. The final `FileId` values are assigned only after that closure is complete.
+/// source closure. The final `SourceId` values are assigned only after that closure is complete.
 #[derive(Clone, Debug)]
 pub(crate) struct SingleFileResolvedReference {
     pub(crate) source_path: PathBuf,
@@ -799,7 +801,7 @@ pub(crate) enum SingleFileReferenceOutcome {
 /// It shares the exact same lexical validation, canonical containment and settled cache as the
 /// directory resolver. The synthetic mode has no indexed `ModuleId`, so source ownership is
 /// represented by its containing directory and the final module preparation maps canonical source
-/// paths to its deterministic `FileId`s. Module-boundary legality for file values is detected
+/// paths to its deterministic `SourceId`s. Module-boundary legality for file values is detected
 /// lazily: every directory between a target and the synthetic root is probed with one `read_dir`
 /// for a child module root file, with the probe verdict cached per directory.
 pub(crate) struct SingleFileReferenceResolver<'a> {

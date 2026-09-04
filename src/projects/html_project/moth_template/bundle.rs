@@ -31,9 +31,9 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -124,8 +124,8 @@ pub(super) fn prepare_file_value_bundle(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    // 1. Register the template's identity so preparation stamps the final FileId.
-    let mut source_files = SourceFileTable::empty();
+    // 1. Register the template's identity so preparation stamps the final SourceId.
+    let mut source_files = SourceDatabase::empty();
     source_files
         .insert(
             unit.source_path.clone(),
@@ -136,7 +136,7 @@ pub(super) fn prepare_file_value_bundle(
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let Some(entry_file_id) = source_files
         .get_by_canonical_path(&unit.source_path)
-        .map(|identity| identity.file_id)
+        .map(|identity| identity.id)
     else {
         return Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error(
@@ -187,7 +187,7 @@ pub(super) fn prepare_file_value_bundle(
         )?;
         let owner_source_file = source_files
             .get_by_canonical_path(&path)
-            .map(|identity| identity.file_id)
+            .map(|identity| identity.id)
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
@@ -241,10 +241,10 @@ pub(super) fn prepare_file_value_bundle(
 /// targets so the fixed point reaches every nested dependency.
 ///
 /// This is the direct lane's identity join: canonical target paths resolved before the full
-/// source inventory was known become the bundle table's `FileId`s here.
+/// source inventory was known become the bundle database's `SourceId`s here.
 fn settle_reference_outcome(
     resolved: SingleFileResolvedReference,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     path_resolver: &ProjectPathResolver,
     queue: &mut VecDeque<QueuedSource>,
     source_file_kinds: &SourceFileKindRegistry,
@@ -317,7 +317,7 @@ fn settle_reference_outcome(
 }
 
 fn prepare_one_source(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     source_path: &Path,
     kind: SourceFileKind,
     source_code: String,

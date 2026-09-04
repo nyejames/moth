@@ -46,8 +46,8 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -125,7 +125,7 @@ fn config_marked_moth_template_paths_stay_out_of_structural_references() {
 fn prepare_via_pipeline(
     source: &str,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let source_files = SourceFileTable::empty();
+    let source_files = SourceDatabase::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions::default();
@@ -150,7 +150,7 @@ fn prepare_via_pipeline(
 }
 
 fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
-    let source_files = SourceFileTable::empty();
+    let source_files = SourceDatabase::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let project_path = std::env::temp_dir();
@@ -262,7 +262,7 @@ struct MothTemplateScopeFixture {
     html_root_file: PathBuf,
     entry_file_path: PathBuf,
     project_path_resolver: ProjectPathResolver,
-    source_files: SourceFileTable,
+    source_files: SourceDatabase,
     base_string_table: StringTable,
 }
 
@@ -336,7 +336,7 @@ impl MothTemplateScopeFixture {
 
         let mut string_table = StringTable::new();
         let entry_file_path = entry_root.join("@page.moth");
-        let source_files = SourceFileTable::build(
+        let source_files = SourceDatabase::build(
             canonical_files.iter(),
             &entry_file_path,
             Some(&project_path_resolver),
@@ -723,7 +723,7 @@ fn prepare_moth_source(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("Moth source should tokenize");
 

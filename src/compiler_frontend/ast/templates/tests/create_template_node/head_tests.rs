@@ -49,7 +49,7 @@ use crate::compiler_frontend::paths::file_references::{
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -220,7 +220,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         .expect("expected a content path token in the template head");
 
     let target_path = PathBuf::from("intro.mtf");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(&target_path),
         &target_path,
         None,
@@ -230,7 +230,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let source_file = source_files
         .get_by_canonical_path(&target_path)
         .expect("content source identity should be present")
-        .file_id;
+        .id;
     let content_path = content_constant_path(
         &source_files
             .get(source_file)

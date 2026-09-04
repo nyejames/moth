@@ -36,8 +36,8 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{
     StringIdRemap, StringTable, StringTableForkSource,
@@ -674,7 +674,7 @@ fn scan_and_cache_local_moth_source(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &ProjectPathResolver,
     entry_file_path: &Path,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<ScannedMothSource, SourceDiscoveryError> {
@@ -707,7 +707,7 @@ fn scan_and_cache_local_moth_template_source(
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &ProjectPathResolver,
     entry_file_path: &Path,
-    source_files: &mut SourceFileTable,
+    source_files: &mut SourceDatabase,
     local_source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     string_table: &mut StringTable,
 ) -> Result<ScannedMothSource, SourceDiscoveryError> {
@@ -760,14 +760,14 @@ fn traverse_reachable_source_files(
     let mut queue = VecDeque::new();
     let mut local_source_cache = FxHashMap::default();
     // Traversal-local source identities: header preparation stamps retained shells from real
-    // FileIds, but the full inventory is unknown during the BFS. `prepare_module` later
+    // source IDs, but the full inventory is unknown during the BFS. `prepare_module` later
     // rebuilds the deterministic sorted table and rebinds every token to it.
-    let mut traversal_source_files = SourceFileTable::empty();
+    let mut traversal_source_files = SourceDatabase::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let mut dependency_clauses_scanned: usize = 0;
 
     // The entry identity table keys on canonical paths; canonicalize the entry once so
-    // header preparation recognises the active root by FileId instead of path text.
+    // header preparation recognises the active root by SourceId instead of path text.
     let canonical_entry_path = fs::canonicalize(&entry_paths[0]).map_err(|error| {
         CompilerError::file_error(
             &entry_paths[0],

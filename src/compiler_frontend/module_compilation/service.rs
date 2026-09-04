@@ -63,8 +63,8 @@ use crate::compiler_frontend::public_interface::{
     build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
@@ -92,7 +92,7 @@ pub(crate) struct BoracleModuleInput {
 ///       collects link facts, borrow-validates, completes generated semantic work and closes the
 ///       public interface. It receives no source text or tokens and cannot rerun file preparation.
 ///       The active module origin and entry file are resolved from the retained active root
-///       `FileId`, never reconstructed from source paths.
+///       `SourceId`, never reconstructed from source paths.
 /// WHY: this is the one production owner of the binding -> ordering -> AST -> HIR -> borrow
 ///      sequence. Everything the sequence needs arrives as immutable input, and everything it
 ///      produces leaves as one typed outcome, so the build system can schedule it without knowing
@@ -122,7 +122,7 @@ pub(crate) fn compile_module(
     resolved_file_references.validate()?;
 
     // The active module origin is resolved from the per-file source-origin table using the
-    // retained active root FileId, not from a loose origin argument. Preparation already
+    // retained active root SourceId, not from a loose origin argument. Preparation already
     // validated the active root's table origin against the expected active origin, so the
     // semantic projection re-derives the same origin from the table and validates every
     // directly-defined public header against it.
@@ -131,7 +131,7 @@ pub(crate) fn compile_module(
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "semantic module compilation: active root file id {} has no module origin",
-                active_root_file_id.0
+                active_root_file_id.index()
             ))
         })?
         .clone();
@@ -244,7 +244,7 @@ pub(crate) fn compile_module_for_boracle(
             CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(format!(
                     "semantic Boracle compilation: active root file id {} has no module origin",
-                    active_root_file_id.0
+                    active_root_file_id.index()
                 )),
                 &string_table,
             )
@@ -300,7 +300,7 @@ pub(crate) fn compile_module_for_boracle(
 struct SemanticStageInputs<'a> {
     prepared_header_syntax: PreparedHeaderSyntax,
     source_module_origins: SourceModuleOriginTable,
-    active_root_file_id: FileId,
+    active_root_file_id: SourceId,
     active_module_origin: StableModuleOriginIdentity,
     entry_file_path: &'a Path,
     source_file_count: usize,
@@ -426,7 +426,7 @@ fn run_semantic_stages(
 
     // Build the transient expanded public source-nominal origin index before `sorted`
     // moves into AST construction. Each origin is derived from the header's retained
-    // FileId through the per-file SourceModuleOriginTable, so imported project-graph
+    // SourceId through the per-file SourceModuleOriginTable, so imported project-graph
     // nominals resolve to their defining provider origin. The type-surface projection
     // consumes this index to resolve imported nominal references in this module's public
     // signatures and fields.
@@ -1021,14 +1021,14 @@ fn record_borrow_counters(report: &BorrowCheckReport) {
 
 /// Render the module's source logical paths from the retained source identity table.
 ///
-/// WHAT: iterates the `SourceFileTable` built during preparation and renders each identity's
+/// WHAT: iterates the `SourceDatabase` built during preparation and renders each identity's
 ///       portable logical path. Returns an empty vector when no project path resolver was used
 ///       during preparation, matching the prior raw-source path behaviour.
 /// WHY: semantic compilation derives source logical paths from retained identities instead of
 ///      carrying raw source paths, so the preparation/semantic boundary stays free of
 ///      `PreparedSourceInput`. UTF-8 validity was already enforced when the table was built.
 fn collect_source_logical_paths_from_table(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     string_table: &StringTable,
     has_project_path_resolver: bool,
 ) -> Vec<String> {

@@ -11,7 +11,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, Token, TokenKind};
@@ -107,7 +108,7 @@ impl RetainedDependencyPath {
     }
 
     /// Commit the final source identity while preserving module-root-relative paths.
-    pub fn commit_source_rebinding(&mut self, file_id: FileId, logical_path: &InternedPath) {
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: &InternedPath) {
         self.location.rebind_source_identity(logical_path);
         self.dependency_shell_id.source = file_id;
     }

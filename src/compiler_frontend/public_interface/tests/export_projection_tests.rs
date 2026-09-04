@@ -8,7 +8,7 @@
 //! independent of declaration scheduling, and the active root origin is validated from the
 //! per-file source-origin table even when the public surface is empty. The source-nominal and
 //! source-trait origin indexes admit direct, imported-provider and alias-targeted declarations
-//! while excluding private and unowned declarations, and reject missing `FileId` failures.
+//! while excluding private and unowned declarations, and reject missing `SourceId` failures.
 //! WHY: these are construction invariants owned by `compiler_frontend::public_interface::export_projection`,
 //! so they own a focused test beside the module rather than an end-to-end case.
 
@@ -30,10 +30,9 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{
-    DependencySelectionId, DependencyShellId, FileId, SourceFileTable,
-};
+use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -62,7 +61,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
     // file identity on every header so the origin projection can resolve the active root
     // from the per-file source-origin table.
     let file_path = PathBuf::from("src/@page.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -72,7 +71,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("the synthetic test file should be in the source file table")
-        .file_id;
+        .id;
     for header in &mut headers.headers {
         header.tokens.file_id = Some(file_id);
     }
@@ -97,7 +96,7 @@ struct ExportProjectionFixture {
     module_symbols: ModuleSymbols,
     source_module_origins: SourceModuleOriginTable,
     string_table: StringTable,
-    active_root_file_id: FileId,
+    active_root_file_id: SourceId,
     module_root: InternedPath,
     module_origin: StableModuleOriginIdentity,
 }
@@ -128,7 +127,7 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         canonical_paths.push(path);
     }
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         canonical_paths.iter(),
         &active_path,
         None,
@@ -138,7 +137,7 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
     let active_root_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("the projection active root should have a file identity")
-        .file_id;
+        .id;
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local(project_name),
         "active".to_owned(),
@@ -162,7 +161,7 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         let file_id = source_files
             .get_by_canonical_path(path)
             .expect("every prepared projection source should have a file identity")
-            .file_id;
+            .id;
         for mut header in output.headers {
             header.tokens.file_id = Some(file_id);
             headers.push(header);
@@ -405,7 +404,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     };
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-            shell: DependencyShellId::new(FileId(0), 0),
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
         },
         interface: &provider_interface,
     }])
@@ -416,7 +415,10 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::ProviderSelection {
                 diagnostic_path: target_path,
-                selection: DependencySelectionId::new(DependencyShellId::new(FileId(0), 0), 0),
+                selection: DependencySelectionId::new(
+                    DependencyShellId::new(SourceId::from_index(0), 0),
+                    0,
+                ),
                 source_name: fixture.string_table.intern("Imported"),
             },
         }]
@@ -534,13 +536,13 @@ export:\n\
 
 #[test]
 fn active_origin_missing_from_table_fails_internally() {
-    // Hidden invariant: when the active root's FileId maps to no owning module origin, the
+    // Hidden invariant: when the active root's SourceId maps to no owning module origin, the
     // projection must fail through CompilerError rather than silently using a fallback origin.
     let (mut headers, mut string_table) =
         parse_single_file_headers_with_table("export:\n    alpha #= 1\n;\n");
 
     let file_path = PathBuf::from("src/@page.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -550,7 +552,7 @@ fn active_origin_missing_from_table_fails_internally() {
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("file should be in source file table")
-        .file_id;
+        .id;
     for header in &mut headers.headers {
         header.tokens.file_id = Some(file_id);
     }
@@ -584,12 +586,12 @@ fn active_origin_missing_from_table_fails_internally() {
 
 #[test]
 fn out_of_range_active_root_file_id_fails_internally() {
-    // Hidden invariant: an out-of-range FileId is an internal CompilerError, not a silent None.
+    // Hidden invariant: an out-of-range SourceId is an internal CompilerError, not a silent None.
     let (mut headers, mut string_table) =
         parse_single_file_headers_with_table("export:\n    alpha #= 1\n;\n");
 
     let file_path = PathBuf::from("src/@page.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -599,7 +601,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("file should be in source file table")
-        .file_id;
+        .id;
     for header in &mut headers.headers {
         header.tokens.file_id = Some(file_id);
     }
@@ -614,7 +616,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
 
     let result = build_direct_export_seed(
         &source_module_origins,
-        FileId(999),
+        SourceId::from_index(999),
         &headers.headers,
         &headers.module_symbols,
         &SourceProviderDependencySet::default(),
@@ -624,7 +626,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
 
     let error = match result {
         Err(error) => error,
-        Ok(_) => panic!("an out-of-range active root FileId must fail"),
+        Ok(_) => panic!("an out-of-range active root SourceId must fail"),
     };
     assert!(
         error.msg.contains("out-of-range"),
@@ -642,7 +644,7 @@ fn conflicting_public_header_ownership_fails_internally() {
 
     let file_path = PathBuf::from("src/@page.moth");
     let second_path = PathBuf::from("src/other.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [file_path.clone(), second_path.clone()],
         &file_path,
         None,
@@ -652,11 +654,11 @@ fn conflicting_public_header_ownership_fails_internally() {
     let active_file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("active root should be in the source file table")
-        .file_id;
+        .id;
     let other_file_id = source_files
         .get_by_canonical_path(&second_path)
         .expect("second file should be in the source file table")
-        .file_id;
+        .id;
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("test-project"),
@@ -721,7 +723,7 @@ fn zero_public_exports_still_validates_active_origin() {
     let (headers, mut string_table) = parse_single_file_headers_with_table("");
 
     let file_path = PathBuf::from("src/@page.moth");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -731,7 +733,7 @@ fn zero_public_exports_still_validates_active_origin() {
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("file should be in source file table")
-        .file_id;
+        .id;
 
     // Build a table where the in-range active file maps to None, simulating an unowned active
     // root. With zero public exports the header loop never runs, so only the active-root lookup
@@ -867,7 +869,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(imported_output.file_role, FileRole::ImportedModuleRoot);
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
         &active_path,
         None,
@@ -877,11 +879,11 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("the active root file should be in the source file table")
-        .file_id;
+        .id;
     let imported_file_id = source_files
         .get_by_canonical_path(&imported_path)
         .expect("the imported root file should be in the source file table")
-        .file_id;
+        .id;
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
@@ -972,7 +974,7 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
         &active_path,
         None,
@@ -982,7 +984,7 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("test-project"),
@@ -1012,7 +1014,7 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
     }
 
     // `Imported` is targeted by a retained module-root public export entry, so the index admits
-    // it; its missing retained FileId is then an internal invariant violation rather than a
+    // it; its missing retained SourceId is then an internal invariant violation rather than a
     // silent skip.
     let imported_path_decl = struct_header_path(&headers, "Imported", &string_table);
     let module_symbols =
@@ -1026,7 +1028,7 @@ fn public_source_nominal_origin_index_rejects_missing_file_id() {
     );
     assert!(
         result.is_err(),
-        "a public export-targeted nominal header with no retained FileId must be a CompilerError"
+        "a public export-targeted nominal header with no retained SourceId must be a CompilerError"
     );
 }
 
@@ -1051,7 +1053,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), package_path.clone()],
         &active_path,
         None,
@@ -1061,11 +1063,11 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
     let package_file_id = source_files
         .get_by_canonical_path(&package_path)
         .expect("package root file should be present")
-        .file_id;
+        .id;
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("test-project"),
@@ -1147,7 +1149,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), impl_path.clone()],
         &active_path,
         None,
@@ -1157,11 +1159,11 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("the active root file should be in the source file table")
-        .file_id;
+        .id;
     let impl_file_id = source_files
         .get_by_canonical_path(&impl_path)
         .expect("the normal file should be in the source file table")
-        .file_id;
+        .id;
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
@@ -1235,7 +1237,7 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), impl_path.clone()],
         &active_path,
         None,
@@ -1245,11 +1247,11 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("the active root file should be in the source file table")
-        .file_id;
+        .id;
     let impl_file_id = source_files
         .get_by_canonical_path(&impl_path)
         .expect("the normal file should be in the source file table")
-        .file_id;
+        .id;
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
@@ -1314,7 +1316,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
         &mut string_table,
     );
     let mut headers: Vec<Header> = output.headers;
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -1324,7 +1326,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
     for header in &mut headers {
         header.tokens.file_id = Some(file_id);
     }
@@ -1379,7 +1381,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
         &active_path,
         None,
@@ -1389,11 +1391,11 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
     let imported_file_id = source_files
         .get_by_canonical_path(&imported_path)
         .expect("imported root file should be present")
-        .file_id;
+        .id;
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("test-project"),
@@ -1476,7 +1478,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [active_path.clone(), impl_path.clone()],
         &active_path,
         None,
@@ -1486,11 +1488,11 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
     let active_file_id = source_files
         .get_by_canonical_path(&active_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
     let impl_file_id = source_files
         .get_by_canonical_path(&impl_path)
         .expect("normal file should be present")
-        .file_id;
+        .id;
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
@@ -1547,7 +1549,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -1557,7 +1559,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
     let file_id = source_files
         .get_by_canonical_path(&file_path)
         .expect("active root file should be present")
-        .file_id;
+        .id;
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
         header.tokens.file_id = Some(file_id);
@@ -1604,7 +1606,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
         &mut string_table,
     );
 
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(package_path.clone()),
         &package_path,
         None,
@@ -1614,7 +1616,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
     let file_id = source_files
         .get_by_canonical_path(&package_path)
         .expect("package file should be present")
-        .file_id;
+        .id;
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
@@ -1660,7 +1662,7 @@ fn public_source_trait_origin_index_rejects_missing_file_id() {
     for header in &mut headers {
         header.tokens.file_id = None;
     }
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
         None,
@@ -1691,6 +1693,6 @@ fn public_source_trait_origin_index_rejects_missing_file_id() {
     );
     assert!(
         result.is_err(),
-        "a public export-targeted trait header with no retained FileId must be a CompilerError"
+        "a public export-targeted trait header with no retained SourceId must be a CompilerError"
     );
 }

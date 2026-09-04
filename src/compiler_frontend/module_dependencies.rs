@@ -30,7 +30,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
@@ -57,7 +57,7 @@ pub(crate) struct SortedHeaders {
 
 /// Stage 0 resolved content-source targets for declaration ordering.
 ///
-/// WHAT: maps one prepared, non-dependency content-class path occurrence (the referencing `FileId`
+/// WHAT: maps one prepared, non-dependency content-class path occurrence (the referencing `SourceId`
 /// plus the row's `PathSyntaxId` handle) to the exact graph key of that occurrence's resolved
 /// content source's synthetic `content` constant. Occurrences whose Stage 0 outcome is not a
 /// settled content target (missing, invalid, or unsupported) are absent, so ordering defers them.
@@ -66,7 +66,7 @@ pub(crate) struct SortedHeaders {
 /// targets instead of re-deriving the authored spelling. The index is preparation and Stage 0
 /// owned data; it involves no expression parsing.
 pub(in crate::compiler_frontend) struct ContentSourceTargets {
-    targets: FxHashMap<(FileId, PathSyntaxId), InternedPath>,
+    targets: FxHashMap<(SourceId, PathSyntaxId), InternedPath>,
 }
 
 impl ContentSourceTargets {
@@ -79,7 +79,7 @@ impl ContentSourceTargets {
     /// Build the index from Stage 0's resolved table and the module source identities.
     pub(in crate::compiler_frontend) fn from_resolved_references(
         resolved_references: &ResolvedFileReferenceTable,
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         string_table: &mut StringTable,
     ) -> Self {
         let mut targets = FxHashMap::default();
@@ -108,7 +108,7 @@ impl ContentSourceTargets {
     fn content_header_path(
         &self,
         hint: &LocalDeclarationOrderingHint,
-        referencing_file: Option<FileId>,
+        referencing_file: Option<SourceId>,
     ) -> Option<&InternedPath> {
         self.targets.get(&(referencing_file?, hint.occurrence()?))
     }

@@ -47,9 +47,8 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{
-    DependencySelectionId, DependencyShellId, FileId,
-};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -91,7 +90,7 @@ fn test_dependency(
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location_for(&["src", "@page.moth"], string_table),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
     };
     RetainedDependencyClause {
         dependency: provider.clone(),
@@ -1011,7 +1010,7 @@ fn explicit_external_symbol_binding_retains_authored_location() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: dependency_location.clone(),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 1),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 1),
     };
     let dependency_selections = vec![
         crate::compiler_frontend::headers::types::DependencySelection {
@@ -1181,7 +1180,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: location_for(&["src", "@page.moth"], &mut string_table),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 2),
+        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 2),
     };
     let dependency = RetainedDependencyClause {
         dependency: provider.clone(),
@@ -1310,7 +1309,7 @@ fn provider_semantics_bind_once_across_many_shells() {
                 &mut string_table,
             );
             dependency.dependency.dependency_shell_id =
-                DependencyShellId::new(FileId(0), index as u32);
+                DependencyShellId::new(SourceId::from_index(0), index as u32);
             add_selection(
                 &mut dependency,
                 &mut dependency_selections,
@@ -1334,7 +1333,7 @@ fn provider_semantics_bind_once_across_many_shells() {
             .enumerate()
             .map(|(index, _)| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
-                    shell: DependencyShellId::new(FileId(0), index as u32),
+                    shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
                 },
                 interface: &provider,
             })
@@ -1382,7 +1381,7 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    forward.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 0);
+    forward.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
     add_selection(
         &mut forward,
         &mut dependency_selections,
@@ -1402,7 +1401,7 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    reverse.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 1);
+    reverse.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 1);
     add_selection(
         &mut reverse,
         &mut dependency_selections,
@@ -1426,13 +1425,13 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &provider,
         },
@@ -1440,10 +1439,10 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
     .expect("repeated provider surfaces should register");
 
     let forward_provider = provider_dependencies
-        .resolve_clause(DependencyShellId::new(FileId(0), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(0), 0))
         .expect("forward clause should resolve");
     let reverse_provider = provider_dependencies
-        .resolve_clause(DependencyShellId::new(FileId(0), 1))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(0), 1))
         .expect("reverse clause should resolve");
     assert_eq!(forward_provider.provider, reverse_provider.provider);
     assert_ne!(forward_provider.shell, reverse_provider.shell);
@@ -1556,7 +1555,8 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         intern_path(&["alpha"], &mut string_table),
         &mut string_table,
     );
-    alpha_dependency.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 0);
+    alpha_dependency.dependency.dependency_shell_id =
+        DependencyShellId::new(SourceId::from_index(0), 0);
     add_selection(
         &mut alpha_dependency,
         &mut dependency_selections,
@@ -1566,7 +1566,8 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     );
     let mut beta_dependency =
         test_dependency(intern_path(&["beta"], &mut string_table), &mut string_table);
-    beta_dependency.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 1);
+    beta_dependency.dependency.dependency_shell_id =
+        DependencyShellId::new(SourceId::from_index(0), 1);
     add_selection(
         &mut beta_dependency,
         &mut dependency_selections,
@@ -1585,13 +1586,13 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &first_provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &second_provider,
         },
@@ -1832,7 +1833,7 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored { shell },
@@ -1895,7 +1896,7 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["SOURCE", "ALIAS"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored { shell },
@@ -1953,7 +1954,7 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_BOUND");
     let source_name = string_table.intern("BOUND");
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let mut registry = ExternalPackageRegistry::new();
     let provider = binding_provider(&mut registry);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
@@ -2007,7 +2008,7 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let mut registry = ExternalPackageRegistry::new();
     let provider =
         binding_provider_with_members(&mut registry, &[("SOURCE", 5_101), ("ALIAS", 5_102)]);
@@ -2062,7 +2063,7 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
-    let shell = DependencyShellId::new(FileId(0), 7);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 7);
     let provider_dependencies = SourceProviderDependencySet::default();
     let registry = ExternalPackageRegistry::new();
     let external_dependency_resolution_table = ExternalImportResolutionTable::new();
@@ -2112,7 +2113,7 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
     let location = location_for(&["facade", "@page.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("MISSING");
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored { shell },
@@ -2169,7 +2170,8 @@ fn namespace_and_direct_selection_share_provider_semantics() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    direct_selection.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 0);
+    direct_selection.dependency.dependency_shell_id =
+        DependencyShellId::new(SourceId::from_index(0), 0);
     add_selection(
         &mut direct_selection,
         &mut dependency_selections,
@@ -2181,7 +2183,7 @@ fn namespace_and_direct_selection_share_provider_semantics() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    namespace.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 1);
+    namespace.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 1);
 
     let mut module_symbols = single_file_module_symbols(
         vec![direct_selection, namespace],
@@ -2191,13 +2193,13 @@ fn namespace_and_direct_selection_share_provider_semantics() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &provider,
         },
@@ -2230,7 +2232,7 @@ fn two_aliases_of_one_declaration_retain_one_record() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    first.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 0);
+    first.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
     add_selection(
         &mut first,
         &mut dependency_selections,
@@ -2242,7 +2244,7 @@ fn two_aliases_of_one_declaration_retain_one_record() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    second.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 1);
+    second.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 1);
     add_selection(
         &mut second,
         &mut dependency_selections,
@@ -2259,13 +2261,13 @@ fn two_aliases_of_one_declaration_retain_one_record() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 0),
+                shell: DependencyShellId::new(SourceId::from_index(0), 0),
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(0), 1),
+                shell: DependencyShellId::new(SourceId::from_index(0), 1),
             },
             interface: &provider,
         },
@@ -2306,7 +2308,7 @@ fn missing_provider_record_fails_deterministically() {
         intern_path(&["provider"], &mut string_table),
         &mut string_table,
     );
-    missing.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), 0);
+    missing.dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
     let mut dependency_selections = Vec::new();
     add_selection(
         &mut missing,
@@ -2322,7 +2324,7 @@ fn missing_provider_record_fails_deterministically() {
         single_file_module_symbols(vec![missing], dependency_selections, &mut string_table);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
-            shell: DependencyShellId::new(FileId(0), 0),
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
         },
         interface: &provider,
     }])
@@ -2358,7 +2360,8 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
                 intern_path(&["shapes"], &mut string_table),
                 &mut string_table,
             );
-            dependency.dependency.dependency_shell_id = DependencyShellId::new(FileId(0), index);
+            dependency.dependency.dependency_shell_id =
+                DependencyShellId::new(SourceId::from_index(0), index);
             add_selection(
                 &mut dependency,
                 &mut dependency_selections,
@@ -2375,7 +2378,7 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
         (0..2)
             .map(|index| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
-                    shell: DependencyShellId::new(FileId(0), index),
+                    shell: DependencyShellId::new(SourceId::from_index(0), index),
                 },
                 interface: &provider,
             })

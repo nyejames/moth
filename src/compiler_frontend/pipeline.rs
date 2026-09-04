@@ -48,8 +48,8 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -119,7 +119,7 @@ pub(crate) struct CompilerFrontend {
     pub(crate) string_table: StringTable,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
-    pub(crate) source_files: SourceFileTable,
+    pub(crate) source_files: SourceDatabase,
 }
 
 /// Shared immutable inputs used while one source file is prepared against a local string table.
@@ -129,7 +129,7 @@ pub(crate) struct CompilerFrontend {
 /// WHY: parallel file preparation passes this context by shared reference to Rayon workers without
 /// giving them mutable access to the module-global string table.
 pub(crate) struct FrontendFilePrepareContext<'a> {
-    pub(crate) source_files: &'a SourceFileTable,
+    pub(crate) source_files: &'a SourceDatabase,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_file_path: &'a Path,
     pub(crate) options: &'a HeaderParseOptions,
@@ -194,10 +194,10 @@ pub(crate) struct AstBuildRequest<'a> {
 /// WHAT: bundles the interned logical path, explicit file ID, and canonical OS path that
 ///       tokenization and non-tokenized preparation both need.
 /// WHY: keeps source-identity lookup in one place so Markdown preparation can reuse the same
-///      identity path as tokenized files without duplicating the `SourceFileTable` fallback logic.
+///      identity path as tokenized files without duplicating the `SourceDatabase` fallback logic.
 struct FrontendSourceFileIdentity {
     logical_path: InternedPath,
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
     canonical_os_path: Option<PathBuf>,
 }
 
@@ -207,14 +207,14 @@ struct FrontendSourceFileIdentity {
 /// WHY: tokenized Moth/Moth template files and non-tokenized Markdown files must share the same
 ///      source identity so downstream stages treat them as ordinary module members.
 fn source_file_identity(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     source_path: &Path,
     string_table: &mut StringTable,
 ) -> Result<FrontendSourceFileIdentity, CompilerError> {
     match source_files.get_by_canonical_path(source_path) {
         Some(identity) => Ok(FrontendSourceFileIdentity {
             logical_path: identity.logical_path.clone(),
-            file_id: Some(identity.file_id),
+            file_id: Some(identity.id),
             canonical_os_path: Some(identity.canonical_os_path.clone()),
         }),
         None => {
@@ -253,12 +253,12 @@ impl CompilerFrontend {
             string_table,
             project_path_resolver,
             options,
-            source_files: SourceFileTable::empty(),
+            source_files: SourceDatabase::empty(),
         }
     }
 
     /// Attach per-module file identities built during Stage 0.
-    pub(crate) fn set_source_files(&mut self, source_files: SourceFileTable) {
+    pub(crate) fn set_source_files(&mut self, source_files: SourceDatabase) {
         self.source_files = source_files;
     }
 
@@ -272,7 +272,7 @@ impl CompilerFrontend {
     /// WHY: parallel and fork-based frontend preparation need to tokenize independently before
     ///      merging deltas back into the module/global table.
     pub(crate) fn tokenize_source(
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         style_directives: &StyleDirectiveRegistry,
         source_code: &str,
         module_path: &Path,

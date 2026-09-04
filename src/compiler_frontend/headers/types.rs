@@ -27,7 +27,8 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::symbols::identity::{DependencySelectionId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
@@ -140,7 +141,7 @@ pub struct TopLevelConstFragment {
 /// WHY: the parser is called from both production and tests, and grouping these keeps the API concise.
 #[derive(Clone)]
 pub struct HeaderParseOptions {
-    pub entry_file_id: Option<FileId>,
+    pub entry_file_id: Option<SourceId>,
     pub project_path_resolver: Option<ProjectPathResolver>,
     /// An explicit role for the active entry file, when the caller is compiling a transient
     /// selection rather than a graph-owned module root.
@@ -296,7 +297,7 @@ pub struct LocalDeclarationOrderingHint {
     ///
     /// WHAT: the dense `PathSyntaxId` of the shell occurrence that produced the hint, valid inside
     ///       the referencing file's prepared path table.
-    ///       (referencing `FileId`, this handle) instead of re-deriving the authored spelling, so
+    ///       (referencing `SourceId`, this handle) instead of re-deriving the authored spelling, so
     ///       a module-relative authored spelling still orders against the canonical content
     ///       constant of a nested module.
     occurrence: Option<PathSyntaxId>,
@@ -496,7 +497,7 @@ impl RetainedDependencyClause {
 
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
     /// required source-owned retained path.
-    pub fn commit_source_rebinding(&mut self, file_id: FileId, logical_path: &InternedPath) {
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: &InternedPath) {
         self.dependency
             .commit_source_rebinding(file_id, logical_path);
         self.binding.rebind_source_identity(logical_path);
@@ -758,7 +759,7 @@ impl Header {
 
     pub fn rebind_source_identity(
         &mut self,
-        file_id: FileId,
+        file_id: SourceId,
         logical_path: InternedPath,
         canonical_os_path: std::path::PathBuf,
     ) -> Result<(), CompilerError> {
@@ -1075,7 +1076,7 @@ pub struct FileFrontendPrepareOutput {
     pub source_file: InternedPath,
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
-    pub file_id: Option<FileId>,
+    pub file_id: Option<SourceId>,
     /// The sole file-owned table while source preparation remains mutable, then the immutable
     /// table shared by every retained header stream from this file.
     pub(crate) path_syntax: PreparedFilePathSyntax,
@@ -1318,12 +1319,12 @@ impl FileFrontendPrepareOutput {
     ///       file-owned selection locations, header-owned token streams, detached declaration
     ///       syntax, fragment metadata and warning locations in one consuming-file operation.
     /// WHY: synthetic Stage 0 discovery prepares files before the complete closure is known, so
-    ///      traversal-local `FileId`s and absolute source scopes must be reconciled before the
+    ///      traversal-local `SourceId`s and absolute source scopes must be reconciled before the
     ///      output can enter module-wide aggregation. Retaining only dependency clauses would
     ///      lose the selection table and the syntax needed by later stages.
     pub fn rebind_source_identity(
         &mut self,
-        final_file_id: FileId,
+        final_file_id: SourceId,
         final_logical_path: InternedPath,
         canonical_os_path: std::path::PathBuf,
     ) -> Result<(), CompilerError> {
@@ -1470,7 +1471,7 @@ impl FileFrontendPrepareOutput {
 fn validate_dependency_clauses(
     clauses: &[RetainedDependencyClause],
     selections: &[DependencySelection],
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
     source_file: &InternedPath,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
@@ -1544,7 +1545,7 @@ fn validate_dependency_clauses(
 
 fn validate_dependency_path(
     dependency: &RetainedDependencyPath,
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
     source_file: &InternedPath,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
@@ -1583,7 +1584,7 @@ fn validate_dependency_selection(
 
 fn validate_header(
     header: &Header,
-    file_id: Option<FileId>,
+    file_id: Option<SourceId>,
     canonical_os_path: Option<&std::path::Path>,
     source_file: &InternedPath,
     path_syntax: &PathSyntaxTable,

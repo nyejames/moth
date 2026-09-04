@@ -30,10 +30,10 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
@@ -61,7 +61,7 @@ fn moth_prepared_input(
 /// Tokenize source text against a source file table and string table, then build a Moth
 /// `PreparedSourceInput` carrying the retained token stream.
 fn tokenized_moth_prepared_input(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     source_path: PathBuf,
@@ -110,7 +110,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .clone();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
         None,
@@ -207,7 +207,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let canonical_b = fs::canonicalize(&file_b).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         &[&canonical_a, &canonical_b],
         &canonical_a,
         None,
@@ -230,7 +230,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         entry_file_id: frontend
             .source_files
             .get_by_canonical_path(&canonical_a)
-            .map(|i| i.file_id),
+            .map(|i| i.id),
         project_path_resolver: frontend.project_path_resolver.clone(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
@@ -428,7 +428,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let canonical_entry = fs::canonicalize(&entry_file).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
         None,
@@ -632,7 +632,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
         None,
@@ -857,7 +857,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let canonical_c = fs::canonicalize(&file_c).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         &[&canonical_a, &canonical_b, &canonical_c],
         &canonical_a,
         None,
@@ -1075,7 +1075,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .clone();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
         None,
@@ -1181,7 +1181,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| identity.file_id),
+            .map(|identity| identity.id),
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
@@ -1379,7 +1379,7 @@ fn parsed_prepared_output(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("test source should tokenize");
 
@@ -1617,7 +1617,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.clone()),
         &canonical_entry,
         None,

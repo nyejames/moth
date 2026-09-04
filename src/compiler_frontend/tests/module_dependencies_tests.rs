@@ -24,8 +24,8 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::path::PathBuf;
@@ -54,7 +54,7 @@ fn parse_module_headers(
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(FileId(0)),
+            Some(SourceId::from_index(0)),
         )
         .expect("tokenization should succeed");
 
@@ -368,7 +368,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        Some(SourceId::from_index(0)),
     )
     .expect("tokenization should succeed");
 
@@ -950,12 +950,12 @@ fn parse_module_headers_with_content_sources(
         .map(|(path, _)| PathBuf::from(path))
         .collect::<Vec<_>>();
     let source_files =
-        SourceFileTable::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
+        SourceDatabase::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
             .expect("fixture source identities should build");
     let file_id_for = |path: &str| {
         source_files
             .get_by_canonical_path(&PathBuf::from(path))
-            .map(|identity| identity.file_id)
+            .map(|identity| identity.id)
             .unwrap_or_else(|| panic!("fixture file {path} should have a source identity"))
     };
 
@@ -1046,7 +1046,7 @@ fn parse_module_headers_with_content_sources(
             );
             let Some(target) = source_files
                 .get_by_canonical_path(&target_path)
-                .map(|identity| identity.file_id)
+                .map(|identity| identity.id)
             else {
                 continue;
             };
@@ -1054,7 +1054,7 @@ fn parse_module_headers_with_content_sources(
                 .push(ResolvedFileReference {
                     source_file: reference
                         .source_file
-                        .expect("fixture prepared rows carry a FileId"),
+                        .expect("fixture prepared rows carry a SourceId"),
                     path_syntax: reference.path_syntax,
                     class: reference.class,
                     outcome: ResolvedFileReferenceOutcome::Target(
@@ -1242,7 +1242,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let project_root = PathBuf::from("project-root");
     let root_file = project_root.join("components/@page.moth");
     let icon_template = project_root.join("components/icon.mtf");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [&root_file, &icon_template],
         &root_file,
         Some(
@@ -1261,11 +1261,11 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let root_file_id = source_files
         .get_by_canonical_path(&root_file)
         .expect("root file identity")
-        .file_id;
+        .id;
     let icon_file_id = source_files
         .get_by_canonical_path(&icon_template)
         .expect("icon identity")
-        .file_id;
+        .id;
     let root_logical = source_files
         .get(root_file_id)
         .expect("root identity")
@@ -1328,7 +1328,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         .push(ResolvedFileReference {
             source_file: content_row
                 .source_file
-                .expect("fixture prepared rows carry a FileId"),
+                .expect("fixture prepared rows carry a SourceId"),
             path_syntax: content_row.path_syntax,
             class: content_row.class,
             outcome: ResolvedFileReferenceOutcome::Target(

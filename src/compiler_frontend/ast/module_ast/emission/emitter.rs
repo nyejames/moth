@@ -57,7 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -101,7 +101,7 @@ struct BaseScopeContextInput<'scope> {
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
-    declaring_file_id: Option<FileId>,
+    declaring_file_id: Option<SourceId>,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }

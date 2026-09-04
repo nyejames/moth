@@ -42,9 +42,9 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
@@ -87,7 +87,7 @@ pub(crate) struct MothTemplateFileValueBundle {
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     /// Source identities of the template and all prepared content dependencies. The template's
     /// own canonical path must be present.
-    pub(crate) source_files: SourceFileTable,
+    pub(crate) source_files: SourceDatabase,
     /// The owning module origin resource pieces intern against.
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
 }
@@ -164,7 +164,7 @@ pub(crate) fn compile_moth_template_source(
             None => (
                 Vec::new(),
                 None,
-                SourceFileTable::build(
+                SourceDatabase::build(
                     [request.source_path],
                     request.source_path,
                     Some(&path_resolver),
@@ -182,7 +182,7 @@ pub(crate) fn compile_moth_template_source(
             string_table,
         ));
     };
-    let entry_file_id = Some(source_identity.file_id);
+    let entry_file_id = Some(source_identity.id);
     let entry_scope = source_identity.logical_path.clone();
 
     // 1. Prepare the single source into retained syntax.
@@ -287,10 +287,10 @@ pub(crate) fn compile_moth_template_source(
 }
 
 fn prepare_template_source(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
-    entry_file_id: Option<FileId>,
+    entry_file_id: Option<SourceId>,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
     let options = HeaderParseOptions {

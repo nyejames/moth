@@ -308,7 +308,7 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     let mut file_tokens =
         FileTokens::new_with_identity(original_scope.clone(), None, None, tokens, path_syntax);
 
-    let file_id = crate::compiler_frontend::symbols::identity::FileId(7);
+    let file_id = crate::compiler_frontend::source::SourceId::from_index(7);
     file_tokens
         .rebind_source_identity(
             logical_scope.clone(),

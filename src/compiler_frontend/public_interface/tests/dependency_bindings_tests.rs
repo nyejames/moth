@@ -14,7 +14,8 @@ use super::super::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 
 fn provider_interface(name: &str) -> PublicSemanticInterface {
     PublicSemanticInterface {
@@ -61,16 +62,19 @@ fn same_suffix_bindings_resolve_by_shell_identity_only() {
     // (`nested/provider/item` ends with `provider/item`). Only the shell identity separates
     // them, and the lookup must never fall back to path text.
     let set = SourceProviderDependencySet::new(vec![
-        authored(DependencyShellId::new(FileId(1), 0), &provider),
-        authored(DependencyShellId::new(FileId(2), 0), &nested),
+        authored(
+            DependencyShellId::new(SourceId::from_index(1), 0),
+            &provider,
+        ),
+        authored(DependencyShellId::new(SourceId::from_index(2), 0), &nested),
     ])
     .expect("distinct shells should register");
 
     let first = set
-        .resolve_clause(DependencyShellId::new(FileId(1), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(1), 0))
         .expect("shell one must bind the provider");
     let second = set
-        .resolve_clause(DependencyShellId::new(FileId(2), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(2), 0))
         .expect("shell two must bind the nested provider");
     assert!(std::ptr::eq(
         set.interface(first.provider)
@@ -83,7 +87,7 @@ fn same_suffix_bindings_resolve_by_shell_identity_only() {
         &nested,
     ));
     assert!(
-        set.resolve_clause(DependencyShellId::new(FileId(1), 1))
+        set.resolve_clause(DependencyShellId::new(SourceId::from_index(1), 1))
             .is_none()
     );
 }
@@ -96,13 +100,13 @@ fn duplicate_shell_fails_instead_of_overwriting() {
     let error = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(3), 0),
+                shell: DependencyShellId::new(SourceId::from_index(3), 0),
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
-                shell: DependencyShellId::new(FileId(3), 0),
+                shell: DependencyShellId::new(SourceId::from_index(3), 0),
             },
             interface: &nested,
         },
@@ -115,7 +119,7 @@ fn duplicate_shell_fails_instead_of_overwriting() {
 #[test]
 fn one_shell_resolves_one_provider_surface() {
     let provider = provider_interface("provider");
-    let shell = DependencyShellId::new(FileId(3), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(3), 0);
     let set = SourceProviderDependencySet::new(vec![authored(shell, &provider)])
         .expect("one authored clause should register one provider surface");
     let provider_id = set
@@ -164,7 +168,10 @@ fn equal_origins_with_differing_interfaces_fail_in_either_input_order() {
                 .into_iter()
                 .enumerate()
                 .map(|(index, interface)| {
-                    authored(DependencyShellId::new(FileId(4), index as u32), interface)
+                    authored(
+                        DependencyShellId::new(SourceId::from_index(4), index as u32),
+                        interface,
+                    )
                 })
                 .collect(),
         )
@@ -183,16 +190,22 @@ fn exact_repeated_interfaces_receive_one_provider_id() {
     let provider = provider_interface("provider");
 
     let set = SourceProviderDependencySet::new(vec![
-        authored(DependencyShellId::new(FileId(5), 0), &provider),
-        authored(DependencyShellId::new(FileId(5), 1), &provider),
+        authored(
+            DependencyShellId::new(SourceId::from_index(5), 0),
+            &provider,
+        ),
+        authored(
+            DependencyShellId::new(SourceId::from_index(5), 1),
+            &provider,
+        ),
     ])
     .expect("exact repeated provider interfaces should collapse");
 
     let first = set
-        .resolve_clause(DependencyShellId::new(FileId(5), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(5), 0))
         .expect("first shell resolves");
     let second = set
-        .resolve_clause(DependencyShellId::new(FileId(5), 1))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(5), 1))
         .expect("second shell resolves");
     assert_eq!(first.provider, second.provider);
     assert_eq!(
@@ -206,20 +219,20 @@ fn exact_repeated_interfaces_receive_one_provider_id() {
 fn grouped_reexport_lookup_uses_the_same_shell_identity() {
     let provider = provider_interface("provider");
     let set = SourceProviderDependencySet::new(vec![authored(
-        DependencyShellId::new(FileId(6), 0),
+        DependencyShellId::new(SourceId::from_index(6), 0),
         &provider,
     )])
     .expect("one authored provider should register");
 
     let provider_id = set
-        .resolve_reexport(DependencyShellId::new(FileId(6), 0))
+        .resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 0))
         .expect("the direct-selection re-export shell must resolve");
     assert!(std::ptr::eq(
         set.interface(provider_id).expect("provider resolves"),
         &provider,
     ));
     assert!(
-        set.resolve_reexport(DependencyShellId::new(FileId(6), 1))
+        set.resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 1))
             .is_none(),
         "a different shell ordinal must not borrow the re-export binding"
     );
@@ -229,13 +242,13 @@ fn grouped_reexport_lookup_uses_the_same_shell_identity() {
 fn unbound_shell_stays_outside_the_provider_map() {
     let provider = provider_interface("provider");
     let set = SourceProviderDependencySet::new(vec![authored(
-        DependencyShellId::new(FileId(7), 0),
+        DependencyShellId::new(SourceId::from_index(7), 0),
         &provider,
     )])
     .expect("one authored provider should register");
 
     assert!(
-        set.resolve_clause(DependencyShellId::new(FileId(7), 5))
+        set.resolve_clause(DependencyShellId::new(SourceId::from_index(7), 5))
             .is_none(),
         "unbound same-module shells must stay local compiler bindings"
     );
@@ -256,7 +269,7 @@ fn implicit_scope_bindings_have_no_shell_and_keep_their_prefix() {
         &provider,
     ));
     assert!(
-        set.resolve_clause(DependencyShellId::new(FileId(0), 0))
+        set.resolve_clause(DependencyShellId::new(SourceId::from_index(0), 0))
             .is_none(),
         "implicit scope must never satisfy an explicit authored shell"
     );
@@ -268,16 +281,19 @@ fn provider_ids_are_dense_and_stable() {
     let nested = provider_interface("nested");
 
     let set = SourceProviderDependencySet::new(vec![
-        authored(DependencyShellId::new(FileId(8), 0), &provider),
-        authored(DependencyShellId::new(FileId(8), 1), &nested),
+        authored(
+            DependencyShellId::new(SourceId::from_index(8), 0),
+            &provider,
+        ),
+        authored(DependencyShellId::new(SourceId::from_index(8), 1), &nested),
     ])
     .expect("distinct shells should register");
 
     let first = set
-        .resolve_clause(DependencyShellId::new(FileId(8), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(8), 0))
         .expect("first shell resolves");
     let second = set
-        .resolve_clause(DependencyShellId::new(FileId(8), 1))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(8), 1))
         .expect("second shell resolves");
     assert!(first.provider != second.provider);
     assert!(set.interface(ProviderInterfaceId::new(0)).is_ok());
@@ -290,7 +306,12 @@ fn ten_shells_from_one_provider_share_one_binding_view() {
 
     let set = SourceProviderDependencySet::new(
         (0..10)
-            .map(|index| authored(DependencyShellId::new(FileId(9), index), &provider))
+            .map(|index| {
+                authored(
+                    DependencyShellId::new(SourceId::from_index(9), index),
+                    &provider,
+                )
+            })
             .collect(),
     )
     .expect("ten distinct shells should register");

@@ -1,6 +1,6 @@
 //! Provider-independent prepared source for one module compilation.
 //!
-//! WHAT: the retained result of preparing one module's source files — the active root's `FileId`,
+//! WHAT: the retained result of preparing one module's source files — the active root's `SourceId`,
 //!       the per-file source-origin table, aggregated `PreparedHeaderSyntax`, the module string
 //!       table, source identities, preparation warnings and the input-size facts arena capacity
 //!       estimation needs.
@@ -15,8 +15,8 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::path::Path;
@@ -28,12 +28,12 @@ use std::path::Path;
 /// `source_files` is valid in it. Semantic compilation consumes this payload and continues
 /// mutating the same string table through binding, AST, HIR and borrow validation.
 pub(crate) struct PreparedModuleInput {
-    /// The retained `FileId` of the active module root, resolved once through `SourceFileTable`
+    /// The retained `SourceId` of the active module root, resolved once through `SourceDatabase`
     /// during preparation and validated against the per-file source-origin table.
     ///
     /// Semantic compilation resolves both the active module origin and the entry file path from
     /// this identity, so neither travels as a loose argument.
-    pub(crate) active_root_file_id: FileId,
+    pub(crate) active_root_file_id: SourceId,
     /// Immutable per-file source-origin side table mapping each prepared source file to its
     /// owning `StableModuleOriginIdentity`.
     ///
@@ -54,7 +54,7 @@ pub(crate) struct PreparedModuleInput {
     /// Local module string table forked for this module during file preparation.
     pub(crate) string_table: StringTable,
     /// Source identities built from the prepared source paths.
-    pub(crate) source_files: SourceFileTable,
+    pub(crate) source_files: SourceDatabase,
     /// Warnings accumulated during file preparation.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
     /// Number of source files in the module, for arena capacity estimation.
@@ -66,7 +66,7 @@ pub(crate) struct PreparedModuleInput {
 impl PreparedModuleInput {
     /// The canonical path of the active module root.
     ///
-    /// WHY: preparation already resolved the entry file through `SourceFileTable`, so the path is
+    /// WHY: preparation already resolved the entry file through `SourceDatabase`, so the path is
     ///      a retained identity fact rather than a second argument the caller must keep in sync.
     pub(crate) fn entry_file_path(&self) -> Result<&Path, CompilerError> {
         self.source_files
@@ -75,7 +75,7 @@ impl PreparedModuleInput {
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "prepared module: active root file id {} is not in the source file table",
-                    self.active_root_file_id.0
+                    self.active_root_file_id.index()
                 ))
             })
     }
