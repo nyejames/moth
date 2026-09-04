@@ -542,7 +542,9 @@ Inventory:
 - [x] identify every existing boxed boundary and whether unboxed failures remain
 - [x] run full `just validate` when the baseline is green — green
 - [x] run `just bench-frontend-check` and `just bench-check`
-- [x] run five recorded frontend and end-to-end benchmark invocations
+- [x] run five recorded frontend and end-to-end benchmark invocations — three recorded suites
+  (frontend phases, end-to-end CLI, diagnosed data layout), each ten iterations per case, plus five
+  independent repeatability invocations per suite; the noise floor is +/-1ms on the suite average
 - [x] record retained source bytes, common data, cold data and clone/remap pressure separately
 - [x] capture focused profiles only where attribution is unclear — attribution was clear; none captured
 

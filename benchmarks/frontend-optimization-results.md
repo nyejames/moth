@@ -3023,6 +3023,25 @@ range. Selection is therefore decided entirely by length overflow, which needs e
 and is measured once Slice 1C3 supplies them. The architecture's default 22/10 split stands until
 that census runs.
 
+### Five-run repeatability, September 4th
+
+Recorded runs (`just bench-frontend`, `just bench`, `just bench-data-layout`) each measure ten
+iterations per case and keep the median. Repeatability is then measured across five independent
+non-recording invocations against that stored baseline:
+
+| Suite | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | --- | --- | --- | --- | --- | --- |
+| Frontend phases, 42 cases | +1ms | 0ms | 0ms | -1ms | -1ms | 0ms |
+| End-to-end CLI, 40 cases | 0ms | 0ms | 0ms | 0ms | 0ms | 0ms |
+
+Every run reported "no measurable change" over the full case set, so the noise floor is +/-1ms on the
+suite average. A later phase's regression claim must exceed that band on the same machine.
+
+Recorded suite averages at this baseline: frontend phases all ~155ms (Core ~34ms, Docs ~1822ms,
+Stress ~176ms, Module ~31ms, Parallelism ~24ms, Borrow ~17ms); end-to-end CLI all ~57ms; the
+diagnosed data-layout pair ~33ms average, with directory compile ~36ms, frontend ~25ms and boundary
+compile ~20ms as its top stages.
+
 ### Work explicitly deferred out of Phase 0, with its owner
 
 | Deferred | Owner | Reason |
