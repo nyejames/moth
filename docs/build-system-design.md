@@ -878,7 +878,6 @@ Packages are classified on independent axes.
 ```rust
 enum PackageOrigin {
     Core,
-    Standard,
     Builder,
     ProjectLocal,
     Dependency,
@@ -900,7 +899,6 @@ Accepted mappings include:
 - annotated project-local `.js`: ProjectLocal origin and ExternalBinding backing
 - dependency source package: Dependency origin and MothSource backing
 
-`Standard` remains valid even when no current package uses it.
 
 Origin and backing classify provenance and implementation. They do not change:
 

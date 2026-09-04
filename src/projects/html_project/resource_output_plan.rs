@@ -555,7 +555,6 @@ pub(crate) fn package_output_prefix(package: &StablePackageIdentity) -> PathBuf 
 fn package_origin_tag(origin: PackageOrigin) -> &'static str {
     match origin {
         PackageOrigin::Core => "core",
-        PackageOrigin::Standard => "standard",
         PackageOrigin::Builder => "builder",
         PackageOrigin::ProjectLocal => "project-local",
         PackageOrigin::Dependency => "dependency",
