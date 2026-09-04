@@ -328,6 +328,16 @@ fn allowed_runtime_specifier_passes() {
 }
 
 #[test]
+fn escaped_runtime_looking_specifiers_are_not_allowlisted() {
+    let source = "import { mothOk } from \"@moth/ru\\ntime\";\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        !findings.is_empty(),
+        "escape sequences must not forge an allowed specifier: {findings:?}"
+    );
+}
+
+#[test]
 fn comments_and_non_import_builtins_do_not_create_findings() {
     let source = r#"
 // import x from "lodash";
@@ -377,6 +387,16 @@ fn dynamic_imports_inside_template_interpolations_are_reported() {
         "template interpolations contain executable imports: {findings:?}"
     );
     assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
+}
+
+#[test]
+fn rejects_dynamic_import_inside_nested_template_interpolation_braces() {
+    let source = "const module = `${(() => { return import(\"lodash\"); })()}`;\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        !findings.is_empty(),
+        "nested interpolation blocks still execute imports: {findings:?}"
+    );
 }
 
 #[test]
