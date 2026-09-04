@@ -12,7 +12,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 # Plans
 
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Active in parallel with diagnostics. Phase 0 package foundations hardening is next.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Active in parallel with diagnostics. Phase 0 package foundations are delivered; Phase 1 living `@core/text` plan is next.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
