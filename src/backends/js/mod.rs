@@ -11,7 +11,7 @@ mod js_function;
 mod js_statement;
 mod lookups;
 mod output;
-mod package_bindings;
+pub(crate) mod package_bindings;
 mod reachability;
 mod runtime;
 mod symbols;

@@ -103,26 +103,6 @@ impl BuilderSurface {
         self.config_globals.insert(name, value)
     }
 
-    /// Exposes the currently supported optional core packages for the HTML builder.
-    ///
-    /// WHAT: registers binding-backed core packages selected by the HTML builder.
-    /// WHY: optional core packages are builder surface; they should not be assumed by
-    /// the compiler's mandatory registry.
-    pub fn expose_html_core_packages(&mut self) {
-        crate::builder_surface::core_packages::register_core_math_package(
-            &mut self.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_text_package(
-            &mut self.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_random_package(
-            &mut self.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_time_package(
-            &mut self.binding_packages,
-        );
-    }
-
     pub fn builtin_source_package_root(prefix: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join(BUILTIN_SOURCE_PACKAGES_DIR)

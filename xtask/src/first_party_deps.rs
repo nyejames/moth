@@ -1,27 +1,25 @@
 //! The first-party package dependency audit.
 //!
-//! WHAT: walks the explicitly owned first-party package and runtime roots, rejects package-manager
-//!       metadata, vendored dependency directories and unapproved bare JavaScript module imports,
-//!       and writes the machine-readable result used by local and CI validation.
+//! WHAT: walks the explicitly owned first-party package roots, rejects package-manager metadata
+//!       and vendored dependency directories, and applies the moth first-party JavaScript import
+//!       policy to physical `.js` assets plus the compiler-owned JavaScript inventory.
 //! WHY: first-party packages promise zero third-party runtime dependencies. That promise needs one
 //!      narrow source owner rather than a repository-wide text search that mistakes documentation,
 //!      tests or benchmarks for package implementations.
 //!
 //! # What this module owns
 //! - The scoped walk of first-party package implementation roots.
-//! - The single `@moth/runtime` bare-module allowlist and JavaScript import checks.
-//! - Inspection of the inline `MOTH_RUNTIME_SOURCE_V1` source owned by the HTML project runtime.
 //! - Findings, the atomic JSON report and the `first-party-deps` command result.
 //!
 //! # What this module does NOT own
+//! - JavaScript lexical scanning or the runtime-module allowlist; those live in `moth::first_party_js`.
 //! - User-owned or future dependency packages and their manifests.
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
-//! - Runtime semantics or the registry's module implementation itself; those remain with the HTML
-//!   project runtime module registry.
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
-use crate::source_tree::{relative_display_path, workspace_root};
+use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
+use moth::first_party_js::{inventoried_javascript_sources, javascript_import_findings};
 use serde::Serialize;
 use std::fmt;
 use std::fs;
@@ -31,7 +29,7 @@ use std::path::Path;
 pub const FIRST_PARTY_DEPS_REPORT_PATH: &str = "target/test-reports/first_party_deps.json";
 
 /// Schema version of the first-party dependency report.
-pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 1;
+pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 2;
 
 /// First-party implementation roots, in deterministic scan order.
 ///
@@ -44,12 +42,7 @@ pub const FIRST_PARTY_SOURCE_ROOTS: &[&str] = &[
     "src/projects/html_project/binding_packages",
 ];
 
-const RUNTIME_REGISTRY_RELATIVE_PATH: &str =
-    "src/projects/html_project/external_js/runtime_module_registry.rs";
-const RUNTIME_SOURCE_LABEL: &str =
-    "src/projects/html_project/external_js/runtime_module_registry.rs::MOTH_RUNTIME_SOURCE_V1";
-const RUNTIME_SOURCE_MARKER: &str = "const MOTH_RUNTIME_SOURCE_V1: &str = r#\"";
-const RUNTIME_SOURCE_END: &str = "\"#;";
+const INVENTORIED_JS_ROOT_LABEL: &str = "moth::first_party_js::inventoried_javascript_sources";
 
 /// Exact package-manager files forbidden inside a first-party implementation root.
 const FORBIDDEN_MANIFEST_BASENAMES: &[&str] = &[
@@ -68,9 +61,6 @@ const FORBIDDEN_MANIFEST_BASENAMES: &[&str] = &[
 /// Directory names that identify copied or vendored third-party code.
 const FORBIDDEN_VENDOR_DIRECTORY_NAMES: &[&str] = &["node_modules", "vendor", "third_party"];
 
-/// The only bare JavaScript module specifier first-party implementations may import.
-const ALLOWED_BARE_MODULES: &[&str] = &["@moth/runtime"];
-
 /// Which first-party dependency rule produced a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,12 +69,10 @@ pub enum FirstPartyDepsRule {
     PackageManagerManifest,
     /// A known vendored dependency directory was found by exact directory name.
     VendoredDependencyRoot,
-    /// A JavaScript import-like expression named an unapproved bare module.
-    UnapprovedBareImport,
+    /// A JavaScript import, require or re-export is not an exact registered runtime module.
+    UnapprovedModuleImport,
     /// A path could not be read or represented, so the audit could not inspect it.
     UnreadablePath,
-    /// The explicitly owned inline runtime source could not be extracted safely.
-    InvalidRuntimeSource,
 }
 
 impl FirstPartyDepsRule {
@@ -92,9 +80,8 @@ impl FirstPartyDepsRule {
         match self {
             Self::PackageManagerManifest => "package-manager-manifest",
             Self::VendoredDependencyRoot => "vendored-dependency-root",
-            Self::UnapprovedBareImport => "unapproved-bare-import",
+            Self::UnapprovedModuleImport => "unapproved-module-import",
             Self::UnreadablePath => "unreadable-path",
-            Self::InvalidRuntimeSource => "invalid-runtime-source",
         }
     }
 }
@@ -102,7 +89,7 @@ impl FirstPartyDepsRule {
 /// One first-party dependency finding, named by the implementation file or directory involved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FirstPartyDepsFinding {
-    /// Workspace-relative path with `/` separators, plus a runtime-source label when applicable.
+    /// Workspace-relative path with `/` separators, or an inventoried JavaScript label.
     pub file: String,
     pub rule: FirstPartyDepsRule,
     pub message: String,
@@ -126,7 +113,8 @@ pub struct FirstPartyDepsReport {
     pub schema_version: u32,
     pub run: ReportRunIdentity,
     pub audited_roots: Vec<String>,
-    pub audited_file_count: usize,
+    pub visited_file_count: usize,
+    pub javascript_source_count: usize,
     pub findings: Vec<FirstPartyDepsFinding>,
 }
 
@@ -138,20 +126,23 @@ pub fn run_first_party_deps() -> Result<(), String> {
 
     write_first_party_deps_report(&report_path, &started_report(run.clone()))?;
 
-    let (audited_file_count, findings) = audit_first_party_deps(&workspace_root)?;
+    let (visited_file_count, javascript_source_count, findings) =
+        audit_first_party_deps(&workspace_root)?;
     let report = FirstPartyDepsReport {
         schema_version: FIRST_PARTY_DEPS_SCHEMA_VERSION,
         run: run.completed(),
         audited_roots: audited_roots(),
-        audited_file_count,
+        visited_file_count,
+        javascript_source_count,
         findings,
     };
 
     write_first_party_deps_report(&report_path, &report)?;
 
     println!(
-        "first-party-deps: {} files audited, {} finding(s)",
-        report.audited_file_count,
+        "first-party-deps: {} files visited, {} JavaScript sources, {} finding(s)",
+        report.visited_file_count,
+        report.javascript_source_count,
         report.findings.len()
     );
 
@@ -168,21 +159,25 @@ pub fn run_first_party_deps() -> Result<(), String> {
     ))
 }
 
-/// Audit the first-party roots and the one explicitly owned inline runtime source.
+/// Audit the first-party roots and the compiler-owned JavaScript inventory.
 ///
 /// Root traversal errors return `Err`; unreadable files become typed findings so a completed report
 /// still records exactly which paths prevented inspection.
 pub(crate) fn audit_first_party_deps(
     workspace_root: &Path,
-) -> Result<(usize, Vec<FirstPartyDepsFinding>), String> {
+) -> Result<(usize, usize, Vec<FirstPartyDepsFinding>), String> {
     let mut state = ScanState::default();
 
     for root in FIRST_PARTY_SOURCE_ROOTS {
         scan_first_party_root(workspace_root, root, &mut state)?;
     }
 
-    scan_runtime_source(workspace_root, &mut state);
-    Ok((state.audited_file_count, state.findings))
+    scan_inventoried_javascript(&mut state);
+    Ok((
+        state.visited_file_count,
+        state.javascript_source_count,
+        state.findings,
+    ))
 }
 
 fn started_report(run: ReportRunIdentity) -> FirstPartyDepsReport {
@@ -190,17 +185,19 @@ fn started_report(run: ReportRunIdentity) -> FirstPartyDepsReport {
         schema_version: FIRST_PARTY_DEPS_SCHEMA_VERSION,
         run,
         audited_roots: audited_roots(),
-        audited_file_count: 0,
+        visited_file_count: 0,
+        javascript_source_count: 0,
         findings: Vec::new(),
     }
 }
 
 fn audited_roots() -> Vec<String> {
-    FIRST_PARTY_SOURCE_ROOTS
+    let mut roots: Vec<String> = FIRST_PARTY_SOURCE_ROOTS
         .iter()
         .map(|root| (*root).to_owned())
-        .chain(std::iter::once(RUNTIME_SOURCE_LABEL.to_owned()))
-        .collect()
+        .collect();
+    roots.push(INVENTORIED_JS_ROOT_LABEL.to_owned());
+    roots
 }
 
 fn write_first_party_deps_report(path: &Path, report: &FirstPartyDepsReport) -> Result<(), String> {
@@ -212,7 +209,8 @@ fn write_first_party_deps_report(path: &Path, report: &FirstPartyDepsReport) -> 
 
 #[derive(Default)]
 struct ScanState {
-    audited_file_count: usize,
+    visited_file_count: usize,
+    javascript_source_count: usize,
     findings: Vec<FirstPartyDepsFinding>,
 }
 
@@ -234,40 +232,18 @@ fn scan_first_party_root(
             root.display()
         ));
     }
-    scan_directory(workspace_root, &root, state)
-}
 
-fn scan_directory(
-    workspace_root: &Path,
-    directory: &Path,
-    state: &mut ScanState,
-) -> Result<(), String> {
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(directory).map_err(|error| {
-        format!(
-            "failed to read first-party directory '{}': {error}",
-            directory.display()
-        )
-    })? {
-        entries.push(entry.map_err(|error| {
-            format!(
-                "failed to read an entry of first-party directory '{}': {error}",
-                directory.display()
-            )
-        })?);
-    }
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let path = entry.path();
-        let relative = relative_display_path(workspace_root, &path)?;
-        let file_name = entry.file_name();
-        let name = file_name.to_str().ok_or_else(|| {
-            format!(
-                "path '{}' has a file name that is not valid UTF-8",
-                path.display()
-            )
-        })?;
+    walk_source_tree(&root, |path, metadata| {
+        let relative = relative_display_path(workspace_root, path)?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "path '{}' has a file name that is not valid UTF-8",
+                    path.display()
+                )
+            })?;
 
         if FORBIDDEN_MANIFEST_BASENAMES.contains(&name) {
             state.findings.push(FirstPartyDepsFinding {
@@ -277,12 +253,6 @@ fn scan_directory(
             });
         }
 
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            format!(
-                "failed to stat first-party path '{}': {error}",
-                path.display()
-            )
-        })?;
         if metadata.is_dir() {
             if FORBIDDEN_VENDOR_DIRECTORY_NAMES.contains(&name) {
                 state.findings.push(FirstPartyDepsFinding {
@@ -290,15 +260,15 @@ fn scan_directory(
                     rule: FirstPartyDepsRule::VendoredDependencyRoot,
                     message: format!("forbidden vendored dependency directory '{name}'"),
                 });
-            } else {
-                scan_directory(workspace_root, &path, state)?;
+                return Ok(WalkDecision::SkipDescendants);
             }
-            continue;
+
+            return Ok(WalkDecision::Continue);
         }
 
         if metadata.is_file() {
-            state.audited_file_count += 1;
-            let bytes = match fs::read(&path) {
+            state.visited_file_count += 1;
+            let bytes = match fs::read(path) {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     state.findings.push(FirstPartyDepsFinding {
@@ -306,15 +276,18 @@ fn scan_directory(
                         rule: FirstPartyDepsRule::UnreadablePath,
                         message: format!("unreadable file ({error})"),
                     });
-                    continue;
+                    return Ok(WalkDecision::Continue);
                 }
             };
 
-            if is_javascript_file(&path) {
+            if is_javascript_file(path) {
                 match String::from_utf8(bytes) {
-                    Ok(source) => state
-                        .findings
-                        .extend(audit_javascript_source(&relative, &source)),
+                    Ok(source) => {
+                        state.javascript_source_count += 1;
+                        state
+                            .findings
+                            .extend(audit_javascript_source(&relative, &source));
+                    }
                     Err(error) => state.findings.push(FirstPartyDepsFinding {
                         file: relative,
                         rule: FirstPartyDepsRule::UnreadablePath,
@@ -322,419 +295,46 @@ fn scan_directory(
                     }),
                 }
             }
-            continue;
+
+            return Ok(WalkDecision::Continue);
         }
 
-        state.audited_file_count += 1;
+        state.visited_file_count += 1;
         state.findings.push(FirstPartyDepsFinding {
             file: relative,
             rule: FirstPartyDepsRule::UnreadablePath,
             message: "path is neither a regular file nor a directory".to_owned(),
         });
+        Ok(WalkDecision::Continue)
+    })
+}
+
+fn scan_inventoried_javascript(state: &mut ScanState) {
+    for source in inventoried_javascript_sources() {
+        state.javascript_source_count += 1;
+        state
+            .findings
+            .extend(audit_javascript_source(&source.label, &source.source));
     }
-
-    Ok(())
-}
-
-fn scan_runtime_source(workspace_root: &Path, state: &mut ScanState) {
-    state.audited_file_count += 1;
-    let registry_path = workspace_root.join(RUNTIME_REGISTRY_RELATIVE_PATH);
-    let registry_source = match fs::read_to_string(&registry_path) {
-        Ok(source) => source,
-        Err(error) => {
-            state.findings.push(FirstPartyDepsFinding {
-                file: RUNTIME_SOURCE_LABEL.to_owned(),
-                rule: FirstPartyDepsRule::UnreadablePath,
-                message: format!("unreadable runtime registry ({error})"),
-            });
-            return;
-        }
-    };
-
-    let runtime_source = match extract_runtime_source(&registry_source) {
-        Ok(source) => source,
-        Err(error) => {
-            state.findings.push(FirstPartyDepsFinding {
-                file: RUNTIME_SOURCE_LABEL.to_owned(),
-                rule: FirstPartyDepsRule::InvalidRuntimeSource,
-                message: error,
-            });
-            return;
-        }
-    };
-    state.findings.extend(audit_javascript_source(
-        RUNTIME_SOURCE_LABEL,
-        runtime_source,
-    ));
-}
-
-fn extract_runtime_source(registry_source: &str) -> Result<&str, String> {
-    let marker = registry_source
-        .find(RUNTIME_SOURCE_MARKER)
-        .ok_or_else(|| "MOTH_RUNTIME_SOURCE_V1 marker was not found".to_owned())?;
-    let source_start = marker + RUNTIME_SOURCE_MARKER.len();
-    let source_end = registry_source[source_start..]
-        .find(RUNTIME_SOURCE_END)
-        .map(|offset| source_start + offset)
-        .ok_or_else(|| "MOTH_RUNTIME_SOURCE_V1 raw string was not terminated".to_owned())?;
-    Ok(&registry_source[source_start..source_end])
 }
 
 fn is_javascript_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension, "js" | "mjs" | "cjs"))
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("js" | "mjs" | "cjs")
+    )
 }
 
-/// Apply import rules to one JavaScript source fragment.
-///
-/// Kept separate from filesystem traversal so the import contract can be proved with small fixture
-/// strings without turning a source-text test into the owner of the repository-wide ban.
+/// Apply the moth first-party import policy to one JavaScript source fragment.
 fn audit_javascript_source(file: &str, source: &str) -> Vec<FirstPartyDepsFinding> {
-    let tokens = tokenize_javascript(source);
-    let mut findings = Vec::new();
-
-    for index in 0..tokens.len() {
-        let Token::Identifier(keyword) = &tokens[index] else {
-            continue;
-        };
-
-        let specifier = match keyword.as_str() {
-            "import" => {
-                if matches!(tokens.get(index + 1), Some(Token::Punctuation('('))) {
-                    string_after_open_paren(&tokens, index + 1, "dynamic import")
-                } else if let Some(Token::String(specifier)) = tokens.get(index + 1) {
-                    Some((specifier.as_str(), "static import"))
-                } else {
-                    static_import_specifier(&tokens, index)
-                }
-            }
-            "export"
-                if matches!(tokens.get(index + 1), Some(Token::Punctuation('{')))
-                    || matches!(tokens.get(index + 1), Some(Token::Punctuation('*'))) =>
-            {
-                re_export_specifier(&tokens, index)
-            }
-            "require" if matches!(tokens.get(index + 1), Some(Token::Punctuation('('))) => {
-                string_after_open_paren(&tokens, index + 1, "require")
-            }
-            _ => None,
-        };
-
-        if let Some((specifier, form)) = specifier
-            && is_unapproved_bare_module(specifier)
-        {
-            findings.push(FirstPartyDepsFinding {
-                file: file.to_owned(),
-                rule: FirstPartyDepsRule::UnapprovedBareImport,
-                message: format!("{form} uses unapproved bare module '{specifier}'"),
-            });
-        }
-    }
-
-    findings
-}
-
-fn string_after_open_paren<'a>(
-    tokens: &'a [Token],
-    open_paren_index: usize,
-    form: &'static str,
-) -> Option<(&'a str, &'static str)> {
-    match tokens.get(open_paren_index + 1) {
-        Some(Token::String(specifier)) => Some((specifier.as_str(), form)),
-        _ => None,
-    }
-}
-
-fn static_import_specifier(tokens: &[Token], import_index: usize) -> Option<(&str, &'static str)> {
-    from_specifier(tokens, import_index, "static import")
-}
-
-fn re_export_specifier(tokens: &[Token], export_index: usize) -> Option<(&str, &'static str)> {
-    from_specifier(tokens, export_index, "re-export")
-}
-
-fn from_specifier<'a>(
-    tokens: &'a [Token],
-    keyword_index: usize,
-    form: &'static str,
-) -> Option<(&'a str, &'static str)> {
-    for index in keyword_index + 1..tokens.len() {
-        match &tokens[index] {
-            Token::Identifier(identifier) if identifier == "from" => {
-                if let Some(Token::String(specifier)) = tokens.get(index + 1) {
-                    return Some((specifier.as_str(), form));
-                }
-            }
-            Token::Identifier(_) | Token::String(_) => {}
-            Token::Punctuation('{' | '}' | '*' | ',') => {}
-            _ => break,
-        }
-    }
-
-    None
-}
-
-fn is_unapproved_bare_module(specifier: &str) -> bool {
-    let is_relative = specifier.starts_with("./") || specifier.starts_with("../");
-    let is_absolute = specifier.starts_with('/');
-    let is_url = ["http:", "https:", "data:"]
-        .iter()
-        .any(|prefix| specifier.to_ascii_lowercase().starts_with(prefix));
-
-    !is_relative && !is_absolute && !is_url && !ALLOWED_BARE_MODULES.contains(&specifier)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Token {
-    Identifier(String),
-    String(String),
-    Punctuation(char),
-}
-
-fn tokenize_javascript(source: &str) -> Vec<Token> {
-    let bytes = source.as_bytes();
-    let mut index = 0;
-    tokenize_javascript_from(bytes, &mut index, TokenizeStop::End)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TokenizeStop {
-    End,
-    Interpolation,
-}
-
-fn tokenize_javascript_from(bytes: &[u8], index: &mut usize, stop: TokenizeStop) -> Vec<Token> {
-    let mut tokens = Vec::new();
-    let mut brace_depth: u32 = 0;
-
-    while *index < bytes.len() {
-        let byte = bytes[*index];
-        if stop == TokenizeStop::Interpolation && byte == b'}' && brace_depth == 0 {
-            *index += 1;
-            break;
-        }
-
-        if byte.is_ascii_whitespace() {
-            *index += 1;
-            continue;
-        }
-
-        if byte == b'/' && bytes.get(*index + 1) == Some(&b'/') {
-            *index += 2;
-            while *index < bytes.len() && bytes[*index] != b'\n' {
-                *index += 1;
-            }
-            continue;
-        }
-        if byte == b'/' && bytes.get(*index + 1) == Some(&b'*') {
-            *index += 2;
-            while *index + 1 < bytes.len() && !(bytes[*index] == b'*' && bytes[*index + 1] == b'/')
-            {
-                *index += 1;
-            }
-            *index = (*index + 2).min(bytes.len());
-            continue;
-        }
-        if byte == b'/' {
-            if slash_starts_regular_expression(&tokens) {
-                skip_regular_expression(bytes, index);
-            } else {
-                *index += 1;
-            }
-            continue;
-        }
-
-        if byte == b'\'' || byte == b'"' {
-            tokens.push(Token::String(read_quoted_string(bytes, index)));
-            continue;
-        }
-
-        if byte == b'`' {
-            scan_template_literal(bytes, index, &mut tokens);
-            continue;
-        }
-
-        if byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$' {
-            let start = *index;
-            *index += 1;
-            while *index < bytes.len()
-                && (bytes[*index].is_ascii_alphanumeric()
-                    || bytes[*index] == b'_'
-                    || bytes[*index] == b'$')
-            {
-                *index += 1;
-            }
-            tokens.push(Token::Identifier(
-                String::from_utf8_lossy(&bytes[start..*index]).into_owned(),
-            ));
-            continue;
-        }
-
-        if matches!(
-            byte,
-            b'(' | b')'
-                | b'{'
-                | b'}'
-                | b'['
-                | b']'
-                | b';'
-                | b'*'
-                | b','
-                | b'.'
-                | b'='
-                | b'+'
-                | b'-'
-                | b'!'
-                | b'?'
-                | b':'
-                | b'&'
-                | b'|'
-                | b'<'
-                | b'>'
-                | b'%'
-                | b'^'
-                | b'~'
-        ) {
-            if byte == b'{' {
-                brace_depth += 1;
-            } else if byte == b'}' {
-                brace_depth = brace_depth.saturating_sub(1);
-            }
-            tokens.push(Token::Punctuation(byte as char));
-        }
-        *index += 1;
-    }
-
-    tokens
-}
-
-fn slash_starts_regular_expression(tokens: &[Token]) -> bool {
-    match tokens.last() {
-        None => true,
-        Some(Token::String(_)) => false,
-        Some(Token::Punctuation(punctuation)) => !matches!(punctuation, ')' | ']' | '}'),
-        Some(Token::Identifier(identifier)) => matches!(
-            identifier.as_str(),
-            "return"
-                | "throw"
-                | "case"
-                | "in"
-                | "of"
-                | "new"
-                | "typeof"
-                | "void"
-                | "delete"
-                | "await"
-                | "yield"
-        ),
-    }
-}
-
-fn skip_regular_expression(bytes: &[u8], index: &mut usize) {
-    *index += 1;
-    let mut in_character_class = false;
-
-    while *index < bytes.len() {
-        let byte = bytes[*index];
-        if byte == b'\\' {
-            *index = (*index + 2).min(bytes.len());
-            continue;
-        }
-        if byte == b'\n' {
-            return;
-        }
-        if byte == b'[' {
-            in_character_class = true;
-        } else if byte == b']' {
-            in_character_class = false;
-        } else if byte == b'/' && !in_character_class {
-            *index += 1;
-            while *index < bytes.len() && bytes[*index].is_ascii_alphabetic() {
-                *index += 1;
-            }
-            return;
-        }
-        *index += 1;
-    }
-}
-
-fn read_quoted_string(bytes: &[u8], index: &mut usize) -> String {
-    let quote = bytes[*index];
-    *index += 1;
-    let mut value = String::new();
-
-    while *index < bytes.len() {
-        let byte = bytes[*index];
-        *index += 1;
-        if byte == quote {
-            break;
-        }
-        if byte == b'\\' {
-            if let Some(escaped) = bytes.get(*index).copied() {
-                *index += 1;
-                value.push(match escaped {
-                    b'n' => '\n',
-                    b'r' => '\r',
-                    b't' => '\t',
-                    b'0' => '\0',
-                    other => other as char,
-                });
-            }
-        } else {
-            value.push(byte as char);
-        }
-    }
-
-    value
-}
-
-fn scan_template_literal(bytes: &[u8], index: &mut usize, tokens: &mut Vec<Token>) {
-    *index += 1;
-    let mut literal = String::new();
-    let mut interpolated = false;
-
-    while *index < bytes.len() {
-        let byte = bytes[*index];
-        *index += 1;
-        if byte == b'\\' {
-            if let Some(escaped) = bytes.get(*index).copied() {
-                *index += 1;
-                if !interpolated {
-                    literal.push(match escaped {
-                        b'n' => '\n',
-                        b'r' => '\r',
-                        b't' => '\t',
-                        b'0' => '\0',
-                        b'`' => '`',
-                        b'$' => '$',
-                        b'\\' => '\\',
-                        other => other as char,
-                    });
-                }
-            }
-            continue;
-        }
-        if byte == b'`' {
-            if !interpolated {
-                tokens.push(Token::String(literal));
-            }
-            return;
-        }
-        if byte == b'$' && bytes.get(*index) == Some(&b'{') {
-            interpolated = true;
-            *index += 1;
-            tokens.extend(tokenize_javascript_from(
-                bytes,
-                index,
-                TokenizeStop::Interpolation,
-            ));
-            continue;
-        }
-        if !interpolated {
-            literal.push(byte as char);
-        }
-    }
+    javascript_import_findings(source)
+        .into_iter()
+        .map(|message| FirstPartyDepsFinding {
+            file: file.to_owned(),
+            rule: FirstPartyDepsRule::UnapprovedModuleImport,
+            message,
+        })
+        .collect()
 }
 
 #[cfg(test)]

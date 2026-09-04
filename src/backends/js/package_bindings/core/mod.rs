@@ -4,13 +4,30 @@
 //! WHY: optional core packages are builder-provided surface; keeping helper emission here
 //! prevents the generic runtime prelude from becoming a package implementation dump.
 
-mod io;
-mod random;
-mod text;
-mod time;
+pub(crate) mod io;
+pub(crate) mod random;
+pub(crate) mod text;
+pub(crate) mod time;
 
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::external_packages::ExternalJsLowering;
+
+/// One Core package helper body shared by JS emission and first-party validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CoreJsHelper {
+    pub name: &'static str,
+    pub source: &'static str,
+}
+
+/// Every Core helper body the JS backend can emit, including currently unreferenced ones.
+pub(crate) fn core_javascript_helpers() -> Vec<CoreJsHelper> {
+    let mut helpers = Vec::new();
+    helpers.extend_from_slice(text::CORE_TEXT_JS_HELPERS);
+    helpers.extend_from_slice(random::CORE_RANDOM_JS_HELPERS);
+    helpers.extend_from_slice(io::CORE_IO_JS_HELPERS);
+    helpers.push(time::CORE_TIME_JS_HELPER);
+    helpers
+}
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_core_package_helpers(&mut self) {
@@ -32,10 +49,10 @@ impl<'hir> JsEmitter<'hir> {
         })
     }
 
-    pub(super) fn emit_referenced_core_helpers(&mut self, helpers: &[(&str, &str)]) {
-        for (js_name, body) in helpers {
-            if self.referenced_external_runtime_function(js_name) {
-                self.emit_line(body);
+    pub(super) fn emit_referenced_core_helpers(&mut self, helpers: &[CoreJsHelper]) {
+        for helper in helpers {
+            if self.referenced_external_runtime_function(helper.name) {
+                self.emit_javascript_source(helper.source);
             }
         }
     }

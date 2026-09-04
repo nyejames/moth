@@ -84,7 +84,6 @@ impl RuntimeModuleRegistry {
     }
 
     /// Returns the list of registered runtime modules.
-    #[cfg(test)]
     pub fn registered_modules(&self) -> &[CoreJsRuntimeModule] {
         &self.modules
     }

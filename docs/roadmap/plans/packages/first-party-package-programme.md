@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: active parallel programme
-CURRENT_SLICE: Phase 1 - activate the living package workflow
+CURRENT_SLICE: Phase 0 - harden package foundations and first-party dependency policy
 BLOCKERS: package slices that require unstable shared frontend or diagnostic representations pause
-NEXT_ACTION: create core-text.md, complete the @core/text audit and settle its v1 scope before implementation
+NEXT_ACTION: finish the first-party dependency guard corrections, then create core-text.md
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -406,7 +406,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Delivered | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 0 | Package foundations | this plan | Active next | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | `core-text.md` | TODO: create when activated | Close common Unicode-aware inspection, search and transformation gaps without accepting temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
@@ -580,12 +580,13 @@ Delivered before Phase 0:
 
 ### Phase 0 - package foundations hardening
 
-Delivered:
+In progress:
 
 - removed `PackageOrigin::Standard` and Standard-tier documentation
 - kept `PackageOrigin::Dependency` for later package-system work
-- added `just first-party-deps` to `just validate` with scoped first-party roots, an `@moth/runtime`
-  allowlist, and focused positive/negative tests
+- added `just first-party-deps` to `just validate` with scoped first-party roots
+- the guard now reuses the HTML JS module scanner, inspects inventoried Core helper and inline JS,
+  and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
 
 Do not activate `@core/text` until this phase stays green.

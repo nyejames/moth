@@ -341,15 +341,14 @@ The first-party package promise has one focused owner:
 
 It walks only these first-party implementation roots: `packages/`,
 `src/builder_surface/core_packages/`, `src/backends/js/package_bindings/` and
-`src/projects/html_project/binding_packages/`. It also inspects the inline
-`MOTH_RUNTIME_SOURCE_V1` source in
-`src/projects/html_project/external_js/runtime_module_registry.rs`.
+`src/projects/html_project/binding_packages/`. It also inspects the compiler-owned JavaScript
+inventory from `moth::first_party_js`: Core helper bodies, inline lowering templates and every
+module registered in `RuntimeModuleRegistry`.
 
-The one bare runtime-module allowlist entry is `@moth/runtime`. Relative, absolute and URL
-specifiers are not third-party package dependencies, while every other bare specifier is rejected
-in `.js`, `.mjs` and `.cjs` files and in the inline runtime source. Exact package-manager manifest
-and lockfile basenames, and `node_modules`, `vendor` and `third_party` directory names, are
-rejected under the scoped roots.
+The only allowed JavaScript module specifier is an exact compiler-owned runtime module registered
+by `RuntimeModuleRegistry`. Dynamic `import()`, `require()`, relative, absolute, URL and data
+imports are rejected. Exact package-manager manifest and lockfile basenames, and `node_modules`,
+`vendor` and `third_party` directory names, are rejected under the scoped roots.
 
 This audit does not walk generated `runtime_glue`, user-owned or future dependency packages,
 documentation, test fixtures, benchmarks or repository-root manifests. Missing roots and unreadable
