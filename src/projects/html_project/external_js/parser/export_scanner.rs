@@ -881,10 +881,7 @@ impl<'a> ExportScanner<'a> {
                     } else if self.peek_str("/*") {
                         self.skip_block_comment();
                         continue;
-                    } else if depth == 1
-                        && self.peek_str("import")
-                        && self.is_word_boundary_at("import".len())
-                    {
+                    } else if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
                         if self
                             .source
                             .get(self.pos + "import".len()..)
@@ -895,9 +892,7 @@ impl<'a> ExportScanner<'a> {
                             self.read_import_statement();
                         }
                         continue;
-                    } else if depth == 1
-                        && self.peek_str("require")
-                        && self.is_word_boundary_at("require".len())
+                    } else if self.peek_str("require") && self.is_word_boundary_at("require".len())
                     {
                         self.read_require_statement();
                         continue;
@@ -1158,7 +1153,13 @@ fn parse_string_literal_from(text: &str) -> Option<String> {
         while let Some((_, inner)) = chars.next() {
             if inner == '\\' {
                 if let Some((_, escaped)) = chars.next() {
-                    value.push(escaped);
+                    value.push(match escaped {
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '0' => '\0',
+                        other => other,
+                    });
                 }
                 continue;
             }
