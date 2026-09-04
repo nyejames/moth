@@ -18,9 +18,9 @@ plans under this directory.
 
 ```text
 STATUS: active parallel programme
-CURRENT_SLICE: Phase 0 - harden package foundations and first-party dependency policy
+CURRENT_SLICE: Phase 1 - activate the living package workflow
 BLOCKERS: package slices that require unstable shared frontend or diagnostic representations pause
-NEXT_ACTION: create the dedicated worktree from this branch, establish the validation baseline and run Phase 0
+NEXT_ACTION: create core-text.md, complete the @core/text audit and settle its v1 scope before implementation
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -121,9 +121,8 @@ Accepted backing kinds are:
 - `MothSource`
 - `ExternalBinding`
 
-`Standard` has no accepted role. Phase 0 removes `PackageOrigin::Standard` and every statement that
-implies a separate compiler-owned standard tier. Core is the single first-party batteries-included
-family.
+`Standard` has no accepted role. `PackageOrigin` no longer includes a Standard variant. Core is the
+single first-party batteries-included family.
 
 Prelude is visibility policy, not an origin or backing. Bare `io` is a prelude alias to `@core/io`.
 The package and its metadata remain `@core/io`.
@@ -407,7 +406,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Active next | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 0 | Package foundations | this plan | Delivered | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | `core-text.md` | TODO: create when activated | Close common Unicode-aware inspection, search and transformation gaps without accepting temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
@@ -579,27 +578,17 @@ Delivered before Phase 0:
 - move the accepted collection sorting plan into the package programme directory
 - sync the package branch with the published diagnostics data-layout checkpoint
 
-The implementation worktree must still establish and record a clean validation baseline.
-
 ### Phase 0 - package foundations hardening
 
-- audit package origin and backing use across docs and code
-- remove `PackageOrigin::Standard`
-- remove stale matches, tests and documentation that imply a Standard package tier
-- update the later dependency-foundations plan to use only accepted package categories
-- preserve `PackageOrigin::Dependency` for the role that later plan already owns
-- align prose with binding-backed and dependency-package terminology
-- search canonical docs for cryptography presented as a Core package example and remove it
-- trace Core, Builder, ProjectLocal and future Dependency package availability through the builder
-  surface and Stage 0
-- audit current Core and Web registration paths for ownership drift, redundant scaffolding and
-  assumptions that every binding-backed package has the same origin
-- make only narrow corrective changes needed by the accepted package model
-- add the first-party no-third-party-dependencies validation rule
-- add focused guard tests and wire the guard into `just validate`
-- stop before dependency declaration, resolver, alias or package graph design
+Delivered:
 
-Mandatory closeout: run the complete phase gate. Do not activate `@core/text` until Phase 0 is green.
+- removed `PackageOrigin::Standard` and Standard-tier documentation
+- kept `PackageOrigin::Dependency` for later package-system work
+- added `just first-party-deps` to `just validate` with scoped first-party roots, an `@moth/runtime`
+  allowlist, and focused positive/negative tests
+- no cryptography Core package examples were present in canonical docs
+
+Do not activate `@core/text` until this phase stays green.
 
 ### Phase 1 - activate the living package workflow
 

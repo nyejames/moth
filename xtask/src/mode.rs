@@ -26,6 +26,7 @@ Modes:
   feature-matrix       Run every curated feature lane and report the outcome table
   feature-lane-check   Check feature-lane coverage and write the coverage report
   source-audit         Apply the broad-source architecture bans and write their report
+  first-party-deps     Check first-party package roots for third-party runtime dependencies
   honesty-audit        Classify the test-honesty findings and write the canonical inventory
                        (use --update-evidence to refresh the tracked durable copy)";
 
@@ -69,6 +70,8 @@ pub enum BenchmarkMode {
     FeatureLaneCheck,
     /// Apply the broad-source architecture bans across the workspace.
     SourceAudit,
+    /// Check first-party package roots for third-party runtime dependencies.
+    FirstPartyDeps,
     /// Classify the test-honesty findings and write the canonical honesty inventory.
     ///
     /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
@@ -123,6 +126,7 @@ impl BenchmarkMode {
             "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
             "source-audit" => Some(BenchmarkMode::SourceAudit),
+            "first-party-deps" => Some(BenchmarkMode::FirstPartyDeps),
             _ => None,
         };
 

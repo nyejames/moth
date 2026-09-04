@@ -23,6 +23,7 @@
 //! - `feature-matrix`       - Run every curated feature lane and report the outcome table
 //! - `feature-lane-check`   - Check feature-lane coverage and write the coverage report
 //! - `source-audit`         - Apply the broad-source architecture bans and write their report
+//! - `first-party-deps`     - Check first-party package roots for third-party runtime dependencies
 //! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
 
 mod architecture_boundary;
@@ -47,6 +48,7 @@ mod benchmark_suite;
 mod benchmark_workspace;
 mod compiler_binary;
 mod feature_matrix;
+mod first_party_deps;
 mod frontend_bench;
 mod honesty_audit;
 mod mode;
@@ -67,6 +69,7 @@ use bench_report::run_benchmark_report;
 use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
 use feature_matrix::{run_feature_lane_check, run_feature_matrix};
+use first_party_deps::run_first_party_deps;
 use frontend_bench::{run_data_layout_benchmarks, run_frontend_benchmarks};
 use honesty_audit::run_honesty_audit;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
@@ -158,6 +161,9 @@ fn main() {
         }
         BenchmarkMode::SourceAudit => {
             exit_with_result(run_source_audit());
+        }
+        BenchmarkMode::FirstPartyDeps => {
+            exit_with_result(run_first_party_deps());
         }
         BenchmarkMode::HonestyAudit { update_evidence } => {
             exit_with_result(run_honesty_audit(update_evidence));

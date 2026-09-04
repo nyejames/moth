@@ -288,7 +288,12 @@ fn parse_args_honesty_audit_rejects_anything_else() {
 
 #[test]
 fn top_level_usage_lists_every_audit_mode() {
-    for mode in ["honesty-audit", "source-audit", "feature-lane-check"] {
+    for mode in [
+        "honesty-audit",
+        "source-audit",
+        "first-party-deps",
+        "feature-lane-check",
+    ] {
         assert!(
             TOP_LEVEL_USAGE.contains(mode),
             "usage does not mention '{mode}', so nobody running `xtask` learns it exists"
