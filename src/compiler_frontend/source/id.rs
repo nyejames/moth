@@ -20,6 +20,16 @@ impl SourceId {
             .expect("source database index must leave room for the non-zero identity");
         Self(NonZeroU32::new(raw).expect("source identities are always non-zero"))
     }
+    /// Convert a zero-based physical-source row into its compiler identity.
+    ///
+    /// The compilation-root row occupies the preceding storage slot. Keeping this conversion here
+    /// prevents Stage 0 callers from encoding the root offset themselves.
+    pub(crate) fn from_physical_index(physical_index: usize) -> Option<Self> {
+        let record_index = physical_index.checked_add(1)?;
+        let record_index = u32::try_from(record_index).ok()?;
+        let raw = record_index.checked_add(1)?;
+        Some(Self(NonZeroU32::new(raw)?))
+    }
 
     /// Return the zero-based source-record index addressed by this identity.
     pub(crate) fn index(self) -> usize {

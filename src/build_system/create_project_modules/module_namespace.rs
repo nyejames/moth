@@ -22,7 +22,8 @@ use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
 use super::source_package_discovery::SourcePackageBoundaryIndexes;
 use super::source_tree_index::{
-    SourceClassification, SourceId, SourceLogicalIdentity, SourceOwnership, SourceTreeIndex,
+    SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceRecordIndex,
+    SourceTreeIndex,
 };
 
 use crate::builder_surface::SourceFileKind;
@@ -43,7 +44,6 @@ use crate::compiler_frontend::utilities::basic::portable_path_text;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-
 /// One explicit namespace entry for one dependency path within one module namespace.
 ///
 /// Entries are tagged records with no precedence chain: a same-module source is never
@@ -51,13 +51,13 @@ use std::path::{Path, PathBuf};
 /// ordered fallback.
 #[derive(Clone, Debug)]
 enum NamespaceEntry {
-    /// A source file owned by the same module, resolved by boundary-local `SourceId`.
+    /// A source file owned by the same module, addressed by its Stage 0 row.
     SameModuleSource {
-        source_id: SourceId,
+        source_index: SourceRecordIndex,
         source_kind: SourceFileKind,
     },
     /// An explicit provider-owned file in the same module, keyed by its path with extension.
-    SameModuleProvider { source_id: SourceId },
+    SameModuleProvider { source_index: SourceRecordIndex },
     /// A child normal module or visible support package, resolved by boundary-local `ModuleId`.
     CrossModule { target_module_id: ModuleId },
 }
@@ -123,20 +123,15 @@ pub(crate) enum NamespaceBoundary {
 /// The result of resolving one compiler-semantic dependency through a namespace.
 #[derive(Clone, Debug)]
 pub(crate) enum ResolvedDependency {
-    /// A source file in the same module (project or package boundary).
+    /// A source file in the same module, addressed by its Stage 0 row.
     ///
-    /// The traversal queues the canonical path as the IO handle with the indexed source kind.
-    /// `source_id` is the boundary-local `SourceId` from the namespace entry, carried directly so
-    /// the semantic-set builder records same-owner membership without re-resolving through paths.
-    /// `consumer_module_id` is the declaring file's owning module inside the active boundary.
+    /// The traversal retains this row handle until it joins the boundary source database's
+    /// compiler identity at the file-reference or module-preparation boundary.
     SameModuleSource {
-        source_id: SourceId,
+        source_index: SourceRecordIndex,
         consumer_module_id: ModuleId,
     },
-    /// A cross-module target in the active project or package boundary.
-    ///
-    /// The traversal inserts a provider-before-consumer edge by `ModuleId` and queues the
-    /// target module's root file.
+    /// A source file in another module in the active project or package boundary.
     CrossModule {
         provider_module_id: ModuleId,
         consumer_module_id: ModuleId,
@@ -335,8 +330,8 @@ impl ModuleNamespaceSet {
         reject_explicit_source_extension(dependency_path, dependency_location, string_table)?;
 
         let prefix_components = provider.path.as_components();
-        let source_id = source_tree_index
-            .source_id_for_canonical_path(declaring_canonical_path)
+        let source_index = source_tree_index
+            .source_index_for_canonical_path(declaring_canonical_path)
             .ok_or_else(|| {
                 CompilerDiagnostic::missing_import_target(
                     dependency_path.clone(),
@@ -344,7 +339,7 @@ impl ModuleNamespaceSet {
                 )
             })?;
         let SourceOwnership::Owned(consumer_module_id) =
-            source_tree_index.source(source_id).ownership()
+            source_tree_index.source(source_index).ownership()
         else {
             return Err(CompilerDiagnostic::missing_import_target(
                 dependency_path.clone(),
@@ -477,12 +472,11 @@ impl ModuleNamespaceSet {
                 dependency_location.clone(),
             ));
         }
-
         let (namespace, index) = match project_source_tree_index
-            .source_id_for_canonical_path(declaring_canonical_path)
+            .source_index_for_canonical_path(declaring_canonical_path)
         {
-            Some(source_id) => {
-                let consumer_record = project_source_tree_index.source(source_id);
+            Some(source_index) => {
+                let consumer_record = project_source_tree_index.source(source_index);
                 let SourceOwnership::Owned(module_id) = consumer_record.ownership() else {
                     return Err(CompilerDiagnostic::missing_import_target(
                         provider_path.clone(),
@@ -508,7 +502,7 @@ impl ModuleNamespaceSet {
                     .get(package_prefix)
                     .expect("package prefix found by find_package_namespace_owner");
                 package_index
-                    .source_id_for_canonical_path(declaring_canonical_path)
+                    .source_index_for_canonical_path(declaring_canonical_path)
                     .expect("package owner lookup found the declaring source");
                 (&namespaces[module_id.index()], package_index)
             }
@@ -523,8 +517,8 @@ impl ModuleNamespaceSet {
         }
 
         match namespace.entries.get(&key) {
-            Some(NamespaceEntry::SameModuleProvider { source_id }) => {
-                Ok(index.source(*source_id).canonical_path().to_path_buf())
+            Some(NamespaceEntry::SameModuleProvider { source_index }) => {
+                Ok(index.source(*source_index).canonical_path().to_path_buf())
             }
             Some(NamespaceEntry::CrossModule { .. })
             | Some(NamespaceEntry::SameModuleSource { .. }) => {
@@ -569,15 +563,16 @@ impl ModuleNamespaceSet {
                     .is_some_and(|remainder| remainder.starts_with('/'))
             })
     }
-
     /// Find the package boundary, index and owning module for a canonical declaring path.
     fn find_package_namespace_owner(
         &self,
         canonical_path: &Path,
     ) -> Option<(&str, &SourceTreeIndex, ModuleId)> {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
-            if let Some(source_id) = package_index.source_id_for_canonical_path(canonical_path) {
-                let ownership = package_index.source(source_id).ownership();
+            if let Some(source_index) =
+                package_index.source_index_for_canonical_path(canonical_path)
+            {
+                let ownership = package_index.source(source_index).ownership();
                 if let SourceOwnership::Owned(module_id) = ownership {
                     return Some((dependency_prefix, package_index, module_id));
                 }
@@ -637,11 +632,10 @@ fn build_package_namespaces(
 
         package_namespaces.insert(dependency_prefix.to_owned(), namespaces);
     }
-
     package_namespaces
 }
 
-/// Add same-module source entries for one module from its owned source IDs.
+/// Add same-module source entries for one module from its owned source rows.
 ///
 /// Each owned source's extensionless module-relative logical path becomes a namespace key.
 /// Root files (names starting with `@` or `+`) are excluded because direct root dependencies are
@@ -651,8 +645,8 @@ fn populate_same_module_entries(
     index: &SourceTreeIndex,
     module_id: ModuleId,
 ) {
-    for source_id in index.owned_source_ids(module_id) {
-        let record = index.source(*source_id);
+    for source_index in index.owned_source_indices(module_id) {
+        let record = index.source(*source_index);
         let SourceLogicalIdentity::Owned(owned_identity) = record.logical_identity() else {
             continue;
         };
@@ -670,14 +664,14 @@ fn populate_same_module_entries(
             SourceClassification::CompilerSemantic(source_kind) => namespace.insert(
                 extensionless_portable_path(relative_path),
                 NamespaceEntry::SameModuleSource {
-                    source_id: *source_id,
+                    source_index: *source_index,
                     source_kind: *source_kind,
                 },
             ),
             SourceClassification::ProviderOwned(_) => namespace.insert(
                 relative_path.to_owned(),
                 NamespaceEntry::SameModuleProvider {
-                    source_id: *source_id,
+                    source_index: *source_index,
                 },
             ),
         }
@@ -839,10 +833,10 @@ fn resolve_entry(
 ) -> Result<ResolvedDependency, CompilerDiagnostic> {
     match entry {
         NamespaceEntry::SameModuleSource {
-            source_id,
+            source_index,
             source_kind,
         } => {
-            let record = index.source(*source_id);
+            let record = index.source(*source_index);
             if !record.supported() {
                 let extension_id = string_table.intern(source_kind.extension());
                 return Err(CompilerDiagnostic::unsupported_source_file_kind(
@@ -852,7 +846,7 @@ fn resolve_entry(
                 ));
             }
             Ok(ResolvedDependency::SameModuleSource {
-                source_id: *source_id,
+                source_index: *source_index,
                 consumer_module_id,
             })
         }

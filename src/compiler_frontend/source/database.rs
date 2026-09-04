@@ -4,12 +4,14 @@
 //! spans and build-lifetime registration remain outside this slice and are deliberately not stored
 //! here.
 
-use super::{SourceId, SourceProvenance, SourceRecord};
+use super::{SourceId, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
 use rustc_hash::FxHashMap;
+
 use std::path::{Path, PathBuf};
 
 /// Source identity records in deterministic logical-path order.
@@ -39,8 +41,8 @@ impl SourceDatabase {
     /// Build deterministic source identities from an unordered file list.
     ///
     /// Canonical files are sorted by portable logical path before identities are assigned, so
-    /// assignment does not depend on filesystem iteration order. Callers that already hold a
-    /// sorted boundary inventory use [`Self::from_ordered_canonical_files`] instead.
+    /// assignment does not depend on filesystem iteration order. Directory boundaries that
+    /// already own sorted registration rows use [`Self::from_ordered_registration_index`] instead.
     pub fn build<I>(
         canonical_files: I,
         entry_file_path: &Path,
@@ -62,25 +64,19 @@ impl SourceDatabase {
         Self::from_ordered_logical_rows(rows)
     }
 
-    /// Build source identities from an already sorted boundary inventory.
+    /// Build source identities from the ordered candidates produced by Stage 0.
     ///
-    /// Stage 0 owns filesystem discovery and sorts its canonical source inventory by portable
-    /// logical identity before assigning its boundary-local handles. Directory and source-package
-    /// compilation pass that order here so the compiler assigns its own `SourceId` values without
-    /// re-walking or re-sorting the inventory.
-    pub(crate) fn from_ordered_canonical_files<I>(
-        canonical_files: I,
+    /// The registration index already carries the canonical logical-identity order. This method
+    /// computes each record's compiler-facing logical path but preserves row order, so the
+    /// compiler assigns the IDs that the source-tree owners and module candidates address.
+    pub(crate) fn from_ordered_registration_index(
+        registration_index: &SourceRegistrationIndex<'_>,
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError>
-    where
-        I: IntoIterator,
-        I::IntoIter: ExactSizeIterator,
-        I::Item: AsRef<Path>,
-    {
+    ) -> Result<Self, CompilerError> {
         let rows = logical_rows_for_canonical_files(
-            canonical_files,
+            registration_index.canonical_paths(),
             entry_file_path,
             project_path_resolver,
             string_table,
@@ -169,16 +165,25 @@ impl SourceDatabase {
         (record.provenance != SourceProvenance::CompilationRoot).then_some(record)
     }
 
-    /// Iterate physical source identities in deterministic logical-path order.
-    ///
-    /// The compilation-root record is addressed by `SourceId(1)` but is not a physical source and
-    /// therefore does not appear in this iterator.
     pub fn iter(&self) -> std::slice::Iter<'_, SourceRecord> {
         debug_assert_eq!(
             self.files.first().map(|record| record.provenance),
             Some(SourceProvenance::CompilationRoot)
         );
         self.files[1..].iter()
+    }
+
+    /// Resolve the compiler identity for a zero-based physical row in a registration index.
+    ///
+    /// The database owns the reserved compilation-root slot, so callers never reproduce that
+    /// offset when carrying a Stage 0 row into compiler-facing preparation.
+    ///
+    /// This holds only while the registration index supplies every physical row. Registering any
+    /// source ahead of it - config being the next one to arrive - shifts each row past its
+    /// identity, so that change must carry the assigned `SourceId` rather than the row ordinal.
+    pub(crate) fn source_id_at_physical_index(&self, physical_index: usize) -> Option<SourceId> {
+        let source_id = SourceId::from_physical_index(physical_index)?;
+        self.get(source_id).map(|_| source_id)
     }
 }
 

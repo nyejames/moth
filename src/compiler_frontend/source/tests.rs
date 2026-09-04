@@ -167,7 +167,7 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
         shared_source.clone(),
     ];
     let mut string_table = StringTable::new();
-    let mut database = SourceDatabase::from_ordered_canonical_files(
+    let mut database = SourceDatabase::build(
         boundary_paths.iter(),
         &module_a_source,
         None,

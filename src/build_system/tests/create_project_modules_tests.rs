@@ -151,8 +151,9 @@ fn source_database_for_test(
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> SourceDatabase {
-    SourceDatabase::from_ordered_canonical_files(
-        source_tree_index.canonical_source_paths_in_logical_order(),
+    let registration_index = source_tree_index.source_registration_index();
+    SourceDatabase::from_ordered_registration_index(
+        &registration_index,
         resolver.entry_root(),
         Some(resolver),
         string_table,
@@ -7215,7 +7216,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // The graph node carries no source records; owned source data is resolved through the
     // retained central index, so the lookup must cover exactly the index's owned source IDs.
     for node in graph.nodes() {
-        for source_id in source_tree_index.owned_source_ids(node.module_id()) {
+        for source_id in source_tree_index.owned_source_indices(node.module_id()) {
             let record = source_tree_index.source(*source_id);
             let lookup_origin = lookup
                 .get(record.canonical_path())
@@ -7236,7 +7237,11 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     let total_entries: usize = graph
         .nodes()
         .iter()
-        .map(|node| source_tree_index.owned_source_ids(node.module_id()).len())
+        .map(|node| {
+            source_tree_index
+                .owned_source_indices(node.module_id())
+                .len()
+        })
         .sum();
     assert_eq!(
         unique_paths.len(),

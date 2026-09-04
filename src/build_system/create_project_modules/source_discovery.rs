@@ -65,7 +65,7 @@ use super::source_loading::{extract_source_code, read_source_code, source_read_e
 use super::source_preparation::{
     PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
 };
-use super::source_tree_index::{SourceClassification, SourceId, SourceTreeIndex};
+use super::source_tree_index::{SourceClassification, SourceRecordIndex, SourceTreeIndex};
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
 ///
@@ -300,28 +300,28 @@ pub(super) fn collect_reachable_input_files(
     })
 }
 
-/// Prepare one owned compiler-semantic `SourceId` directly into the module's input lane.
+/// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
 /// WHAT: reads and tokenizes the selected source exactly once, producing the owned input consumed
 ///       by this module's header preparation queue. The caller's queued set is the ownership
-///       proof: a canonical source ID is handed to this function at most once for its owning
+///       proof: a canonical source row is handed to this function at most once for its owning
 ///       module.
 /// WHY: `SourceTreeIndex` owns source identity and ownership; retaining a second project-wide
 ///      payload store would duplicate complete source strings and token buffers without a second
 ///      compiler consumer. The returned input is moved into the module job after its header
 ///      references have been resolved.
 pub(super) fn prepare_owned_source_input(
-    source_id: SourceId,
+    source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let record = source_tree_index.source(source_id);
+    let record = source_tree_index.source(source_index);
     let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
         return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
             format!(
-                "Project source ID {} is not compiler semantic",
-                source_id.index(),
+                "Project source row {} is not compiler semantic",
+                source_index.index(),
             ),
         )));
     };
@@ -402,20 +402,20 @@ pub(super) struct PreparedOwnedSource {
 /// by canonical source order before the module handoff. Unreachable candidates are dropped
 /// without merging, preserving the existing semantic source set and diagnostic behaviour.
 pub(super) fn prepare_owned_source_inputs(
-    source_ids: &[SourceId],
+    source_indices: &[SourceRecordIndex],
     source_tree_index: &SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
     fork_source: &StringTableForkSource,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> FxHashMap<SourceId, PreparedOwnedSource> {
-    let prepare_source = |&source_id: &SourceId| {
+) -> FxHashMap<SourceRecordIndex, PreparedOwnedSource> {
+    let prepare_source = |&source_index: &SourceRecordIndex| {
         let fork = fork_source.fork_for_module();
         let (mut string_table, base_len) = fork.into_parts();
         let input = crate::timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             timing_context,
             prepare_owned_source_input(
-                source_id,
+                source_index,
                 source_tree_index,
                 style_directives,
                 &mut string_table,
@@ -423,7 +423,7 @@ pub(super) fn prepare_owned_source_inputs(
         );
 
         (
-            source_id,
+            source_index,
             PreparedOwnedSource {
                 string_table,
                 base_len,
@@ -432,7 +432,7 @@ pub(super) fn prepare_owned_source_inputs(
         )
     };
 
-    let prepared_sources = source_ids
+    let prepared_sources = source_indices
         .par_iter()
         .map(prepare_source)
         .collect::<Vec<_>>();
@@ -442,15 +442,15 @@ pub(super) fn prepare_owned_source_inputs(
 
 /// Merge one selected batched input into the module string table before header preparation.
 pub(super) fn merge_prepared_owned_source(
-    source_id: SourceId,
-    prepared_sources: &mut FxHashMap<SourceId, PreparedOwnedSource>,
+    source_index: SourceRecordIndex,
+    prepared_sources: &mut FxHashMap<SourceRecordIndex, PreparedOwnedSource>,
     string_table: &mut StringTable,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let Some(prepared) = prepared_sources.remove(&source_id) else {
+    let Some(prepared) = prepared_sources.remove(&source_index) else {
         return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
             format!(
-                "Prepared source ID {} is absent from the owned-source batch",
-                source_id.index(),
+                "Prepared source row {} is absent from the owned-source batch",
+                source_index.index(),
             ),
         )));
     };

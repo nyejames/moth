@@ -520,10 +520,9 @@ pub(crate) fn compile_directory_frontend(
         }
     };
     let project_path_resolver = project_setup.resolver;
-    let project_source_files = SourceDatabase::from_ordered_canonical_files(
-        project_setup
-            .source_tree_index
-            .canonical_source_paths_in_logical_order(),
+    let project_registration_index = project_setup.source_tree_index.source_registration_index();
+    let project_source_files = SourceDatabase::from_ordered_registration_index(
+        &project_registration_index,
         project_path_resolver.entry_root(),
         Some(&project_path_resolver),
         string_table,
@@ -567,8 +566,9 @@ pub(crate) fn compile_directory_frontend(
             dependency_prefix,
             package_index,
         );
-        let package_source_files = SourceDatabase::from_ordered_canonical_files(
-            package_index.canonical_source_paths_in_logical_order(),
+        let package_registration_index = package_index.source_registration_index();
+        let package_source_files = SourceDatabase::from_ordered_registration_index(
+            &package_registration_index,
             package_path_resolver.entry_root(),
             Some(&package_path_resolver),
             string_table,

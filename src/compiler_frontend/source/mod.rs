@@ -12,6 +12,7 @@
 mod database;
 mod id;
 mod record;
+mod registration;
 
 #[cfg(test)]
 mod tests;
@@ -19,3 +20,4 @@ mod tests;
 pub(crate) use database::SourceDatabase;
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceProvenance, SourceRecord};
+pub(crate) use registration::SourceRegistrationIndex;

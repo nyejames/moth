@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use super::module_identity::ModuleId;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_tree_index::{
-    SourceClassification, SourceId as IndexedSourceId, SourceOwnership, SourceTreeIndex,
+    SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
 };
 
 /// One directory-boundary physical file-reference resolver.
@@ -96,7 +96,7 @@ impl<'a> FileReferenceResolver<'a> {
         reference: &PreparedFileReference,
         source_files: &SourceDatabase,
         string_table: &mut StringTable,
-        discovered_content_sources: &mut Vec<IndexedSourceId>,
+        discovered_content_sources: &mut Vec<SourceRecordIndex>,
     ) -> Result<ResolvedFileReference, CompilerError> {
         let source_file = reference.source_file.ok_or_else(|| {
             CompilerError::compiler_error("graph-active file reference has no preparing SourceId")
@@ -221,16 +221,16 @@ impl<'a> FileReferenceResolver<'a> {
 
         let outcome = match reference.class {
             PreparedFileReferenceClass::ContentSource => {
-                let target_source_id = self
+                let target_source_index = self
                     .source_tree_index
-                    .source_id_for_canonical_path(&canonical)
+                    .source_index_for_canonical_path(&canonical)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "canonical content target {:?} is absent from SourceTreeIndex",
                             canonical
                         ))
                     })?;
-                let target_record = self.source_tree_index.source(target_source_id);
+                let target_record = self.source_tree_index.source(target_source_index);
                 if !target_record.supported() {
                     let extension = canonical
                         .extension()
@@ -249,7 +249,7 @@ impl<'a> FileReferenceResolver<'a> {
                         )),
                     });
                 }
-                let target_source_id = self.indexed_source(
+                let target_source_index = self.indexed_source(
                     consumer_module_id,
                     &canonical,
                     SourceFileKind::from_extension(
@@ -259,7 +259,7 @@ impl<'a> FileReferenceResolver<'a> {
                             .unwrap_or_default(),
                     ),
                 )?;
-                discovered_content_sources.push(target_source_id);
+                discovered_content_sources.push(target_source_index);
                 let target_file_id = source_files
                     .get_by_canonical_path(&canonical)
                     .map(|identity| identity.id)
@@ -345,23 +345,22 @@ impl<'a> FileReferenceResolver<'a> {
             .nearest_module_for_directory(canonical_ancestor)
             .is_some_and(|module_id| module_id != consumer_module_id)
     }
-
     fn indexed_source(
         &self,
         consumer_module_id: ModuleId,
         canonical: &Path,
         expected_kind: Option<SourceFileKind>,
-    ) -> Result<IndexedSourceId, CompilerError> {
-        let source_id = self
+    ) -> Result<SourceRecordIndex, CompilerError> {
+        let source_index = self
             .source_tree_index
-            .source_id_for_canonical_path(canonical)
+            .source_index_for_canonical_path(canonical)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "canonical source target {:?} is absent from SourceTreeIndex",
                     canonical
                 ))
             })?;
-        let record = self.source_tree_index.source(source_id);
+        let record = self.source_tree_index.source(source_index);
         if record.ownership() != SourceOwnership::Owned(consumer_module_id) {
             return Err(CompilerError::compiler_error(format!(
                 "canonical source target {:?} disagrees with indexed ownership facts",
@@ -388,7 +387,7 @@ impl<'a> FileReferenceResolver<'a> {
             )));
         }
 
-        Ok(source_id)
+        Ok(source_index)
     }
 
     fn diagnostic_outcome(

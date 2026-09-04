@@ -403,7 +403,7 @@ impl ProjectModuleGraph {
 
         for node in &self.nodes {
             let node_origin = node.stable_origin();
-            for source_id in source_tree_index.owned_source_ids(node.module_id()) {
+            for source_id in source_tree_index.owned_source_indices(node.module_id()) {
                 let record = source_tree_index.source(*source_id);
                 let Some(entry_origin) = record.logical_identity().module_origin() else {
                     return Err(CompilerError::compiler_error(format!(

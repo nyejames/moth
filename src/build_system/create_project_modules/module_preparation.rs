@@ -18,7 +18,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
-use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReference, ResolvedFileReferenceTable,
+};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
@@ -850,15 +852,14 @@ impl ModuleSyntaxDiscovery<'_> {
 
     /// Resolve one prepared file-reference row while keeping the source table and its string
     /// table in their distinct owned lanes. The build resolver never receives an expression or
-    /// source text; it only joins the retained row to Stage 0 physical facts.
     pub(super) fn resolve_file_reference(
         &mut self,
         resolver: &mut crate::build_system::create_project_modules::file_reference_resolution::FileReferenceResolver<'_>,
         consumer_module_id: crate::build_system::create_project_modules::module_identity::ModuleId,
         path_syntax: &PathSyntaxTable,
-        reference: &crate::compiler_frontend::paths::file_references::PreparedFileReference,
+        reference: &PreparedFileReference,
         discovered_content_sources: &mut Vec<
-            crate::build_system::create_project_modules::source_tree_index::SourceId,
+            crate::build_system::create_project_modules::source_tree_index::SourceRecordIndex,
         >,
     ) -> Result<
         crate::compiler_frontend::paths::file_references::ResolvedFileReference,

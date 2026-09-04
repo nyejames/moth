@@ -3098,6 +3098,129 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
 }
 
 #[test]
+fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_display_order_differs()
+ {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    let src = dir.join("src");
+    fs::create_dir_all(src.join("a")).expect("should create a module");
+    fs::create_dir_all(src.join("a-b")).expect("should create a-b module");
+
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("a/@a.moth"), "@drawing.js draw\nvalue = draw()\n")
+        .expect("should write a module");
+    fs::write(
+        src.join("a-b/@b.moth"),
+        "@drawing.js draw\nvalue = draw()\n",
+    )
+    .expect("should write a-b module");
+    fs::write(
+        src.join("a/drawing.js"),
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+    )
+    .expect("should write a JS provider");
+    fs::write(
+        src.join("a-b/drawing.js"),
+        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 2; }\n",
+    )
+    .expect("should write a-b JS provider");
+
+    let mut config = Config::new(dir.clone());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = builder_surface_with_html_js_provider();
+
+    let modules = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("sibling modules with distinct JS providers should compile");
+
+    let artefacts = modules
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        artefacts.len(),
+        2,
+        "expected both sibling module artefacts to compile"
+    );
+
+    let module_a = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry_point
+                .ends_with(Path::new("a/@a.moth"))
+        })
+        .expect("expected a sibling module artefact");
+    let module_a_b = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry_point
+                .ends_with(Path::new("a-b/@b.moth"))
+        })
+        .expect("expected a-b sibling module artefact");
+
+    let module_a_provider_package_paths = module_a
+        .module
+        .link_facts
+        .external_import_candidates
+        .iter()
+        .filter_map(|candidate| {
+            module_a
+                .module
+                .link_facts
+                .external_package_registry
+                .get_package_by_id(candidate.package_id)
+                .map(|package| package.path.as_str())
+        })
+        .filter(|path| path.starts_with("@html-js/"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        module_a_provider_package_paths,
+        vec!["@html-js/a/drawing.js"],
+        "a module should retain only its own JS provider package"
+    );
+
+    let module_a_b_provider_package_paths = module_a_b
+        .module
+        .link_facts
+        .external_import_candidates
+        .iter()
+        .filter_map(|candidate| {
+            module_a_b
+                .module
+                .link_facts
+                .external_package_registry
+                .get_package_by_id(candidate.package_id)
+                .map(|package| package.path.as_str())
+        })
+        .filter(|path| path.starts_with("@html-js/"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        module_a_b_provider_package_paths,
+        vec!["@html-js/a-b/drawing.js"],
+        "a-b module should retain only its own JS provider package"
+    );
+}
+
+#[test]
 fn html_js_provider_direct_selection_resolves() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");

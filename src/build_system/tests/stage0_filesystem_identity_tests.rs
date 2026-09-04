@@ -698,7 +698,7 @@ mod source_package_boundary_indexes_tests {
             .next()
             .expect("package root module should exist");
         let provider_record = index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .map(|source_id| index.source(*source_id))
             .find(|record| {
@@ -1841,7 +1841,7 @@ mod owned_source_inventory_tests {
 
     fn owned_relative_paths(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<String> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .map(|source_id| owned_relative_path(index, *source_id))
             .collect()
@@ -1850,12 +1850,12 @@ mod owned_source_inventory_tests {
     /// Resolve one owned source's portable module-relative path through the central index.
     fn owned_relative_path(
         index: &SourceTreeIndex,
-        source_id: super::source_tree_index::SourceId,
+        source_index: super::source_tree_index::SourceRecordIndex,
     ) -> String {
-        match index.source(source_id).logical_identity() {
+        match index.source(source_index).logical_identity() {
             SourceLogicalIdentity::Owned(identity) => identity.relative_source_path().to_owned(),
             other => {
-                panic!("owned source {source_id:?} has a non-owned logical identity: {other:?}")
+                panic!("owned source {source_index:?} has a non-owned logical identity: {other:?}")
             }
         }
     }
@@ -1863,7 +1863,7 @@ mod owned_source_inventory_tests {
     /// Resolve the source kinds for one module's owned source IDs through the central index.
     fn owned_kinds(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<SourceFileKind> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .filter_map(
                 |source_id| match index.source(*source_id).classification() {
@@ -1881,7 +1881,7 @@ mod owned_source_inventory_tests {
         relative_path: &str,
     ) -> Option<&'a super::source_tree_index::SourceRecord> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .find_map(|source_id| {
                 let record = index.source(*source_id);
@@ -1897,7 +1897,7 @@ mod owned_source_inventory_tests {
     /// Resolve the portable entry-root-relative logical paths for the unrooted source IDs.
     fn unrooted_logical_paths(index: &SourceTreeIndex) -> Vec<String> {
         index
-            .unrooted_source_ids()
+            .unrooted_source_indices()
             .iter()
             .map(
                 |source_id| match index.source(*source_id).logical_identity() {
@@ -2080,14 +2080,14 @@ mod owned_source_inventory_tests {
             "recognized source kinds remain indexed while unknown extensions stay excluded"
         );
         let unsupported_paths = index
-            .owned_source_ids(entry_id)
+            .owned_source_indices(entry_id)
             .iter()
             .filter(|source_id| !index.source(**source_id).supported())
             .map(|source_id| owned_relative_path(&index, *source_id))
             .collect::<Vec<_>>();
         assert_eq!(unsupported_paths, vec!["content.md", "page.mtf"]);
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "excluded files are not unrooted facts"
         );
     }
@@ -2149,7 +2149,7 @@ mod owned_source_inventory_tests {
             .find(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
             .expect("project package facade should exist");
 
-        let facade_ids = index.owned_source_ids(facade_id);
+        let facade_ids = index.owned_source_indices(facade_id);
         assert_eq!(
             facade_ids.len(),
             1,
@@ -2190,7 +2190,7 @@ mod owned_source_inventory_tests {
             0,
             "unrooted candidates must not be assigned to a module"
         );
-        let unrooted = index.unrooted_source_ids();
+        let unrooted = index.unrooted_source_indices();
         assert_eq!(
             unrooted.len(),
             2,
@@ -2207,7 +2207,7 @@ mod owned_source_inventory_tests {
             "the logical candidate path is entry-root-relative and portable"
         );
         let orphan_id = index
-            .source_id_for_entry_root_relative_logical_path("orphan.moth", &string_table)
+            .source_index_for_entry_root_relative_logical_path("orphan.moth", &string_table)
             .expect("orphan.moth logical path should render and resolve");
         assert_eq!(
             orphan_id, unrooted[0],
@@ -2295,7 +2295,7 @@ mod owned_source_inventory_tests {
             "an arbitrary registered unknown extension must not enter owned source sets"
         );
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "an excluded unknown registered extension is not an unrooted fact"
         );
     }
@@ -2332,14 +2332,14 @@ mod owned_source_inventory_tests {
             "recognized source identity is independent of active builder support"
         );
         let page_source_id = index
-            .owned_source_ids(entry_id)
+            .owned_source_indices(entry_id)
             .iter()
             .copied()
             .find(|source_id| owned_relative_path(&index, *source_id) == "page.mtf")
             .expect("recognized Moth template should have a source ID");
         assert!(!index.source(page_source_id).supported());
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "an excluded mismatched mapping is not an unrooted fact"
         );
     }
@@ -2415,7 +2415,7 @@ mod owned_source_inventory_tests {
             })
             .expect("entry root normal module should exist");
 
-        let facade_ids = index.owned_source_ids(facade_id);
+        let facade_ids = index.owned_source_indices(facade_id);
         assert_eq!(
             facade_ids.len(),
             1,
@@ -2481,19 +2481,24 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn source_ids_equal_their_contiguous_table_index() {
+    fn source_row_handles_address_their_own_record() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
 
-        let sources = index.sources();
-        for (position, record) in sources.iter().enumerate() {
+        // Every Stage 0 consumer keys parallel ownership and reachability data by this handle and
+        // then reads the record back through `source`. A handle that drifted from its row would
+        // silently return a different file's metadata rather than fail.
+        for record in index.sources() {
+            let handle = index
+                .source_index_for_canonical_path(record.canonical_path())
+                .expect("every classified source must be reachable by its canonical path");
             assert_eq!(
-                record.id().index(),
-                position,
-                "each SourceId must equal its contiguous table index"
+                index.source(handle).canonical_path(),
+                record.canonical_path(),
+                "a row handle must address the record it was resolved from"
             );
         }
     }
@@ -2510,14 +2515,14 @@ mod owned_source_inventory_tests {
         for module_id in index.module_identities().module_ids() {
             referenced_ids.extend(
                 index
-                    .owned_source_ids(module_id)
+                    .owned_source_indices(module_id)
                     .iter()
                     .map(|source_id| source_id.index()),
             );
         }
         referenced_ids.extend(
             index
-                .unrooted_source_ids()
+                .unrooted_source_indices()
                 .iter()
                 .map(|source_id| source_id.index()),
         );
@@ -2553,7 +2558,7 @@ mod owned_source_inventory_tests {
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
 
         for module_id in index.module_identities().module_ids() {
-            for source_id in index.owned_source_ids(module_id) {
+            for source_id in index.owned_source_indices(module_id) {
                 let record = index.source(*source_id);
                 assert_eq!(
                     record.ownership(),
@@ -2580,11 +2585,11 @@ mod owned_source_inventory_tests {
             &html_source_file_kinds(),
         );
         assert_eq!(
-            unrooted_index.unrooted_source_ids().len(),
+            unrooted_index.unrooted_source_indices().len(),
             1,
             "the focused unrooted tree must exercise one unrooted record"
         );
-        for source_id in unrooted_index.unrooted_source_ids() {
+        for source_id in unrooted_index.unrooted_source_indices() {
             let record = unrooted_index.source(*source_id);
             assert_eq!(
                 record.ownership(),
@@ -2803,47 +2808,37 @@ mod owned_source_inventory_tests {
             "nested-module provider files are owned by the nested module"
         );
 
-        let helper_id = index
-            .source_id_for_entry_root_relative_logical_path("helper.js", &string_table)
-            .expect("helper.js logical path resolves to a SourceId");
+        let helper_index = index
+            .source_index_for_entry_root_relative_logical_path("helper.js", &string_table)
+            .expect("helper.js logical path resolves to a source row");
         assert_eq!(
-            helper_id,
-            helper_record.id(),
-            "rendered root-level logical path must resolve its source record"
-        );
-        assert_eq!(
-            index.source(helper_id).canonical_path(),
+            index.source(helper_index).canonical_path(),
             helper_record.canonical_path()
         );
-        let util_id = index
-            .source_id_for_entry_root_relative_logical_path("feature/util.js", &string_table)
-            .expect("feature/util.js logical path resolves to a SourceId");
+        let util_index = index
+            .source_index_for_entry_root_relative_logical_path("feature/util.js", &string_table)
+            .expect("feature/util.js logical path resolves to a source row");
         assert_eq!(
-            util_id,
-            util_record.id(),
-            "rendered nested logical path must resolve its source record"
-        );
-        assert_eq!(
-            index.source(util_id).canonical_path(),
+            index.source(util_index).canonical_path(),
             util_record.canonical_path()
         );
 
         // The canonical-path lookup map resolves a consumer to its owning record.
         let page_canonical = page_record.canonical_path();
-        let page_lookup_id = index
-            .source_id_for_canonical_path(page_canonical)
-            .expect("page canonical path resolves to a SourceId");
+        let page_lookup_index = index
+            .source_index_for_canonical_path(page_canonical)
+            .expect("page canonical path resolves to a source row");
         assert_eq!(
-            index.source(page_lookup_id).ownership(),
+            index.source(page_lookup_index).ownership(),
             SourceOwnership::Owned(entry_id)
         );
 
-        // SourceIds are assigned in deterministic portable logical identity order. The root
-        // module precedes the child module, so helper.js precedes feature/util.js regardless of
-        // traversal or creation order.
+        // Source rows follow deterministic portable logical identity order. The root module
+        // precedes the child module, so helper.js precedes feature/util.js regardless of traversal
+        // or creation order.
         assert!(
-            helper_id.index() < util_id.index(),
-            "provider SourceIds must follow deterministic logical identity order"
+            helper_index.index() < util_index.index(),
+            "provider source rows must follow deterministic logical identity order"
         );
     }
 
@@ -2986,7 +2981,7 @@ mod project_module_graph_tests {
             // The graph node carries no source records: owned source data lives in the central
             // index. Verify the index's owned source IDs for this module all resolve to records
             // owned by this module, proving the graph delegates ownership to the index.
-            for source_id in index.owned_source_ids(table_id) {
+            for source_id in index.owned_source_indices(table_id) {
                 let record = index.source(*source_id);
                 assert_eq!(
                     record.ownership(),

@@ -644,7 +644,29 @@ that knows the offset. The root is inert storage until a slice gives it text and
 reservation is what matters, because token identities already derive from this domain and shifting
 it later would invalidate them. Config tokenization passes `file_id: None` rather than the
 fabricated `SourceId::from_index(0)` it previously shared with the root; registering config into
-the project identity context is 1B-gamma1b.
+the project identity context is 1B-gamma1c.
+
+**Single ID domain, recorded against 1B1.** Stage 0 and the compiler previously ran two independent
+zero-based `SourceId` domains, reconciled by canonical path in `resolve_boundary_candidate_source_ids`.
+That helper is deleted. `SourceTreeIndex` now owns only a Stage-0-local row ordinal,
+`SourceRecordIndex`, which never reaches `PreparedModuleInput`, a compiler payload or a diagnostic;
+the compiler assigns the single real `SourceId` from the ordered `SourceRegistrationIndex` Stage 0
+hands it.
+
+This changed assignment order. `SourceDatabase` previously re-derived resolver *display* logical
+paths and sorted those, which contradicts lines 592-594 above naming `SourceLogicalIdentity`'s owned
+portable spelling as the sort key, so the display sort was a latent bug rather than an equal
+alternative. The orders genuinely diverge: for siblings `src/a/@a.moth` and `src/a-b/@b.moth`, `-`
+sorts before `/`, so display order yields `a-b` first while registration order yields `a` first.
+Under the old sort Stage 0's `a` row addressed the database's `a-b` source, leaking a sibling's
+provider into a module's external-import candidate scope;
+`directory_module_external_import_candidates_are_scoped_to_owned_sources_when_display_order_differs`
+is the regression guard and fails on exactly that leak.
+
+`SourceDatabase::source_id_at_physical_index` is the one positional bridge from a Stage 0 row to an
+identity. It is correct only while the registration index supplies every physical row. Registering
+config ahead of it shifts each row past its identity, so 1B-gamma1c must carry the assigned
+`SourceId` rather than the row ordinal; the accessor documents this precondition at its definition.
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 

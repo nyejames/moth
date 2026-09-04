@@ -27,6 +27,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
 };
+use crate::compiler_frontend::source::SourceRegistrationIndex;
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
@@ -170,23 +171,20 @@ struct DiscoveredSourceCandidate {
     logical_candidate_path: String,
 }
 
-/// Dense build-local handle addressing one slot in the contiguous [`SourceRecord`] table.
+/// Zero-based row handle for a source candidate in one [`SourceTreeIndex`].
 ///
-/// `SourceId` is assigned deterministically from portable logical identity (see
-/// [`SourceLogicalIdentity`]) and is independent of traversal, file-creation order and checkout
-/// root. Absolute physical paths never become semantic identity. `SourceId` is build-local and
-/// never leaks across module boundaries or into persistent artefacts.
+/// This is a Stage 0 table position, not a compiler source identity. The compiler assigns the
+/// boundary's [`crate::compiler_frontend::source::SourceId`] after the rows are registered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct SourceId(usize);
+pub(crate) struct SourceRecordIndex(usize);
 
-impl SourceId {
-    /// The contiguous table index this handle addresses.
+impl SourceRecordIndex {
     pub(crate) fn index(self) -> usize {
         self.0
     }
 
     fn from_index(index: usize) -> Self {
-        SourceId(index)
+        Self(index)
     }
 }
 
@@ -210,12 +208,12 @@ impl UnrootedSourceLogicalPath {
 /// origin plus the module-relative source file path. `Unrooted` carries an owned
 /// entry-root-relative portable spelling for files outside any module root. Both variants have no
 /// absolute path component.
-/// `SourceId` ordering is defined by the explicit ordering implementation below.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SourceLogicalIdentity {
     Owned(StableOwnedSourceIdentity),
     Unrooted(UnrootedSourceLogicalPath),
 }
+
 impl PartialOrd for SourceLogicalIdentity {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -270,8 +268,8 @@ pub(crate) enum SourceOwnership {
 /// WHAT: distinguishes files that feed tokenization, header preparation and semantic
 /// compilation from files whose extension is registered with an external import provider but is
 /// not a compiler `SourceFileKind`. Provider-owned records never pretend to be `.moth`, `.mtf`
-/// or `.md`; the provider extension is retained so the directory provider path validates
-/// the target from indexed facts rather than re-probing the filesystem.
+/// or `.md`; the provider extension is retained so the directory provider path validates the
+/// target from indexed facts rather than re-probing the filesystem.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SourceClassification {
     /// A compiler semantic input (`.moth`, `.mtf`, `.md`) that feeds the frontend pipeline.
@@ -281,19 +279,14 @@ pub(crate) enum SourceClassification {
     ProviderOwned(ExternalFileExtension),
 }
 
-/// One recognized compiler source or provider-owned file stored exactly once in the central
-/// [`SourceTreeIndex`] table.
+/// One recognized compiler source or provider-owned file stored exactly once in the Stage 0
+/// source-tree table.
 ///
-/// WHAT: owns the dense `SourceId`, entry-root-relative `PathId` where that portable spelling
-///       exists, canonical physical path (the IO handle), source classification, stable logical
-///       identity (the deterministic sort key) and explicit owned `ModuleId` or unrooted state.
-///       The canonical path is never semantic identity, and `PathId` is never a source snapshot.
-/// WHY: the index is the sole source inventory/ownership owner. Later Stage 0 consumers resolve
-///      source data through `SourceId` rather than through duplicated per-module records, so
-///      identity, ownership and physical lookup each have one owner.
+/// The row owns the canonical physical path used for IO, classification, stable logical identity,
+/// and explicit `ModuleId` ownership. Its zero-based position is a tree-local lookup handle, not a
+/// compiler `SourceId`; the boundary `SourceDatabase` assigns the latter from registration rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceRecord {
-    id: SourceId,
     /// Entry-root-relative logical identity, when this source has a portable entry-root spelling.
     ///
     /// A facade outside the entry root has no such identity and keeps `None`; its stable source
@@ -307,10 +300,6 @@ pub(crate) struct SourceRecord {
 }
 
 impl SourceRecord {
-    pub(crate) fn id(&self) -> SourceId {
-        self.id
-    }
-
     pub(crate) fn canonical_path(&self) -> &Path {
         &self.canonical_path
     }
@@ -346,11 +335,10 @@ impl SourceRecord {
     }
 }
 
-/// One classified source awaiting deterministic `SourceId` assignment.
+/// One classified source awaiting compiler-boundary registration.
 ///
-/// Built during the single post-traversal classification pass. The stable logical identity is the
-/// portable sort key, while the entry-root-relative `PathId` records the dense path-table handle.
-/// `SourceId` is assigned after sorting, so path interning order cannot affect source ordering.
+/// The stable logical identity is the portable sort key, while the entry-root-relative `PathId`
+/// records the dense path-table handle. No compiler `SourceId` is assigned in this Stage 0 pass.
 struct ClassifiedSource {
     canonical_path: PathBuf,
     classification: SourceClassification,
@@ -360,19 +348,15 @@ struct ClassifiedSource {
     entry_root_relative_logical_path: Option<PathId>,
 }
 
-/// Completed central source inventory produced after classification and deterministic ID
-/// assignment.
+/// Completed central source inventory produced after classification and deterministic sorting.
 ///
-/// WHAT: groups the one record table with its ID-only owned and unrooted projections plus the
-/// canonical path lookup map that lets the directory provider path resolve an authored consumer
-/// file to a `SourceId` without filesystem probing.
-/// WHY: the collections form one construction result and must enter `SourceTreeIndex` together
-/// without an opaque tuple or a second durable owner.
+/// The collections hold zero-based source-row handles for Stage 0 ownership and namespace
+/// resolution. The compiler-facing registration index is produced after these rows are sorted.
 struct SourceInventory {
     sources: Vec<SourceRecord>,
-    owned_source_ids: Vec<Vec<SourceId>>,
-    unrooted_source_ids: Vec<SourceId>,
-    canonical_path_to_source_id: FxHashMap<PathBuf, SourceId>,
+    owned_source_indices: Vec<Vec<SourceRecordIndex>>,
+    unrooted_source_indices: Vec<SourceRecordIndex>,
+    canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex>,
 }
 
 /// Canonical module identities and traversal evidence for one directory build.
@@ -383,14 +367,14 @@ struct SourceInventory {
 /// Stage 0 tests; directory compilation derives its complete normal-and-support table directly
 /// from `module_identities`.
 ///
-/// `sources` is the central contiguous `SourceRecord` table addressed by dense `SourceId`s; it is
-/// the sole source inventory/ownership owner. `owned_source_ids` and `unrooted_source_ids` store
-/// only `SourceId`s so no consumer duplicates source records.
+/// `sources` is the central source-row table addressed by [`SourceRecordIndex`]. It is the sole
+/// Stage 0 source inventory/ownership owner. The compiler-facing [`SourceRegistrationIndex`] is
+/// assembled from its already-sorted canonical rows when a boundary constructs its
+/// [`crate::compiler_frontend::source::SourceDatabase`].
 ///
 /// `path_table` backs the logical `PathId` stored on each source record and is used for rendering
-/// that identity when needed. `canonical_path_to_source_id` resolves a consumer file to its
-/// owning record. Canonical paths remain IO handles, and logical path identities never merge with
-/// filesystem handles.
+/// that identity when needed. Canonical paths remain IO handles, and logical path identities never
+/// merge with filesystem handles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
@@ -399,9 +383,9 @@ pub(crate) struct SourceTreeIndex {
     module_roots: ModuleRootTable,
     path_table: PathTable,
     sources: Vec<SourceRecord>,
-    owned_source_ids: Vec<Vec<SourceId>>,
-    unrooted_source_ids: Vec<SourceId>,
-    canonical_path_to_source_id: FxHashMap<PathBuf, SourceId>,
+    owned_source_indices: Vec<Vec<SourceRecordIndex>>,
+    unrooted_source_indices: Vec<SourceRecordIndex>,
+    canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex>,
     stats: SourceTreeDiscoveryStats,
 }
 
@@ -461,11 +445,10 @@ impl SourceTreeIndex {
     /// not a compiler `SourceFileKind`. Unknown extensions never enter owned source sets. After
     /// deterministic `ModuleIdentityTable` construction, each recognized candidate is classified
     /// under its nearest containing normal or support root into
-    /// the central [`SourceRecord`] table; the optional project facade owns its root file even
+    /// central [`SourceRecord`] table; the optional project facade owns its root file even
     /// though it sits outside entry-root containment. Recognized candidates with no enclosing
     /// module root remain explicit unrooted [`SourceRecord`]s rather than being silently
-    /// discarded. Each record receives a dense [`SourceId`] assigned in portable logical identity
-    /// order, and per-module owned and unrooted collections store only `SourceId`s.
+    /// discarded. Sorted rows are handed to the boundary's compiler-facing registration index.
     pub(super) fn discover(
         entry_root: PathBuf,
         project_context: SourceTreeProjectContext<'_>,
@@ -500,16 +483,15 @@ impl SourceTreeIndex {
     }
 
     /// Build one source-package boundary index from its already-canonical root directory.
-    ///
     /// WHAT: traverses one source-backed package root with its own stable package identity,
-    /// dense `SourceId`s, module IDs and ownership tables. The package index becomes the
-    /// filesystem owner for the package root's direct-child root discovery and for sibling
-    /// `.moth` file/folder collisions throughout the package tree, using the same traversal
-    /// implementation as the project index.
-    /// WHY: each project or package compilation boundary owns a separate `SourceTreeIndex` so
-    /// raw `SourceId`/`ModuleId` values never cross boundaries. Reusing the project traversal
-    /// avoids a parallel package traversal while preserving package-specific missing-root and
-    /// multiple-root diagnostics at the package root directory.
+    /// source-row and module ownership tables. The package index becomes the filesystem owner for
+    /// the package root's direct-child root discovery and for sibling `.moth` file/folder
+    /// collisions throughout the package tree, using the same traversal implementation as the
+    /// project index.
+    /// WHY: each project or package boundary owns a separate `SourceTreeIndex`; compiler
+    /// `SourceId`s are assigned later by that boundary's `SourceDatabase`. Reusing the project
+    /// traversal avoids a parallel package traversal while preserving package-specific
+    /// missing-root and multiple-root diagnostics at the package root directory.
     pub(crate) fn discover_package(
         canonical_root: PathBuf,
         package_identity: StablePackageIdentity,
@@ -533,12 +515,12 @@ impl SourceTreeIndex {
     }
 
     /// Run the shared boundary-parameterized source-tree traversal.
-    ///
     /// This is the single filesystem inventory implementation. The boundary descriptor supplies
     /// the stable package identity, skip policy, project-only facade and entry-root prefix
     /// collision inputs, and selects package-specific root-directory classification. Every other
-    /// step — per-directory collision checks, candidate inventory, nearest-module ownership,
-    /// deterministic `SourceId` assignment — is shared between project and package boundaries.
+    /// step — per-directory collision checks, candidate inventory and nearest-module ownership —
+    /// is shared between project and package boundaries. Compiler identity assignment happens in
+    /// the boundary's `SourceDatabase`.
     fn discover_for_boundary(
         boundary: SourceTreeBoundary,
         source_file_kinds: &SourceFileKindRegistry,
@@ -914,9 +896,9 @@ impl SourceTreeIndex {
 
         let SourceInventory {
             sources,
-            owned_source_ids,
-            unrooted_source_ids,
-            canonical_path_to_source_id,
+            owned_source_indices,
+            unrooted_source_indices,
+            canonical_path_to_source_index,
         } = build_source_inventory(classified, module_count)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
@@ -927,9 +909,9 @@ impl SourceTreeIndex {
             module_roots,
             path_table,
             sources,
-            owned_source_ids,
-            unrooted_source_ids,
-            canonical_path_to_source_id,
+            owned_source_indices,
+            unrooted_source_indices,
+            canonical_path_to_source_index,
             stats,
         })
     }
@@ -1021,94 +1003,70 @@ impl SourceTreeIndex {
         &self.module_identities
     }
 
-    /// The central contiguous source record table, addressed by dense `SourceId`s.
+    /// The central source-record table, addressed by zero-based [`SourceRecordIndex`] rows.
     ///
-    /// WHAT: every recognized compiler source and provider-owned file discovered by the single
-    /// Stage 0 traversal, stored
-    /// exactly once with its canonical physical path, source classification, portable logical
-    /// identity and owned `ModuleId` or unrooted state. `SourceId`s are assigned in deterministic
-    /// portable logical identity order so the table order is independent of traversal,
-    /// file-creation order and checkout root.
-    /// WHY: the index is the sole source inventory/ownership owner. Later Stage 0 consumers
-    /// resolve source data through `SourceId` rather than through duplicated per-module records.
+    /// The table owns Stage 0 classification, ownership and canonical IO paths. The compiler-facing
+    /// registration index borrows its sorted canonical rows and assigns `SourceId`s separately.
     #[cfg(test)]
     pub(crate) fn sources(&self) -> &[SourceRecord] {
         &self.sources
     }
 
-    /// Iterate canonical source paths in the deterministic logical-identity order assigned by
-    /// Stage 0.
+    /// Build the compact compiler-facing registration rows in this index's deterministic order.
     ///
-    /// Directory and source-package boundaries pass this inventory directly to the compiler's
-    /// source database. The iterator exposes no second discovery path and preserves the
-    /// boundary-local source-tree ordering without allocating another path list.
-    pub(crate) fn canonical_source_paths_in_logical_order(
-        &self,
-    ) -> impl ExactSizeIterator<Item = &Path> {
-        self.sources.iter().map(|record| record.canonical_path())
+    /// Rows are already sorted by [`SourceLogicalIdentity`]. The boundary source database consumes
+    /// this order unchanged when assigning compiler identities.
+    pub(crate) fn source_registration_index(&self) -> SourceRegistrationIndex<'_> {
+        SourceRegistrationIndex::from_ordered_paths(
+            self.sources.iter().map(|record| record.canonical_path()),
+        )
     }
 
-    /// One source record addressed by its dense `SourceId`.
-    ///
-    /// `source_id` must be a valid `SourceId` produced by this index. A valid `SourceId` always
-    /// addresses a record because `SourceId`s are assigned contiguously from `0`.
-    pub(crate) fn source(&self, source_id: SourceId) -> &SourceRecord {
-        let record = &self.sources[source_id.index()];
-        debug_assert_eq!(record.id(), source_id);
-        record
+    /// One source record addressed by its zero-based tree row.
+    pub(crate) fn source(&self, source_index: SourceRecordIndex) -> &SourceRecord {
+        &self.sources[source_index.index()]
     }
 
-    /// The `SourceId`s owned by one canonical module, indexed by `ModuleId`.
+    /// The source-row handles owned by one canonical module, indexed by `ModuleId`.
     ///
-    /// WHAT: every recognized compiler source or provider-owned file whose nearest containing
-    /// normal or support root is this
-    /// module, plus the optional project package facade's root file. The IDs are in portable
-    /// module-relative source path order so ordering is independent of traversal and checkout
-    /// root.
-    /// WHY: later Phase 3 slices consume this as the ownership authority for semantic source
-    /// sets, check-only orphan units and source attribution.
-    pub(crate) fn owned_source_ids(&self, module_id: ModuleId) -> &[SourceId] {
-        &self.owned_source_ids[module_id.index()]
+    /// Every recognized compiler source or provider-owned file whose nearest containing normal or
+    /// support root is this module appears in portable module-relative source order.
+    pub(crate) fn owned_source_indices(&self, module_id: ModuleId) -> &[SourceRecordIndex] {
+        &self.owned_source_indices[module_id.index()]
     }
 
-    /// The `SourceId`s for recognized or provider-owned files with no enclosing module root.
-    ///
-    /// WHAT: explicit deterministic Stage 0 facts for files that sit outside any normal or
-    /// support module root. They are not silently discarded; later phases decide whether they
-    /// become check-only orphan units or are rejected. This slice invents no orphan diagnostic.
-    /// The IDs are in portable entry-root-relative logical path order.
+    /// The source-row handles for recognized or provider-owned files with no enclosing module root.
     #[cfg(test)]
-    pub(crate) fn unrooted_source_ids(&self) -> &[SourceId] {
-        &self.unrooted_source_ids
+    pub(crate) fn unrooted_source_indices(&self) -> &[SourceRecordIndex] {
+        &self.unrooted_source_indices
     }
 
-    /// Resolve one `SourceId` by its entry-root-relative portable logical path.
-    ///
-    /// This test-only invariant probe deliberately scans the compact source table: rendering each
-    /// record's `PathId` through the frozen path table keeps the logical-path field exercised
-    /// without retaining a second lookup map solely for tests.
+    /// Resolve one source-row handle by its entry-root-relative portable logical path.
     #[cfg(test)]
-    pub(crate) fn source_id_for_entry_root_relative_logical_path(
+    pub(crate) fn source_index_for_entry_root_relative_logical_path(
         &self,
         logical_path: &str,
         string_table: &StringTable,
-    ) -> Option<SourceId> {
+    ) -> Option<SourceRecordIndex> {
         let mut scratch = Vec::new();
-        self.sources.iter().find_map(|record| {
+        self.sources.iter().enumerate().find_map(|(index, record)| {
             let path_id = record.logical_path?;
             let rendered = self
                 .path_table
                 .render_portable(path_id, string_table, &mut scratch);
-            (rendered == logical_path).then_some(record.id())
+            (rendered == logical_path).then_some(SourceRecordIndex::from_index(index))
         })
     }
 
-    /// Resolve one `SourceId` by its canonical physical path.
+    /// Resolve one source-row handle by its canonical physical path.
     ///
     /// The directory namespace uses this to select the consuming file's owning boundary-local
     /// module. Returns `None` when no indexed record carries that canonical path.
-    pub(crate) fn source_id_for_canonical_path(&self, canonical_path: &Path) -> Option<SourceId> {
-        self.canonical_path_to_source_id
+    pub(crate) fn source_index_for_canonical_path(
+        &self,
+        canonical_path: &Path,
+    ) -> Option<SourceRecordIndex> {
+        self.canonical_path_to_source_index
             .get(canonical_path)
             .copied()
     }
@@ -1655,17 +1613,11 @@ fn validate_unique_source_logical_identities(
     Ok(())
 }
 
-/// Assign dense `SourceId`s and build the central [`SourceRecord`] table plus per-module owned
-/// and unrooted `SourceId` collections from the classified sources.
+/// Sort classified sources and build the central Stage 0 source-row table plus ownership
+/// projections.
 ///
-/// WHAT: assigns a contiguous `SourceId` equal to each source table index. Absolute paths remain
-/// diagnostic and IO context only; they never participate in identity or ordering.
-/// Per-module owned IDs and the unrooted ID list are projected from the sorted table, so each
-/// module's owned IDs are in portable module-relative source path order and the unrooted IDs are
-/// in portable entry-root-relative logical path order.
-/// WHY: one deterministic inventory projection feeds later Phase 3 semantic-source-set and
-/// check-only slices. Ordering is independent of traversal, file-creation order and checkout
-/// root because the sort key is the portable logical identity, not the absolute path.
+/// The row order is the only ordering contract this owner publishes to the compiler-facing
+/// registration index. No compiler `SourceId` is assigned here.
 fn build_source_inventory(
     classified: Vec<ClassifiedSource>,
     module_count: usize,
@@ -1674,14 +1626,16 @@ fn build_source_inventory(
     classified.sort_by(|left, right| left.logical_identity.cmp(&right.logical_identity));
 
     let mut sources = Vec::with_capacity(classified.len());
-    let mut owned_source_ids: Vec<Vec<SourceId>> = (0..module_count).map(|_| Vec::new()).collect();
-    let mut unrooted_source_ids = Vec::new();
-    let mut canonical_path_to_source_id: FxHashMap<PathBuf, SourceId> = FxHashMap::default();
+    let mut owned_source_indices: Vec<Vec<SourceRecordIndex>> =
+        (0..module_count).map(|_| Vec::new()).collect();
+    let mut unrooted_source_indices = Vec::new();
+    let mut canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex> =
+        FxHashMap::default();
 
     for (index, source) in classified.into_iter().enumerate() {
-        let source_id = SourceId::from_index(index);
-        if canonical_path_to_source_id
-            .insert(source.canonical_path.clone(), source_id)
+        let source_index = SourceRecordIndex::from_index(index);
+        if canonical_path_to_source_index
+            .insert(source.canonical_path.clone(), source_index)
             .is_some()
         {
             return Err(CompilerError::compiler_error(format!(
@@ -1692,14 +1646,13 @@ fn build_source_inventory(
         }
         match source.ownership {
             SourceOwnership::Owned(module_id) => {
-                owned_source_ids[module_id.index()].push(source_id);
+                owned_source_indices[module_id.index()].push(source_index);
             }
             SourceOwnership::Unrooted => {
-                unrooted_source_ids.push(source_id);
+                unrooted_source_indices.push(source_index);
             }
         }
         sources.push(SourceRecord {
-            id: source_id,
             logical_path: source.entry_root_relative_logical_path,
             canonical_path: source.canonical_path,
             classification: source.classification,
@@ -1711,9 +1664,9 @@ fn build_source_inventory(
 
     Ok(SourceInventory {
         sources,
-        owned_source_ids,
-        unrooted_source_ids,
-        canonical_path_to_source_id,
+        owned_source_indices,
+        unrooted_source_indices,
+        canonical_path_to_source_index,
     })
 }
 
