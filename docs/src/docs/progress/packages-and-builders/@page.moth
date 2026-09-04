@@ -147,6 +147,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: HTML / JS]
             [: Builder-owned runtime packages such as [$html:<code>@web/canvas</code>] are binding-backed packages. They share the specialised external package registry and HTML external JS asset/glue pipeline with provider-created imports.]
         ]
+
+        [data:
+            [: First-party no-third-party-dependencies guard]
+            [: Supported]
+            [: Targeted package-manager, vendored-root, allowed-runtime-import and rejected-bare-import coverage.]
+            [: Validation / packages]
+            [: The [$html:<code>first-party-deps</code>] validation owner inspects only first-party implementation roots and the inline Moth runtime source. User-owned and future dependency packages, generated glue, documentation, tests and benchmarks remain outside its scan.]
+        ]
     ]
 ]
 

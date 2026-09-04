@@ -12,6 +12,8 @@ validate-common:
 
     @echo "source audit"
     just source-audit
+    @echo "first-party dependency audit"
+    just first-party-deps
 
     @echo "unit tests"
     cargo test --workspace --quiet -- --format terse
@@ -80,6 +82,11 @@ timers-erasure-check:
 # The one broad-source architecture audit: timer source rules plus the removed-name tripwires.
 source-audit:
     cargo run --quiet --package xtask --bin xtask -- source-audit
+
+# Check first-party package implementation roots for manifests, vendored dependencies and
+# unapproved bare JavaScript runtime imports.
+first-party-deps:
+    cargo run --quiet --package xtask --bin xtask -- first-party-deps
 
 # Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
 # features across the resolve graph and always enables `timers` through xtask's dependency, so it
@@ -170,6 +177,9 @@ ci-gate-timers-erasure:
 
 ci-gate-source-audit:
     just source-audit
+
+ci-gate-first-party-deps:
+    just first-party-deps
 
 ci-gate-honesty-audit:
     just test-honesty-audit
