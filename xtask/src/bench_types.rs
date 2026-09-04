@@ -110,18 +110,20 @@ impl BenchmarkRunPolicy {
     }
 }
 
-/// Distinguishes the two benchmark suite kinds so local history and summaries
-/// do not accidentally compare incompatible metrics.
+/// Distinguishes benchmark suite kinds so local history and summaries do not accidentally compare incompatible metrics.
 ///
-/// WHAT: CLI subprocess wall-clock time vs in-process frontend stage time.
+/// WHAT: CLI subprocess wall-clock time, in-process frontend stage time, or
+///      in-process diagnostic/data-layout frontend stage time.
 /// WHY: Prevents a frontend refactor from being compared against CLI spawn
-///      overhead, and vice versa.
+///      overhead, and keeps diagnostic-heavy measurements in their own history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BenchmarkSuiteKind {
     /// End-to-end CLI benchmark measuring subprocess wall-clock time.
     EndToEndCli,
     /// In-process frontend benchmark measuring compiler stage timings.
     FrontendPhases,
+    /// In-process frontend benchmark focused on diagnostic/data-layout cases.
+    DataLayout,
 }
 
 impl BenchmarkSuiteKind {
@@ -130,6 +132,7 @@ impl BenchmarkSuiteKind {
         match name {
             "end_to_end_cli" => Some(BenchmarkSuiteKind::EndToEndCli),
             "frontend_phases" => Some(BenchmarkSuiteKind::FrontendPhases),
+            "data_layout" => Some(BenchmarkSuiteKind::DataLayout),
             _ => None,
         }
     }
@@ -139,6 +142,7 @@ impl BenchmarkSuiteKind {
         match self {
             BenchmarkSuiteKind::EndToEndCli => "end_to_end_cli",
             BenchmarkSuiteKind::FrontendPhases => "frontend_phases",
+            BenchmarkSuiteKind::DataLayout => "data_layout",
         }
     }
 
@@ -147,6 +151,7 @@ impl BenchmarkSuiteKind {
         match self {
             BenchmarkSuiteKind::EndToEndCli => "End-to-end CLI",
             BenchmarkSuiteKind::FrontendPhases => "Frontend phases",
+            BenchmarkSuiteKind::DataLayout => "Diagnostic data layout",
         }
     }
 
@@ -155,6 +160,7 @@ impl BenchmarkSuiteKind {
         match self {
             BenchmarkSuiteKind::EndToEndCli => "avg",
             BenchmarkSuiteKind::FrontendPhases => "frontend avg",
+            BenchmarkSuiteKind::DataLayout => "data-layout avg",
         }
     }
 
@@ -163,6 +169,7 @@ impl BenchmarkSuiteKind {
         match self {
             BenchmarkSuiteKind::EndToEndCli => "just bench",
             BenchmarkSuiteKind::FrontendPhases => "just bench-frontend",
+            BenchmarkSuiteKind::DataLayout => "just bench-data-layout",
         }
     }
 
@@ -170,7 +177,84 @@ impl BenchmarkSuiteKind {
     pub fn primary_metric_name(&self) -> &'static str {
         match self {
             BenchmarkSuiteKind::EndToEndCli => "wall_time_ms",
-            BenchmarkSuiteKind::FrontendPhases => "frontend_total_ms",
+            BenchmarkSuiteKind::FrontendPhases | BenchmarkSuiteKind::DataLayout => {
+                "frontend_total_ms"
+            }
+        }
+    }
+}
+
+/// Closed set of public benchmark groups.
+///
+/// The enum is the one group authority: it owns the manifest spelling, the
+/// persisted spelling, the display label and the stable sort order. Unknown
+/// authored groups fail manifest validation; legacy records with unknown
+/// group names stay readable but are never comparable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum BenchmarkGroup {
+    Core,
+    Docs,
+    Stress,
+    Module,
+    Parallelism,
+    Borrow,
+    DataLayout,
+}
+
+impl BenchmarkGroup {
+    /// Persisted spelling, kept stable so normal history never changes shape.
+    ///
+    /// The manifest spelling is identical to the persisted spelling and is
+    /// owned by `parse_spelling`.
+    pub(crate) fn persistence_spelling(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Docs => "docs",
+            Self::Stress => "stress",
+            Self::Module => "module",
+            Self::Parallelism => "parallelism",
+            Self::Borrow => "borrow",
+            Self::DataLayout => "data_layout",
+        }
+    }
+
+    /// Human-readable display label used in summaries and terminal output.
+    pub(crate) fn display_label(self) -> &'static str {
+        match self {
+            Self::Core => "Core",
+            Self::Docs => "Docs",
+            Self::Stress => "Stress",
+            Self::Module => "Module",
+            Self::Parallelism => "Parallelism",
+            Self::Borrow => "Borrow",
+            Self::DataLayout => "Data layout",
+        }
+    }
+
+    /// Stable sort order; lower values sort first.
+    pub(crate) fn sort_order(self) -> usize {
+        match self {
+            Self::Core => 0,
+            Self::Docs => 1,
+            Self::Stress => 2,
+            Self::Module => 3,
+            Self::Parallelism => 4,
+            Self::Borrow => 5,
+            Self::DataLayout => 6,
+        }
+    }
+
+    /// Parse an authored or persisted spelling.
+    pub(crate) fn parse_spelling(spelling: &str) -> Option<Self> {
+        match spelling {
+            "core" => Some(Self::Core),
+            "docs" => Some(Self::Docs),
+            "stress" => Some(Self::Stress),
+            "module" => Some(Self::Module),
+            "parallelism" => Some(Self::Parallelism),
+            "borrow" => Some(Self::Borrow),
+            "data_layout" => Some(Self::DataLayout),
+            _ => None,
         }
     }
 }
@@ -190,76 +274,6 @@ pub struct BenchmarkMeasurementIdentity {
     pub measurement_fingerprint: String,
     /// Timing schema used to produce the observations.
     pub timing_schema_version: u32,
-}
-
-/// Closed set of public benchmark groups.
-///
-/// The enum is the one group authority: it owns the manifest spelling, the
-/// persisted spelling, the display label and the stable sort order. Unknown
-/// authored groups fail manifest validation; legacy records with unknown
-/// group names stay readable but are never comparable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum BenchmarkGroup {
-    Core,
-    Docs,
-    Stress,
-    Module,
-    Parallelism,
-    Borrow,
-}
-
-impl BenchmarkGroup {
-    /// Persisted spelling, kept stable so normal history never changes shape.
-    ///
-    /// The manifest spelling is identical to the persisted spelling and is
-    /// owned by `parse_spelling`.
-    pub(crate) fn persistence_spelling(self) -> &'static str {
-        match self {
-            Self::Core => "core",
-            Self::Docs => "docs",
-            Self::Stress => "stress",
-            Self::Module => "module",
-            Self::Parallelism => "parallelism",
-            Self::Borrow => "borrow",
-        }
-    }
-
-    /// Human-readable display label used in summaries and terminal output.
-    pub(crate) fn display_label(self) -> &'static str {
-        match self {
-            Self::Core => "Core",
-            Self::Docs => "Docs",
-            Self::Stress => "Stress",
-            Self::Module => "Module",
-            Self::Parallelism => "Parallelism",
-            Self::Borrow => "Borrow",
-        }
-    }
-
-    /// Stable sort order; lower values sort first.
-    pub(crate) fn sort_order(self) -> usize {
-        match self {
-            Self::Core => 0,
-            Self::Docs => 1,
-            Self::Stress => 2,
-            Self::Module => 3,
-            Self::Parallelism => 4,
-            Self::Borrow => 5,
-        }
-    }
-
-    /// Parse an authored or persisted spelling.
-    pub(crate) fn parse_spelling(spelling: &str) -> Option<Self> {
-        match spelling {
-            "core" => Some(Self::Core),
-            "docs" => Some(Self::Docs),
-            "stress" => Some(Self::Stress),
-            "module" => Some(Self::Module),
-            "parallelism" => Some(Self::Parallelism),
-            "borrow" => Some(Self::Borrow),
-            _ => None,
-        }
-    }
 }
 
 /// A single benchmark case result after measured iterations.

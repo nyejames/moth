@@ -121,6 +121,112 @@ fn clean_cli_execution_rejects_warning_status() {
 }
 
 #[test]
+fn warned_cli_expectation_requires_success_and_a_warning() {
+    let fixture = CliFixture::new();
+    let output = "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=0 warnings=2";
+    let compiler = fixture.mock_path("warned");
+    create_output_executable(&compiler, output, "", 0);
+    let mut manifest = fixture.single_cli_manifest();
+    manifest.cases[0].expectation = BenchmarkExpectation::Warned;
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+
+    let execution =
+        execute_case(&context, &manifest.cases[0]).expect("warned case should accept warnings");
+    assert_eq!(execution.benchmark_status.error_count, 0);
+    assert_eq!(execution.benchmark_status.warning_count, 2);
+
+    let compiler = fixture.mock_path("warned_errors");
+    create_output_executable(
+        &compiler,
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=2 warnings=1",
+        "",
+        1,
+    );
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let failure =
+        execute_case(&context, &manifest.cases[0]).expect_err("warned errors should fail");
+    assert!(matches!(
+        failure.kind,
+        BenchmarkFailureKind::WarnedExpectationErrors { error_count: 2 }
+    ));
+
+    let compiler = fixture.mock_path("warned_without_warning");
+    create_output_executable(
+        &compiler,
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=0 warnings=0",
+        "",
+        0,
+    );
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let failure = execute_case(&context, &manifest.cases[0])
+        .expect_err("warned without warnings should fail");
+    assert!(matches!(
+        failure.kind,
+        BenchmarkFailureKind::WarnedExpectationWarnings {
+            warning_count: 0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn diagnosed_cli_expectation_accepts_user_errors_and_rejects_other_outcomes() {
+    let fixture = CliFixture::new();
+    let mut manifest = fixture.single_cli_manifest();
+    manifest.cases[0].expectation = BenchmarkExpectation::Diagnosed;
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+
+    let compiler = fixture.mock_path("diagnosed");
+    create_output_executable(
+        &compiler,
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=2 warnings=0",
+        "",
+        1,
+    );
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let execution =
+        execute_case(&context, &manifest.cases[0]).expect("diagnosed errors should be accepted");
+    assert_eq!(execution.benchmark_status.error_count, 2);
+    assert_eq!(execution.benchmark_status.warning_count, 0);
+
+    let compiler = fixture.mock_path("diagnosed_clean");
+    create_output_executable(
+        &compiler,
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=0 warnings=2",
+        "",
+        0,
+    );
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let failure =
+        execute_case(&context, &manifest.cases[0]).expect_err("diagnosed clean output should fail");
+    assert!(matches!(
+        failure.kind,
+        BenchmarkFailureKind::DiagnosedExpectationNoErrors {
+            warning_count: 2,
+            ..
+        }
+    ));
+
+    let compiler = fixture.mock_path("diagnosed_success");
+    create_output_executable(
+        &compiler,
+        "MOTH_BENCH timing-schema 2\nMOTH_BENCH timing command.check.total=1ms\nMOTH_BENCH status errors=2 warnings=0",
+        "",
+        0,
+    );
+    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let failure = execute_case(&context, &manifest.cases[0])
+        .expect_err("diagnosed successful process should fail");
+    assert!(matches!(
+        failure.kind,
+        BenchmarkFailureKind::DiagnosedExpectationSucceeded { error_count: 2 }
+    ));
+}
+
+#[test]
 fn successful_cli_process_rejects_reported_errors() {
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("errors");
@@ -519,13 +625,45 @@ fn frontend_compilation_failure_is_typed_and_bounded() {
 
     assert!(matches!(
         failure.kind,
-        BenchmarkFailureKind::FrontendCompilationFailure
+        BenchmarkFailureKind::CleanExpectationErrors { error_count: 1 }
     ));
-    assert!(
+    assert_eq!(
         failure
-            .stderr_evidence
-            .as_deref()
-            .is_some_and(|evidence| evidence.contains("MOTH-"))
+            .benchmark_status
+            .expect("frontend diagnostic status should be retained")
+            .error_count,
+        1
+    );
+}
+
+#[test]
+fn frontend_diagnosed_expectation_returns_common_success_shape() {
+    let _guard = FRONTEND_EXECUTION_TEST_LOCK
+        .lock()
+        .expect("frontend execution test lock should not be poisoned");
+    let fixture = CliFixture::new();
+    fs::write(fixture.root().join("invalid.moth"), "value =\n")
+        .expect("invalid fixture should be written");
+    let mut manifest = fixture.manifest(
+        vec![fixture.workload("invalid.moth")],
+        vec![frontend_case("invalid_frontend", 0)],
+    );
+    manifest.cases[0].expectation = BenchmarkExpectation::Diagnosed;
+    let unused_compiler = fixture.root().join("unused-compiler");
+    let workspace =
+        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
+    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler, &workspace);
+
+    let execution = execute_case(&context, &manifest.cases[0])
+        .expect("diagnosed frontend case should retain timing evidence");
+
+    assert_eq!(execution.case_id, "invalid_frontend");
+    assert_eq!(execution.benchmark_status.error_count, 1);
+    assert_eq!(execution.benchmark_status.warning_count, 0);
+    assert!(execution.total_duration_ms > 0.0);
+    assert!(
+        !execution.observations.stage_timings.is_empty(),
+        "diagnosed frontend case should retain stage observations"
     );
 }
 

@@ -262,7 +262,7 @@ fn case_result_builder_computes_expected_statistics() {
 
 #[test]
 fn cli_and_frontend_suites_share_one_presentation_owner() {
-    // Both suite kinds route through the same shared functions; this test pins
+    // All suite kinds route through the same shared functions; this test pins
     // the read-only no-write contract for each kind.
     let fixture = CliFixture::new();
     let compiler = fixture.mock_path("read-only");
@@ -280,6 +280,7 @@ fn cli_and_frontend_suites_share_one_presentation_owner() {
     for suite_kind in [
         BenchmarkSuiteKind::EndToEndCli,
         BenchmarkSuiteKind::FrontendPhases,
+        BenchmarkSuiteKind::DataLayout,
     ] {
         present_read_only(
             &results,
@@ -305,6 +306,7 @@ fn previous_run_loader_is_shared_and_returns_none_without_local_history() {
     for suite_kind in [
         BenchmarkSuiteKind::EndToEndCli,
         BenchmarkSuiteKind::FrontendPhases,
+        BenchmarkSuiteKind::DataLayout,
     ] {
         let previous = load_previous_cases_for_system(
             "sys-a",
@@ -326,6 +328,7 @@ fn every_accepted_group_parses_with_stable_unique_sort_order() {
         BenchmarkGroup::Module,
         BenchmarkGroup::Parallelism,
         BenchmarkGroup::Borrow,
+        BenchmarkGroup::DataLayout,
     ];
     let mut orders = groups
         .iter()
@@ -351,7 +354,15 @@ fn every_accepted_group_parses_with_stable_unique_sort_order() {
             .iter()
             .map(|group| group.persistence_spelling())
             .collect::<Vec<_>>(),
-        ["core", "docs", "stress", "module", "parallelism", "borrow"]
+        [
+            "core",
+            "docs",
+            "stress",
+            "module",
+            "parallelism",
+            "borrow",
+            "data_layout",
+        ]
     );
 }
 
@@ -364,6 +375,7 @@ fn group_persistence_spelling_round_trips() {
         BenchmarkGroup::Module,
         BenchmarkGroup::Parallelism,
         BenchmarkGroup::Borrow,
+        BenchmarkGroup::DataLayout,
     ] {
         let spelling = group.persistence_spelling();
         assert_eq!(

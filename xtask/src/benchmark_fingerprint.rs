@@ -412,6 +412,8 @@ fn compute_measurement_fingerprint(
 
     fingerprint.write_field(match case.expectation {
         BenchmarkExpectation::Clean => b"clean",
+        BenchmarkExpectation::Warned => b"warned",
+        BenchmarkExpectation::Diagnosed => b"diagnosed",
     });
 
     fingerprint.finish_measurement()

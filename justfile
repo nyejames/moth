@@ -47,6 +47,12 @@ bench:
 bench-frontend:
     cargo run --package xtask --bin xtask -- bench-frontend
 
+bench-data-layout:
+    cargo run --package xtask --bin xtask -- bench-data-layout
+
+bench-data-layout-check:
+    cargo run --package xtask --bin xtask -- bench-data-layout-check
+
 bench-check:
     cargo run --package xtask --bin xtask -- bench-check
 

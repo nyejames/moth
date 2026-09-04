@@ -7,10 +7,10 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Queued. Test Suite Hardening and integration coverage were delivered in `03168082d`. This plan
-> remains ordered after the earlier queued implementation work; Phase 0 establishes its baseline at activation.
->
-> Phase 0 establishes the baseline at activation. Do not record one here.
+> Active. Phase 0 is complete: activated on branch `token-and-diagnostic-data-layout-changes` from
+> `b6f81fe58`, with the Test Suite Hardening prerequisite delivered in `03168082d`. The activation
+> baseline, migration inventory summary and layout/correctness evidence are recorded under
+> `Data Layout Migration - Phase 0 Activation Baseline` in `benchmarks/frontend-optimization-results.md`.
 
 ## Purpose
 
@@ -28,7 +28,7 @@ infrastructure `Result` boundaries. Until the layout migration replaces that mix
 the library crate's `src/lib.rs` carries one documented crate-level `#[allow(clippy::result_large_err)]` for the
 192-byte `CompilerError`. The benchmark execution module at `xtask/src/benchmark_execution.rs`
 carries one documented module-level allowance for its 224-byte `BenchmarkCaseFailure`.
-Together, these temporary allowances keep Rust 1.95 native, Linux and Windows validation runnable.
+Together, these temporary allowances keep the native, Linux and Windows Clippy lanes runnable.
 These are validation bridges only. They must not be narrowed into copied local allowances or
 treated as the target error model.
 
@@ -69,18 +69,18 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Activation gate — not active
-- Checklist item: wait for this plan's turn in the queued implementation chain, then start Phase 0A
-- Goal: activate from current `main` with no concurrent representation migration
-- Non-goals: no Rust migration or representation-schema work before this plan's turn; narrow diagnostics work remains separate
+- Phase: Phase 0 complete; Phase 1 (build-lifetime source identity and exact compact spans) is next
+- Checklist item: Slice 1A — introduce `PathId(NonZeroU32)` and the dense parent/component path table
+- Goal: land the path identity foundation that `SourceRecord` needs, without migrating the compiler's `InternedPath` owners yet
+- Non-goals: no `InternedPath` migration (Phase 2), no token or diagnostic representation change, no filesystem-path semantics change
 
 LAST_GOOD_COMMIT:
-- `none` until the first implementation slice is accepted
+- Phase 0 activation baseline: `b6f81fe58` (pre-Phase-0 activation state); Phase 0 documentation/evidence commit recorded below it
 
 CURRENT_WORKTREE_STATE:
-- Clean / known changes: establish at activation
-- Branch: expected `main`; confirm at activation
-- Dedicated worker worktrees: inspect and record before creating or reusing one
+- Clean at activation; Phase 0 changed only `AGENTS.md`, `docs/compiler-data-layout-design.md`, this plan and `benchmarks/frontend-optimization-results.md`
+- Branch: `token-and-diagnostic-data-layout-changes`
+- Dedicated worker worktrees: none; a single worktree at the repository root is the whole inventory
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -106,13 +106,13 @@ RELEVANT_CODE:
 - `src/build_system/create_project_modules/source_loading.rs`: current source IO and byte-loading owner
 - `src/build_system/create_project_modules/compilation.rs`: canonical module ordering, local identity forks and module-result merging
 - `src/build_system/create_project_modules/module_preparation.rs`: current source attachment and deterministic file-preparation merge. Stage 0 stops at prepared syntax; it owns no frontend stage.
-- `src/build_system/build.rs::InputFile`: current duplicate source-text/path carrier and mutable backend string-table handoff
+- `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the five current source-text/path carriers. There is no `InputFile` type; `src/build_system/build.rs` owns the mutable backend string-table handoff
 - `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
 - `src/compiler_frontend/pipeline.rs::CompilerFrontend`: current mutable stage-facade state and per-module `SourceFileTable`
 - `src/compiler_frontend/symbols/identity.rs`: current `FileId` and `SourceFileTable`
 - `src/compiler_frontend/symbols/interned_path.rs`: current `Vec<StringId>` complete-path owner
 - `src/compiler_frontend/symbols/string_interning.rs`: existing immutable-base fork and deterministic delta merge to reuse
-- `src/compiler_frontend/tokenizer/tokens.rs`: current `Token`, wide `TokenKind`, `PathTokenItem` and `FileTokens`
+- `src/compiler_frontend/tokenizer/tokens.rs`: current `Token`, wide 94-variant `TokenKind` and `FileTokens`
 - `src/compiler_frontend/headers/types.rs::Header`: current owned `FileTokens` body and repeated source/path fields
 - `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current token-cloning body capture
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
@@ -130,7 +130,7 @@ ACCEPTANCE_CRITERIA:
 - the delivered Test Suite Hardening commit `03168082d` is recorded as the prerequisite
 - every hard layout assertion in `docs/compiler-data-layout-design.md` passes
 - the old source-location, path, token, payload, message and mixed-error models are deleted
-- CI passes Rust 1.95 native/Linux/Windows Clippy without boxing or lint suppression
+- CI passes native/Linux/Windows Clippy on the repository's current stable toolchain without boxing or lint suppression
 - stable diagnostic codes, source ranges, diagnostic order and emitted artifacts remain correct
 - aggregate retained frontend memory improves on representative success and failure workloads
 - no unaccepted median regression above 5% remains
@@ -155,24 +155,23 @@ DECISIONS_ALREADY_MADE:
   - source/user/date: user interview, 2026-07-19
 
 BLOCKERS / RISKS:
-- earlier queued implementation work in the roadmap must land before activation
-- the activation commit, test counts and worktree topology will change
+- earlier queued implementation work has landed; this plan is active
 - source/span migration touches nearly every frontend stage
 - current boxed diagnostic aliases and style-guide advice are already present and must be removed
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- last command: none; this artifact is based on read-only repository inspection
-- result: current planning snapshot and relevant source owners inspected
-- known unrelated failures: unknown; establish at Phase 0
+- last command: `just validate`, the three Clippy lanes, `just bench-frontend-check`, `just bench-check`
+- result: fully green on `b6f81fe58`. 4947 + 817 + 17 unit tests, 1951/1951 integration cases, docs clean, 82/82 bench preflight, 40/40 bench-check cases
+- known unrelated failures: none
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-- when the earlier queued chain reaches this plan, refresh `main`, record `03168082d` as the delivered hardening prerequisite and execute Phase 0A
+- next action: Phase 1, Slice 1A
 
 ---
 
@@ -245,11 +244,11 @@ Current pressure points:
   still need to converge on the planned build-lifetime `PreparedSource` store
 - temporary discovery identities are rebound into the retained module source table during final
   aggregation
-- `InputFile` owns `String`, `PathBuf` and source kind, while `SourceFileTable` is rebuilt per module
+- the `PreparedSourceInput` variants own `String`, `PathBuf` and source kind, while `SourceFileTable` is rebuilt per module
 - `SourceLocation` owns `InternedPath` plus line/column start and end pairs
 - `InternedPath` owns `Vec<StringId>` and allocates on parent/append/join operations
 - `FileTokens` mixes immutable storage, source identity, filesystem identity and mutable cursor state
-- `TokenKind` is widened by `Path(Vec<PathTokenItem>)` and `NumericLiteralToken`
+- `TokenKind` is widened to 24 bytes by `NumericLiteralToken`; its path variant already carries a dense `PathSyntaxId`
 - header parsing clones tokens into declaration bodies, then each `Header` owns another `FileTokens`
 - `CompilerDiagnostic` duplicates its primary location into an allocated primary label
 - `DiagnosticPayload` and nested reason enums contain paths, tokens, spans and variable lists
@@ -273,7 +272,7 @@ This table is normative. Do not create a new subsystem when the listed current o
 | `StringTableForkSource` and `merge_delta_from` | preserve immutable-base forks and deterministic file/module merges; add a consuming frozen lookup form | no globally locked interner and no generic identity framework that obscures ownership |
 | `SourceTreeIndex`, source-package inventories and path resolution | remain the only filesystem discovery owners; extend their existing deterministic inventories to pre-register source identity without eagerly loading every file | a second filesystem traversal or source-discovery policy inside `SourceDatabase` |
 | `SourceFileTable` | absorb into the build-lifetime `SourceDatabase`; assign IDs once in Stage 0 | per-module file tables, fallback path reconstruction and `attach_source_files` |
-| `InputFile`, `PreparedSourceInput` and source-loading slots | replace with pre-registered source slots whose text allocation is populated once and then addressed by `SourceId`; module inputs become ordered `SourceId` sets | duplicate source strings, per-module input copies and another source cache |
+| `PreparedSourceInput` and source-loading slots | replace with pre-registered source slots whose text allocation is populated once and then addressed by `SourceId`; module inputs become ordered `SourceId` sets | duplicate source strings, per-module input copies and another source cache |
 | `CompilerFrontend` | remain the explicit mutable module compiler owner; borrow build-owned source registration, style directives, path resolver and external registries while owning only module-local mutable string/path/diagnostic state | a parallel all-purpose `CompilationContextBuilder` and per-module clones of immutable build services |
 | `ModuleCompilationContext` | continue to own one module compilation's immutable inputs and consume already-prepared source IDs | a generic worker/task framework |
 | `TokenStats`, `HeaderStats`, `FrontendArenaCapacityEstimate` | extend only with the layout metrics explicitly required by Phases 0, 3 and 7 | another token-statistics or capacity subsystem |
@@ -362,7 +361,7 @@ The following edits are authorized in their owning phases:
 - `docs/src/developer-docs/style-guide/style-guide.mtf`: compact-record rules and removal of boxed large-error advice
 - `docs/src/developer-docs/style-guide/testing.mtf`: layout/property/schema/render-equivalence/failure-worker test ownership
 - `docs/src/developer-docs/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
-- `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`: park, then refresh against the final schema APIs
+- the paused user-facing diagnostics improvement work: keep it parked, then refresh it against the final schema APIs when this migration completes
 - `docs/src/docs/progress/@page.moth`: only when current support wording changes
 - `benchmarks/README.md` and `CONTRIBUTING.md`: document the alternate data-layout benchmark case list/command if that surface is added
 - `index.md`: final source, token, path and diagnostic module map
@@ -401,9 +400,10 @@ Record for every material phase:
 A benchmark-only counting allocator may be added only if current counters cannot provide a repeatable
 peak-allocation proxy. It must have zero normal-build cost.
 
-Keep the current default `benchmarks/cases.txt` and `benchmarks/frontend-cases.txt` suites
-success-only. Extend the existing in-process frontend benchmark engine, case parser and report types so
-`benchmarks/data-layout-cases.txt` can declare success or an **expected diagnosed outcome**. Give these
+Keep the existing default `core` and scaling case groups in `benchmarks/manifest.toml` success-only.
+`benchmarks/manifest.toml` is the corpus authority; `xtask/src/benchmark_manifest.rs` is only its
+parser. Extend the existing in-process frontend benchmark engine, manifest parser and report types so
+a `data_layout` case group can declare success or an **expected diagnosed outcome**. Give these
 runs their own `BenchmarkSuiteKind::DataLayout` history/summary identity and add thin
 `just bench-data-layout-check` / `just bench-data-layout` recipes that delegate to the same engine.
 Reuse the existing warmup, measurement, observation and history machinery rather than copying
@@ -474,21 +474,24 @@ records the exact baseline before representation changes make comparison impossi
 
 ### Slice 0A — Activate from the final hardening commit
 
-- [ ] confirm the delivered hardening prerequisite at `03168082d`
-- [ ] confirm the parent worktree is clean and inventory all worker worktrees
-- [ ] create or reuse one dedicated implementation worktree according to current repository policy
-- [ ] record the activation baseline and inventory what changed under the owners below
-- [ ] refresh every path and symbol in the active context capsule
-- [ ] re-read the progress matrix and all authority documents
+- [x] confirm the delivered hardening prerequisite at `03168082d`
+- [x] confirm the parent worktree is clean and inventory all worker worktrees
+- [x] create or reuse one dedicated implementation worktree according to current repository policy —
+  the repository has exactly one worktree and no worker-worktree policy; work proceeds on branch
+  `token-and-diagnostic-data-layout-changes` in the root worktree
+- [x] record the activation baseline and inventory what changed under the owners below
+- [x] refresh every path and symbol in the active context capsule
+- [x] re-read the progress matrix and all authority documents
 
 ### Slice 0B — Serialize roadmap ownership
 
-- [ ] apply the activation roadmap order defined above
-- [ ] confirm the diagnostics plan remains paused until this representation migration completes
-- [ ] add `docs/compiler-data-layout-design.md` to task-specific `AGENTS.md` reading
-- [ ] update the design document's audit anchor, implementation map, deterministic source-registration barriers and lookup-only frozen-context example to the refreshed repo
-- [ ] do not edit the progress matrix unless current support changes during activation or migration
-- [ ] build documentation and inspect all plan/authority links
+- [x] apply the activation roadmap order defined above
+- [x] confirm the diagnostics plan remains paused until this representation migration completes
+- [x] add `docs/compiler-data-layout-design.md` to task-specific `AGENTS.md` reading
+- [x] update the design document's audit anchor, implementation map, deterministic source-registration barriers and lookup-only frozen-context example to the refreshed repo
+- [x] do not edit the progress matrix unless current support changes during activation or migration —
+  no current support changed, so the matrix was not edited
+- [x] build documentation and inspect all plan/authority links
 
 ### Slice 0C — Produce the migration inventory
 
@@ -498,56 +501,69 @@ keep the active slice's exact affected symbols in the context capsule.
 
 Inventory:
 
-- [ ] every `SourceLocation`, `CharPosition`, `FileId`, `SourceFileTable` and durable location field
-- [ ] every `InputFile` source-text/path ownership, source cache, source reread and dependency-scan retokenization
-- [ ] every `InternedPath` field, clone, append, parent, join and remap path
-- [ ] every `Token`, `TokenKind`, `PathTokenItem`, `FileTokens`, token clone and retained token vector
-- [ ] every diagnostic kind, payload/reason/label-message variant, renderer, stable external code and `StringId`/string field containing compiler-generated prose rather than authored facts
-- [ ] every `Box<CompilerDiagnostic>` alias or conversion
-- [ ] every complete `StringTable` clone, diagnostic-only `TypeEnvironment` retention, backend/project-builder `StringTable` mutation and renderer query that depends on more than type spelling
-- [ ] every `CompilerError` producer, macro, conversion, consumer and immediate-print path
-- [ ] every panic catch, poisoned-lock recovery and panic-profile setting
-- [ ] planned owning phase for each item
+- [x] every `SourceLocation`, `CharPosition`, `FileId`, `SourceFileTable` and durable location field
+- [x] every source-text/path ownership, source cache, source reread and dependency-scan
+  retokenization — the carriers are `PreparedSourceInput` variants, not an `InputFile` type
+- [x] every `InternedPath` field, clone, append, parent, join and remap path
+- [x] every `Token`, `TokenKind`, path row, `FileTokens`, token clone and retained token vector
+- [x] every diagnostic kind, payload/reason/label-message variant, renderer, stable external code and `StringId`/string field containing compiler-generated prose rather than authored facts
+- [x] every `Box<CompilerDiagnostic>` alias or conversion
+- [x] every complete `StringTable` clone, diagnostic-only `TypeEnvironment` retention, backend/project-builder `StringTable` mutation and renderer query that depends on more than type spelling
+- [x] every `CompilerError` producer, macro, conversion, consumer and immediate-print path
+- [x] every panic catch, poisoned-lock recovery and panic-profile setting
+- [x] planned owning phase for each item
 
 ### Slice 0D — Record layout, distribution and memory baseline
 
-- [ ] add focused layout-report support for current predecessor types
-- [ ] record size/alignment of current location, path, token, path item, diagnostic, largest reasons, labels, messages and render contexts
-- [ ] extend existing counters with span start/length histograms, path uniqueness, token/cold-store estimates, diagnostic extras and context clones
-- [ ] include exact boundary buckets for every candidate `LocalSpan` split
-- [ ] add `benchmarks/data-layout-cases.txt` plus an alternate case-list option to the existing frontend benchmark engine and support an explicitly expected diagnosed outcome
-- [ ] reuse a hardened canonical input when it already exercises the required failure workload; otherwise add a benchmark-only diagnosed input under `benchmarks/` and keep correctness assertions in `tests/cases/`
-- [ ] record source, path/dependency, token, template, type/generic, warning-heavy and malformed-source workloads
-- [ ] ensure instrumentation is feature-gated or otherwise zero-cost in normal builds
+- [x] record size/alignment of current location, path, path row, token, diagnostic, largest reason
+  types, labels, messages, render contexts and the retained `TypeEnvironment`, through a throwaway
+  probe deleted after recording. Durable layout assertions land with the replacement types in
+  Phase 1, so no predecessor-only layout-report module was added.
+- [x] record the corpus source-size distribution, which decides the `LocalSpan` start-bit gates
+- [ ] **owned by Slice 1C2:** exact span start/length histograms with boundary buckets for every
+  candidate split. The current model stores line/column, not byte offsets, so the census cannot run
+  against today's spans. Slice group 1C was reordered at activation so the byte cursor and line
+  index land first and the census runs against real offsets where the selection decision lives.
+- [x] add the `data_layout` case group to `benchmarks/manifest.toml`, extend `BenchmarkExpectation`
+  with expected warning and diagnosed outcomes, add `BenchmarkSuiteKind::DataLayout` and add the
+  `just bench-data-layout-check` / `just bench-data-layout` recipes. Built in Phase 0 rather than
+  deferred: the predecessor diagnostic and warning memory baseline is unrecoverable once Phases 3
+  and 4 delete the token and diagnostic models it measures.
+- [x] reuse existing benchmark inputs where they exercise the required workload; new diagnosed and
+  warning-heavy inputs live under `benchmarks/`, with correctness assertions left in `tests/cases/`
+- [x] record source, path/dependency, token, template, type/generic, warning-heavy and
+  malformed-source workloads
+- [x] ensure instrumentation is feature-gated or otherwise zero-cost in normal builds
 
 ### Slice 0E — Establish correctness and performance baseline
 
-- [ ] run exact Rust 1.95 native/Linux/Windows Clippy commands and record all failures
-- [ ] identify every existing boxed boundary and whether unboxed failures remain
-- [ ] run full `just validate` when the baseline is green; otherwise run and report every independently runnable component after recording the exact blocker
-- [ ] run `just bench-frontend-check` and `just bench-check`
-- [ ] run five recorded frontend and end-to-end benchmark invocations
-- [ ] record retained source bytes, common data, cold data and clone/remap pressure separately
-- [ ] capture focused profiles only where attribution is unclear
+- [x] run the native/Linux/Windows Clippy commands and record all failures — all three lanes pass
+  under Rust 1.97.1, the repository's actual toolchain
+- [x] identify every existing boxed boundary and whether unboxed failures remain
+- [x] run full `just validate` when the baseline is green — green
+- [x] run `just bench-frontend-check` and `just bench-check`
+- [x] run five recorded frontend and end-to-end benchmark invocations
+- [x] record retained source bytes, common data, cold data and clone/remap pressure separately
+- [x] capture focused profiles only where attribution is unclear — attribution was clear; none captured
 
 ### Phase 0 — Audit / style-guide review / validation
 
-- [ ] confirm no compiler or language semantics changed
-- [ ] confirm every current owner appears in the migration ledger
-- [ ] confirm locked design decisions still match the refreshed repo
-- [ ] confirm no unrecorded lint allowance, boxing workaround or new compatibility path was added; the temporary pre-activation `result_large_err` bridge is recorded with its removal owner
-- [ ] confirm instrumentation reuses existing owners and has no normal-build cost
-- [ ] run the documentation-only gate for documentation-only commits
-- [ ] record the exact green or failing baseline without assuming the original `result_large_err` state still exists
-- [ ] record the Phase 0 commit and refresh the capsule/report
+- [x] confirm no compiler or language semantics changed
+- [x] confirm every current owner appears in the migration ledger
+- [x] confirm locked design decisions still match the refreshed repo
+- [x] confirm no unrecorded lint allowance, boxing workaround or new compatibility path was added; the temporary pre-activation `result_large_err` bridge is recorded with its removal owner
+- [x] confirm instrumentation reuses existing owners and has no normal-build cost
+- [x] run the documentation-only gate for documentation-only commits
+- [x] record the exact green baseline
+- [x] record the Phase 0 commit and refresh the capsule/report
 
 ### Phase 0 exit criteria
 
-- [ ] this plan is the sole active owner of the source/token/diagnostic representation migration
-- [ ] diagnostics work remains paused cleanly behind this migration
-- [ ] every stale snapshot fact is refreshed
-- [ ] migration and failure-site inventories are complete
-- [ ] baseline correctness, layout, memory, timing and CI evidence is recorded
+- [x] this plan is the sole active owner of the source/token/diagnostic representation migration
+- [x] diagnostics work remains paused cleanly behind this migration
+- [x] every stale snapshot fact is refreshed
+- [x] migration and failure-site inventories are complete
+- [x] baseline correctness, layout, memory, timing and CI evidence is recorded
 
 ---
 
@@ -576,15 +592,19 @@ green before later layout work proceeds.
 - [ ] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [ ] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
-- [ ] **1B5 — module inputs and worker ownership:** replace `InputFile` payloads with ordered `SourceId` sets; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
+- [ ] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
 - [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
-- [ ] **1C1 — select the encoding:** implement benchmark-only candidate codecs for the architecture document's 8–12 length-bit splits, run the bounded terminator experiment once, select by the accepted gates and record/freeze the constants in the architecture document and evidence report
-- [ ] **1C2 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
-- [ ] **1C3 — byte cursor and line index:** thread one line-index builder through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
+Slice order note, recorded at activation: the encoding cannot be selected before byte offsets exist.
+The original order put selection (`1C1`) before the byte cursor (`1C3`), which would have forced a
+throwaway offset tracker duplicating the line-index builder. The byte cursor now comes first.
+
+- [ ] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
+- [ ] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, run the bounded terminator experiment once, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone.
+- [ ] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
 - [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
 - [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
 
@@ -635,7 +655,7 @@ a public boundary supporting both location models.
 - [ ] **1G2 — remove infrastructure widening:** stop converting `CompilerError` into `DiagnosticPayload::InfrastructureError`, carry the legacy outer failure separately until Phase 5 and delete the infrastructure payload plus its cloned `String`/`HashMap`
 - [ ] **1G3 — enforce a non-throwaway size fix:** measure the transitional diagnostic; do not build a temporary old-payload cold-store system; when simplification is insufficient, pull forward only final schema/projection components retained by later phases
 - [ ] **1G4 — token projection gate:** if the predecessor still exceeds 128 bytes, pull forward only final `TokenTag`, `TokenDescriptor` and 8-byte `DiagnosticToken` foundations from Phase 3; do not create another wide or temporary diagnostic-token enum
-- [ ] **1G5 — remove workarounds:** require `size_of::<CompilerDiagnostic>() <= 128`, delete every `Box<CompilerDiagnostic>` alias/conversion and remove style-guide advice recommending local boxing; run Rust 1.95 native/Linux/Windows Clippy and confirm `result_large_err` is gone
+- [ ] **1G5 — remove workarounds:** require `size_of::<CompilerDiagnostic>() <= 128`, delete every `Box<CompilerDiagnostic>` alias/conversion and remove style-guide advice recommending local boxing; run native/Linux/Windows Clippy and confirm `result_large_err` is gone
 - [ ] remove both temporary `result_large_err` allowances from `src/lib.rs` and `xtask/src/benchmark_execution.rs` rather than relocating either one
 
 ### Slice 1H — Delete the old location and source identity model
@@ -827,7 +847,7 @@ Each checked batch is independently accepted and must remove the old token API f
 
 ### Slice 3H — Delete the old token architecture
 
-- [ ] delete `Token`, `TokenKind`, `PathTokenItem` and `FileTokens`
+- [ ] delete `Token`, `TokenKind` and `FileTokens`
 - [ ] delete clone-based `current_token()` and body-capture helpers
 - [ ] delete duplicate token spelling/classification matches
 - [ ] delete token string/path remapping that the new stores no longer require
@@ -1269,7 +1289,7 @@ For each experiment:
 - [ ] move rejected/postponed items to the roadmap with the deferral table below and links here
 - [ ] remove duplicate deferred bullets owned by another plan
 - [ ] update the existing Structured diagnostics matrix row to the implemented report/failure contract
-- [ ] reactivate the diagnostics-improvement plan immediately after this plan
+- [ ] unpause the user-facing diagnostics improvement work immediately after this plan
 - [ ] refresh its paths, capsule and next semantic slice against the schema/store APIs
 - [ ] remove old payload, label, token and type-context assumptions from that plan
 - [ ] require future diagnostics to fit the 32-byte schema and side-store policy
@@ -1281,7 +1301,7 @@ For each experiment:
 - [ ] confirm stable diagnostic codes, source spans and renderer identity across terminal/terse/dev server
 - [ ] confirm successful artifacts/goldens are unchanged except explicitly authorized output
 - [ ] run docs check and release build
-- [ ] run Rust 1.95 native/Linux/Windows Clippy with warnings denied after removing the temporary `result_large_err` suppressions from `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and confirm the large-error lint is absent without boxing the common diagnostic
+- [ ] run native/Linux/Windows Clippy with warnings denied after removing the temporary `result_large_err` suppressions from `src/lib.rs` and `xtask/src/benchmark_execution.rs`, and confirm the large-error lint is absent without boxing the common diagnostic
 - [ ] run full `just validate`
 - [ ] run the complete five-run recorded benchmark protocol
 - [ ] compare against Phase 0 and each material phase
@@ -1356,9 +1376,9 @@ progress matrix unless they change current tooling or user-visible support.
 After every Phase 7 exit criterion is checked:
 
 1. Keep `docs/compiler-data-layout-design.md` as the active architecture authority.
-2. Freeze this plan as the historical implementation record.
-3. Reactivate `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`.
-4. Refresh that plan from current `main`; do not preserve old file paths or payload assumptions.
+2. Delete this plan and its roadmap entry in the commit that completes it, as `Adding and maintaining plans` in `docs/roadmap/roadmap.md` requires. Git history is the implementation record.
+3. Unpause the user-facing diagnostics improvement work.
+4. Refresh that work from the current branch; do not preserve old file paths or payload assumptions.
 5. Implement each future diagnostic through one schema entry, typed facts, labels and optional cold data.
 6. Require every diagnostic review to answer:
    - Does the diagnostic fit four fact words?

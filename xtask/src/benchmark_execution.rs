@@ -116,6 +116,20 @@ pub(crate) enum BenchmarkFailureKind {
         warning_count: usize,
         warning_codes: Vec<String>,
     },
+    WarnedExpectationErrors {
+        error_count: usize,
+    },
+    WarnedExpectationWarnings {
+        warning_count: usize,
+        warning_codes: Vec<String>,
+    },
+    DiagnosedExpectationNoErrors {
+        warning_count: usize,
+        warning_codes: Vec<String>,
+    },
+    DiagnosedExpectationSucceeded {
+        error_count: usize,
+    },
     FrontendCompilationFailure,
     InvalidTotalDuration {
         duration_ms: f64,
@@ -254,19 +268,7 @@ fn execute_cli_case(
         )
     })?;
 
-    if !run.status.success {
-        let benchmark_status = BenchmarkDiagnosticStatus::try_from(run.stdout.as_str()).ok();
-
-        return Err(process_failure(
-            context,
-            case,
-            BenchmarkFailureKind::NonZeroProcessStatus,
-            &run,
-            benchmark_status,
-        ));
-    }
-
-    let benchmark_status =
+    let benchmark_status = if run.status.success {
         BenchmarkDiagnosticStatus::try_from(run.stdout.as_str()).map_err(|error| {
             process_failure(
                 context,
@@ -275,9 +277,32 @@ fn execute_cli_case(
                 &run,
                 None,
             )
-        })?;
+        })?
+    } else {
+        // A non-zero status with user errors is the expected diagnosed lane.
+        // Any other non-zero process remains an infrastructure failure.
+        match BenchmarkDiagnosticStatus::try_from(run.stdout.as_str()) {
+            Ok(status) if status.error_count > 0 => status,
+            status => {
+                return Err(process_failure(
+                    context,
+                    case,
+                    BenchmarkFailureKind::NonZeroProcessStatus,
+                    &run,
+                    status.ok(),
+                ));
+            }
+        }
+    };
 
-    validate_clean_expectation(context, case, benchmark_status, Vec::new(), Some(&run))?;
+    validate_expectation(
+        context,
+        case,
+        benchmark_status,
+        Vec::new(),
+        Some(&run),
+        run.status.success,
+    )?;
     validate_total_duration(context, case, run.duration_ms, Some(&run), benchmark_status)?;
 
     let observations =
@@ -341,16 +366,20 @@ fn execute_frontend_case(
         )
     })?;
     let benchmark_status = BenchmarkDiagnosticStatus {
-        error_count: 0,
+        error_count: report.error_count,
         warning_count: report.warning_count,
     };
 
-    validate_clean_expectation(
+    validate_expectation(
         context,
         case,
         benchmark_status,
         report.warning_codes.clone(),
         None,
+        matches!(
+            report.outcome,
+            moth::benchmarking::FrontendBenchmarkOutcome::Success
+        ),
     )?;
     validate_total_duration(context, case, report.total_ms, None, benchmark_status)?;
 
@@ -379,38 +408,96 @@ fn execute_frontend_case(
     ))
 }
 
-fn validate_clean_expectation(
+fn validate_expectation(
     context: &BenchmarkExecutionContext<'_>,
     case: &BenchmarkCase,
     benchmark_status: BenchmarkDiagnosticStatus,
     warning_codes: Vec<String>,
     process_run: Option<&ProcessRun>,
+    compilation_succeeded: bool,
 ) -> Result<(), BenchmarkCaseFailure> {
     match case.expectation {
-        BenchmarkExpectation::Clean if benchmark_status.error_count > 0 => {
-            Err(failure_with_optional_process(
-                context,
-                case,
-                BenchmarkFailureKind::CleanExpectationErrors {
-                    error_count: benchmark_status.error_count,
-                },
-                process_run,
-                Some(benchmark_status),
-            ))
+        BenchmarkExpectation::Clean => {
+            if benchmark_status.error_count > 0 {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::CleanExpectationErrors {
+                        error_count: benchmark_status.error_count,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+            if benchmark_status.warning_count > 0 {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::CleanExpectationWarnings {
+                        warning_count: benchmark_status.warning_count,
+                        warning_codes,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+
+            Ok(())
         }
-        BenchmarkExpectation::Clean if benchmark_status.warning_count > 0 => {
-            Err(failure_with_optional_process(
-                context,
-                case,
-                BenchmarkFailureKind::CleanExpectationWarnings {
-                    warning_count: benchmark_status.warning_count,
-                    warning_codes,
-                },
-                process_run,
-                Some(benchmark_status),
-            ))
+        BenchmarkExpectation::Warned => {
+            if benchmark_status.error_count > 0 || !compilation_succeeded {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::WarnedExpectationErrors {
+                        error_count: benchmark_status.error_count,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+            if benchmark_status.warning_count == 0 {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::WarnedExpectationWarnings {
+                        warning_count: benchmark_status.warning_count,
+                        warning_codes,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+
+            Ok(())
         }
-        BenchmarkExpectation::Clean => Ok(()),
+        BenchmarkExpectation::Diagnosed => {
+            if benchmark_status.error_count == 0 {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::DiagnosedExpectationNoErrors {
+                        warning_count: benchmark_status.warning_count,
+                        warning_codes,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+            if compilation_succeeded {
+                return Err(failure_with_optional_process(
+                    context,
+                    case,
+                    BenchmarkFailureKind::DiagnosedExpectationSucceeded {
+                        error_count: benchmark_status.error_count,
+                    },
+                    process_run,
+                    Some(benchmark_status),
+                ));
+            }
+
+            Ok(())
+        }
     }
 }
 
@@ -649,6 +736,44 @@ impl Display for BenchmarkFailureKind {
                     write!(formatter, ": {}", bounded_inline(&warning_codes.join(", ")))?;
                 }
                 Ok(())
+            }
+            Self::WarnedExpectationErrors { error_count } => {
+                write!(
+                    formatter,
+                    "warned expectation found {error_count} diagnostic error(s); compilation must succeed"
+                )
+            }
+            Self::WarnedExpectationWarnings {
+                warning_count,
+                warning_codes,
+            } => {
+                write!(
+                    formatter,
+                    "warned expectation found {warning_count} warning(s), expected at least one"
+                )?;
+                if !warning_codes.is_empty() {
+                    write!(formatter, ": {}", bounded_inline(&warning_codes.join(", ")))?;
+                }
+                Ok(())
+            }
+            Self::DiagnosedExpectationNoErrors {
+                warning_count,
+                warning_codes,
+            } => {
+                write!(
+                    formatter,
+                    "diagnosed expectation found no diagnostic errors ({warning_count} warning(s))"
+                )?;
+                if !warning_codes.is_empty() {
+                    write!(formatter, ": {}", bounded_inline(&warning_codes.join(", ")))?;
+                }
+                Ok(())
+            }
+            Self::DiagnosedExpectationSucceeded { error_count } => {
+                write!(
+                    formatter,
+                    "diagnosed expectation compiled successfully with {error_count} diagnostic error(s)"
+                )
             }
             Self::FrontendCompilationFailure => write!(formatter, "frontend compilation failed"),
             Self::InvalidTotalDuration { duration_ms } => {

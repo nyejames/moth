@@ -1,0 +1,8 @@
+project #= |
+    name = "data_layout_diagnosed",
+    entry_root = "src",
+|
+html #= |
+    dev_output = "dev",
+    release_output = "release",
+|

@@ -2,13 +2,14 @@
 
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
-> **Status:** Accepted end-state architecture. Implementation is queued after the delivered Compiler
-> Test Suite Hardening work and before further user-facing diagnostic improvement work; diagnostics
-> remain paused until this plan completes.
+> **Status:** Accepted end-state architecture. Implementation is active under
+> `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`; user-facing
+> diagnostic improvement work remains paused until that plan completes.
 >
-> **Initial repository audit anchor:** `d119988861aad9732c19d945eeabeb249a7e5caa`. The implementation
-> plan records delivered hardening at `03168082d`; it must replace this historical anchor with the
-> final activation baseline before code changes begin.
+> **Activation baseline:** `b6f81fe58` on `token-and-diagnostic-data-layout-changes`, with the
+> delivered Compiler Test Suite Hardening prerequisite at `03168082d`. Baseline validation was green:
+> `just validate`, plus Clippy with warnings denied on `aarch64-apple-darwin`,
+> `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` under Rust 1.97.1.
 
 ## Authority and ownership
 
@@ -178,7 +179,7 @@ The following are also hard rules:
 | `SourceLocation { InternedPath, start line/column, end line/column }` | `SourceSpan { SourceId, LocalSpan }` |
 | source paths cloned into each token and diagnostic | one path and source record in shared tables |
 | `Token { TokenKind, SourceLocation }` | source-owned `TokenShape` plus `LocalSpan` |
-| `TokenKind::Path(Vec<PathTokenItem>)` | `TokenKind::Path(PathSyntaxId)` into one file-owned `PathSyntaxTable` |
+| `TokenKind` widened to 24 bytes by its inline numeric literal payload | 8-byte `TokenShape` plus typed source-local cold stores |
 | declaration shells clone `Vec<Token>` | `TokenRange` into immutable source-owned tokens |
 | `InternedPath(Vec<StringId>)` | `PathId` into a dense path trie/table |
 | wide `CompilerDiagnostic` and `DiagnosticPayload` | small `DiagnosticDraft`, 32-byte `DiagnosticRecord`, side stores |
@@ -189,23 +190,36 @@ The following are also hard rules:
 
 ## Compilation identity context
 
-One project or package compilation boundary owns one identity context.
+One project or package compilation boundary owns one identity context. That context is mutable while
+compilation runs and becomes a lookup-only frozen bundle afterwards. Diagnostics are **not** part of
+the frozen identity bundle; they belong to the report that a diagnosed or warning outcome owns.
 
 ```rust
-pub struct CompilationContextBuilder {
+/// Mutable build-lifetime identity construction. One explicit owner.
+pub struct IdentityContextBuilder {
     sources: SourceDatabaseBuilder,
     strings: StringTableBuilder,
-    paths: PathInternerBuilder,
-    diagnostic_types: DiagnosticTypeStoreBuilder,
-    diagnostics: DiagnosticStoreBuilder,
+    paths: PathTableBuilder,
 }
 
-pub struct FrozenCompilationContext {
+/// Lookup-only immutable identity. Owns no diagnostics, no report-local type
+/// display data, no driver, no scheduler and no injected services.
+pub struct FrozenIdentityContext {
     sources: FrozenSourceDatabase,
     strings: FrozenStringTable,
     paths: FrozenPathTable,
-    diagnostic_types: FrozenDiagnosticTypeStore,
-    diagnostics: FrozenDiagnosticStore,
+}
+
+/// One report covers exactly one identity domain.
+pub struct DiagnosticReport {
+    context: Arc<FrozenIdentityContext>,
+    diagnostics: DiagnosticStore,
+    types: DiagnosticTypeStore,
+}
+
+/// The command-level one-or-many container over independent project/package domains.
+pub struct DiagnosticReportSet {
+    reports: Vec<DiagnosticReport>,
 }
 ```
 
@@ -216,12 +230,15 @@ Exact Rust names may change. The ownership rules may not.
 - Workers use local append-only deltas rather than mutating shared global tables.
 - Deltas merge in canonical source or module order.
 - Worker-owned records are remapped once before a later consumer can observe them.
-- The completed context freezes into immutable storage.
-- Build results and diagnostics that outlive compilation retain an `Arc<FrozenCompilationContext>`
-  or an equivalent single shared owner.
+- The completed identity context freezes once into immutable lookup storage.
+- A result retains `Arc<FrozenIdentityContext>` only while it still contains compact IDs that need
+  it. A clean success whose final outputs carry no compact compiler IDs builds no frozen context at
+  all and drops source/token/identity data at its last diagnostic-capable boundary.
+- `DiagnosticReport` owns its own dense diagnostic and type-display stores; `DiagnosticReportSet`
+  owns only the ordered collection and adds no second context or store layer.
 - Bulk owning stores are move-only until frozen.
 - Compact IDs and records may be `Copy`.
-- Broad `Clone` implementations on message sets, diagnostic bags, source databases and owning render
+- Broad `Clone` implementations on report sets, diagnostic bags, source databases and owning render
   contexts are prohibited.
 
 A frozen context is a process-local rendering and inspection boundary. It is not a persistent cache
@@ -237,7 +254,7 @@ key or a cross-process protocol.
 pub struct SourceId(NonZeroU32);
 ```
 
-`SourceId` identifies one source snapshot inside one `FrozenCompilationContext`.
+`SourceId` identifies one source snapshot inside one identity context.
 
 Rules:
 
@@ -1177,26 +1194,22 @@ user-visible spelling unless an explicitly authorized diagnostics-improvement sl
 
 ## Frozen render context and cloning policy
 
-A diagnostic report carries one immutable context owner:
+A diagnostic report owns its diagnostic and type-display stores and shares one lookup-only identity
+context. See `Compilation identity context` for the exact split.
 
-```rust
-pub struct DiagnosticReport {
-    context: Arc<FrozenCompilationContext>,
-    diagnostics: DiagnosticRange,
-}
-```
-
-A graph-level result may carry several module/package reports when they belong to independent
-identity contexts. It does not concatenate raw IDs without preserving their context owner.
+A graph-level `DiagnosticReportSet` may carry several module/package reports when they belong to
+independent identity contexts. It does not concatenate raw IDs without preserving their context owner.
 
 Rules:
 
 - `StringTable::clone()` is not used to snapshot every failure boundary.
 - a finalized string table is shared immutably
-- source, path, type-display and diagnostic stores share the same context lifetime
-- renderers borrow the frozen context
+- source, string and path lookups share the frozen identity context's lifetime; diagnostic and
+  type-display stores belong to the report, not to that context
+- renderers borrow the frozen context and the report's stores
 - successful warnings and failed diagnostics use the same record/store model
-- a report can be cheaply cloned by cloning one `Arc` plus a range, not by copying tables
+- a report is move-only; a host that genuinely shares one wraps the whole report or set in `Arc`,
+  never a per-record or per-side-store `Arc`
 - stage-local mutable bags are consumed, not cloned
 - no context is kept alive by hidden global state
 
@@ -1408,11 +1421,14 @@ This architecture uses the existing frontend instrumentation and benchmark tooli
 reports belong under those owners rather than being scattered through source, token or diagnostic
 modules.
 
-The implementation plan creates:
+Evidence lives in the existing indexed report:
 
 ```text
-benchmarks/compiler-data-layout-results.md
+benchmarks/frontend-optimization-results.md
 ```
+
+The implementation plan adds one indexed top-level section there per material phase. It does not
+create a second optimisation report or a second benchmark runner.
 
 Raw allocator logs, profiler captures and per-run data remain uncommitted.
 

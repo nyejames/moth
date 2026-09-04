@@ -40,6 +40,31 @@ fn run_policy_rejects_quick_recording() {
     );
 }
 
+#[test]
+fn suite_and_group_spellings_round_trip() {
+    for suite in [
+        BenchmarkSuiteKind::EndToEndCli,
+        BenchmarkSuiteKind::FrontendPhases,
+        BenchmarkSuiteKind::DataLayout,
+    ] {
+        assert_eq!(
+            BenchmarkSuiteKind::from_persisted_name(suite.persisted_name()),
+            Some(suite)
+        );
+        assert!(!suite.display_label().is_empty());
+        assert!(!suite.primary_metric_name().is_empty());
+    }
+
+    assert_eq!(
+        BenchmarkGroup::parse_spelling("data_layout"),
+        Some(BenchmarkGroup::DataLayout)
+    );
+    assert_eq!(
+        BenchmarkGroup::DataLayout.persistence_spelling(),
+        "data_layout"
+    );
+}
+
 fn make_case(name: &str, mean_ms: f64) -> BenchmarkCaseResult {
     make_grouped_case(name, "ungrouped", mean_ms)
 }

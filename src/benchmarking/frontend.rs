@@ -21,6 +21,7 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostic_payload::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -72,9 +73,22 @@ pub struct FrontendBenchmarkOptions {
     pub build_config_inputs: Vec<FrontendBenchmarkInput>,
 }
 
-/// Report produced by a successful frontend benchmark run.
+/// Whether a completed frontend benchmark compiled cleanly or produced user diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendBenchmarkOutcome {
+    Success,
+    Diagnosed,
+}
+
+/// Report produced by a completed frontend benchmark run.
 #[derive(Debug, Clone)]
 pub struct FrontendBenchmarkReport {
+    /// Whether compilation completed cleanly or with user-facing diagnostics.
+    pub outcome: FrontendBenchmarkOutcome,
+    /// Number of error-severity user diagnostics.
+    pub error_count: usize,
+    /// Stable codes for the error-severity user diagnostics.
+    pub diagnostic_codes: Vec<String>,
     /// Timing observation schema used by the stage list.
     pub timing_schema_version: u32,
     pub total_ms: f64,
@@ -195,7 +209,9 @@ impl std::error::Error for FrontendBenchmarkError {}
 /// Run one frontend benchmark for the given entry path.
 ///
 /// WHAT: validates the path, bootstraps an HTML project build, compiles through
-/// the frontend pipeline, and returns total plus per-stage timings.
+/// the frontend pipeline, and returns total plus per-stage timings. User
+/// diagnostics are a completed `Diagnosed` report; infrastructure failures
+/// remain typed errors.
 /// WHY: this is the narrow dev-tooling entry point that keeps benchmark
 /// orchestration out of the compiler frontend while reusing production setup.
 ///
@@ -273,7 +289,7 @@ pub fn run_frontend_benchmark(
         FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
     };
 
-    let messages = match compile_project_frontend_with_inputs(
+    let (messages, compilation_failed) = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
@@ -283,8 +299,8 @@ pub fn run_frontend_benchmark(
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
-        Ok(frontend) => frontend.into_render_messages(&mut string_table),
-        Err(messages) => messages,
+        Ok(frontend) => (frontend.into_render_messages(&mut string_table), false),
+        Err(messages) => (messages, true),
     };
 
     #[cfg(feature = "timers")]
@@ -297,21 +313,25 @@ pub fn run_frontend_benchmark(
     let counters: Vec<FrontendBenchmarkCounter> = Vec::new();
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let error_count = messages.error_count();
+    let diagnostic_codes = collect_diagnostic_codes(&messages);
+    let has_infrastructure_diagnostic = messages.diagnostics().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InfrastructureError { .. }
+        )
+    });
 
-    if messages.error_count() > 0 {
-        let diagnostic_codes = collect_diagnostic_codes(&messages);
+    // User diagnostics are an expected benchmark outcome, but an infrastructure
+    // payload or a failed compilation with no user error is still a runner
+    // failure and must abort the benchmark.
+    if has_infrastructure_diagnostic || (compilation_failed && error_count == 0) {
         return Err(FrontendBenchmarkError {
             kind: FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,
             message: format_compiler_messages(&messages),
         });
     }
-
-    let warning_count = messages.warning_count();
-    let warning_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
-        .collect();
 
     #[cfg(feature = "timers")]
     let stages = snapshot
@@ -334,12 +354,31 @@ pub fn run_frontend_benchmark(
         })
         .collect();
 
-    #[cfg(feature = "timers")]
-    let timing_schema_version = crate::benchmarking::TIMING_SCHEMA_VERSION;
-    #[cfg(not(feature = "timers"))]
-    let timing_schema_version = 0;
+    let warning_count = messages.warning_count();
+    let warning_codes = messages
+        .warnings()
+        .map(|warning| warning.kind.code().to_owned())
+        .collect();
+    let outcome = if error_count == 0 {
+        FrontendBenchmarkOutcome::Success
+    } else {
+        FrontendBenchmarkOutcome::Diagnosed
+    };
+    let timing_schema_version = {
+        #[cfg(feature = "timers")]
+        {
+            crate::benchmarking::TIMING_SCHEMA_VERSION
+        }
+        #[cfg(not(feature = "timers"))]
+        {
+            0
+        }
+    };
 
     Ok(FrontendBenchmarkReport {
+        outcome,
+        error_count,
+        diagnostic_codes,
         timing_schema_version,
         total_ms,
         warning_count,
@@ -351,11 +390,9 @@ pub fn run_frontend_benchmark(
 
 fn format_compiler_messages(messages: &CompilerMessages) -> String {
     let mut lines = format_terse_compiler_messages(messages);
-
     if lines.is_empty() {
         lines.push(format!("{} error(s) found", messages.error_count()));
     }
-
     lines.join("\n")
 }
 

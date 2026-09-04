@@ -149,7 +149,12 @@ impl FrontendBenchmarkProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BenchmarkExpectation {
+    /// The workload must compile without errors or warnings.
     Clean,
+    /// The workload must compile successfully with at least one warning.
+    Warned,
+    /// The workload must fail with at least one user-facing diagnostic error.
+    Diagnosed,
 }
 
 /// Resolved CLI arguments for one manifest case.
@@ -376,11 +381,24 @@ impl BenchmarkManifest {
     }
 
     pub(crate) fn frontend_cases(&self) -> impl Iterator<Item = &BenchmarkCase> {
-        self.cases
-            .iter()
-            .filter(|case| matches!(case.runner, BenchmarkRunner::Frontend { .. }))
+        self.cases.iter().filter(|case| {
+            matches!(case.runner, BenchmarkRunner::Frontend { .. })
+                && case.group_name != BenchmarkGroup::DataLayout
+        })
     }
 
+    pub(crate) fn data_layout_cases(&self) -> impl Iterator<Item = &BenchmarkCase> {
+        self.cases.iter().filter(|case| {
+            matches!(case.runner, BenchmarkRunner::Frontend { .. })
+                && case.group_name == BenchmarkGroup::DataLayout
+        })
+    }
+
+    pub(crate) fn standard_cases(&self) -> impl Iterator<Item = &BenchmarkCase> {
+        self.cases
+            .iter()
+            .filter(|case| case.group_name != BenchmarkGroup::DataLayout)
+    }
     pub(crate) fn frontend_invocation(
         &self,
         case: &BenchmarkCase,
@@ -565,6 +583,8 @@ fn validate_manifest(
         })?;
         let expectation = match raw_case.expectation.as_str() {
             "clean" => BenchmarkExpectation::Clean,
+            "warned" => BenchmarkExpectation::Warned,
+            "diagnosed" => BenchmarkExpectation::Diagnosed,
             other => {
                 return Err(invalid(
                     manifest_path,
@@ -634,6 +654,23 @@ fn validate_manifest(
                 BenchmarkRunner::Frontend { profile }
             }
         };
+
+        if group_name == BenchmarkGroup::DataLayout {
+            if !matches!(&runner, BenchmarkRunner::Frontend { .. }) {
+                return Err(invalid(
+                    manifest_path,
+                    format!("case '{}'", raw_case.id),
+                    "data_layout cases must use the in-process frontend runner",
+                ));
+            }
+            if expectation == BenchmarkExpectation::Clean {
+                return Err(invalid(
+                    manifest_path,
+                    format!("case '{}'", raw_case.id),
+                    "data_layout cases must expect warnings or diagnostics",
+                ));
+            }
+        }
 
         if let BenchmarkRunner::Cli {
             command: CliBenchmarkCommand::Build,

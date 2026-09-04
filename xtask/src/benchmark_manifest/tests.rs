@@ -456,6 +456,104 @@ profile = "dev"
 }
 
 #[test]
+fn manifest_parses_all_expectations_and_selects_data_layout_cases() {
+    let directory = tempdir().expect("temporary repository should exist");
+    create_entry(directory.path(), "clean.moth");
+    create_entry(directory.path(), "warned.moth");
+    create_entry(directory.path(), "diagnosed.moth");
+    let contents = r#"schema = 4
+
+[[workload]]
+id = "clean_workload"
+entry = "clean.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["clean.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "warned_workload"
+entry = "warned.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["warned.moth"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "diagnosed_workload"
+entry = "diagnosed.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["diagnosed.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "clean_case"
+workload = "clean_workload"
+group = "core"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "warned_case"
+workload = "warned_workload"
+group = "data_layout"
+quick = false
+expectation = "warned"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "diagnosed_case"
+workload = "diagnosed_workload"
+group = "data_layout"
+quick = false
+expectation = "diagnosed"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+"#;
+    let path = write_manifest(directory.path(), contents);
+    let manifest = load_manifest_at(&path, directory.path()).expect("manifest should load");
+
+    assert_eq!(
+        manifest
+            .cases
+            .iter()
+            .map(|case| case.expectation)
+            .collect::<Vec<_>>(),
+        [
+            BenchmarkExpectation::Clean,
+            BenchmarkExpectation::Warned,
+            BenchmarkExpectation::Diagnosed,
+        ]
+    );
+    assert_eq!(
+        manifest
+            .data_layout_cases()
+            .map(|case| case.id.as_str())
+            .collect::<Vec<_>>(),
+        ["warned_case", "diagnosed_case"]
+    );
+    assert_eq!(
+        manifest
+            .frontend_cases()
+            .map(|case| case.id.as_str())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        manifest
+            .standard_cases()
+            .map(|case| case.id.as_str())
+            .collect::<Vec<_>>(),
+        ["clean_case"]
+    );
+}
+
+#[test]
 fn nested_start_directory_resolves_all_invocations_from_repository_root() {
     let directory = tempdir().expect("temporary repository should exist");
     create_entry(directory.path(), "fixture.moth");
@@ -967,6 +1065,24 @@ fn repository_manifest_has_complete_ordered_authority() {
                 "benchmarks/parallelism/few-modules-many-files-each/dev",
                 "benchmarks/parallelism/few-modules-many-files-each/release",
             ],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "data_layout_diagnosed",
+            entry: "benchmarks/data-layout/diagnosed",
+            entry_kind: BenchmarkEntryKind::Directory,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/data-layout/diagnosed"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
+            id: "data_layout_warning_heavy",
+            entry: "benchmarks/data-layout/warning-heavy.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/data-layout/warning-heavy.moth"],
+            excludes: &[],
             generated_roots: &[],
         },
     ];
@@ -1545,6 +1661,20 @@ fn repository_manifest_has_complete_ordered_authority() {
             quick: true,
             runner: FRONTEND,
         },
+        ExpectedCase {
+            id: "data_layout_diagnosed_frontend",
+            workload_id: "data_layout_diagnosed",
+            group: "data_layout",
+            quick: false,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "data_layout_warning_heavy_frontend",
+            workload_id: "data_layout_warning_heavy",
+            group: "data_layout",
+            quick: false,
+            runner: FRONTEND,
+        },
     ];
 
     let manifest = load_benchmark_manifest().expect("repository manifest should load");
@@ -1587,7 +1717,12 @@ fn repository_manifest_has_complete_ordered_authority() {
         assert_eq!(workload.id, expected.workload_id);
         assert_eq!(actual.group_name.persistence_spelling(), expected.group);
         assert_eq!(actual.quick, expected.quick);
-        assert_eq!(actual.expectation, BenchmarkExpectation::Clean);
+        let expected_expectation = match expected.id {
+            "data_layout_diagnosed_frontend" => BenchmarkExpectation::Diagnosed,
+            "data_layout_warning_heavy_frontend" => BenchmarkExpectation::Warned,
+            _ => BenchmarkExpectation::Clean,
+        };
+        assert_eq!(actual.expectation, expected_expectation);
 
         match (&actual.runner, expected.runner) {
             (

@@ -14,6 +14,9 @@ use crate::frontend_bench::{report_to_observations, run_one_frontend_case};
 #[test]
 fn report_to_observations_converts_stages_and_counters() {
     let report = FrontendBenchmarkReport {
+        outcome: moth::benchmarking::FrontendBenchmarkOutcome::Success,
+        error_count: 0,
+        diagnostic_codes: Vec::new(),
         timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 42.0,
         warning_count: 0,
@@ -58,6 +61,9 @@ fn report_to_observations_converts_stages_and_counters() {
 #[test]
 fn report_to_observations_rejects_empty_stages() {
     let report = FrontendBenchmarkReport {
+        outcome: moth::benchmarking::FrontendBenchmarkOutcome::Success,
+        error_count: 0,
+        diagnostic_codes: Vec::new(),
         timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 1.0,
         warning_count: 0,
@@ -74,6 +80,9 @@ fn report_to_observations_rejects_empty_stages() {
 #[test]
 fn report_to_observations_sums_repeated_stages_and_validates_values() {
     let report = FrontendBenchmarkReport {
+        outcome: moth::benchmarking::FrontendBenchmarkOutcome::Success,
+        error_count: 0,
+        diagnostic_codes: Vec::new(),
         timing_schema_version: moth::benchmarking::TIMING_SCHEMA_VERSION,
         total_ms: 1.0,
         warning_count: 0,

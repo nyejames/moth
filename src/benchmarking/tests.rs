@@ -1,3 +1,4 @@
+use crate::benchmarking::FrontendBenchmarkOutcome;
 use crate::benchmarking::frontend::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkInput,
     FrontendBenchmarkInputValue, FrontendBenchmarkOptions, run_frontend_benchmark,
@@ -44,6 +45,8 @@ fn frontend_benchmark_runs_for_simple_file() {
     );
     assert_eq!(report.warning_count, 0);
     assert!(report.warning_codes.is_empty());
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
+    assert_eq!(report.error_count, 0);
 
     // Stage timings are collected when `timers` is enabled.
     #[cfg(feature = "timers")]
@@ -169,6 +172,8 @@ if value is:
         report.warning_codes,
         vec!["MOTH-RULE-0022", "MOTH-RULE-0022", "MOTH-RULE-0022"]
     );
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
+    assert_eq!(report.error_count, 0);
 }
 
 #[test]
@@ -213,6 +218,8 @@ fn frontend_benchmark_retains_source_package_warning() {
         report.warning_codes.len(),
         "the reported warning count must match the retained codes"
     );
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
+    assert_eq!(report.error_count, 0);
 }
 
 #[test]
@@ -284,7 +291,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_path_validation() {
 /// compile it runs would be recorded into an outer caller-owned snapshot.
 ///
 /// Invalid source discriminates the ordering: compiling first would report `Compilation` with a
-/// syntax diagnostic, which is what `frontend_benchmark_fails_for_invalid_syntax` proves happens
+/// syntax diagnostic, which is what `frontend_benchmark_reports_invalid_syntax` proves happens
 /// when the collector is free.
 #[cfg(feature = "timers")]
 #[test]
@@ -318,7 +325,7 @@ fn frontend_benchmark_rejects_a_busy_raw_session_before_compilation() {
 }
 
 #[test]
-fn frontend_benchmark_fails_for_invalid_syntax() {
+fn frontend_benchmark_reports_invalid_syntax() {
     let _guard = benchmark_test_guard();
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
@@ -336,19 +343,23 @@ fn frontend_benchmark_fails_for_invalid_syntax() {
         build_config_inputs: Vec::new(),
     };
 
-    let result = run_frontend_benchmark(options);
-    let error = result.expect_err("benchmark should fail for invalid syntax");
+    let report = run_frontend_benchmark(options)
+        .expect("user diagnostics should remain a completed benchmark outcome");
     assert_eq!(
-        error.kind,
-        FrontendBenchmarkFailureKind::Compilation,
-        "invalid-syntax benchmark should fail at compilation"
+        report.outcome,
+        crate::benchmarking::FrontendBenchmarkOutcome::Diagnosed
     );
+    assert!(report.error_count > 0);
+    assert_eq!(report.error_count, report.diagnostic_codes.len());
     assert!(
-        error
+        report
             .diagnostic_codes
             .iter()
             .any(|code| code.starts_with("MOTH-SYNTAX")),
         "invalid-syntax benchmark should report a syntax diagnostic code: {:?}",
-        error.diagnostic_codes
+        report.diagnostic_codes
     );
+    assert!(report.total_ms.is_finite() && report.total_ms >= 0.0);
+    #[cfg(feature = "timers")]
+    assert!(!report.stages.is_empty());
 }

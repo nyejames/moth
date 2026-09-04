@@ -2846,3 +2846,188 @@ comparable before/after evidence: its endpoints fell from `41.20ms` / `1403.99ms
 `16.48ms` / `486.77ms`, while the fitted exponent fell from `n^1.70` to `n^1.63`. The development
 scaling gate fits `n^1.59`; its budget is tightened from `n^1.80` to `n^1.70` as a deliberately
 close ratchet, not headroom.
+
+## Data Layout Migration - Phase 0 Activation Baseline - 2026-09-04
+
+Baseline freeze for `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`.
+Evidence-only phase: no compiler or language semantics changed. Every subsequent phase of that plan
+compares against this section.
+
+### Environment
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-04 |
+| Branch | `token-and-diagnostic-data-layout-changes` |
+| Activation commit | `b6f81fe58` |
+| Prerequisite | Compiler Test Suite Hardening, delivered at `03168082d` |
+| Machine | Apple M1 Pro, 10 cores |
+| OS | macOS 14.6.1 (`aarch64-apple-darwin`) |
+| Toolchain | `rustc 1.97.1 (8bab26f4f 2026-07-14)`, `clippy 0.1.97` |
+
+The plan text and the architecture document both referred to a Rust 1.95 CI gate. The repository's
+actual toolchain is 1.97.1 and `.github/workflows/release.yml` runs `dtolnay/rust-toolchain@stable`,
+so the recorded lanes below are the current truth. The three Clippy lanes were reproduced locally by
+cross-checking; `x86_64-unknown-linux-gnu` was installed for this purpose.
+
+### Correctness and lint baseline: green
+
+| Command | Result |
+| --- | --- |
+| `just validate` | pass |
+| `cargo test --workspace` | 4947 + 817 + 17 pass, 0 fail |
+| `cargo run -- tests --terse` | 1951/1951 correct in 10.42s |
+| `cargo run -- check docs --terse` | no errors or warnings |
+| `just bench-ci` | 82/82 cases passed shared preflight |
+| `just bench-scaling` | within budget |
+| `just timers-erasure-check` | pass |
+| Clippy `aarch64-apple-darwin` (`just ci-clippy-native`) | pass, `-D warnings` |
+| Clippy `x86_64-unknown-linux-gnu`, same feature set | pass, `-D warnings` |
+| Clippy `x86_64-pc-windows-msvc`, same feature set | pass, `-D warnings` |
+| `just bench-frontend-check` | pass |
+| `just bench-check` | 40/40 cases, `-24ms avg`, 30 faster / 0 slower |
+
+No unrelated failures. The baseline is fully green, so no component had to be reported separately.
+
+### Temporary lint bridge, recorded with its removal owner
+
+Two `#[allow(clippy::result_large_err)]` allowances exist and are the only reason the three Clippy
+lanes pass:
+
+| Site | Reason | Removal owner |
+| --- | --- | --- |
+| `src/lib.rs` | 192-byte `CompilerError` across internal `Result` boundaries | Slice 1G5 |
+| `xtask/src/benchmark_execution.rs` | 224-byte `BenchmarkCaseFailure` | Slice 1G5, by shrinking the record rather than relocating the allowance |
+
+No other lint suppression, boxing workaround or compatibility path was added during activation.
+
+### Layout baseline: current predecessor types
+
+Measured on `aarch64-apple-darwin` with `std::mem::size_of` / `align_of` through a throwaway probe
+test, which was deleted after recording. The durable layout assertions arrive with the replacement
+types in Phase 1.
+
+| Type | size (bytes) | align | Target |
+| --- | ---: | ---: | --- |
+| `CharPosition` | 8 | 4 | deleted |
+| `SourceLocation` | 40 | 8 | `SourceSpan`, 8 |
+| `Option<SourceLocation>` | 40 | 8 | `Option<SourceSpan>`, 8 |
+| `FileId` | 4 | 4 | `SourceId`, 4 |
+| `SourceFileTable` | 56 | 8 | absorbed into the build-lifetime source database |
+| `StringId` | 4 | 4 | unchanged |
+| `InternedPath` | 24 | 8 | `PathId`, 4 |
+| `Option<InternedPath>` | 24 | 8 | `Option<PathId>`, 4 |
+| `PathSyntaxId` | 4 | 4 | unchanged |
+| `PathSyntax` | 64 | 8 | typed source-local path cold store |
+| `PathSyntaxTable` | 24 | 8 | source-owned |
+| `StringTable` | 72 | 8 | frozen lookup form |
+| `Token` | 64 | 8 | `TokenShape` 8 + `LocalSpan` 4 |
+| `TokenKind` | 24 | 4 | `TokenShape`, 8 |
+| `NumericLiteralToken` | 24 | 4 | numeric cold store |
+| `FileTokens` | 232 | 8 | `SourceTokens` + short-lived `TokenCursor` |
+| `DiagnosticKind` | 2 | 1 | `DiagnosticCode`, 2 |
+| `DiagnosticPayload` | 112 | 8 | four fact words plus typed extras |
+| `DiagnosticLabel` | 72 | 8 | `SecondaryDiagnosticLabel`, 12 |
+| `CompilerDiagnostic` | 184 | 8 | `DiagnosticRecord` 32, `DiagnosticDraft` <= 48 |
+| `DiagnosticBag` | 24 | 8 | move-only draft accumulator |
+| `CompilerMessages` | 120 | 8 | `DiagnosticReport` / `DiagnosticReportSet` |
+| `RenderTypeContext` | 640 | 8 | `DiagnosticTypeStore` |
+| `TypeEnvironment` | 624 | 8 | not retained for rendering at all |
+| `CompilerError` | 192 | 8 | split across the three failure lanes |
+
+Largest inline reason types inside `DiagnosticPayload`, out of the 75 measured in
+`diagnostic_payload/types.rs` (max 104 bytes, min 0 bytes):
+
+| Reason type | size (bytes) | align |
+| --- | ---: | ---: |
+| `InvalidGenericInstantiationReason` | 104 | 8 |
+| `InvalidConfigReason` | 40 | 8 |
+| `InvalidCallShapeReason` | 32 | 8 |
+| `InvalidFunctionSignatureReason` | 28 | 4 |
+| `InvalidTypeAnnotationReason` | 28 | 4 |
+| `DiagnosticPlace` | 24 | 8 |
+| `InvalidCollectionTypeReason` | 24 | 8 |
+| `InvalidDeclarationReason` | 24 | 8 |
+| `InvalidGenericParameterReason` | 24 | 4 |
+| `InvalidMultiBindReason` | 24 | 8 |
+| `InvalidReturnShapeReason` | 24 | 8 |
+| `InvalidTraitConformanceReason` | 24 | 8 |
+
+`InvalidGenericInstantiationReason` alone sets the 112-byte floor of `DiagnosticPayload`.
+`RenderTypeContext` at 640 bytes is the single largest retained-for-rendering record in the
+compiler, and it exists only because durable diagnostics keep a full `TypeEnvironment` view.
+
+`CompilerDiagnostic` at 184 bytes and `CompilerError` at 192 bytes are the direct causes of
+`clippy::result_large_err`. Slice 1G5's gate is `size_of::<CompilerDiagnostic>() <= 128`.
+
+### Migration inventory
+
+Full searchable inventories are generated under `target/data-layout-audit/` and are deliberately not
+committed. Concise summary:
+
+| Inventory | Scale | Highest-risk owners | Owning phases |
+| --- | --- | --- | --- |
+| `01-source-locations.md` | 2 location primitives, 2 file-identity structs, 5 `PreparedSourceInput` variants, 6 identity/remap gateways, 271+ location-bearing records | `SourceLocation`/`CharPosition` with interned scope and overlap-as-`Equal` ordering; two coexisting ID systems (`FileId`/`SourceFileTable` and `SourceId`/`SourceTreeIndex`) with provisional-to-final rebinding; `FileTokens` -> `FileFrontendPrepareOutput` -> `Header` identity chain | 1, 2, 3 |
+| `02-paths.md` | 301+ `InternedPath` rows (298+ in `compiler_frontend`), 24 inherent methods, 90+ path-keyed maps/sets, 0 `Box<Path>` | `symbols/interned_path.rs`; `paths/path_resolution.rs` mixing logical spelling with physical candidates; `headers/module_symbols.rs` prefix rebinding; `hir_side_table.rs` embedding `InternedPath` in location keys | 2, with token path rows in 3 |
+| `03-tokens.md` | 94 `TokenKind` variants (8 payload-bearing), 8 `FileTokens` fields, 31 files with token-vector shapes, 141 files referencing `FileTokens` | `tokenizer/tokens.rs:241-617` coupling storage, path-table lifecycle, identity, stats, cursor and remap; `headers/types.rs:404-1451`; `generic_functions/materialisation/frozen_syntax.rs` full-stream cloning; duplicated classification matches in `parse_expression_dispatch.rs` and `body_dispatch.rs` | 3, with token-bearing diagnostics in 4 |
+| `04-diagnostics.md` | 8 category wrappers, 147 stable descriptors, 127 `DiagnosticPayload` variants, 74 supporting enums, 11 label-message variants, 29 diagnostic clone sites, 72 files referencing `Box<CompilerDiagnostic>`, 38 files cloning `StringTable`, 21 `with_type_context_for_all_diagnostics` callsites | primary-location duplication into the primary label; the exhaustive payload remap/rebind walkers; `CompilerMessages.render_type_contexts` keyed by diagnostic index ranges that survive prepend/append | 4, with span work in 1 |
+| `05-failure-lanes.md` | 1 `CompilerError` struct, 6 `ErrorType` variants, 7 `CompilerErrorMetadataKey` variants, 16 + 151 + 1 macro callsites, 250+ `Result<_, CompilerError>` boundaries, 2 lint allowances, 4 `catch_unwind` sites, 8 poisoned-lock recovery sites, 0 panic hooks, 2 `panic = "abort"` profile settings (root `Cargo.toml`, release and profiling) | `compiler_errors.rs:511-716` mixing message, interned identity, category, metadata and an optional `StringTable`; 151 `return_hir_transformation_error!` callsites in `hir/`; dev-server poisoned-state recovery in `build_loop.rs`/`state.rs` | 5, 6 |
+
+Two counts in the generated `05-failure-lanes.md` inventory were wrong and are corrected above:
+`CompilerErrorMetadataKey` has seven variants, not six, and the repository has two `panic = "abort"`
+settings, not three. The generated file under `target/` retains the original figures.
+
+### Stale plan facts corrected at activation
+
+- The plan and the architecture document named a Rust 1.95 CI gate. Current toolchain is 1.97.1 and
+  CI pins `stable`.
+- The plan referenced `benchmarks/cases.txt` and `benchmarks/frontend-cases.txt`. No case-list text
+  files exist. `benchmarks/manifest.toml` is the corpus authority and declares every `[[workload]]`
+  and `[[case]]`; `xtask/src/benchmark_manifest.rs` is only its parser, and `BenchmarkSuiteKind` in
+  `xtask/src/bench_types.rs` owns suite selection and history identity. The planned data-layout
+  suite therefore becomes a `data_layout` case group in `benchmarks/manifest.toml` plus a third
+  `BenchmarkSuiteKind`, not a `benchmarks/data-layout-cases.txt` file.
+- The plan schedules the deletion of `PathTokenItem` and says `TokenKind` is widened by
+  `Path(Vec<PathTokenItem>)`. That migration already happened: `PathTokenItem` does not exist and
+  `TokenKind::Path` already carries a dense `PathSyntaxId` into a file-owned `PathSyntaxTable`.
+  The architecture document's current-to-target row repeated the same stale claim.
+- The plan named `src/build_system/build.rs::InputFile` as the duplicate source-text/path carrier.
+  No `InputFile` type exists; the current carriers are the five `PreparedSourceInput` variants in
+  `src/build_system/create_project_modules/prepared_source.rs` plus the frontend source variants in
+  `src/compiler_frontend/pipeline.rs`.
+- `docs/compiler-data-layout-design.md` still carried the pre-activation audit anchor
+  `d119988861aad9732c19d945eeabeb249a7e5caa` and a conceptual context example that placed
+  diagnostics inside the frozen context. Both were corrected in this phase.
+
+### Source-size census: the `LocalSpan` start-bit gates
+
+Scope: every compiler-visible source (`.moth`, `.mtf`, `.js`) under `benchmarks/`, `docs/src/` and
+`tests/`. Markdown and the evidence report itself are excluded because they are not compiler input
+and this report is modified by the census that would measure it.
+
+4584 files, 2,354,191 bytes total, median 77 bytes, p95 1,318 bytes, p99 9,002 bytes. The largest
+source is `benchmarks/nominal-scaling/nominal-scaling-320.moth` at 92,557 bytes, followed by
+`docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
+
+| `LENGTH_BITS` | Inline start range | Sources at or over the limit |
+| ---: | ---: | ---: |
+| 8 | 16 MiB | 0 |
+| 9 | 8 MiB | 0 |
+| 10 | 4 MiB | 0 |
+| 11 | 2 MiB | 0 |
+| 12 | 1 MiB | 0 |
+
+No candidate split suffers a single start overflow on the current corpus - the largest source is
+under 0.1 MiB, which is more than an order of magnitude below the tightest candidate's 1 MiB start
+range. Selection is therefore decided entirely by length overflow, which needs exact byte offsets
+and is measured once Slice 1C3 supplies them. The architecture's default 22/10 split stands until
+that census runs.
+
+### Work explicitly deferred out of Phase 0, with its owner
+
+| Deferred | Owner | Reason |
+| --- | --- | --- |
+| Exact span start/length histograms with per-candidate boundary buckets | Slice 1C3, consumed by 1C1 | The current model stores line/column, not byte offsets, so the census cannot run against today's spans. Phase 1's slice order is corrected so the byte cursor and line index (1C3) land before the encoding is selected (1C1); the census then runs against real offsets instead of a throwaway tracker. |
+
+This deferral does not block Phase 1; it is recorded on its owning slice in the plan, and the plan's
+Phase 1 slice order was changed in this phase so it is actually executable.

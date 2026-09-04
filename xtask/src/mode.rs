@@ -17,7 +17,8 @@ Modes:
   bench-report         Print a local-only benchmark drilldown report
   bench-frontend-check Run the focused frontend benchmark suite without writing history
   bench-frontend       Run the focused frontend benchmark suite and record
-  bench-validate       Validate all benchmark cases compile without errors
+  bench-data-layout-check Run diagnostic/data-layout frontend benchmarks without writing history
+  bench-data-layout    Run diagnostic/data-layout frontend benchmarks and record
   bench-profile        Run Samply-backed profiling (use --help for options)
   stress               Repeat the unit and integration suites across thread counts
                        (use --repeats <n>; default 3)
@@ -50,6 +51,10 @@ pub enum BenchmarkMode {
     BenchFrontend,
     /// Run the focused frontend benchmark suite without writing history.
     BenchFrontendCheck,
+    /// Run the diagnostic/data-layout frontend suite and record.
+    BenchDataLayout,
+    /// Run the diagnostic/data-layout frontend suite without writing history.
+    BenchDataLayoutCheck,
     /// Validate all benchmark cases compile without errors (no timing).
     BenchValidate,
     /// Fit and check the growth exponent of every declared scaling series.
@@ -110,6 +115,8 @@ impl BenchmarkMode {
             "bench-report" => Some(BenchmarkMode::BenchReport),
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
+            "bench-data-layout" => Some(BenchmarkMode::BenchDataLayout),
+            "bench-data-layout-check" => Some(BenchmarkMode::BenchDataLayoutCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
             "bench-scaling" => Some(BenchmarkMode::BenchScaling),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),

@@ -67,7 +67,7 @@ use bench_report::run_benchmark_report;
 use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
 use feature_matrix::{run_feature_lane_check, run_feature_matrix};
-use frontend_bench::run_frontend_benchmarks;
+use frontend_bench::{run_data_layout_benchmarks, run_frontend_benchmarks};
 use honesty_audit::run_honesty_audit;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use source_audit::run_source_audit;
@@ -123,6 +123,16 @@ fn main() {
         BenchmarkMode::BenchFrontend => {
             exit_with_result(
                 full_run_policy(BenchmarkRecording::Record).and_then(run_frontend_benchmarks),
+            );
+        }
+        BenchmarkMode::BenchDataLayoutCheck => {
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::ReadOnly).and_then(run_data_layout_benchmarks),
+            );
+        }
+        BenchmarkMode::BenchDataLayout => {
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::Record).and_then(run_data_layout_benchmarks),
             );
         }
         BenchmarkMode::BenchProfile(options) => {
