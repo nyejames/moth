@@ -16,21 +16,27 @@ framework or a second call parser.
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh collection builtin, ordering and target helper owners
 BLOCKERS: mixed JavaScript and Wasm lowering must deliver final collection layouts, shared page memory and target helper integration
-NEXT_ACTION: activate in an isolated worktree after the mixed backend prerequisite lands, then run Phase 0
+NEXT_ACTION: activate in the package programme worktree after the mixed backend prerequisite lands, then run Phase 0
 ```
 
 Establish the active revision, branch, worktree state and validation baseline in untracked working
 notes when implementation starts. Do not pin a queued plan to a commit.
 
-## Roadmap position
+## Roadmap position and lifecycle
 
-This plan runs immediately after HTML mixed JavaScript and Wasm backend work and before package
-dependency declarations and package-manager foundations.
+This specialised plan is coordinated by
+`docs/roadmap/plans/packages/first-party-package-programme.md`. It runs immediately after HTML mixed
+JavaScript and Wasm backend work and before package dependency declarations and package-manager
+foundations.
 
-Implementation runs in its own branch and worktree. It must not share generated files, temporary
-state or uncommitted changes with the active diagnostics worktree.
+Use the package programme worktree unless the sorting slice becomes invasive enough to justify its
+own branch. It must not share generated files, temporary state or uncommitted changes with the active
+diagnostics worktree.
 
-At closeout, delete this plan and remove its roadmap entry in the same commit.
+This plan has no separate top-level roadmap bullet. At closeout, move durable implementation notes,
+rationale and follow-ups into the living `core-collections.md` package plan. This specialised
+checklist may then be retired under the package programme lifecycle without removing the umbrella
+roadmap entry.
 
 ## Hard prerequisites
 
@@ -66,6 +72,8 @@ Read these from the active worktree before implementation:
 - `docs/src/developer-docs/style-guide/testing.mtf`
 - `docs/src/developer-docs/style-guide/validation.mtf`
 - `docs/src/docs/progress/@page.moth`
+- `docs/src/docs/progress/packages-and-builders/@page.moth`
+- `docs/roadmap/plans/packages/first-party-package-programme.md`
 - `docs/roadmap/roadmap.md`
 - `index.md` as a locator only
 
@@ -403,8 +411,10 @@ promise restoration of the original order.
 - Add no compatibility wrappers or parallel sort representation.
 - Do not edit generated documentation directly.
 
-Each code-bearing phase ends with focused tests, the integration audit, `just validate`,
-`git diff --check`, a Slice review and one coherent commit.
+Each code-bearing phase must satisfy the complete mandatory phase gate in
+`first-party-package-programme.md`. The focused tests, integration audit, `just validate`,
+`git diff --check`, Slice review and coherent phase commit below are additional sorting-specific
+requirements.
 
 # Phase 0 - Refresh owners and baseline
 
@@ -636,7 +646,7 @@ Make the contract canonical and leave one clean Core collection path for later p
   missing.
 - [ ] Update build architecture only for a real missing Core helper or physical variant contract.
 - [ ] Update routed memory docs with permutation and scratch transport rules.
-- [ ] Update the progress matrix, cheatsheet and `index.md` where required.
+- [ ] Update both progress matrices, the cheatsheet and `index.md` where required.
 - [ ] Rebuild generated docs through the compiler.
 
 ## Package-thread and Slice review
@@ -662,8 +672,10 @@ just bench-check
 git diff --check
 ```
 
-Record exactly what ran and any unrelated failure. Delete this plan and its roadmap bullet in the
-completion commit.
+Record exactly what ran and any unrelated failure. Transfer durable implementation rationale,
+quirks, final helper ownership and concrete follow-ups into `core-collections.md`. Retire this
+specialised checklist only after that transfer. Keep the umbrella roadmap entry active until the
+wider package programme is parked.
 
 # Completion conditions
 
@@ -683,4 +695,5 @@ The work is complete when:
 - documentation and progress report actual support
 - the Slice review finds no duplicate parser, type list, compatibility path or speculative framework
 - final validation passes or unrelated failures are recorded honestly
-- this plan and its roadmap entry are removed in the completion commit
+- durable implementation decisions and follow-ups are retained in the living Core collections plan
+  before this specialised checklist is retired
