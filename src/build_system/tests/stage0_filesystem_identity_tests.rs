@@ -1788,6 +1788,22 @@ mod owned_source_inventory_tests {
         project_name: &str,
         source_file_kinds: &SourceFileKindRegistry,
     ) -> SourceTreeIndex {
+        discover_index_with_kinds_and_table(
+            root,
+            entry_root_relative,
+            project_name,
+            source_file_kinds,
+        )
+        .0
+    }
+
+    /// Discover an index while retaining the build string table used for its logical path IDs.
+    fn discover_index_with_kinds_and_table(
+        root: &Path,
+        entry_root_relative: &str,
+        project_name: &str,
+        source_file_kinds: &SourceFileKindRegistry,
+    ) -> (SourceTreeIndex, StringTable) {
         let entry_root = root.join(entry_root_relative);
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
@@ -1800,7 +1816,7 @@ mod owned_source_inventory_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        SourceTreeIndex::discover(
+        let index = SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1812,7 +1828,8 @@ mod owned_source_inventory_tests {
             &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect("source tree index should build")
+        .expect("source tree index should build");
+        (index, string_table)
     }
 
     fn html_source_file_kinds() -> SourceFileKindRegistry {
@@ -2160,8 +2177,12 @@ mod owned_source_inventory_tests {
         fs::write(src.join("orphan.moth"), "").expect("should write orphan source");
         fs::write(src.join("page.mtf"), "").expect("should write orphan moth template");
 
-        let index =
-            discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
+        let (index, string_table) = discover_index_with_kinds_and_table(
+            &root,
+            "src",
+            "my-project",
+            &html_source_file_kinds(),
+        );
 
         // No modules were discovered, so no owned source IDs and no silent discard.
         assert_eq!(
@@ -2184,6 +2205,13 @@ mod owned_source_inventory_tests {
         assert_eq!(
             unrooted_paths[0], "orphan.moth",
             "the logical candidate path is entry-root-relative and portable"
+        );
+        let orphan_id = index
+            .source_id_for_entry_root_relative_logical_path("orphan.moth", &string_table)
+            .expect("orphan.moth logical path should render and resolve");
+        assert_eq!(
+            orphan_id, unrooted[0],
+            "the rendered unrooted logical path must identify the root-level source record"
         );
     }
 
@@ -2680,7 +2708,7 @@ mod owned_source_inventory_tests {
         root: &Path,
         entry_root_relative: &str,
         project_name: &str,
-    ) -> SourceTreeIndex {
+    ) -> (SourceTreeIndex, StringTable) {
         let entry_root = root.join(entry_root_relative);
         let mut config = Config::new(root.to_path_buf());
         config.entry_root = PathBuf::from(entry_root_relative);
@@ -2693,7 +2721,7 @@ mod owned_source_inventory_tests {
         let mut providers = ExternalImportProviderRegistry::empty();
         providers.register(Arc::new(JsOnlyProvider::new()));
 
-        SourceTreeIndex::discover(
+        let index = SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -2705,7 +2733,8 @@ mod owned_source_inventory_tests {
             &providers,
             &mut string_table,
         )
-        .expect("source tree index should build with a js provider")
+        .expect("source tree index should build with a js provider");
+        (index, string_table)
     }
 
     #[test]
@@ -2720,7 +2749,8 @@ mod owned_source_inventory_tests {
         fs::write(feature.join("@mod.moth"), "").expect("should write feature root");
         fs::write(feature.join("util.js"), "").expect("should write feature provider file");
 
-        let index = discover_index_with_js_provider(&root, "src", "provider-project");
+        let (index, string_table) =
+            discover_index_with_js_provider(&root, "src", "provider-project");
         let table = index.module_identities();
 
         let entry_id = table
@@ -2773,17 +2803,26 @@ mod owned_source_inventory_tests {
             "nested-module provider files are owned by the nested module"
         );
 
-        // The logical-path lookup map resolves both provider targets by entry-root-relative path.
         let helper_id = index
-            .source_id_for_entry_root_relative_logical_path("helper.js")
+            .source_id_for_entry_root_relative_logical_path("helper.js", &string_table)
             .expect("helper.js logical path resolves to a SourceId");
+        assert_eq!(
+            helper_id,
+            helper_record.id(),
+            "rendered root-level logical path must resolve its source record"
+        );
         assert_eq!(
             index.source(helper_id).canonical_path(),
             helper_record.canonical_path()
         );
         let util_id = index
-            .source_id_for_entry_root_relative_logical_path("feature/util.js")
+            .source_id_for_entry_root_relative_logical_path("feature/util.js", &string_table)
             .expect("feature/util.js logical path resolves to a SourceId");
+        assert_eq!(
+            util_id,
+            util_record.id(),
+            "rendered nested logical path must resolve its source record"
+        );
         assert_eq!(
             index.source(util_id).canonical_path(),
             util_record.canonical_path()

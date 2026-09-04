@@ -580,13 +580,22 @@ green before later layout work proceeds.
 
 ### Slice 1A — Add the final path foundation required by source records
 
-- [ ] introduce `PathId(NonZeroU32)` and a dense parent/component path table
-- [ ] intern source logical paths into the build base before string/path forks are created
-- [ ] use `PathId` in `SourceRecord` immediately; do not store an interim `InternedPath`
-- [ ] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
-- [ ] add layout, root, parent, append, equality and rendering tests
-- [ ] defer the full compiler `InternedPath` migration to Phase 2
+- [x] introduce `PathId(NonZeroU32)` and a dense parent/component path table
+- [x] intern source logical paths into the build base before string/path forks are created
+- [x] use `PathId` in `SourceRecord` immediately; do not store an interim `InternedPath` — Stage 0's
+  `SourceRecord` carries `Option<PathId>`; `None` only for a facade outside the entry root, which
+  has no entry-root-relative spelling. The frontend source record arrives in Slice group 1B
+- [x] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
+- [x] add layout, root, parent, append, equality and rendering tests
+- [x] defer the full compiler `InternedPath` migration to Phase 2
 
+`SourceLogicalIdentity` deliberately keeps its owned portable spelling as the `SourceId` sort key.
+`PathId` is assigned in interning order, so it can never be a sort key, and replacing the string
+forced a hand-rolled byte comparator that was rejected. The two representations converge in Phase 2.
+
+Interning is exactly as strict as the `FxHashMap<String, SourceId>` key it replaced: separators are
+never normalised away, and only the empty spelling denotes the root. The frozen table owns nodes and
+depths only; the child map lives and dies with the builder.
 
 ### Slice group 1B — Replace per-module source tables with build-lifetime registration
 

@@ -67,6 +67,7 @@ pub(crate) mod symbols {
     pub(crate) mod identifier_policy;
     pub(crate) mod identity;
     pub(crate) mod interned_path;
+    pub(crate) mod path_interner;
     pub(crate) mod string_interning;
 
     #[cfg(test)]
