@@ -30,10 +30,76 @@ Frontend-owned directives and compiler-owned builtins join that surface. A build
 
 The command chooses what kind of project this build is allowed to be. That choice decides which source kinds, packages and targets the project may use.
 
-**Diagram placeholder:** Command selection feeds builder, profile, overlays and target intent
+The three commands also differ in how far they run:
 
-*Caption: accepted bootstrap order.*
-*Question: what becomes known before config opens?*
+- **`build`** compiles the entry, package and provider union, then lowers and writes outputs when it succeeds.
+- **`dev`** compiles its complete graph on the first build. Rebuilds are currently fresh rather than incremental.
+- **`check`** casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the `ValidatedMemoryPlan`, then stops before lowering or writing anything.
+
+[diagram:
+    [$insert("label"): What is already decided before config.moth opens]
+    [$insert("caption"): Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): First]
+            [$insert("title"): The command]
+            `build`, `dev` or `check` picks the artefact builder, the build profile, tooling overlays, explicit inputs and target intent.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Second]
+            [$insert("title"): The capability surface]
+            The selected builder publishes what this project may use.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Published before any source is read]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    Config schemas
+                ]
+                [detail:
+                    [$insert("href"): ../project-graphs-and-modules/]
+                    Available packages
+                ]
+                [detail:
+                    [$insert("href"): ../tokenization/]
+                    Supported source kinds
+                ]
+                [detail:
+                    [$insert("href"): ../target-planning-and-validation/]
+                    Target affinity metadata
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Third]
+            [$insert("title"): Folded project values]
+            Only now does `config.moth` compile, and only down to folded values under `@project`.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../project-graphs-and-modules/]
+            [$insert("eyebrow"): Then]
+            [$insert("title"): Stage 0 discovery]
+            With a project it can name, the build system finally goes looking for source.
+        ]
+    ]
+]
 
 ## Self-contained project config
 
@@ -45,7 +111,8 @@ The ordinary compiler owners still touch that one file:
 
 [codeblock, $code("text"):
 tokenization
--> declaration-shell parsing
+-> declaration-shell preparation
+-> interface binding for the single config source
 -> local declaration ordering
 -> AST semantic checking and folding
 -> folded config values
@@ -75,23 +142,38 @@ html #= |
 
 Config runs through one named **compiler service**, not a build-owned copy of the frontend. The build system hands over the single authored source and receives folded values, authored key locations and diagnostics. Config schema and how folded values apply to the project record stay build-owned.
 
-**Diagram placeholder:** One config source stops at folded values and does not enter HIR
-
-*Caption: exact design boundary.*
-*Question: what does config produce that Stage 0 can consume?*
-
 ## Build configuration values and `@project`
 
-Direct fields of `project` may declare a build-config contract with `#Config of T` only when the selected project schema marks the field `Configurable` and its value has a supported primitive or optional primitive shape. Registered fixed-only identity, source-discovery and compiler-control fields reject the qualifier. The qualifier is compiler-owned and the semantic type remains `T`. Accepted types stay narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
+A direct field of `project` may declare a build-config contract with `#Config of T`, meaning the command line can override it. Two conditions gate that, and both must hold: the selected project schema marks the field `Configurable`, and its value has a supported primitive or optional primitive shape.
 
-Command and programmatic inputs are typed immediately as concrete primitives before source contracts are checked. Exact `true` and `false` become `Bool`, complete whole numbers become `Int`, decimal or exponent forms become `Float`, quoted characters become `Char`, quoted strings become `String`, and every other value falls back to `String`. Explicit quoted strings force ambiguous text such as `"true"`; malformed quoted literals are diagnostics. Omitting an input is how optional absence resolves to `none`.
+Registered identity, source-discovery and compiler-control fields are fixed-only and reject the qualifier outright. The qualifier itself is compiler-owned, and the semantic type stays plain `T`. Accepted types stay deliberately narrow: `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those.
 
-Resolution order:
+Command and programmatic inputs become concrete primitives immediately, before source contracts are checked:
+
+- exact `true` and `false` become `Bool`
+- complete whole numbers become `Int`
+- decimal or exponent forms become `Float`
+- quoted characters become `Char`
+- quoted strings become `String`
+- every remaining valid unquoted value falls back to `String`, including empty text after `name=`
+
+Quoting forces ambiguous text such as `"true"` to stay a `String`. A value that opens with a quote must close as a complete valid literal, and a malformed one is a command-input diagnostic rather than a silent fall back to `String`. Omit an input and optional absence resolves to `none`.
+
+Resolution order for a direct project `#Config`:
 
 1. explicit CLI or programmatic build input
 2. builder-provided primitive global
 3. the folded declaration default
 4. a structured missing-input diagnostic
+
+A source contract resolves against a longer chain, because the project gets first say:
+
+1. a compatible fixed direct project field
+2. a resolved direct project `#Config`
+3. source-only CLI or programmatic input
+4. builder-provided global
+5. the shared source default
+6. a structured missing-input diagnostic
 
 The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root.
 
@@ -102,12 +184,7 @@ Normal modules may bind `@project` explicitly. Nothing injects it silently. Chil
 For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.
 
 Resolved source `#Config` values become ordinary folded constants. They use ordinary `if` for
-static Bool specialisation; there is no `#Config if` and no config-specific HIR node.
-
-**Diagram placeholder:** Resolved project fields enter ordinary module compilation through an immutable interface
-
-*Caption: simplified interface view.*
-*Question: how do build values reach source without becoming a second language?*
+static Bool specialisation. Moth has no `#Config if` and no config-specific HIR node.
 
 ## The ownership boundary
 
@@ -136,7 +213,8 @@ Draw the line early and keep it sharp.
 ]
 
 The compiler does not wander the filesystem inventing a project. The builder does not re-parse `@page.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
-The command/build system owns target intent; source does not observe physical target identity. Builders expose stable capabilities and choose the physical target and artefact form.
+
+The command and build system own target intent, target partition and physical-variant orchestration. Compiler-owned validation checks the assignment it is handed rather than choosing it. Builders expose stable capabilities and map them to target artefact forms. Source never observes physical target identity at all.
 
 ## What can fail here
 
@@ -160,8 +238,9 @@ surface remains deferred.
 ## Roadmap and current status
 
 - **Accepted design:** one self-contained `config.moth` and a specialised `ProjectGlobalsInterface`.
-- **Implemented:** grouped `config.moth`, direct and source `#Config`, typed `--input` for build/check/dev, ordinary static-`if` integration and immutable explicit `@project`.
-- **Deferred:** entry-local `config:` blocks, config dependencies and a general Moth build script system.
+- **Current implementation:** grouped `config.moth`, direct and source `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
+- **Queued work:** entry-local `config:` blocks, under `entry-config-blocks-runtime-title-plan.md`.
+- **Deferred or outside scope:** config dependencies and a general Moth build script system.
 
 ## Exit state
 

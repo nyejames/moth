@@ -26,11 +26,6 @@ If the compiler treated the body as blind concatenation, it could still emit cha
 
 Structure earns its keep.
 
-**Diagram placeholder:** Paragraph wrapper contains a dynamic name slot
-
-*Caption: teaching structure.*
-*Question: what does interpolation mean once structure exists?*
-
 ## TIR phases
 
 One module AST build owns one `TemplateIrStore`. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store.
@@ -51,14 +46,57 @@ Exact view identity includes root, phase and value context. Consumers read throu
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
-**Diagram placeholder:** One template passes through four structural phases
+[diagram:
+    [$insert("label"): TIR lives and dies inside AST]
+    [$insert("caption"): Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.]
 
-*Caption: accepted phase names, simplified records.*
-*Question: where does template structure live during AST?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Built]
+            [$insert("title"): Structure captured as TIR]
+            Wrappers, slots, child values, control flow and placement order, kept as structure rather than flattened text.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Classified]
+            [$insert("title"): prepare_tir_view labels each piece]
+            Foldable, runtime or helper. One owner decides, so finalisation never re-litigates it.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Two exits]
+                [fanout:
+                [detail:
+                    [$insert("href"): ../html-assembly-and-output/]
+                    Static pieces fold to strings with insertion indexes
+                ]
+                [detail:
+                    [$insert("href"): ../hir/]
+                    Dynamic pieces become neutral runtime handoff data
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../hir/]
+            [$insert("eyebrow"): Gone]
+            [$insert("title"): The TIR store drops]
+            No TIR identity survives the completed AST. HIR sees ordinary strings and control flow.
+        ]
+    ]
+]
 
 ## Folded and runtime paths
 
-AST finalisation walks prepared views and chooses a fate:
+Classification happens in one place. `prepare_tir_view` validates reachable TIR and labels each piece foldable, runtime or helper. AST finalisation then consumes exactly that preparation rather than deciding again:
 
 - fully constant templates **fold into strings**
 - runtime `if` and loop bodies stay available for lazy lowering
@@ -71,26 +109,18 @@ Compile-time fragments never live in HIR. HIR receives ordinary string and contr
 
 For the greeting project, a fully static visitor and prefix can collapse toward the familiar fragment. If `visitor` were dynamic input, the structure would still check at compile time while runtime handoff carried the moving parts.
 
-**Diagram placeholder:** Static pieces become a string while dynamic pieces become neutral runtime handoff data
-
-*Caption: exact boundary, simplified shape.*
-*Question: what reaches HIR?*
-
 ## Source-kind adapters
 
 Moth template `.mtf` and Markdown `.md` files do not invent forever-parallel compilers. They adapt into ordinary synthetic `content #String` declarations.
 
 - `.mtf` builds a private constant whose initializer is a structurally built `$md` template over the original body tokens
-- `.md` can contribute the same declaration shape with a synthetic string-literal initializer after Markdown preparation
+- `.md` reaches the same shape after preparation renders the raw Markdown to HTML, and that rendered HTML becomes the synthetic string-literal initializer
 
 Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `@page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
 
-Tooling that wants only a rendered `.mtf` file asks the compiler's **direct Moth template service** for a folded `content` result. That service is a shorter compiler path over the same owners, stopping before HIR. It is not a second parser, and project tooling does not prepare, bind, order or fold the template itself.
+Tooling that wants folded `.mtf` content asks the compiler's **direct Moth template service**. That service is a shorter path over the same owners, stopping before HIR. It is not a second parser, and project tooling never prepares, binds, orders or folds the template itself.
 
-**Diagram placeholder:** moth, mtf and md reach one ordinary semantic path
-
-*Caption: simplified source-kind map.*
-*Question: how does document content enter the compiler without a second IR forever?*
+What comes back is folded content, not a finished artefact. It can still hold opaque resource and site-root anchors, because only a builder's link plan can resolve those. Output writing stays outside the service.
 
 ## Reactivity boundary
 

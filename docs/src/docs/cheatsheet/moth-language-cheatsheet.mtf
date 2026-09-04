@@ -67,9 +67,7 @@
     ]
 
     [td:
-        [: `!ready`, `a && b`, `a]
-        [: ]
-        [: b`]
+        [: `!ready`, `a && b`, `a || b`]
         [: `not ready`, `a and b`, `a or b`]
     ]
 

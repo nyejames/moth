@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,64 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 07. AST semantics and types</p><p>Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.</p></section>
-<section class="container"><h1>Giving syntax checked meaning</h1><p>Parsed text can look right and still mean nothing the machine should trust. <code>greet(visitor)</code> on the page is a shape. Until name resolution and type checking finish, it is not yet a call with a known callee, argument contract and return type.</p><p>The <strong>AST stage</strong> turns ordered shells and bound visibility into a <strong>typed semantic structure</strong>. That structure owns source meaning for the module.</p><h2>Syntax tree versus semantic tree</h2><p>A <strong>syntax tree</strong> records how tokens grouped: call expression, argument list, identifier nodes.</p><p>A <strong>semantic tree</strong> (still often stored as AST nodes in Moth) adds resolved facts:</p><ul><li>which symbol <code>greet</code> names</li><li>which local <code>visitor</code> names</li><li>argument and return <code>TypeId</code> values</li><li>whether the call is legal at this site</li></ul><p><strong>Name resolution</strong> connects spellings to declarations. <strong>Type checking</strong> checks that operations and values agree under language rules. <strong>Semantic identity</strong> names the underlying declaration or type in a way that survives aliases and module boundaries.</p><p>Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the dependency clauses.</p><p><strong>Diagram placeholder:</strong> Unresolved names gain symbol, argument and return facts</p><p><em>Caption: teaching simplification.</em> <em>Question: what does type checking add that parsing refused to invent?</em></p><h2>Environments and visibility</h2><p>AST consumes <strong>bound file visibility</strong>. It may validate semantic use of visible symbols. It does not rebuild dependency bindings or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.</p><p>Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source dependencies, binding-backed dependencies, aliases, prelude symbols and builtins cannot silently shadow one another.</p><p>Local declarations, dependency bindings and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.</p><p><strong>Diagram placeholder:</strong> Two visible declarations trigger one collision result</p><p><em>Caption: accepted visibility policy.</em> <em>Question: who owns a name when two dependencies want the same spelling?</em></p><h2>Type identity</h2><p>Each compiled module owns one local <strong><code>TypeEnvironment</code></strong>. Inside that module, <strong><code>TypeId</code></strong> equality is the only valid comparison for local semantic decisions.</p><p>Cross-module interfaces use <strong>canonical type identities</strong>, not donor-local indexes. A consumer may intern compact local handles for imported types. Equality across modules still compares canonical identity, never rendered names alone.</p><p>Why refuse donor-local indexes at the boundary? Because module-local numbering is an implementation accident. Stable meaning must survive recompilation order, re-exports and parallel workers.</p><p><code>DataType</code> spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.</p><p>Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.</p><p><strong>Diagram placeholder:</strong> Local handles point to stable semantic identities</p><p><em>Caption: exact identity principle, simplified storage.</em> <em>Question: why not share donor indexes into the consumer?</em></p><h2>Receiving boundaries and coercion</h2><p>Expression evaluation finds an expression&#39;s <strong>natural type</strong> and stays strict. <strong>Contextual coercion</strong> applies only at explicit <strong>receiving boundaries</strong> owned by the frontend:</p><ul><li>declarations and assignments</li><li>returns</li><li>concrete function parameters</li><li>struct and choice fields</li><li>default values</li><li>typed collection and map entries</li><li>template and string content</li><li>explicit <code>cast</code> targets</li><li>certain <code>then</code> arms with an explicit receiver</li><li>compiler and binding-backed call contracts</li></ul><p>Natural typing asks &quot;what is this?&quot; Contextual coercion asks &quot;may this value enter that slot?&quot; Explicit casts ask &quot;please convert under compiler-owned rules.&quot; Those paths stay separate on purpose. Broad implicit conversion would hide bugs. Forbidding every conversion would drown source in noise.</p><p>On the page, <code>visitor</code> as a <code>String</code> meets <code>greet</code>&#39;s <code>name</code> parameter at a receiving boundary. The constant <code>&quot;Priya&quot;</code> met <code>visitor</code>&#39;s declaration boundary earlier.</p><p><strong>Diagram placeholder:</strong> A contextual boundary permits a documented coercion or requires a cast</p><p><em>Caption: simplified typing flow.</em> <em>Question: where does conversion happen, and who requested it?</em></p><h2>Bodies, blocks and terminality</h2><p>Functions contain statements and expressions. Some constructs produce values: value-producing <code>if</code>, match and block-form <code>catch</code> act as closed receiving constructs rather than free-floating general expressions.</p><p>They are valid only where a receiver is explicit. Every producing path must satisfy the receiving arity. Non-unit success returns must be <strong>terminal</strong> before HIR lowering: control must not fall off the end without producing the promised values.</p><p>AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract and HIR reports an internal transformation error rather than a casual source shrug.</p><p>HIR will make runtime control flow explicit. AST still owes a body that already makes sense.</p><h2>What can fail here</h2><ul><li>unknown name or collision</li><li>type mismatch, invalid return or non-terminal block</li><li>cross-module type identity mismatch</li><li>exported surfaces that leak private or prohibited identities</li></ul><p>Diagnostic transport and rendering wait for the diagnostics article. The semantic failures belong here.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> infer meaning from rendered type names, allow broad implicit conversion and permit shadowing as a convenience.</p><p><strong>Choice:</strong> stable identities, strict names and narrow receiving-boundary rules.</p><p><strong>Benefit:</strong> later stages consume facts rather than rediscovering source meaning from pretty strings.</p><p><strong>Cost:</strong> source needs explicit disambiguation and casts in more cases.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST resolves source meaning and emits typed semantic facts.</li><li><strong>Current implementation:</strong> progress rows for type, coercion and language coverage.</li><li><strong>Queued work:</strong> anonymous record and numeric plans may change examples of type identity, not the ownership boundary.</li><li><strong>Deferred or outside scope:</strong> HIR and backend type reconstruction from source.</li></ul><h2>Exit state</h2><p>You leave with a typed AST, semantic identities and checked executable bodies. Next: which static computations disappear before HIR, and which become explicit data.</p></section>
+<section class="container"><h1>Giving syntax checked meaning</h1><p>Parsed text can look right and still mean nothing the machine should trust. <code>greet(visitor)</code> on the page is a shape. Until name resolution and type checking finish, it is not yet a call with a known callee, argument contract and return type.</p><p>The <strong>AST stage</strong> turns ordered shells and bound visibility into a <strong>typed semantic structure</strong>. That structure owns source meaning for the module.</p><h2>Syntax tree versus semantic tree</h2><p>A <strong>syntax tree</strong> records how tokens grouped: call expression, argument list, identifier nodes.</p><p>A <strong>semantic tree</strong> (still often stored as AST nodes in Moth) adds resolved facts:</p><ul><li>which symbol <code>greet</code> names</li><li>which local <code>visitor</code> names</li><li>argument and return <code>TypeId</code> values</li><li>whether the call is legal at this site</li></ul><p><strong>Name resolution</strong> connects spellings to declarations. <strong>Type checking</strong> checks that operations and values agree under language rules. <strong>Semantic identity</strong> names the underlying declaration or type in a way that survives aliases and module boundaries.</p><p>Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the dependency clauses.</p><figure class="moth-flow" aria-label=" The same call, before and after checking">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../declarations-dependencies-and-ordering/">
+        <span class="moth-flow__eyebrow"> Before</span>
+        <span class="moth-flow__title"> greet(visitor) as shape</span>
+        <span class="moth-flow__description"><p>A call expression with an argument list. Grouping is known. Meaning is not.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> After</span>
+        <span class="moth-flow__title"> greet(visitor) as fact</span>
+        <span class="moth-flow__description"><p>A call with a known callee, a checked argument contract and a return type.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Facts added here</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./">
+        <p>Which symbol <code>greet</code> names</p>
+</a><a class="moth-flow__detail" href=" ./">
+        <p>Which local <code>visitor</code> names</p>
+</a><a class="moth-flow__detail" href=" ./">
+        <p>Argument and return <code>TypeId</code> values</p>
+</a><a class="moth-flow__detail" href=" ../diagnostics/">
+        <p>Whether the call is legal here</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../hir/">
+        <span class="moth-flow__eyebrow"> Downstream</span>
+        <span class="moth-flow__title"> Lowered without reopening</span>
+        <span class="moth-flow__description"><p>HIR can lower the call without going back to the dependency clauses to ask what <code>greet</code> was.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Parsing refuses to invent any of the facts on the right. Each one needs a rule and a source of truth, which is exactly what this stage supplies.
+</figcaption>
+</figure><h2>Environments and visibility</h2><p>AST consumes <strong>bound file visibility</strong>. It may validate semantic use of visible symbols. It does not rebuild dependency bindings or rediscover top-level visibility. If a top-level name cannot be found by walking sorted declarations and bound visibility, the missing fact belongs earlier in the pipeline.</p><p>Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source dependencies, binding-backed dependencies, aliases, prelude symbols and builtins cannot silently shadow one another.</p><p>Local declarations, dependency bindings and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.</p><h2>Type identity</h2><p>Each compiled module owns one local <strong><code>TypeEnvironment</code></strong>. Inside that module, <strong><code>TypeId</code></strong> equality is the only valid comparison for local semantic decisions.</p><p>Cross-module interfaces use <strong>canonical type identities</strong>, not donor-local indexes. A consumer may intern compact local handles for imported types. Equality across modules still compares canonical identity, never rendered names alone.</p><p>Why refuse donor-local indexes at the boundary? Because module-local numbering is an implementation accident. Stable meaning must survive recompilation order, re-exports and parallel workers.</p><p><code>DataType</code> spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.</p><p>Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.</p><h2>Receiving boundaries and coercion</h2><p>Expression evaluation finds an expression&#39;s <strong>natural type</strong> and stays strict. <strong>Contextual coercion</strong> applies only at explicit <strong>receiving boundaries</strong> owned by the frontend:</p><ul><li>declarations and assignments</li><li>returns</li><li>concrete function parameters</li><li>struct and choice fields</li><li>default values</li><li>typed collection and map entries</li><li>template and string content</li><li>explicit <code>cast</code> targets</li><li>certain <code>then</code> arms with an explicit receiver</li><li>compiler and binding-backed call contracts</li></ul><p>Natural typing asks &quot;what is this?&quot; Contextual coercion asks &quot;may this value enter that slot?&quot; Explicit casts ask &quot;please convert under compiler-owned rules.&quot; Those paths stay separate on purpose. Broad implicit conversion would hide bugs. Forbidding every conversion would drown source in noise.</p><p>On the page, <code>visitor</code> as a <code>String</code> meets <code>greet</code>&#39;s <code>name</code> parameter at a receiving boundary. The constant <code>&quot;Priya&quot;</code> met <code>visitor</code>&#39;s declaration boundary earlier.</p><h2>Bodies, blocks and terminality</h2><p>Functions contain statements and expressions. Some constructs produce values: value-producing <code>if</code>, match and block-form <code>catch</code> act as closed receiving constructs rather than free-floating general expressions.</p><p>They are valid only where a receiver is explicit. Every producing path must satisfy the receiving arity. Non-unit success returns must be <strong>terminal</strong> before HIR lowering: control must not fall off the end without producing the promised values.</p><p>AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract, so HIR reports an internal transformation error instead of blaming the author.</p><p>HIR will make runtime control flow explicit. AST still owes a body that already makes sense.</p><h2>What can fail here</h2><ul><li>unknown name or collision</li><li>type mismatch, invalid return or non-terminal block</li><li>cross-module type identity mismatch</li><li>exported surfaces that leak private or prohibited identities</li></ul><p>Diagnostic transport and rendering wait for the diagnostics article. The semantic failures belong here.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> infer meaning from rendered type names, allow broad implicit conversion and permit shadowing as a convenience.</p><p><strong>Choice:</strong> stable identities, strict names and narrow receiving-boundary rules.</p><p><strong>Benefit:</strong> later stages consume facts rather than rediscovering source meaning from pretty strings.</p><p><strong>Cost:</strong> source needs explicit disambiguation and casts in more cases.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST resolves source meaning and emits typed semantic facts.</li><li><strong>Current implementation:</strong> progress rows for type, coercion and language coverage.</li><li><strong>Queued work:</strong> anonymous record and numeric plans may change examples of type identity, not the ownership boundary.</li><li><strong>Deferred or outside scope:</strong> HIR and backend type reconstruction from source.</li></ul><h2>Exit state</h2><p>You leave with a typed AST, semantic identities and checked executable bodies. Next: which static computations disappear before HIR, and which become explicit data.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../declarations-dependencies-and-ordering">Previous</a> / <a href="../compile-time-semantics">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

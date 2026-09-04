@@ -397,11 +397,11 @@ td {
     min-width: 0;
 }
 
-.moth-flow__details:empty {
+.moth-flow__details:not(:has(> *)) {
     display: none;
 }
 
-.moth-flow__details:not(:empty)::before {
+.moth-flow__details:has(> *)::before {
     content: "";
     position: absolute;
     right: 100%;
@@ -411,7 +411,7 @@ td {
     pointer-events: none;
 }
 
-.moth-flow__details:not(:empty)::after {
+.moth-flow__details:has(> *)::after {
     content: "";
     position: absolute;
     right: calc(100% - 0.05rem);
@@ -631,7 +631,7 @@ td {
         left: calc(50% - 0.23rem);
     }
 
-    .moth-flow__details:not(:empty)::before {
+    .moth-flow__details:has(> *)::before {
         right: auto;
         left: 50%;
         top: -1.5rem;
@@ -641,7 +641,7 @@ td {
         border-left: 1px solid currentColor;
     }
 
-    .moth-flow__details:not(:empty)::after {
+    .moth-flow__details:has(> *)::after {
         right: auto;
         left: calc(50% - 0.22rem);
         top: -0.6rem;
@@ -776,8 +776,8 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Developers</a> / Compiler design</p><p>This section of the docs is written to help you understand compiler concepts in general, as well as Moth specific concepts. </p><p>This is to help break down what Moth does differently, why it does it and how it all fits into the bigger design picture.</p></section>
-<section class="container"><h1>From Moth source to a webpage</h1><p>We&#39;ll follow a small Moth program from files on disk to a generated HTML page. </p><p>If you write Rust, you already know functions, enums, structs and ownership as a user.  You may not know terms like <em>intermediate representation</em>, <em>link plan</em> or <em>borrow validation</em> yet. </p><p>Each term shows up when the example needs it and will be explained step by step.</p><p>These docs are focused on teaching rather than documenting the compiler&#39;s actual implemented behaviour.</p><h2>The small example project we&#39;ll follow</h2><h3>The file structure</h3><pre style=""><code class='codeblock'>compiler_walkthrough/
+<section class="container"><p><a href="../">Developers</a> / Compiler design</p><p>This section explains compiler concepts in general alongside the Moth-specific ones.</p><p>It breaks down what Moth does differently, why it does it and how the pieces fit the bigger design picture.</p></section>
+<section class="container"><h1>From Moth source to a webpage</h1><p>We&#39;ll follow a small Moth program from files on disk to a generated HTML page.</p><p>If you write Rust, you already know functions, enums, structs and ownership as a user. You may not have met <em>intermediate representation</em>, <em>link plan</em> or <em>borrow validation</em>. Each term arrives when the example needs it and gets explained on the spot.</p><p>These docs teach the concepts rather than document every behaviour the compiler implements today.</p><h2>The small example project we&#39;ll follow</h2><h3>The file structure</h3><pre style=""><code class='codeblock'>compiler_walkthrough/
 ├── config.moth
 └── src/
     ├── @page.moth
@@ -808,7 +808,7 @@ visitor <span class='moth-code-operator'>=</span> <span class='moth-code-string'
 -&gt; project/link lifetime topology validation
 -&gt; deterministic target assignment
 -&gt; JavaScript and Wasm outputs
--&gt; HTML, runtime assets and output manifest</code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><br><p><figure class="moth-flow" aria-label=" Moth compiler and build pipeline">
+-&gt; HTML, runtime assets and output manifest</code></pre><p>Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.</p><p><figure class="moth-flow" aria-label=" Moth compiler and build pipeline">
         <div class="moth-flow__pipeline">
             
 
@@ -892,7 +892,7 @@ File-reference worklist
     <section class="moth-flow__stage">
     <div class="moth-flow__main">
         <a class="moth-flow__node" href=" ./declarations-dependencies-and-ordering/">
-        <span class="moth-flow__eyebrow"> Stages 2b-3</span>
+        <span class="moth-flow__eyebrow"> Stages 2-3</span>
         <span class="moth-flow__title"> Interface binding and declaration order</span>
         <span class="moth-flow__description">
 
@@ -933,7 +933,7 @@ Local ordering
         <span class="moth-flow__description">
 
 
-Resolve types, fold constants and templates, specialise static control flow and commit generated requests.</span>
+Resolve types, fold constants and templates, specialise ordinary "if" control flow on a known Bool and commit generated requests.</span>
     </a>
 
 
@@ -1082,7 +1082,7 @@ Intervals and frontiers
         <span class="moth-flow__description">
 
 
-Publish successful module semantics, generated sidecars, link facts and reuse fingerprints.</span>
+Publish successful module semantics, generated sidecars and link facts. Reuse fingerprints are planned, not a current lane.</span>
     </a>
 </div>
 
@@ -1220,7 +1220,7 @@ Assemble documents and runtime assets, validate output paths, write manifests an
 <figcaption class="moth-flow__caption">
      Each box links to the walkthrough page that expands that stage. Side branches show important internal work without lengthening the main pipeline.
 </figcaption>
-</figure></p><p><em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li><a href="./what-a-compiler-does">01. What a compiler does</a></li><li><a href="./moth-design-choices">02. Why Moth makes different choices</a></li><li><a href="./starting-a-build">03. Starting a build</a></li><li><a href="./project-graphs-and-modules">04. Project graphs and modules</a></li><li><a href="./tokenization">05. Tokenization</a></li><li><a href="./declarations-dependencies-and-ordering">06. Declarations, dependencies and ordering</a></li><li><a href="./ast-semantics-and-types">07. AST semantics and types</a></li><li><a href="./compile-time-semantics">08. Compile-time semantics</a></li><li><a href="./templates-and-tir">09. Templates and TIR</a></li><li><a href="./diagnostics">10. Diagnostics</a></li><li><a href="./hir">11. HIR</a></li><li><a href="./memory-management-and-gc">12. Memory topology and lowering</a></li><li><a href="./borrow-validation-and-drops">13. Borrow validation and drops</a></li><li><a href="./module-artefacts-and-reuse">14. Module artefacts and reuse</a></li><li><a href="./linking-entries-and-reachability">15. Linking, entries and reachability</a></li><li><a href="./target-planning-and-validation">16. Target planning and validation</a></li><li><a href="./backend-lowering">17. Backend lowering</a></li><li><a href="./html-assembly-and-output">18. HTML assembly and output</a></li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued or active implementation:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/developer-docs/language/overview.mtf</code> for language surface</li><li><code>docs/src/developer-docs/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/@page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
+</figure></p><p><em>Question: which step still looks like source, and which first looks like something a host can run?</em></p><h2>Four owners you will meet again</h2><p><strong>Build system.</strong> Selects the command, discovers source, builds graphs, schedules modules, plans entries and writes files to disk.</p><p><strong>Compiler frontend and analysis.</strong> Prepares syntax, binds interfaces, checks semantics, lowers HIR and validates access.</p><p><strong>Artefact builder.</strong> Assembles selected compiler facts into an output plan for one kind of project, such as an HTML page.</p><p><strong>Target backends.</strong> Lower validated functions and runtime needs into JavaScript, Wasm and glue.</p><p>A fact has one owner. Later stages consume that fact. They do not rebuild it from source text.</p><h2>How to read the series</h2><p>Read in order. The path groups ideas by time of appearance, not by internal crate name.</p><ol><li><a href="./what-a-compiler-does">01. What a compiler does</a></li><li><a href="./moth-design-choices">02. Why Moth makes different choices</a></li><li><a href="./starting-a-build">03. Starting a build</a></li><li><a href="./project-graphs-and-modules">04. Project graphs and modules</a></li><li><a href="./tokenization">05. Tokenization</a></li><li><a href="./declarations-dependencies-and-ordering">06. Declarations, dependencies and ordering</a></li><li><a href="./ast-semantics-and-types">07. AST semantics and types</a></li><li><a href="./compile-time-semantics">08. Compile-time semantics</a></li><li><a href="./templates-and-tir">09. Templates and TIR</a></li><li><a href="./diagnostics">10. Diagnostics</a></li><li><a href="./hir">11. HIR</a></li><li><a href="./memory-management-and-gc">12. Memory topology and lowering</a></li><li><a href="./borrow-validation-and-drops">13. Borrow validation and drops</a></li><li><a href="./module-artefacts-and-reuse">14. Module artefacts and reuse</a></li><li><a href="./linking-entries-and-reachability">15. Linking, entries and reachability</a></li><li><a href="./target-planning-and-validation">16. Target planning and validation</a></li><li><a href="./backend-lowering">17. Backend lowering</a></li><li><a href="./html-assembly-and-output">18. HTML assembly and output</a></li></ol><p>This landing page acts as article 00.</p><h2>Status language on every page</h2><p>Later articles label four kinds of claim:</p><ul><li><strong>Accepted design:</strong> architecture or language contract the authorities already chose</li><li><strong>Current implementation:</strong> behaviour the progress matrix records today</li><li><strong>Queued work:</strong> named roadmap work still landing</li><li><strong>Deferred or outside scope:</strong> postponed on purpose, or rejected as a language shape</li></ul><p>The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.</p><h2>Where authority lives</h2><ul><li><code>docs/compiler-design-overview.md</code> for compiler stages, identities, artefacts and validation</li><li><code>docs/build-system-design.md</code> for commands, graphs, builders, linking and outputs</li><li><code>docs/src/developer-docs/language/overview.mtf</code> for language surface</li><li><code>docs/src/developer-docs/memory-management/overview.mtf</code> for reference semantics, borrow validation, lifetime regions, ownership and backend lowering</li><li><code>docs/src/docs/progress/@page.moth</code> for what works today</li><li><code>docs/roadmap/roadmap.md</code> for order and deferred design</li></ul><p>Educational pages explain those authorities. They do not outrank them.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> a staged compiler library with build-owned project orchestration, immutable module artefacts, entry-selected roots, per-function target assignment and a validated memory plan per physical variant.</li><li><strong>Current implementation:</strong> the frontend through borrow validation, canonical module compilation, scoped packages, typed project config and the HTML builder&#39;s JavaScript path. Consult the progress matrix rather than this series for row-level detail.</li><li><strong>Queued work:</strong> the mixed JavaScript and Wasm backend plan, entry-local config blocks, the numeric redesign and the collector-free memory and REC plans.</li><li><strong>Deferred or outside scope:</strong> lifetime-region validation, memory-strategy planning, REC, artefact reuse and persistence, trait objects and source-visible reference types.</li></ul><p>Read the series as the accepted destination, with each page&#39;s own status section marking where today diverges.</p><p>Next: what a compiler does between Priya&#39;s name and a paragraph on a page.</p></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

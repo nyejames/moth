@@ -12,10 +12,9 @@ page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 #[section, $md:
     @../ (Developers) / Compiler design
 
-    This section of the docs is written to help you understand compiler concepts in general,
-    as well as Moth specific concepts. 
+    This section explains compiler concepts in general alongside the Moth-specific ones.
 
-    This is to help break down what Moth does differently, why it does it and how it all fits into the bigger design picture.
+    It breaks down what Moth does differently, why it does it and how the pieces fit the bigger design picture.
 ]
 
 #[section, reference_content]

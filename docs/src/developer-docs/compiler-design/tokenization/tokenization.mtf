@@ -6,11 +6,9 @@ A parser that stares at an undifferentiated character stream spends its life gue
 
 ## Token boundaries and spelling
 
-A token carries at least:
+A token itself is two fields: a **kind** and a **source location** span pointing back at the file.
 
-- a **kind** (identifier, string literal, keyword-like form, delimiter, operator, ...)
-- the **authored spelling** as it appeared in source
-- a **source location** span pointing back at the file
+The text doesn't ride along inside the token. The kind carries a small handle instead, and the real payload lives in a side table the file owns. A quoted string resolves to its decoded value, while a numeric literal keeps the authored text so diagnostics can quote what you typed. Interning text once and passing handles keeps tokens small and comparisons cheap.
 
 Take the page dependency clause:
 
@@ -28,24 +26,21 @@ A lexer might emit a sequence in this spirit:
 
     [td:
         [: `@greeting`]
-        [: package or module path atom]
+        [: `Path`, a handle into the file's path table]
     ]
 
     [td:
         [: `greet`]
-        [: identifier]
+        [: `Symbol`, a handle into the string table]
     ]
 
 ]
 
-Exact kind names live in the tokenizer. The teaching point stays fixed: boundaries enter here, meaning does not.
+Notice what the lexer does **not** record: that `@greeting` names a dependency, or that `greet` is a function. It emits a path handle and a symbol handle. Header processing decides what those mean later.
 
-Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them. The lexer only marks the boundaries.
+Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them.
 
-**Diagram placeholder:** Source characters become located token kinds
-
-*Caption: simplified lexer view.*
-*Question: where do boundaries enter the pipeline?*
+Marking boundaries is the headline job, though not the only one. The lexer also classifies each piece, tracks locations, tracks string and template delimiter context, scans numeric text and raises its own spacing and directive diagnostics. What it leaves alone is meaning.
 
 ## Source locations
 
@@ -55,27 +50,73 @@ A span says "these characters in this source identity." When interface binding l
 
 Tokenization attaches locations. It does not decide that `greet` is a function. That decision waits for binding and AST.
 
-**Diagram placeholder:** Token spans point back to exact source ranges
-
-*Caption: exact diagnostic principle, simplified data shape.*
-*Question: how can later stages point to authored text without reparsing?*
-
 ## Code and document source kinds
 
 Not every file starts in the same lexical mode.
 
 - Ordinary **`.moth`** starts in code mode.
 - **Moth template `.mtf`** starts in an implicit template body while preserving original source locations.
-- Plain **`.md`** is prepared before tokenization and does not use a tokenizer entry mode in the same way.
+- Plain **`.md`** is never tokenized as Moth at all. Preparation handles it and it claims no tokenizer entry mode.
 
-Those paths converge. Moth template preparation synthesises an ordinary private `content #String` declaration whose initializer is a Markdown template over the body tokens. Markdown preparation can contribute the same declaration shape with a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.
+Those three are the whole list. `.bst` is not a compiler source kind, and a Moth-native build-script system stays deferred.
+
+Those paths converge. Moth template preparation synthesises an ordinary private `content #String` declaration whose initializer is a Markdown template over the body tokens. Markdown preparation reaches the same shape by a blunter route: it renders the raw Markdown to HTML first, then hands that HTML over as a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.
 
 The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.
 
-**Diagram placeholder:** moth, mtf and md use different entry preparation then converge
+[diagram:
+    [$insert("label"): Three source kinds, one semantic pipeline]
+    [$insert("caption"): Each source kind gets its own way in. After preparation they all look like ordinary declarations, so no later stage needs a document dialect.]
 
-*Caption: teaching simplification.*
-*Question: why avoid duplicate pipelines for documents and code?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Entry]
+            [$insert("title"): Three ways in]
+            Each source kind starts in the lexical mode that suits it.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Entry preparation]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./]
+                    `.moth` starts in code mode
+                ]
+                [detail:
+                    [$insert("href"): ../templates-and-tir/]
+                    `.mtf` starts inside a template body
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    `.md` is prepared before tokenizing
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../declarations-dependencies-and-ordering/]
+            [$insert("eyebrow"): Converged]
+            [$insert("title"): One ordinary declaration]
+            Document kinds arrive as a private `content #String` constant. From here nothing downstream can tell them apart.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../ast-semantics-and-types/]
+            [$insert("eyebrow"): Shared]
+            [$insert("title"): The same later stages]
+            Binding, type checking and lowering serve docs and code with one set of owners.
+        ]
+    ]
+]
+
+*Why avoid duplicate pipelines for documents and code? Because a second pipeline is a second place for meaning to drift.*
 
 ## Lexical failures
 
@@ -124,7 +165,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 - **Accepted design:** located tokens and retained source preparation.
 - **Current implementation:** progress rows for source-kind coverage.
-- **Queued work:** numeric roadmap may change later semantic ownership, not lexical token boundaries.
+- **Queued work:** queued numeric work may extend the `Number`, `NumberN` and `Byte` surface. The ownership split stays fixed: `numeric_text` owns lexical grammar, AST owns semantic typing, HIR owns numeric domains and failure.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 
 ## Exit state

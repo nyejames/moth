@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,11 +777,98 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 01. What a compiler does</p><p>Between source text and a finished page sits a ladder of representations. This article names the jobs on that ladder and the owners who hold them.</p></section>
-<section class="container"><h1>What a compiler does</h1><p>You type source. Something emits <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>. Between those two facts sits a chain of transformations. Each step is a bit less like human prose and a bit more like something a machine can use.</p><p>People often shrink that chain to a slogan: &quot;the compiler turns code into machine instructions.&quot; That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.</p><h2>Meaning versus representation</h2><p><strong>Source meaning</strong> answers: what did the author intend under the language rules?</p><p><strong>Target representation</strong> answers: what concrete form will a host execute or display?</p><p><strong>Transformation</strong> answers: how do we move from one to the other without losing the meaning we care about?</p><p>The project tree enters as authored text:</p><pre style=""><code class='codeblock'>compiler_walkthrough/
+<section class="container"><h1>What a compiler does</h1><p>You type source. Something emits <code>&lt;p&gt;Hello, Priya!&lt;/p&gt;</code>. Between those two facts sits a chain of transformations. Each step drifts further from human prose and closer to something a machine can use.</p><p>People often shrink that chain to a slogan: &quot;the compiler turns code into machine instructions.&quot; That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.</p><h2>Meaning versus representation</h2><p><strong>Source meaning</strong> answers: what did the author intend under the language rules?</p><p><strong>Target representation</strong> answers: what concrete form will a host execute or display?</p><p><strong>Transformation</strong> answers: how do we move from one to the other without losing the meaning we care about?</p><p>The project tree enters as authored text:</p><pre style=""><code class='codeblock'>compiler_walkthrough/
 ├── config.moth
 └── src/
     ├── @page.moth
-    └── greeting.moth</code></pre><p>Those files hold characters on disk. They do not yet hold a typed call graph, a borrow fact or a Wasm export. Meaning arrives when a stage applies language rules and records the result in a structure later stages trust.</p><p>Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.</p><p><strong>Diagram placeholder:</strong> One source plan becomes different target forms while keeping the same meaning</p><p><em>Caption: teaching analogy for source meaning and target form.</em> <em>Question: which parts of the greeting project still look like source plan, and which already look like a page a browser can show?</em></p><h2>A small vocabulary</h2><p>Words collide in casual talk. Pin them by job.</p><p>A <strong>compiler</strong> reads source under language rules and produces another representation a machine or host can use. That product might be native code, bytecode, JavaScript, Wasm, HTML fragments or a structured artefact a builder will assemble.</p><p>An <strong>interpreter</strong> walks a representation and performs the operations as it goes. It may parse first. Execution still happens inside the interpreter process, not as a finished artefact handed to another runtime.</p><p>A <strong>transpiler</strong> usually means a compiler whose target is another human-authored language at a similar level, such as TypeScript to JavaScript. The word names a common special case, not a third kind of computation.</p><p>A <strong>linker</strong> connects separately compiled pieces. It resolves which functions call which others, which symbols an entry needs and which objects belong in one final image or bundle.</p><p>A <strong>build system</strong> decides <em>what</em> to compile, in which order, with which inputs and where outputs land. It schedules work. It does not replace the language&#39;s type checker.</p><p>Moth splits those jobs on purpose. The compiler library owns semantic meaning for modules. The build system owns project graphs, entry plans and writing files. Backends lower already-validated meaning into JavaScript or Wasm. The HTML builder assembles page-shaped outputs.</p><p><strong>Diagram placeholder:</strong> Three routes from source toward execution with overlapping responsibilities</p><p><em>Caption: teaching simplification, not a complete taxonomy.</em> <em>Question: where does execution happen for Priya&#39;s page?</em></p><h2>Frontend, analysis and backend</h2><p>Compilers often speak of a <strong>frontend</strong>, <strong>middle</strong> analysis and a <strong>backend</strong>. Treat those as responsibilities, not a sacred phase diagram every language must copy.</p><p>The <strong>frontend</strong> faces source text. It tokenises, parses shells, binds names, checks types and builds a typed structure that captures source meaning.</p><p><strong>Analysis</strong> walks that structure to prove properties: terminal control flow, borrow safety, reachability, target capability. Some languages fold analysis into the frontend. Moth keeps several analyses after a first backend-facing IR exists.</p><p>The <strong>backend</strong> faces a concrete target. It lowers validated meaning into JavaScript, Wasm, helpers and glue. It should not reopen source files to rediscover what <code>greet</code> means.</p><p>Moth&#39;s compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI &quot;the compiler.&quot;</p><p><strong>Diagram placeholder:</strong> Owner map for build system, frontend, analysis and backend</p><p><em>Caption: ownership categories from the canonical authorities.</em> <em>Question: who decides which files enter the graph, and who decides whether <code>visitor</code> type-checks?</em></p><h2>Why intermediate representations exist</h2><p>Why not keep one giant syntax tree until the end?</p><p>Because each consumer wants a different kind of clarity. You do not jump from seed to full plant in one step. Roots, stem and leaves each solve a different problem.</p><table style="">
+    └── greeting.moth</code></pre><p>Those files hold characters on disk. They do not yet hold a typed call graph, a borrow fact or a Wasm export. Meaning arrives when a stage applies language rules and records the result in a structure later stages trust.</p><p>Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.</p><figure class="moth-flow" aria-label=" One source meaning grown into several target forms">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Source meaning</span>
+        <span class="moth-flow__title"> The plan</span>
+        <span class="moth-flow__description"><p><code>greet</code> takes a visitor name and returns a greeting. One set of rules, checked once.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Grown forms</div>
+        <div class="moth-flow__fanout">
+    <a class="moth-flow__detail" href=" ../backend-lowering/">
+        <p>JavaScript for browser work</p>
+</a><a class="moth-flow__detail" href=" ../backend-lowering/">
+        <p>WebAssembly for neutral compute</p>
+</a><a class="moth-flow__detail" href=" ../html-assembly-and-output/">
+        <p>HTML the browser displays</p>
+</a>
+</div>
+</div>
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     The plan is authored once. Each target grows it into a different adult form without changing what the program means.
+</figcaption>
+</figure><h2>A small vocabulary</h2><p>Words collide in casual talk. Pin them by job.</p><p>A <strong>compiler</strong> reads source under language rules and produces another representation a machine or host can use. That product might be native code, bytecode, JavaScript, Wasm, HTML fragments or a structured artefact a builder will assemble.</p><p>An <strong>interpreter</strong> walks a representation and performs the operations as it goes. It may parse first. Execution still happens inside the interpreter process, not as a finished artefact handed to another runtime.</p><p>A <strong>transpiler</strong> usually means a compiler whose target is another human-authored language at a similar level, such as TypeScript to JavaScript. The word names a common special case, not a third kind of computation.</p><p>A <strong>linker</strong> connects separately compiled pieces. It resolves which functions call which others, which symbols an entry needs and which objects belong in one final image or bundle.</p><p>A <strong>build system</strong> decides <em>what</em> to compile, in which order, with which inputs and where outputs land. It schedules work. It does not replace the language&#39;s type checker.</p><p>Moth splits those jobs on purpose. The compiler library owns semantic meaning for modules. The build system owns project graphs, entry plans and writing files. Backends lower already-validated meaning into JavaScript or Wasm. The HTML builder assembles page-shaped outputs.</p><h2>Frontend, analysis and backend</h2><p>Compilers often speak of a <strong>frontend</strong>, <strong>middle</strong> analysis and a <strong>backend</strong>. Treat those as responsibilities, not a sacred phase diagram every language must copy.</p><p>The <strong>frontend</strong> faces source text. It tokenises, parses shells, binds names, checks types and builds a typed structure that captures source meaning.</p><p><strong>Analysis</strong> walks that structure to prove properties: terminal control flow, borrow safety, reachability, target capability. Some languages fold analysis into the frontend. Moth keeps several analyses after a first backend-facing IR exists.</p><p>The <strong>backend</strong> faces a concrete target. It lowers validated meaning into JavaScript, Wasm, helpers and glue. It should not reopen source files to rediscover what <code>greet</code> means.</p><p>Moth&#39;s compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI &quot;the compiler.&quot;</p><figure class="moth-flow" aria-label=" Which part of Moth owns which job">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../starting-a-build/">
+        <span class="moth-flow__eyebrow"> Build system</span>
+        <span class="moth-flow__title"> Which files, in which order?</span>
+        <span class="moth-flow__description"><p>Chooses the command, reads project config and builds the source graph.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Frontend</span>
+        <span class="moth-flow__title"> What does this source mean?</span>
+        <span class="moth-flow__description"><p>Tokenises, binds names, checks types and records source meaning.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../borrow-validation-and-drops/">
+        <span class="moth-flow__eyebrow"> Analysis</span>
+        <span class="moth-flow__title"> Is that meaning legal?</span>
+        <span class="moth-flow__description"><p>Proves access safety, lifetimes, reachability and target capability.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../backend-lowering/">
+        <span class="moth-flow__eyebrow"> Backend</span>
+        <span class="moth-flow__title"> How do we say it in the target?</span>
+        <span class="moth-flow__description"><p>Lowers validated meaning into JavaScript, Wasm and glue. It never reopens source.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Four owners, four questions. The build system asks which files matter, the frontend asks what they mean, analysis asks whether that meaning is safe and the backend asks how to say it in a target language.
+</figcaption>
+</figure><p><em>Who decides which files enter the graph, and who decides whether <code>visitor</code> type-checks? Different owners, and that separation is the point.</em></p><h2>Why intermediate representations exist</h2><p>Why not keep one giant syntax tree until the end?</p><p>Because each consumer wants a different kind of clarity. You do not jump from seed to full plant in one step. Roots, stem and leaves each solve a different problem.</p><table style="">
             
             <tr style="">
                 
@@ -455,7 +892,7 @@ td {
              <td style=""><p> Target code</p></td> <td style=""><p> host instructions and calling conventions</p></td>
         </tr>
             
-</table><p>Raw text still confuses a parser about where one token ends. Tokens still confuse a type checker about which <code>greet</code> you meant. A typed AST still nests expressions so a borrow checker must rediscover evaluation order. HIR still refuses to choose JavaScript versus Wasm spelling.</p><p>Each step deletes one class of question so the next owner can ask a harder one.</p><p><strong>One fact, one owner.</strong> If the AST already folded <code>greeting_prefix</code> to <code>&quot;Hello&quot;</code>, HIR should not re-parse the constant. If HIR already recorded a call edge to <code>greet</code>, the linker should not guess callees from string names in source. Duplication invites drift. Drift invites bugs that only appear on one backend.</p><p><strong>Diagram placeholder:</strong> Representation path from source text to target code</p><p><em>Caption: simplified Moth walkthrough.</em> <em>Question: why keep multiple forms instead of overwriting one tree in place?</em></p><h2>What can fail here</h2><p>Failures arrive in families, not one grey cloud labelled &quot;error.&quot;</p><p><strong>Malformed source</strong> breaks spelling, structure or language rules: a bad escape, an unknown name, a type mismatch.</p><p><strong>Unsupported target capability</strong> means the program makes sense as Moth yet needs something the chosen target cannot host, such as a DOM API on a pure Wasm partition.</p><p><strong>Missing project input</strong> means the build never obtained a required config value or source file before semantic work could start.</p><p>Later articles assign exact diagnostic ownership. Here only the families matter: user source, target contract and project bootstrap fail for different reasons and travel different lanes.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> one target-specific compiler path that thinks in HTML and JavaScript from the first token.</p><p><strong>Choice:</strong> backend-neutral compiler facts, with the build system orchestrating projects and builders.</p><p><strong>Benefit:</strong> multiple builders and targets reuse the same semantic work. A <code>check</code> command can validate without writing a page. A future non-HTML builder can reuse module artefacts.</p><p><strong>Cost:</strong> explicit boundaries and more intermediate data to maintain. You pay in structure so you do not pay in repeated meaning.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> a staged compiler library plus a build-owned project pipeline.</li><li><strong>Current implementation:</strong> follow the progress matrix. Do not treat transitional backend handoff details as permanent law.</li><li><strong>Queued work:</strong> canonical module compilation and mixed-target plans still shape how cleanly some handoffs land.</li><li><strong>Deferred or outside scope:</strong> this article does not teach a universal compiler taxonomy for every language.</li></ul><h2>Exit state</h2><p>You leave with a vocabulary and a representation path. Next: why Moth places language design and build-system design in the same conversation.</p></section>
+</table><p>Raw text still confuses a parser about where one token ends. Tokens still confuse a type checker about which <code>greet</code> you meant. A typed AST still nests expressions so a borrow checker must rediscover evaluation order. HIR still refuses to choose JavaScript versus Wasm spelling.</p><p>Each step deletes one class of question so the next owner can ask a harder one.</p><p><strong>One fact, one owner.</strong> If the AST already folded <code>greeting_prefix</code> to <code>&quot;Hello&quot;</code>, HIR should not re-parse the constant. If HIR already recorded a call edge to <code>greet</code>, the linker should not guess callees from string names in source. Duplication invites drift. Drift invites bugs that only appear on one backend.</p><h2>What can fail here</h2><p>Failures arrive in families, not one grey cloud labelled &quot;error.&quot;</p><p><strong>Malformed source</strong> breaks spelling, structure or language rules: a bad escape, an unknown name, a type mismatch.</p><p><strong>Unsupported target capability</strong> means the program makes sense as Moth yet needs something the chosen target cannot host, such as a DOM API on a pure Wasm partition.</p><p><strong>Missing project input</strong> means the build never obtained a required config value or source file before semantic work could start.</p><p>Later articles assign exact diagnostic ownership. Here only the families matter: user source, target contract and project bootstrap fail for different reasons and travel different lanes.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> one target-specific compiler path that thinks in HTML and JavaScript from the first token.</p><p><strong>Choice:</strong> backend-neutral compiler facts, with the build system orchestrating projects and builders.</p><p><strong>Benefit:</strong> multiple builders and targets reuse the same semantic work. A <code>check</code> command can validate without writing a page. A future non-HTML builder can reuse module artefacts.</p><p><strong>Cost:</strong> explicit boundaries and more intermediate data to maintain. You pay in structure so you do not pay in repeated meaning.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> a staged compiler library plus a build-owned project pipeline.</li><li><strong>Current implementation:</strong> follow the progress matrix. Do not treat transitional backend handoff details as permanent law.</li><li><strong>Queued work:</strong> the mixed JavaScript/Wasm backend plan. Canonical module compilation and scoped packages already landed.</li><li><strong>Deferred or outside scope:</strong> this article does not teach a universal compiler taxonomy for every language.</li></ul><h2>Exit state</h2><p>You leave with a vocabulary and a representation path. Next: why Moth places language design and build-system design in the same conversation.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

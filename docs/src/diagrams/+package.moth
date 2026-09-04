@@ -67,11 +67,11 @@ flow_diagram_css #= [$css:
         min-width: 0;
     }
 
-    .moth-flow__details:empty {
+    .moth-flow__details:not(:has(> *)) {
         display: none;
     }
 
-    .moth-flow__details:not(:empty)::before {
+    .moth-flow__details:has(> *)::before {
         content: "";
         position: absolute;
         right: 100%;
@@ -81,7 +81,7 @@ flow_diagram_css #= [$css:
         pointer-events: none;
     }
 
-    .moth-flow__details:not(:empty)::after {
+    .moth-flow__details:has(> *)::after {
         content: "";
         position: absolute;
         right: calc(100% - 0.05rem);
@@ -301,7 +301,7 @@ flow_diagram_css #= [$css:
             left: calc(50% - 0.23rem);
         }
 
-        .moth-flow__details:not(:empty)::before {
+        .moth-flow__details:has(> *)::before {
             right: auto;
             left: 50%;
             top: -1.5rem;
@@ -311,7 +311,7 @@ flow_diagram_css #= [$css:
             border-left: 1px solid currentColor;
         }
 
-        .moth-flow__details:not(:empty)::after {
+        .moth-flow__details:has(> *)::after {
             right: auto;
             left: calc(50% - 0.22rem);
             top: -0.6rem;

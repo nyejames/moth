@@ -1,9 +1,10 @@
 @memory-management-and-gc content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_css
+@diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
 page_title #= "12. Memory topology and lowering"
 page_description #= "How static access and lifetime proof feed physical memory lowering."
-page_head #= theme_head
+page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
 
@@ -18,3 +19,14 @@ page_head #= theme_head
 #[section, $md:
     @../ (Compiler design) / @../hir (Previous) / @../borrow-validation-and-drops (Next)
 ]
+
+export:
+    diagram #= flow_diagram
+    stage #= flow_stage
+    node #= flow_node
+    branch #= flow_branch
+    lane #= flow_lane
+    detail #= flow_detail
+    island #= flow_island
+    fanout #= flow_fanout
+;

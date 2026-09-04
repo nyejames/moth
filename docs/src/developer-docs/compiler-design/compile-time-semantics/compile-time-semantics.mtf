@@ -2,7 +2,9 @@
 
 HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.
 
-If a value never changes at runtime, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.
+If a declaration is marked compile-time and its value fully folds, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.
+
+The marker does the deciding, not the value. `#` is what makes a declaration compile-time. A top-level runtime binding stays runtime even when its value never actually changes.
 
 AST owns that static work.
 
@@ -28,18 +30,67 @@ Stage 4 owns the boundary:
 fully checked authored AST
 -> constant evaluation
 -> known Bool branch selection
+-> commit active generated requests and summaries
+-> terminality validation over the active control flow
 -> active executable AST
 -> HIR
 ]
 
-There is no config-specific branch node. Both branches are frontend-valid before selection, and only
+Stage 4 adds no config-specific branch node. Both branches are frontend-valid before selection, and only
 active generated requests and executable facts survive. HIR never redoes the decision, and Moth source
 has no platform-conditional source mechanism.
 
-**Diagram placeholder:** Authored string becomes a backend-neutral compile-time value
+[diagram:
+    [$insert("label"): What leaves the runtime program entirely]
+    [$insert("caption"): Folding is deletion as much as evaluation. Work finished at Stage 4 has no runtime cost and no second chance to disagree with itself.]
 
-*Caption: exact semantic handoff, simplified storage.*
-*Question: what leaves the runtime program entirely?*
+    [stage:
+        [node:
+            [$insert("href"): ../ast-semantics-and-types/]
+            [$insert("eyebrow"): Authored]
+            [$insert("title"): greeting_prefix #= "Hello"]
+            A compile-time declaration with a value that fully folds.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Also settled here]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    Known-Bool branches selected
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Generic requests committed
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Trait evidence resolved
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../module-artefacts-and-reuse/]
+            [$insert("eyebrow"): Folded]
+            [$insert("title"): A backend-neutral value]
+            Copied into the immutable module interface. Consumers read the answer instead of re-folding the source.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../hir/]
+            [$insert("eyebrow"): Absent]
+            [$insert("title"): Nothing reaches HIR]
+            No config branch node, no runtime wrapper type, no second evaluation. The question is closed.
+        ]
+    ]
+]
 
 ## Generic requests
 
@@ -49,14 +100,11 @@ A generic template lives in the declaring module as an immutable validated templ
 2. resolves required visible trait evidence
 3. emits a **module-local request** keyed by stable generic identity, canonical concrete types and evidence identities
 
-The build system aggregates requests across a compilation boundary and lends the published set as an immutable view; the compiler deduplicates each request against that set. The compiler materialises each accepted request as a **generated sidecar** beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.
+The build system aggregates requests across a compilation boundary and lends the published set as an immutable view. The compiler deduplicates each request against that set, then materialises each accepted request as a **generated sidecar** beside the base module.
+
+Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.
 
 HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.
-
-**Diagram placeholder:** One call creates a named request which later materialises beside the base module
-
-*Caption: accepted architecture.*
-*Question: when does generic code become concrete?*
 
 ## Static trait evidence
 
@@ -65,11 +113,6 @@ Traits and conformances are compile-time frontend metadata. AST validates requir
 Static bound calls resolve to **concrete executable targets** before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.
 
 That choice rejects a familiar dynamic path. You cannot box "any `Show`" and discover methods later. You can write choices for closed heterogeneity and generics with evidence for static reuse.
-
-**Diagram placeholder:** A trait bound resolves before HIR
-
-*Caption: simplified static dispatch.*
-*Question: what replaces a trait object in this model?*
 
 ## Coercion and explicit casts
 
@@ -80,11 +123,6 @@ Coercion happens when a receiving boundary accepts a value under documented rule
 Explicit `cast` is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.
 
 Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.
-
-**Diagram placeholder:** Contextual acceptance and explicit conversion take separate paths
-
-*Caption: teaching distinction.*
-*Question: who requested conversion?*
 
 ## Numeric ownership
 
@@ -97,7 +135,7 @@ Accepted ownership splits cleanly:
 - **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
 - compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
 
-`Number` and related roadmap work such as `NumberN` ideas may still be landing. Keep **current** `Number` and `Byte` status on the progress matrix separate from the ownership split above. The split is accepted even while surface coverage grows.
+The richer `Number`, `NumberN` and `Byte` redesign is queued and deferred rather than landing now. Keep that surface question separate from the ownership split above, which is accepted and stable regardless of how far coverage grows.
 
 ## What can fail here
 
@@ -121,7 +159,7 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 ## Roadmap and current status
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
-- **Current implementation:** folded constants, typed build configuration values, immutable `@project`, label numeric and anonymous-record support from the progress matrix.
+- **Current implementation:** folded constants, typed build configuration values, immutable `@project` and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The rich numeric redesign is deferred.
 - **Queued work:** `number_type_numeric_plan.md` and `entry-config-blocks-runtime-title-plan.md`.
 - **Deferred or outside scope:** trait objects and broad runtime reflection.
 

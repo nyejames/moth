@@ -1,28 +1,25 @@
 # Deciding where code can run
 
-Target planning receives an already-validated lifetime topology. It assigns targets and checks capabilities; it does not change region ownership or source legality.
+Target planning receives an already-validated lifetime topology. It assigns targets and checks capabilities. It never changes region ownership or source legality.
 
-Semantically valid Moth can still be unhostable on a chosen target. A function that touches the DOM does not belong in a pure Wasm partition that has no DOM. A backend should learn that **before** it emits half a module and shrugs.
+Semantically valid Moth can still be unhostable on a chosen target. A function that touches the DOM does not belong in a pure Wasm partition that has no DOM. A backend should learn that **before** it emits half a module.
 
-**Target planning** assigns functions. **Target validation** checks the assignment against capabilities.
+**Target planning** is build-owned and assigns each reachable function to a target. **Target validation** is compiler-owned and checks that finished assignment against capabilities.
 
 ## Roots and capabilities
 
-The build system supplies **validation roots** and candidate assignments from entry or package link planning. The compiler owns validation semantics over those inputs.
+The build system supplies **validation roots** and the completed per-function target assignment from entry or package link planning. The compiler owns validation semantics over that assignment. It judges the partition rather than choosing it.
 
 Distinguish two ideas people conflate:
 
-- **semantic package provenance** records where a fact came from in the Moth sense
-- **target capability** records what a runtime target can host
+- **package provenance** records where a fact came from. `PackageOrigin` says which kind of package it belongs to and `PackageBacking` says whether real Moth source or an external binding implements it.
+- **target capability** is builder and backend metadata describing which semantic features, bindings and helpers a target supports, plus what each function requires.
+
+Neither one is source-visible target identity. Moth source cannot ask which physical target it is being compiled for.
 
 A function can be perfectly typed and still require a capability its assigned target lacks.
 
-For the greeting walkthrough, `start`, `greet` and any template runtime work arrive with link facts and capability requirements. Even a humble string page teaches the machinery that larger apps need for DOM and friends.
-
-**Diagram placeholder:** Each function carries capability facts and target affinity
-
-*Caption: simplified link input.*
-*Question: what constrains assignment?*
+For the greeting walkthrough, `start`, `greet` and any template runtime work arrive with link facts and capability requirements. Even a humble string page exercises the machinery that larger apps need for the DOM and everything around it.
 
 ## Affinity and propagation
 
@@ -30,10 +27,37 @@ Some functions are born with **affinity**. A JavaScript-owned `start` that must 
 
 Requirements **propagate backwards** along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.
 
-**Diagram placeholder:** A DOM requirement travels from callee to callers
+[diagram:
+    [$insert("label"): A capability requirement travels backwards along call edges]
+    [$insert("caption"): The helper needs the DOM, so anything that must reach it inherits the requirement. Constraints climb towards callers, which is why a caller can be moved by a decision made three calls away.]
 
-*Caption: accepted propagation rule.*
-*Question: why does a caller move targets?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Callee]
+            [$insert("title"): Touches the DOM]
+            This helper can only run where a DOM exists, so it is JavaScript-bound.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Caller]
+            [$insert("title"): Inherits the requirement]
+            A caller that must reach the helper picks up the same constraint.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../linking-entries-and-reachability/]
+            [$insert("eyebrow"): Root]
+            [$insert("title"): start lands in JavaScript]
+            The requirement surfaces at the entry. Neutral callees stay in Wasm where callers bridge correctly.
+        ]
+    ]
+]
 
 ## Deterministic assignment
 
@@ -46,12 +70,7 @@ A clean mental loop:
 5. validate assigned functions
 6. validate cross-target edges
 
-Determinism matters. The same program should not flip partitions because a hash map iterated differently at breakfast.
-
-**Diagram placeholder:** One reachable union splits into target-labelled functions
-
-*Caption: conceptual assignment.*
-*Question: where does each function run?*
+Determinism matters. The same program should not flip partitions because a hash map iterated in a different order.
 
 ## Cross-target calls
 
@@ -62,11 +81,6 @@ Mixed output needs bridges.
 **Wasm-to-JavaScript Moth calls** remain prohibited after propagation in the accepted model. The planner should push the JS requirement outward rather than leave a forbidden reverse edge for emission to discover.
 
 That asymmetry is deliberate engineering, not an accident of today's engine.
-
-**Diagram placeholder:** JS-to-Wasm wrapper is allowed while Wasm-to-JS edge is rejected
-
-*Caption: exact edge rule simplified.*
-*Question: which bridge is legal?*
 
 ## Entry-specific variants and check
 
@@ -79,8 +93,9 @@ The `check` command plans and validates, then stops before writing a full page o
 - unsupported target feature on a reachable function
 - missing capability
 - invalid cross-target edge
-- unresolved layout requirement
 - whole-module HTML-Wasm behaviour still marked transitional or experimental in the progress matrix
+
+Unresolved layout requirements are not on that list. Layout and memory-strategy planning happens per variant *after* target validation, so those failures belong to the memory planner.
 
 Unsupported features in unreachable private functions should not fail validation.
 

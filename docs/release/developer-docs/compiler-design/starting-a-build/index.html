@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,8 +777,78 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 03. Starting a build</p><p>A build chooses its command, builder and folded project values before any page source enters the compiler.</p></section>
-<section class="container"><h1>A build starts before source compilation</h1><p><code>moth build</code> does not open <code>@page.moth</code> first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?</p><p>Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.</p><h2>Command and capability surface</h2><p>Bootstrap starts with the <strong>command</strong>, not with <code>config.moth</code>.</p><p>The command selects:</p><ul><li>the active <strong>artefact builder</strong> (today the HTML builder arrives implicitly on the CLI)</li><li>the active <strong>build profile</strong></li><li><strong>tooling overlays</strong> such as <code>check</code></li><li>explicit <strong>build inputs</strong></li><li><strong>target intent</strong> and command-specific options</li></ul><p>The selected builder exposes a <strong>capability surface</strong> before config compilation:</p><ul><li>project and entry config schemas</li><li>source-backed Core and Builder packages</li><li>binding-backed packages</li><li>style directives and external import providers</li><li>supported source file kinds</li><li>builder-provided primitive globals</li><li>target-affinity and capability metadata</li></ul><p>Frontend-owned directives and compiler-owned builtins join that surface. A builder cannot replace them.</p><p>The command chooses what kind of project this build is allowed to be. That choice decides which source kinds, packages and targets the project may use.</p><p><strong>Diagram placeholder:</strong> Command selection feeds builder, profile, overlays and target intent</p><p><em>Caption: accepted bootstrap order.</em> <em>Question: what becomes known before config opens?</em></p><h2>Self-contained project config</h2><p><code>config.moth</code> is build-system-owned compile-time Moth source. It is <strong>not</strong> a module. It produces no HIR, no <code>start</code>, no runtime artefact and no package interface.</p><p>Config operates on exactly one authored file identity. It rejects source dependencies before path resolution. It never builds a config package graph.</p><p>The ordinary compiler owners still touch that one file:</p><pre style=""><code class='codeblock'>tokenization
--&gt; declaration-shell parsing
+<section class="container"><h1>A build starts before source compilation</h1><p><code>moth build</code> does not open <code>@page.moth</code> first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?</p><p>Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.</p><h2>Command and capability surface</h2><p>Bootstrap starts with the <strong>command</strong>, not with <code>config.moth</code>.</p><p>The command selects:</p><ul><li>the active <strong>artefact builder</strong> (today the HTML builder arrives implicitly on the CLI)</li><li>the active <strong>build profile</strong></li><li><strong>tooling overlays</strong> such as <code>check</code></li><li>explicit <strong>build inputs</strong></li><li><strong>target intent</strong> and command-specific options</li></ul><p>The selected builder exposes a <strong>capability surface</strong> before config compilation:</p><ul><li>project and entry config schemas</li><li>source-backed Core and Builder packages</li><li>binding-backed packages</li><li>style directives and external import providers</li><li>supported source file kinds</li><li>builder-provided primitive globals</li><li>target-affinity and capability metadata</li></ul><p>Frontend-owned directives and compiler-owned builtins join that surface. A builder cannot replace them.</p><p>The command chooses what kind of project this build is allowed to be. That choice decides which source kinds, packages and targets the project may use.</p><p>The three commands also differ in how far they run:</p><ul><li><strong><code>build</code></strong> compiles the entry, package and provider union, then lowers and writes outputs when it succeeds.</li><li><strong><code>dev</code></strong> compiles its complete graph on the first build. Rebuilds are currently fresh rather than incremental.</li><li><strong><code>check</code></strong> casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the <code>ValidatedMemoryPlan</code>, then stops before lowering or writing anything.</li></ul><figure class="moth-flow" aria-label=" What is already decided before config.moth opens">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> First</span>
+        <span class="moth-flow__title"> The command</span>
+        <span class="moth-flow__description"><p><code>build</code>, <code>dev</code> or <code>check</code> picks the artefact builder, the build profile, tooling overlays, explicit inputs and target intent.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Second</span>
+        <span class="moth-flow__title"> The capability surface</span>
+        <span class="moth-flow__description"><p>The selected builder publishes what this project may use.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Published before any source is read</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./">
+        <p>Config schemas</p>
+</a><a class="moth-flow__detail" href=" ../project-graphs-and-modules/">
+        <p>Available packages</p>
+</a><a class="moth-flow__detail" href=" ../tokenization/">
+        <p>Supported source kinds</p>
+</a><a class="moth-flow__detail" href=" ../target-planning-and-validation/">
+        <p>Target affinity metadata</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Third</span>
+        <span class="moth-flow__title"> Folded project values</span>
+        <span class="moth-flow__description"><p>Only now does <code>config.moth</code> compile, and only down to folded values under <code>@project</code>.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../project-graphs-and-modules/">
+        <span class="moth-flow__eyebrow"> Then</span>
+        <span class="moth-flow__title"> Stage 0 discovery</span>
+        <span class="moth-flow__description"><p>With a project it can name, the build system finally goes looking for source.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.
+</figcaption>
+</figure><h2>Self-contained project config</h2><p><code>config.moth</code> is build-system-owned compile-time Moth source. It is <strong>not</strong> a module. It produces no HIR, no <code>start</code>, no runtime artefact and no package interface.</p><p>Config operates on exactly one authored file identity. It rejects source dependencies before path resolution. It never builds a config package graph.</p><p>The ordinary compiler owners still touch that one file:</p><pre style=""><code class='codeblock'>tokenization
+-&gt; declaration-shell preparation
+-&gt; interface binding for the single config source
 -&gt; local declaration ordering
 -&gt; AST semantic checking and folding
 -&gt; folded config values</code></pre><p>Then config <strong>stops</strong>. No borrow checker. No backend.</p><p>Allowed shape includes one required open <code>project</code> const record, private helper constants, builder and tooling section records, scalars, optional values, anonymous const records, collections of foldable values and templates represented by their folded strings.</p><p>Rejected shape includes dependency clauses, runtime declarations, functions, traits, page fragments, <code>export:</code> and nested config files.</p><p>A short shape for the walkthrough project might look like:</p><pre style=""><code class='codeblock'>project <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
@@ -439,7 +859,7 @@ td {
 html <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
     dev_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;dev&quot;</span>,
     release_output <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;release&quot;</span>,
-<span class='moth-code-delimiter'>|</span></code></pre><p><code>config.moth</code> does not select the builder. The command already did.</p><p>Config runs through one named <strong>compiler service</strong>, not a build-owned copy of the frontend. The build system hands over the single authored source and receives folded values, authored key locations and diagnostics. Config schema and how folded values apply to the project record stay build-owned.</p><p><strong>Diagram placeholder:</strong> One config source stops at folded values and does not enter HIR</p><p><em>Caption: exact design boundary.</em> <em>Question: what does config produce that Stage 0 can consume?</em></p><h2>Build configuration values and <code>@project</code></h2><p>Direct fields of <code>project</code> may declare a build-config contract with <code>#Config of T</code> only when the selected project schema marks the field <code>Configurable</code> and its value has a supported primitive or optional primitive shape. Registered fixed-only identity, source-discovery and compiler-control fields reject the qualifier. The qualifier is compiler-owned and the semantic type remains <code>T</code>. Accepted types stay narrow: <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those.</p><p>Command and programmatic inputs are typed immediately as concrete primitives before source contracts are checked. Exact <code>true</code> and <code>false</code> become <code>Bool</code>, complete whole numbers become <code>Int</code>, decimal or exponent forms become <code>Float</code>, quoted characters become <code>Char</code>, quoted strings become <code>String</code>, and every other value falls back to <code>String</code>. Explicit quoted strings force ambiguous text such as <code>&quot;true&quot;</code>; malformed quoted literals are diagnostics. Omitting an input is how optional absence resolves to <code>none</code>.</p><p>Resolution order:</p><ol><li>explicit CLI or programmatic build input</li><li>builder-provided primitive global</li><li>the folded declaration default</li><li>a structured missing-input diagnostic</li></ol><p>The folded <code>project</code> record becomes a specialised immutable <strong><code>ProjectGlobalsInterface</code></strong> under the reserved <strong><code>@project</code></strong> dependency root.</p><p>That interface carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.</p><p>Normal modules may bind <code>@project</code> explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the <code>@project</code> root. Direct re-export of <code>@project</code> is forbidden.</p><p>For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.</p><p>Resolved source <code>#Config</code> values become ordinary folded constants. They use ordinary <code>if</code> for static Bool specialisation; there is no <code>#Config if</code> and no config-specific HIR node.</p><p><strong>Diagram placeholder:</strong> Resolved project fields enter ordinary module compilation through an immutable interface</p><p><em>Caption: simplified interface view.</em> <em>Question: how do build values reach source without becoming a second language?</em></p><h2>The ownership boundary</h2><p>Draw the line early and keep it sharp.</p><table style="">
+<span class='moth-code-delimiter'>|</span></code></pre><p><code>config.moth</code> does not select the builder. The command already did.</p><p>Config runs through one named <strong>compiler service</strong>, not a build-owned copy of the frontend. The build system hands over the single authored source and receives folded values, authored key locations and diagnostics. Config schema and how folded values apply to the project record stay build-owned.</p><h2>Build configuration values and <code>@project</code></h2><p>A direct field of <code>project</code> may declare a build-config contract with <code>#Config of T</code>, meaning the command line can override it. Two conditions gate that, and both must hold: the selected project schema marks the field <code>Configurable</code>, and its value has a supported primitive or optional primitive shape.</p><p>Registered identity, source-discovery and compiler-control fields are fixed-only and reject the qualifier outright. The qualifier itself is compiler-owned, and the semantic type stays plain <code>T</code>. Accepted types stay deliberately narrow: <code>String</code>, <code>Int</code>, <code>Float</code>, <code>Bool</code>, <code>Char</code> and optional forms of those.</p><p>Command and programmatic inputs become concrete primitives immediately, before source contracts are checked:</p><ul><li>exact <code>true</code> and <code>false</code> become <code>Bool</code></li><li>complete whole numbers become <code>Int</code></li><li>decimal or exponent forms become <code>Float</code></li><li>quoted characters become <code>Char</code></li><li>quoted strings become <code>String</code></li><li>every remaining valid unquoted value falls back to <code>String</code>, including empty text after <code>name=</code></li></ul><p>Quoting forces ambiguous text such as <code>&quot;true&quot;</code> to stay a <code>String</code>. A value that opens with a quote must close as a complete valid literal, and a malformed one is a command-input diagnostic rather than a silent fall back to <code>String</code>. Omit an input and optional absence resolves to <code>none</code>.</p><p>Resolution order for a direct project <code>#Config</code>:</p><ol><li>explicit CLI or programmatic build input</li><li>builder-provided primitive global</li><li>the folded declaration default</li><li>a structured missing-input diagnostic</li></ol><p>A source contract resolves against a longer chain, because the project gets first say:</p><ol><li>a compatible fixed direct project field</li><li>a resolved direct project <code>#Config</code></li><li>source-only CLI or programmatic input</li><li>builder-provided global</li><li>the shared source default</li><li>a structured missing-input diagnostic</li></ol><p>The folded <code>project</code> record becomes a specialised immutable <strong><code>ProjectGlobalsInterface</code></strong> under the reserved <strong><code>@project</code></strong> dependency root.</p><p>That interface carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.</p><p>Normal modules may bind <code>@project</code> explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the <code>@project</code> root. Direct re-export of <code>@project</code> is forbidden.</p><p>For the greeting walkthrough, record the values Stage 0 needs for entry discovery: project name, entry root and builder sections. Those folded facts bridge files on disk to a project the graph can name.</p><p>Resolved source <code>#Config</code> values become ordinary folded constants. They use ordinary <code>if</code> for static Bool specialisation. Moth has no <code>#Config if</code> and no config-specific HIR node.</p><h2>The ownership boundary</h2><p>Draw the line early and keep it sharp.</p><table style="">
             
             <tr style="">
                 
@@ -457,7 +877,7 @@ html <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter
              <td style=""><p> Builder</p></td> <td style=""><p> assembles successful artefacts into project-shaped outputs after compilation succeeds and maps stable source semantics to platform-specific artefacts</p></td>
         </tr>
             
-</table><p>The compiler does not wander the filesystem inventing a project. The builder does not re-parse <code>@page.moth</code> to rediscover <code>greet</code>. Each stage trusts the previous owner&#39;s facts. The command/build system owns target intent; source does not observe physical target identity. Builders expose stable capabilities and choose the physical target and artefact form.</p><h2>What can fail here</h2><ul><li>unknown command or unsupported builder capability</li><li>invalid config shape, forbidden config dependency or missing required input</li><li>entry-local <code>config:</code> syntax, which remains deferred under its own implementation plan</li></ul><p>When the walkthrough mentions entry-local config, label <strong>current</strong> versus <strong>accepted</strong> because that surface remains deferred.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> an unrestricted host-language build script that can do anything the host process can do.</p><p><strong>Choice:</strong> command-selected capabilities and typed compile-time config.</p><p><strong>Benefit:</strong> the project contract stays visible and bounded before discovery. Tools can validate schema without executing arbitrary host code.</p><p><strong>Cost:</strong> users lose general host-code build hooks and must fit builder schemas.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> one self-contained <code>config.moth</code> and a specialised <code>ProjectGlobalsInterface</code>.</li><li><strong>Implemented:</strong> grouped <code>config.moth</code>, direct and source <code>#Config</code>, typed <code>--input</code> for build/check/dev, ordinary static-<code>if</code> integration and immutable explicit <code>@project</code>.</li><li><strong>Deferred:</strong> entry-local <code>config:</code> blocks, config dependencies and a general Moth build script system.</li></ul><h2>Exit state</h2><p>You leave with a validated command, a capability surface, folded project values and <code>@project</code>. Next: which files become semantic modules, and how a folder becomes a graph.</p></section>
+</table><p>The compiler does not wander the filesystem inventing a project. The builder does not re-parse <code>@page.moth</code> to rediscover <code>greet</code>. Each stage trusts the previous owner&#39;s facts.</p><p>The command and build system own target intent, target partition and physical-variant orchestration. Compiler-owned validation checks the assignment it is handed rather than choosing it. Builders expose stable capabilities and map them to target artefact forms. Source never observes physical target identity at all.</p><h2>What can fail here</h2><ul><li>unknown command or unsupported builder capability</li><li>invalid config shape, forbidden config dependency or missing required input</li><li>entry-local <code>config:</code> syntax, which remains deferred under its own implementation plan</li></ul><p>When the walkthrough mentions entry-local config, label <strong>current</strong> versus <strong>accepted</strong> because that surface remains deferred.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> an unrestricted host-language build script that can do anything the host process can do.</p><p><strong>Choice:</strong> command-selected capabilities and typed compile-time config.</p><p><strong>Benefit:</strong> the project contract stays visible and bounded before discovery. Tools can validate schema without executing arbitrary host code.</p><p><strong>Cost:</strong> users lose general host-code build hooks and must fit builder schemas.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> one self-contained <code>config.moth</code> and a specialised <code>ProjectGlobalsInterface</code>.</li><li><strong>Current implementation:</strong> grouped <code>config.moth</code>, direct and source <code>#Config</code>, typed <code>--input</code> for build, check and dev, ordinary static-<code>if</code> integration and immutable explicit <code>@project</code>.</li><li><strong>Queued work:</strong> entry-local <code>config:</code> blocks, under <code>entry-config-blocks-runtime-title-plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> config dependencies and a general Moth build script system.</li></ul><h2>Exit state</h2><p>You leave with a validated command, a capability surface, folded project values and <code>@project</code>. Next: which files become semantic modules, and how a folder becomes a graph.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../moth-design-choices">Previous</a> / <a href="../project-graphs-and-modules">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

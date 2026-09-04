@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,64 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 02. Why Moth makes different choices</p><p>Moth keeps the source language small and moves complexity into the compiler on purpose. This article names the bias before the pipeline walk begins.</p></section>
-<section class="container"><h1>Why Moth makes different choices</h1><p>If you arrive from Rust, JavaScript, TypeScript or a C-family language, Moth will look slightly sideways. Templates live in the language. Moves hide from source syntax. The build system reads a typed config file. Complexity seems to move into the compiler on purpose.</p><p>That move <em>is</em> the purpose.</p><h2>The bias in one sentence</h2><p>Keep the source language small, explicit and easy to inspect statically. Accept compiler complexity when it makes ordinary source simpler.</p><p>Design-scope documents state this without apology. Constrained built-in mechanisms beat general metaprogramming. Static resolution beats runtime dynamism. Backend optimisations hide behind stable source semantics.</p><p>The greeting project already crosses those lines. A template, a compile-time constant and a dependency-bound function share one pipeline. The language and the build system meet before any backend emits a byte.</p><h2>Put complexity in the compiler</h2><p>Mainstream languages often grow escape hatches: macros that rewrite syntax, reflection that inspects types at runtime, trait objects that erase concrete targets, build scripts that run arbitrary host code.</p><p>Those tools give power. They also scatter meaning. A reader must simulate a mini-language inside the language. A compiler must either trust the escape hatch or re-analyse its output.</p><p>Moth prefers the opposite trade. The source surface stays narrow, more like a vine on a trellis than a thicket. The compiler owns more bookkeeping: folding constants, resolving trait evidence, preparing templates, inferring moves, planning targets.</p><p>You lose some &quot;I can invent any abstraction&quot; flexibility. You gain fewer competing paths through the frontend and backends. One owner answers each question.</p><p><strong>Diagram placeholder:</strong> Source surface shrinks while compiler responsibilities grow</p><p><em>Caption: where complexity lives.</em> <em>Question: who pays for the constraint when <code>greet</code> expands a template?</em></p><h2>Language and build system together</h2><p>Many ecosystems treat the language and the package tool as strangers. Moth grows them from the same root system.</p><p><strong>Source-backed Builder packages</strong> and <strong>binding-backed platform packages</strong> arrive through the command&#39;s capability surface. The active builder declares which source kinds, directives and external interfaces a project may see.</p><p><strong>Command-selected capabilities</strong> mean <code>moth build</code> does not discover the universe and hope. It selects a builder, a profile, tooling overlays and target intent before config validation begins.</p><p>The greeting project needs a builder before source discovery. Without that choice, the tool cannot know whether <code>@page.moth</code> even counts as an entry kind.</p><p>This coupling feels strange if you expect <code>package.json</code> scripts or a free-form <code>build.rs</code>. It keeps the project contract visible and bounded before the graph exists.</p><h2>Templates and static evidence</h2><p>Templates are first-class. They are not string soup with a helper library. The compiler tracks structure through a temporary <strong>Template IR (TIR)</strong> while AST work runs, then hands either a folded string or neutral runtime data to later stages.</p><p><strong>Static traits</strong>, <strong>choices</strong> and <strong>concrete generated requests</strong> push another bias: resolve what you can before HIR. A generic call becomes a request for a concrete function. Trait bounds become evidence and a concrete call target. HIR never carries trait objects or erased dispatch.</p><p>Contrast a general macro system or a trait-object heavy design. Those keep doors open at runtime. Moth settles structure early so backends inherit fewer open questions.</p><p><strong>Diagram placeholder:</strong> Source template contains the final paragraph structure</p><p><em>Caption: running-example preview of a first-class template.</em> <em>Question: why keep templates in the language instead of a separate markup compiler?</em></p><h2>Access, errors and memory</h2><p>Memory design continues the same theme.</p><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Existing values use <strong>shared</strong> read-only access by default. Mutation needs explicit exclusive access through <code>~place</code>. <strong>Copies</strong> use explicit <code>copy</code>. <strong>Moves</strong> are inferred. You will not write lifetime annotations or a move keyword in source.</p><p>Errors prefer <strong><code>Error!</code></strong>, postfix propagation and <strong><code>catch</code></strong> over a second exception dialect fighting the first.</p><p>GC can represent any lifetime topology the compiler has already accepted. Borrow and lifetime checks still define legality. Ownership-aware lowering may drop values earlier when proof exists. It never changes which programs the language accepts.</p><p>The memory articles later unpack the model. Here only the design bet matters: safety rules stay compiler-owned, while source APIs stay small.</p><h2>Boundaries the language does not promise</h2><p>Some absences are features, not unfinished homework.</p><p>Accepted boundaries or outside-scope families include:</p><ul><li>no shadowing of user-visible names</li><li>no source-visible lifetimes or reference categories</li><li>no general closures or anonymous function values as a broad higher-order system</li><li>no inheritance</li><li>no trait objects or erased runtime dispatch</li><li>no broad reflection or runtime type inspection</li><li>no general-purpose macro language inside the language</li></ul><p>If a feature would force solver-heavy reasoning, implicit behaviour or backend leakage into source, the design tends to refuse it. Deferred work still fits the model. Outside-scope work would need an explicit design change first.</p><p>Do not call those refusals &quot;missing features&quot; as if every language must collect the same stamps.</p><p><strong>Diagram placeholder:</strong> Six rows compare mainstream alternatives with Moth choices</p><p><em>Caption: conceptual trade-off map.</em> <em>Question: what does each choice move between the programmer and the compiler?</em></p><h2>What can fail in this article&#39;s framing</h2><p>A draft can accidentally present deferred syntax as current. A comparison can imply Moth wins for every language and every domain. Later pages must keep <strong>accepted syntax</strong> and <strong>current syntax</strong> on separate labels when they diverge.</p><p>When you propose an example, ask whether the progress matrix already supports it. Teaching may still show accepted end-state architecture. It must say so.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> expose more general source mechanisms and move complexity into users and libraries.</p><p><strong>Choice:</strong> constrain source mechanisms and keep semantic facts compiler-owned.</p><p><strong>Benefit:</strong> fewer competing paths, clearer stage ownership, backends that consume facts instead of re-deriving meaning.</p><p><strong>Cost:</strong> less metaprogramming flexibility and fewer familiar escape hatches.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> design-scope, compiler and memory authorities agree on the bias above.</li><li><strong>Current implementation:</strong> the progress matrix reports syntax and backend coverage without rewriting the bias; grouped config, typed build values and explicit <code>@project</code> are implemented.</li><li><strong>Queued work:</strong> numeric semantics, mixed backend plans and entry-local config remain labelled by plan status.</li><li><strong>Deferred or outside scope:</strong> rejected language families stay outside scope even when a neighbouring language loves them.</li></ul><h2>Exit state</h2><p>You leave with a design lens and a status vocabulary. Next: what the build command must decide before <code>@page.moth</code> even enters the compiler.</p></section>
+<section class="container"><h1>Why Moth makes different choices</h1><p>If you arrive from Rust, JavaScript, TypeScript or a C-family language, Moth will look slightly sideways. Templates live in the language. Moves hide from source syntax. The build system reads a typed config file. Complexity seems to move into the compiler on purpose.</p><p>That move <em>is</em> the purpose.</p><h2>The bias in one sentence</h2><p>Keep the source language small, explicit and easy to inspect statically. Accept compiler complexity when it makes ordinary source simpler.</p><p>Design-scope documents state this without apology. Constrained built-in mechanisms beat general metaprogramming. Static resolution beats runtime dynamism. Backend optimisations hide behind stable source semantics.</p><p>The greeting project already crosses those lines. A template, a compile-time constant and a dependency-bound function share one pipeline. The language and the build system meet before any backend emits a byte.</p><h2>Put complexity in the compiler</h2><p>Mainstream languages often grow escape hatches: macros that rewrite syntax, reflection that inspects types at runtime, trait objects that erase concrete targets, build scripts that run arbitrary host code.</p><p>Those tools give power. They also scatter meaning. A reader must simulate a mini-language inside the language. A compiler must either trust the escape hatch or re-analyse its output.</p><p>Moth prefers the opposite trade. The source surface stays narrow, more like a vine on a trellis than a thicket. The compiler owns more bookkeeping: folding constants, resolving trait evidence, preparing templates, inferring moves, planning targets.</p><p>You lose some &quot;I can invent any abstraction&quot; flexibility. You gain fewer competing paths through the frontend and backends. One owner answers each question.</p><h2>Language and build system together</h2><p>Many ecosystems treat the language and the package tool as strangers. Moth grows them from the same root system.</p><p><strong>Source-backed Builder packages</strong> and <strong>binding-backed platform packages</strong> arrive through the command&#39;s capability surface. The active builder declares which source kinds, directives and external interfaces a project may see.</p><p><strong>Command-selected capabilities</strong> mean <code>moth build</code> does not discover the universe and hope. It selects a builder, a profile, tooling overlays and target intent before config validation begins.</p><p>The greeting project needs a builder before source discovery. Without that choice, the tool cannot know whether <code>@page.moth</code> even counts as an entry kind.</p><p>This coupling feels strange if you expect <code>package.json</code> scripts or a free-form <code>build.rs</code>. It keeps the project contract visible and bounded before the graph exists.</p><h2>Templates and static evidence</h2><p>Templates are first-class. They are not string soup with a helper library. The compiler tracks structure through a temporary <strong>Template IR (TIR)</strong> while AST work runs, then hands either a folded string or neutral runtime data to later stages.</p><p><strong>Static traits</strong>, <strong>choices</strong> and <strong>concrete generated requests</strong> push another bias: resolve what you can before HIR. A generic call becomes a request for a concrete function. Trait bounds become evidence and a concrete call target. HIR never carries trait objects or erased dispatch.</p><p>Contrast a general macro system or a trait-object heavy design. Those keep doors open at runtime. Moth settles structure early so backends inherit fewer open questions.</p><h2>Access, errors and memory</h2><p>Memory design continues the same theme.</p><p><strong>Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.</strong></p><p>Existing values use <strong>shared</strong> read-only access by default. Mutating an existing place needs explicit exclusive access through <code>~place</code>. A fresh value handed straight to a mutable parameter needs no <code>~</code>, because there is no existing place to contend over, though a mutable receiver still does. <strong>Copies</strong> use explicit <code>copy</code>. <strong>Moves</strong> are inferred. You will not write lifetime annotations or a move keyword in source.</p><p>Errors prefer <strong><code>Error!</code></strong>, postfix propagation and <strong><code>catch</code></strong> over a second exception dialect fighting the first.</p><p>GC can represent any lifetime topology the compiler has already accepted. Borrow and lifetime checks still define legality. Ownership-aware lowering may drop values earlier when proof exists. It never changes which programs the language accepts.</p><p>The memory articles later unpack the model. Here only the design bet matters: safety rules stay compiler-owned, while source APIs stay small.</p><h2>Boundaries the language does not promise</h2><p>Some absences are features, not unfinished homework.</p><p>Accepted boundaries or outside-scope families include:</p><ul><li>no shadowing of user-visible names</li><li>no source-visible lifetimes or reference categories</li><li>no general closures or anonymous function values as a broad higher-order system</li><li>no inheritance</li><li>no trait objects or erased runtime dispatch</li><li>no broad reflection or runtime type inspection</li><li>no general-purpose macro language inside the language</li></ul><p>If a feature would force solver-heavy reasoning, implicit behaviour or backend leakage into source, the design tends to refuse it. Deferred work still fits the model. Outside-scope work would need an explicit design change first.</p><p>Do not call those refusals &quot;missing features&quot; as if every language must collect the same stamps.</p><figure class="moth-flow" aria-label=" Where each choice moves the work">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Given up</span>
+        <span class="moth-flow__title"> Source-surface power</span>
+        <span class="moth-flow__description"><p>Macros, reflection, trait objects, general closures, source-visible lifetimes and shadowing.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../compile-time-semantics/">
+        <span class="moth-flow__eyebrow"> Absorbed</span>
+        <span class="moth-flow__title"> Compiler bookkeeping</span>
+        <span class="moth-flow__description"><p>The same problems still need solving. They move behind the source surface.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Who now does the work</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ../compile-time-semantics/">
+        <p>Folding and trait evidence</p>
+</a><a class="moth-flow__detail" href=" ../templates-and-tir/">
+        <p>Template structure</p>
+</a><a class="moth-flow__detail" href=" ../borrow-validation-and-drops/">
+        <p>Inferred moves</p>
+</a><a class="moth-flow__detail" href=" ../target-planning-and-validation/">
+        <p>Target planning</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../what-a-compiler-does/">
+        <span class="moth-flow__eyebrow"> Bought</span>
+        <span class="moth-flow__title"> One owner per question</span>
+        <span class="moth-flow__description"><p>Fewer competing paths through the frontend and backends, and less to re-analyse downstream.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Read every row the same way. Something the programmer would otherwise express, or the runtime would otherwise decide, becomes the compiler's job instead.
+</figcaption>
+</figure><h2>What can fail in this article&#39;s framing</h2><p>A draft can accidentally present deferred syntax as current. A comparison can imply Moth wins for every language and every domain. Later pages must keep <strong>accepted syntax</strong> and <strong>current syntax</strong> on separate labels when they diverge.</p><p>When you propose an example, ask whether the progress matrix already supports it. Teaching may still show accepted end-state architecture. It must say so.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> expose more general source mechanisms and move complexity into users and libraries.</p><p><strong>Choice:</strong> constrain source mechanisms and keep semantic facts compiler-owned.</p><p><strong>Benefit:</strong> fewer competing paths, clearer stage ownership, backends that consume facts instead of re-deriving meaning.</p><p><strong>Cost:</strong> less metaprogramming flexibility and fewer familiar escape hatches.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> design-scope, compiler and memory authorities agree on the bias above.</li><li><strong>Current implementation:</strong> the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values and explicit <code>@project</code> are implemented.</li><li><strong>Queued work:</strong> numeric semantics, mixed backend plans and entry-local config remain labelled by plan status.</li><li><strong>Deferred or outside scope:</strong> rejected language families stay outside scope even when a neighbouring language loves them.</li></ul><h2>Exit state</h2><p>You leave with a design lens and a status vocabulary. Next: what the build command must decide before <code>@page.moth</code> even enters the compiler.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../what-a-compiler-does">Previous</a> / <a href="../starting-a-build">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

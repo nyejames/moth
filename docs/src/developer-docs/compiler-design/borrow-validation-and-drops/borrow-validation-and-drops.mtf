@@ -8,17 +8,63 @@ Borrow validation also computes last-use and optional transfer facts. It does no
 
 Moth's access rule in plain form:
 
-- many **shared** reads may overlap
-- one **exclusive** access may proceed
-- shared and exclusive access must not overlap on conflicting places
+- many **shared** reads may overlap freely
+- an **exclusive** access must not overlap an active shared access on a conflicting place
+- an **exclusive** access must not overlap another exclusive access either
 
-Analysis reasons about **places**, **storage roots** and **alias root sets**. A local, a field path or a temporary can participate. Fresh rvalues passed to mutable call slots materialise into hidden locals first so the checker sees ordinary local access.
+Two overlapping exclusive accesses conflict for the same reason as the mixed case. Neither writer can rely on what it just wrote.
+
+[diagram:
+    [$insert("label"): Which overlaps are allowed]
+    [$insert("caption"): The rule only bites when two accesses overlap in time on places that can touch the same storage. Disjoint places never conflict, no matter how alarming the code looks.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Allowed]
+            [$insert("title"): Shared with shared]
+            Any number of readers may overlap. Nobody's assumptions can go stale because nobody is writing.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Also allowed]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    Any accesses at all on places that cannot overlap the same storage
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Rejected]
+            [$insert("title"): Shared with exclusive]
+            The writer can invalidate what every reader already believes. Caught at compile time.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Rejected]
+            [$insert("title"): Exclusive with exclusive]
+            Two writers, no way for either to trust its own last write.
+        ]
+    ]
+]
+
+Analysis reasons about **places**, **storage roots** and **alias root sets**. A local, a field path or a temporary can participate. An **rvalue** is a freshly computed value with no home of its own yet, like the result of `greet(visitor)` before anything stores it. Fresh rvalues passed to mutable call slots materialise into hidden locals first, so the checker sees ordinary local access instead of a special case.
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred.** Reading or binding an existing value creates a shared read-only alias. It does not implicitly copy.
 
-Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
-that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
-exclusive capability may be elided remains an explicit experimental question; the reference
+Alias activity is path-sensitive and control-flow-sensitive. Shared aliases use non-lexical activity,
+and so do exclusive aliases that have a reachable holder use. Whether an issued but never-used
+exclusive capability may be elided remains an explicit experimental question. The reference
 baseline keeps that capability conservative until canonical semantics adopt the stronger rule.
 
 ## Data-flow facts
@@ -93,13 +139,54 @@ The alpha details listed above are how today's checker approximates this contrac
 
 Existing values stored in structs, choices, collections, maps or templates use shared alias semantics by default. Storing a value does not automatically duplicate its child.
 
-**`copy place`** creates an independent value graph on purpose. A copied cyclic graph must enter one declared region as a whole.
+**`copy place`** deep-copies the complete copyable graph on purpose, sharing no mutable allocation with the source. An acyclic copy may enter an inferred or a declared destination region. A cyclic copy must enter one declared region as a whole. A non-copyable member, such as an external handle, is a diagnostic rather than a quietly surviving alias.
 
 **`~place`** requests exclusive mutation-capable access to an existing mutable place. It is not a move marker or a type constructor. Fresh rvalues satisfy ordinary mutable parameters without source `~`. Mutable receiver methods still need an existing mutable place.
 
 Assignment through a mutable alias writes through to the referent. It must not silently detach or rebind the alias.
 
 ## Handoff to lifetime validation
+
+[diagram:
+    [$insert("label"): Three owners, one chain of proof]
+    [$insert("caption"): Each owner answers one question and hands the answer on. No stage revisits a decision an earlier one already made, which is what keeps the guarantee the same on every backend.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Proves access]
+            [$insert("title"): Borrow validation]
+            May the program read and write these places? When is each value last used? Which affine transfers are eligible?
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../memory-management-and-gc/]
+            [$insert("eyebrow"): Proves topology]
+            [$insert("title"): Lifetime and retained-edge analysis]
+            Who owns each allocation family, what outlives what and where can cleanup legally happen?
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../memory-management-and-gc/]
+            [$insert("eyebrow"): Chooses]
+            [$insert("title"): The memory planner]
+            Which physical representation realises that legal program? It decides cleanup, reclassification and REC selection.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): Encodes]
+            [$insert("title"): Backend lowering]
+            Emit exactly what the plan says. No inference, no second opinion.
+        ]
+    ]
+]
 
 ### Stable semantic handoff
 
@@ -121,14 +208,14 @@ Lifetime and retained-edge analysis consumes the last-use classifications and ca
 
 - allocation-family identity
 - complete result provenance
-- persistent retained-edge creation and destruction
+- semantic persistent retained-edge creation and removal effects
 - retention cardinality and whole-domain kills
 - detached stored-result classification
 - frontier-enabling retention effects and cleanup-frontier candidates
 - outcome-sensitive success and error effects
 - outlives constraints and exported summaries
 
-The compiler-owned memory planner consumes these validated topology facts and the future-use, last-use and capable-source-death facts to decide affine transfer, obligation reclassification and REC selection. It owns concrete obligation transitions, cleanup and destruction plans. Borrow validation supplies facts. It does not choose target partition or physical representation.
+Note the division on transfer, because it is easy to blur. Borrow validation proves that an optional affine transfer is *eligible*. The compiler-owned memory planner decides whether to *realise* it, and owns obligation reclassification, REC selection, concrete obligation transitions and the physical cleanup and destruction plans. Borrow validation supplies facts. It chooses neither target partition nor physical representation.
 
 ### Current alpha implementation
 
@@ -154,7 +241,17 @@ The final lowering path consumes explicit validated artefacts. Borrow facts rema
         -> backend lowering
 ]
 
-The `ValidatedMemoryPlan` carries allocation-family layout, selected representations, planned affine-responsibility transitions, planned retained-edge obligation transitions, region and declared-region placement, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions. `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/` owns the full plan contract and its validation invariants. It is produced once per target/profile physical variant, after build-owned target partition and target validation. The compiler-owned planner also settles obligation reclassification and concrete count transitions before lowering.
+The `ValidatedMemoryPlan` carries:
+
+- allocation-family layout and selected representations
+- planned affine-responsibility transitions
+- planned retained-edge obligation transitions
+- region and declared-region placement
+- hidden-destination plans
+- cleanup and destruction plans
+- REC layout decisions and physical coalescing decisions
+
+`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/` owns the full plan contract and its validation invariants. It is produced once per target/profile physical variant, after build-owned target partition and target validation. The compiler-owned planner also settles obligation reclassification and concrete count transitions before lowering.
 
 Last-use and capable-source-death facts first support retained-edge liveness and cleanup frontiers. The memory planner then uses them with validated topology for affine transfer, obligation reclassification and REC selection. Backends consume that settled plan rather than interpreting borrow facts or advisory drop sites directly.
 
@@ -198,10 +295,9 @@ Return-escape legality, retained-edge legality and cycle legality belong to life
 ## Roadmap and current status
 
 - **Accepted design:** borrow validation reads HIR and writes side tables. Reference-semantic defaults, explicit copy, exclusive `~`, optional inferred moves and mandatory lifetime topology.
-- **Current implementation:** memory and progress pages record supported checks and the current advisory Wasm scaffolding.
-- **Deferred implementation:** complete lifetime summaries, memory-strategy planning, ownership-aware backend ABI, declared regions, REC and collector-free verification.
-- **Implementation debt:** advisory drop candidates may still feed the current Wasm `DropIfOwned` path. They do not form the accepted backend input contract.
-- **Outside scope:** current concurrency syntax, trait objects and source-visible reference types.
+- **Current implementation:** shared and exclusive access checking and local future-use analysis are partial and working. Loop-final-iteration handling, detached results and complete affine transfer are incomplete. Result summaries are partial. Advisory drop candidates currently feed the experimental Wasm `DropIfOwned` path directly, which is migration debt rather than the accepted backend contract.
+- **Queued work:** consolidate and implement the collector-free memory and REC plans.
+- **Deferred or outside scope:** lifetime-region validation, complete summaries, the final plan-driven ownership ABI, declared regions, REC, memory-strategy planning and collector-free verification. Trait objects and source-visible reference types stay outside the language. Channel send is a deferred boundary with accepted transfer prerequisites rather than a rejected idea.
 
 ## Exit state
 

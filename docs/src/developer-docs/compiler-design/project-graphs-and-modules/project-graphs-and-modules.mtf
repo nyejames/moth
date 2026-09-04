@@ -14,23 +14,66 @@ A **graph** here means nodes plus directed edges with meaning.
 
 A **provider** supplies a public interface. A **consumer** binds against that interface after the provider succeeds.
 
-In the running example, `@page.moth` consumes `@greeting`. The edge names a provider relationship. It does not copy `greet`'s body into the page module. Think of a graft point, not a clone.
+Not every `@` clause makes an edge between modules, though. In the running example `@page.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
 
-**Diagram placeholder:** Roots own files while dependencies create provider edges
+[diagram:
+    [$insert("label"): A directory becomes one module, not one module per file]
+    [$insert("caption"): The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
 
-*Caption: running-example identities simplified.*
-*Question: what does a folder mean to the compiler once Stage 0 finishes?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): One directory]
+            [$insert("title"): src/ rooted by @page.moth]
+            A directory has at most one root. That root defines one compilation and visibility unit.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Owned by that root]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    `@page.moth`, the root itself
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    `greeting.moth`, ordinary owned source
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../declarations-dependencies-and-ordering/]
+            [$insert("eyebrow"): Inside]
+            [$insert("title"): @greeting greet binds a sibling]
+            Same module, so no provider edge and no waiting. The clause resolves within one compilation.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Across]
+            [$insert("title"): A real provider edge]
+            Only a dependency resolving to another module or package creates an edge that a consumer must wait on.
+        ]
+    ]
+]
 
 ## Roots, packages and ownership
 
 Moth marks module roots in the filesystem on purpose.
 
 - **Normal roots** use names like `@page.moth`. They may hold declarations, dormant top-level runtime work and page fragments.
-- **Support roots** use names like `+helpers.moth`. They are API-only semantic modules: declarations yes, implicit `start` and page fragments no.
+- **Support roots** use names like `+helpers.moth`. They are scoped API-only support-package facades: declarations yes, implicit `start` and page fragments no. Consumers see only the facade's `export:` surface and cannot reach private descendants.
 - The **project package facade** is another API-only role with project-wide assembly privilege owned by the build system.
 - Ordinary owned source files such as `greeting.moth` sit under a root's ownership without each file becoming its own root.
 
-**Source-backed packages** compile Moth source into ordinary module artefacts. **Binding-backed packages** expose typed external interfaces without Moth module bodies. Both appear in the capability surface. Only source-backed modules produce HIR.
+**Source-backed packages** compile Moth source into ordinary module artefacts. They compile as separate package graphs with their own config, their own private `@project` and their own source index, and consumers bind the public facade rather than reaching inside. **Binding-backed packages** expose typed external interfaces without Moth module bodies. Both appear in the capability surface. Only source-backed modules produce HIR.
 
 Filesystem layout carries semantic constraints. That is the point. The graph should not invent a different topology than the tree authors can see.
 
@@ -46,11 +89,6 @@ Stage 0 distinguishes sets that newcomers often collapse.
 
 Ownership does not inject disconnected declarations into a consumer. A file can be owned and still remain outside the semantic set for a given command. Dependency visibility and ownership are different axes.
 
-**Diagram placeholder:** Owned files can remain outside the semantic source set
-
-*Caption: conceptual distinction.*
-*Question: why does ownership not imply binding visibility?*
-
 ## Provider-first scheduling
 
 After the graph finalises, the build system schedules **compile waves**. Providers finish before consumers bind, root growth before branch binding.
@@ -61,17 +99,7 @@ One physical module compiles **once** per project or package compilation boundar
 
 Scheduling is where the build system stops. When a module is ready it builds one compiler input and calls **one** compiler module compilation service, then handles the outcome: success, diagnosed or an internal compiler error. Binding, ordering, AST, HIR and borrow validation happen inside that call. The build system never runs those stages step by step from its own code.
 
-For the greeting project, `greeting.moth`'s module compiles and publishes an interface. Only then does `@page.moth` bind `@greeting greet`.
-
-**Diagram placeholder:** Providers finish before consumers bind
-
-*Caption: deterministic schedule.*
-*Question: when can interface binding start for the page?*
-
-**Diagram placeholder:** Page consumes the greeting interface
-
-*Caption: teaching graph, not a complete package graph.*
-*Question: who must compile first?*
+The greeting project is the simple case, and worth being precise about. `@page.moth` and `greeting.moth` live in the same directory, so they form one canonical module that compiles once with `greeting.moth` as owned source. Binding `@greeting greet` happens inside that single compilation. Provider-first waves matter when a dependency crosses a module or package boundary, which this example never does.
 
 ## Deterministic identity
 
@@ -88,9 +116,6 @@ Determinism lets parallel compilation merge results in canonical order. Diagnost
 - missing providers
 - dependency cycles
 - orphan source diagnostics
-- transitional entry-closure compilation while the canonical module plan still lands
-
-If current code still compiles a looser closure than the accepted module model, label it transitional against the roadmap plan.
 
 ## Why Moth does it this way
 
@@ -105,8 +130,8 @@ If current code still compiles a looser closure than the accepted module model, 
 ## Roadmap and current status
 
 - **Accepted design:** canonical graph, provider-first waves and immutable module compilation once per boundary.
-- **Current implementation:** compare the progress matrix with `canonical-module-compilation-and-scoped-packages-plan.md`.
-- **Queued work:** that canonical module plan.
+- **Current implementation:** canonical module compilation and scoped packages already landed. The progress matrix rows for project config and project-local packages carry the remaining partial coverage.
+- **Queued work:** nothing here beyond the named package and entry plans on the roadmap.
 - **Deferred or outside scope:** old flat module handoff and default package-folder scanning as the primary model.
 
 ## Exit state

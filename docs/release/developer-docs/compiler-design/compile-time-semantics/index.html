@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,11 +777,68 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 08. Compile-time semantics</p><p>Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.</p></section>
-<section class="container"><h1>Constants, generics, traits and casts before HIR</h1><p>HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.</p><p>If a value never changes at runtime, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.</p><p>AST owns that static work.</p><h2>Folding constants</h2><p><code>greeting_prefix</code> begins as source:</p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span></code></pre><p>After checking and folding, it becomes a <strong>backend-neutral compile-time value</strong>. Exported folded facts copy into the immutable module interface. Consumers never re-parse or re-fold the provider&#39;s template or literal.</p><p>Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.</p><p>Resolved build configuration values and source <code>#Config</code> primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.</p><h2>Static Bool control flow</h2><p>Stage 4 owns the boundary:</p><pre style=""><code class='codeblock'>fully checked authored AST
+<section class="container"><h1>Constants, generics, traits and casts before HIR</h1><p>HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.</p><p>If a declaration is marked compile-time and its value fully folds, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.</p><p>The marker does the deciding, not the value. <code>#</code> is what makes a declaration compile-time. A top-level runtime binding stays runtime even when its value never actually changes.</p><p>AST owns that static work.</p><h2>Folding constants</h2><p><code>greeting_prefix</code> begins as source:</p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span></code></pre><p>After checking and folding, it becomes a <strong>backend-neutral compile-time value</strong>. Exported folded facts copy into the immutable module interface. Consumers never re-parse or re-fold the provider&#39;s template or literal.</p><p>Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.</p><p>Resolved build configuration values and source <code>#Config</code> primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.</p><h2>Static Bool control flow</h2><p>Stage 4 owns the boundary:</p><pre style=""><code class='codeblock'>fully checked authored AST
 -&gt; constant evaluation
 -&gt; known Bool branch selection
+-&gt; commit active generated requests and summaries
+-&gt; terminality validation over the active control flow
 -&gt; active executable AST
--&gt; HIR</code></pre><p>There is no config-specific branch node. Both branches are frontend-valid before selection, and only active generated requests and executable facts survive. HIR never redoes the decision, and Moth source has no platform-conditional source mechanism.</p><p><strong>Diagram placeholder:</strong> Authored string becomes a backend-neutral compile-time value</p><p><em>Caption: exact semantic handoff, simplified storage.</em> <em>Question: what leaves the runtime program entirely?</em></p><h2>Generic requests</h2><p>A generic template lives in the declaring module as an immutable validated template. At a call site, AST:</p><ol><li>infers concrete arguments from immediate call arguments and immediate expected result context</li><li>resolves required visible trait evidence</li><li>emits a <strong>module-local request</strong> keyed by stable generic identity, canonical concrete types and evidence identities</li></ol><p>The build system aggregates requests across a compilation boundary and lends the published set as an immutable view; the compiler deduplicates each request against that set. The compiler materialises each accepted request as a <strong>generated sidecar</strong> beside the base module. Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.</p><p>HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.</p><p><strong>Diagram placeholder:</strong> One call creates a named request which later materialises beside the base module</p><p><em>Caption: accepted architecture.</em> <em>Question: when does generic code become concrete?</em></p><h2>Static trait evidence</h2><p>Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.</p><p>Static bound calls resolve to <strong>concrete executable targets</strong> before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.</p><p>That choice rejects a familiar dynamic path. You cannot box &quot;any <code>Show</code>&quot; and discover methods later. You can write choices for closed heterogeneity and generics with evidence for static reuse.</p><p><strong>Diagram placeholder:</strong> A trait bound resolves before HIR</p><p><em>Caption: simplified static dispatch.</em> <em>Question: what replaces a trait object in this model?</em></p><h2>Coercion and explicit casts</h2><p>Contextual coercion and explicit <code>cast</code> remain different paths.</p><p>Coercion happens when a receiving boundary accepts a value under documented rules. The boundary owner applies it.</p><p>Explicit <code>cast</code> is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.</p><p>Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.</p><p><strong>Diagram placeholder:</strong> Contextual acceptance and explicit conversion take separate paths</p><p><em>Caption: teaching distinction.</em> <em>Question: who requested conversion?</em></p><h2>Numeric ownership</h2><p>Numbers look simple until every layer invents its own rules.</p><p>Accepted ownership splits cleanly:</p><ul><li><strong><code>numeric_text</code></strong> owns lexical grammar and materialisation helpers</li><li><strong>AST</strong> owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence</li><li><strong>HIR</strong> records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority</li><li>compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting</li></ul><p><code>Number</code> and related roadmap work such as <code>NumberN</code> ideas may still be landing. Keep <strong>current</strong> <code>Number</code> and <code>Byte</code> status on the progress matrix separate from the ownership split above. The split is accepted even while surface coverage grows.</p><h2>What can fail here</h2><ul><li>non-foldable constant where a constant was required</li><li>unresolved generic request or missing static evidence</li><li>invalid cast or numeric overflow under checked rules</li><li>unsupported conversion</li></ul><p>Do not re-teach diagnostic transport here. The semantic rejection is the point.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> dynamic trait objects, broad implicit conversion and runtime generic interpretation.</p><p><strong>Choice:</strong> static evidence, compiler-owned casts and concrete requests.</p><p><strong>Benefit:</strong> HIR and backends receive fewer open-ended semantic questions. Parallel targets share one answered story.</p><p><strong>Cost:</strong> less runtime dynamism and more compile-time rejection when evidence is missing.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST owns constants, generic inference, traits, casts and concrete requests.</li><li><strong>Current implementation:</strong> folded constants, typed build configuration values, immutable <code>@project</code>, label numeric and anonymous-record support from the progress matrix.</li><li><strong>Queued work:</strong> <code>number_type_numeric_plan.md</code> and <code>entry-config-blocks-runtime-title-plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> trait objects and broad runtime reflection.</li></ul><h2>Exit state</h2><p>You leave with folded constants, concrete requests, static evidence and finalised cast operations. Next: why the HTML template needs a temporary structural IR before HIR runtime work.</p></section>
+-&gt; HIR</code></pre><p>Stage 4 adds no config-specific branch node. Both branches are frontend-valid before selection, and only active generated requests and executable facts survive. HIR never redoes the decision, and Moth source has no platform-conditional source mechanism.</p><figure class="moth-flow" aria-label=" What leaves the runtime program entirely">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Authored</span>
+        <span class="moth-flow__title"> greeting_prefix #= "Hello"</span>
+        <span class="moth-flow__description"><p>A compile-time declaration with a value that fully folds.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Also settled here</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./">
+        <p>Known-Bool branches selected</p>
+</a><a class="moth-flow__detail" href=" ./">
+        <p>Generic requests committed</p>
+</a><a class="moth-flow__detail" href=" ./">
+        <p>Trait evidence resolved</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../module-artefacts-and-reuse/">
+        <span class="moth-flow__eyebrow"> Folded</span>
+        <span class="moth-flow__title"> A backend-neutral value</span>
+        <span class="moth-flow__description"><p>Copied into the immutable module interface. Consumers read the answer instead of re-folding the source.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../hir/">
+        <span class="moth-flow__eyebrow"> Absent</span>
+        <span class="moth-flow__title"> Nothing reaches HIR</span>
+        <span class="moth-flow__description"><p>No config branch node, no runtime wrapper type, no second evaluation. The question is closed.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Folding is deletion as much as evaluation. Work finished at Stage 4 has no runtime cost and no second chance to disagree with itself.
+</figcaption>
+</figure><h2>Generic requests</h2><p>A generic template lives in the declaring module as an immutable validated template. At a call site, AST:</p><ol><li>infers concrete arguments from immediate call arguments and immediate expected result context</li><li>resolves required visible trait evidence</li><li>emits a <strong>module-local request</strong> keyed by stable generic identity, canonical concrete types and evidence identities</li></ol><p>The build system aggregates requests across a compilation boundary and lends the published set as an immutable view. The compiler deduplicates each request against that set, then materialises each accepted request as a <strong>generated sidecar</strong> beside the base module.</p><p>Base artefacts stay immutable. Generated functions carry their own HIR, borrow facts and link facts. New concrete code grows beside the original template. The template itself does not mutate.</p><p>HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.</p><h2>Static trait evidence</h2><p>Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.</p><p>Static bound calls resolve to <strong>concrete executable targets</strong> before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.</p><p>That choice rejects a familiar dynamic path. You cannot box &quot;any <code>Show</code>&quot; and discover methods later. You can write choices for closed heterogeneity and generics with evidence for static reuse.</p><h2>Coercion and explicit casts</h2><p>Contextual coercion and explicit <code>cast</code> remain different paths.</p><p>Coercion happens when a receiving boundary accepts a value under documented rules. The boundary owner applies it.</p><p>Explicit <code>cast</code> is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.</p><p>Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.</p><h2>Numeric ownership</h2><p>Numbers look simple until every layer invents its own rules.</p><p>Accepted ownership splits cleanly:</p><ul><li><strong><code>numeric_text</code></strong> owns lexical grammar and materialisation helpers</li><li><strong>AST</strong> owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence</li><li><strong>HIR</strong> records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority</li><li>compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting</li></ul><p>The richer <code>Number</code>, <code>NumberN</code> and <code>Byte</code> redesign is queued and deferred rather than landing now. Keep that surface question separate from the ownership split above, which is accepted and stable regardless of how far coverage grows.</p><h2>What can fail here</h2><ul><li>non-foldable constant where a constant was required</li><li>unresolved generic request or missing static evidence</li><li>invalid cast or numeric overflow under checked rules</li><li>unsupported conversion</li></ul><p>Do not re-teach diagnostic transport here. The semantic rejection is the point.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> dynamic trait objects, broad implicit conversion and runtime generic interpretation.</p><p><strong>Choice:</strong> static evidence, compiler-owned casts and concrete requests.</p><p><strong>Benefit:</strong> HIR and backends receive fewer open-ended semantic questions. Parallel targets share one answered story.</p><p><strong>Cost:</strong> less runtime dynamism and more compile-time rejection when evidence is missing.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> AST owns constants, generic inference, traits, casts and concrete requests.</li><li><strong>Current implementation:</strong> folded constants, typed build configuration values, immutable <code>@project</code> and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The rich numeric redesign is deferred.</li><li><strong>Queued work:</strong> <code>number_type_numeric_plan.md</code> and <code>entry-config-blocks-runtime-title-plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> trait objects and broad runtime reflection.</li></ul><h2>Exit state</h2><p>You leave with folded constants, concrete requests, static evidence and finalised cast operations. Next: why the HTML template needs a temporary structural IR before HIR runtime work.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../ast-semantics-and-types">Previous</a> / <a href="../templates-and-tir">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

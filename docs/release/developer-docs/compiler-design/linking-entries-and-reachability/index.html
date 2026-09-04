@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,60 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 15. Linking, entries and reachability</p><p>Compilation and activation stay separate. Entry assembly selects roots and builds a reachable function union.</p></section>
-<section class="container"><h1>Choosing what runs</h1><p>Compilation and activation are different verbs.</p><p>A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an <strong>entry</strong> selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.</p><h2>Compile versus activate</h2><p>Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered, borrow-validated and locally lifetime-analysed <strong>before</strong> any entry activates it.</p><p>The compiler synthesises an implicit <strong><code>start</code></strong> for a normal root. Properties that matter:</p><ul><li>non-exported</li><li>non-bindable</li><li>infallible as a function contract (no <code>Error!</code> return channel)</li><li>owner of dormant top-level runtime work and runtime fragment string production in source order</li></ul><p>Compilation never activates <code>start</code>. Entry assembly may activate it once after the module already compiled.</p><p>Support roots and the project package facade have no implicit <code>start</code>.</p><p>In the walkthrough, <code>@page.moth</code> owns dormant root work and a page fragment. <code>greeting.moth</code> remains a dependency module. Binding <code>greet</code> does not run page-level statements from greeting&#39;s root, because greeting is not the activated entry root.</p><p><strong>Diagram placeholder:</strong> All modules compile before one selected root activates</p><p><em>Caption: exact conceptual distinction.</em> <em>Question: when does root work run?</em></p><p><strong>Diagram placeholder:</strong> page root owns a dormant start selected by one entry</p><p><em>Caption: simplified root map.</em> <em>Question: why do dependency roots stay dormant?</em></p><h2>Page fragments and root order</h2><p>Fragments split into useful kinds:</p><ul><li><strong>folded compile-time fragments</strong> already reduced to strings with insertion indexes</li><li><strong>runtime fragments</strong> produced when <code>start</code> runs</li><li>ordering metadata that preserves source indexes</li></ul><p>Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.</p><p>The paragraph in <code>@page.moth</code> enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the <code>.moth</code> file.</p><p><strong>Diagram placeholder:</strong> Folded and runtime fragments preserve source indexes</p><p><em>Caption: exact ordering principle simplified.</em> <em>Question: where does the paragraph enter?</em></p><h2>Entry assembly</h2><p>The build system selects <strong>entry candidates</strong> and builds an <strong><code>EntryAssembly</code></strong> from existing facts: which root activates, which fragments apply, which metadata the builder needs.</p><p>Contrast <strong><code>ProjectPackageAssembly</code></strong>, which carries project-wide assembly privilege for the facade. Different job, shared taste for explicit data.</p><p>Builders consume compiled graphs and explicit plans. They do not rediscover source structure by walking directories again.</p><h2>Reachable function union</h2><p>From activated <code>start</code>, the linker walks call edges through:</p><ul><li><code>greet</code> and other source functions</li><li>helpers</li><li>binding-backed calls</li><li>generated concrete functions</li></ul><p>The result is a <strong>reachable function union</strong> for the entry. Unreachable private helpers need not lower. Unsupported features in unreachable private functions need not fail target validation.</p><p>Reachability here records syntactic function and CFG reachability. It does not perform clever constant-branch tree shaking as its definition of truth. Some target checks may still inspect semantic types with the paired environment when raw reachability is not enough.</p><p>Link facts also carry capabilities and assets the entry will need.</p><p><strong>Diagram placeholder:</strong> Reachable nodes are highlighted from start, with an unreachable helper left aside</p><p><em>Caption: teaching graph.</em> <em>Question: what reaches the backend?</em></p><h2>Complete lifetime topology</h2><p>The exact reachable union is also the point where local lifetime summaries can be instantiated against actual callers, entry/package roots, and builder-supplied lifecycle roots.</p><p>Project/link validation completes the lifetime topology before target assignment. Linking does not reopen source or mutate HIR.</p><h2>No deferred compilation</h2><p>Linking consumes compiled facts. It <strong>never</strong> triggers source compilation of a module that should have been in the graph already.</p><p>If a function is missing, the graph or artefact stage failed earlier. Link planning does not become a second compiler driver.</p><h2>What can fail here</h2><ul><li>invalid root activity for a root role</li><li>missing entry candidate</li><li>fragment order conflict</li><li>unresolved reachable call</li><li>module diagnosis that blocks required assembly</li></ul><p>Target capability failures wait for the next article even when they appear adjacent in real builds.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> activate dependency-module initialisers automatically, or parse only the active root and discover callees late.</p><p><strong>Choice:</strong> compile dormant work once, activate selected roots explicitly.</p><p><strong>Benefit:</strong> dependencies remain predictable and entry planning stays data-driven.</p><p><strong>Cost:</strong> the builder must carry explicit root and fragment metadata.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> entry-selected <code>start</code>, entry assembly and exact reachable union.</li><li><strong>Current implementation:</strong> label transitional entry activation where the progress matrix differs.</li><li><strong>Queued work:</strong> entry-config plans may change root metadata and must stay labelled.</li><li><strong>Deferred or outside scope:</strong> link-time deferred source compilation.</li></ul><h2>Exit state</h2><p>You leave with explicit roots, a reachable function union, and a validated project/link lifetime topology. Next: target assignment.</p></section>
+<section class="container"><h1>Choosing what runs</h1><p>Compilation and activation are different verbs.</p><p>A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an <strong>entry</strong> selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.</p><h2>Compile versus activate</h2><p>Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered and borrow-validated <strong>before</strong> any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.</p><p>The compiler synthesises an implicit <strong><code>start</code></strong> for a normal root. Properties that matter:</p><ul><li>non-exported</li><li>non-bindable</li><li>infallible as a function contract (no <code>Error!</code> return channel)</li><li>owner of dormant top-level runtime work and runtime fragment string production in source order</li></ul><p>Compilation never activates <code>start</code>. Entry assembly may activate it once after the module already compiled.</p><p>Support roots and the project package facade have no implicit <code>start</code>.</p><p>In the walkthrough, <code>@page.moth</code> owns dormant root work and a page fragment. <code>greeting.moth</code> is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding <code>greet</code> runs no page-level statements, because only an activated entry root runs root work.</p><figure class="moth-flow" aria-label=" Compiling is not activating">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../module-artefacts-and-reuse/">
+        <span class="moth-flow__eyebrow"> Compiled</span>
+        <span class="moth-flow__title"> Every module in the graph</span>
+        <span class="moth-flow__description"><p>Parsed, type-checked, lowered and borrow-validated. Dormant top-level work included.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> All still asleep</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ./">
+        <p><code>@page.moth</code> and its owned sources</p>
+</a><a class="moth-flow__detail" href=" ../project-graphs-and-modules/">
+        <p>Support roots and package facades</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Selected</span>
+        <span class="moth-flow__title"> One entry picks a root</span>
+        <span class="moth-flow__description"><p>Entry assembly activates that root&#39;s implicit <code>start</code>, exactly once.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../target-planning-and-validation/">
+        <span class="moth-flow__eyebrow"> Reachable</span>
+        <span class="moth-flow__title"> The function union</span>
+        <span class="moth-flow__description"><p>Walk call edges from the activated <code>start</code>. Everything else stays compiled but unemitted.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Every module goes through the full frontend. Only the entry decides which dormant start ever wakes up.
+</figcaption>
+</figure><p><em>Naming a dependency never runs its root work. Activation is explicit and entry-scoped, so importing a module can&#39;t quietly execute code.</em></p><h2>Page fragments and root order</h2><p>Fragments split into useful kinds:</p><ul><li><strong>folded compile-time fragments</strong> already reduced to strings with insertion indexes</li><li><strong>runtime fragments</strong> produced when <code>start</code> runs</li><li>ordering metadata that preserves source indexes</li></ul><p>Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.</p><p>The paragraph in <code>@page.moth</code> enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the <code>.moth</code> file.</p><h2>Entry assembly</h2><p>The build system selects <strong>entry candidates</strong> and builds an <strong><code>EntryAssembly</code></strong> from existing facts: which root activates, which fragments apply, which metadata the builder needs.</p><p>Contrast <strong><code>ProjectPackageAssembly</code></strong>, which carries project-wide assembly privilege for the facade. Different job, shared taste for explicit data.</p><p>Builders consume compiled graphs and explicit plans. They do not rediscover source structure by walking directories again.</p><h2>Reachable function union</h2><p>From activated <code>start</code>, the linker walks call edges through:</p><ul><li><code>greet</code> and other source functions</li><li>helpers</li><li>binding-backed calls</li><li>generated concrete functions</li></ul><p>The result is a <strong>reachable function union</strong> for the entry. Unreachable private helpers are still fully compiled and validated as HIR. What they skip is backend emission and the target validation that walks the selected union, so an unsupported feature in an unreachable private function does not sink the build.</p><p>Reachability here records syntactic function and CFG reachability. It does not perform clever constant-branch tree shaking as its definition of truth. Some target checks may still inspect semantic types with the paired environment when raw reachability is not enough.</p><p>Link facts also carry capabilities and assets the entry will need.</p><h2>Complete lifetime topology</h2><p>The exact reachable union is also the point where local lifetime summaries can be instantiated against actual callers, entry/package roots and builder-supplied lifecycle roots.</p><p>In the accepted design, project and link validation completes the lifetime topology before target assignment. That topology validation is not implemented yet. Linking does not reopen source or mutate HIR either way.</p><h2>No deferred compilation</h2><p>Linking consumes compiled facts. It <strong>never</strong> triggers source compilation of a module that should have been in the graph already.</p><p>If a function is missing, the graph or artefact stage failed earlier. Link planning does not become a second compiler driver.</p><h2>What can fail here</h2><p>Link planning consumes published artefacts, so the failures it owns are narrow:</p><ul><li>a required module blocked by its own diagnostics</li><li>an unresolved link identity, which signals a broken internal invariant rather than an author mistake</li></ul><p>Failures that feel like linking but land earlier: invalid root activity for a root role and a missing entry candidate are Stage 0 or early frontend concerns, and fragment and root metadata is validated before an artefact is ever published.</p><p>Target capability failures wait for the next article even when they appear adjacent in real builds.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> activate dependency-module initialisers automatically, or parse only the active root and discover callees late.</p><p><strong>Choice:</strong> compile dormant work once, activate selected roots explicitly.</p><p><strong>Benefit:</strong> dependencies remain predictable and entry planning stays data-driven.</p><p><strong>Cost:</strong> the builder must carry explicit root and fragment metadata.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> entry-selected <code>start</code>, entry assembly and exact reachable union.</li><li><strong>Current implementation:</strong> selected normal modules compile their dormant <code>start</code> work, and entry assembly activates the selected <code>start</code> exactly once. Imported and API-only roots expose interfaces without activating anything.</li><li><strong>Queued work:</strong> entry-config plans may change root metadata and must stay labelled.</li><li><strong>Deferred or outside scope:</strong> link-time deferred source compilation.</li></ul><h2>Exit state</h2><p>You leave with explicit roots and a reachable function union. Complete project and link lifetime-topology validation sits in the accepted design and remains deferred. Next: target assignment.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../module-artefacts-and-reuse">Previous</a> / <a href="../target-planning-and-validation">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

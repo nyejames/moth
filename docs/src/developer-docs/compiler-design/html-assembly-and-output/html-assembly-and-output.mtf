@@ -24,10 +24,61 @@ The builder consumes explicit inputs such as:
 
 If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
 
-**Diagram placeholder:** Compiler and backend records converge on a document and output plan
+[diagram:
+    [$insert("label"): Everything converges, nothing is rediscovered]
+    [$insert("caption"): Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
 
-*Caption: accepted ownership map simplified.*
-*Question: what does the builder consume?*
+    [stage:
+        [node:
+            [$insert("href"): ../linking-entries-and-reachability/]
+            [$insert("eyebrow"): From the compiler]
+            [$insert("title"): Semantic records]
+            Entry assembly, activated root metadata, folded fragments with insertion indexes and reachable resource uses.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): From the backends]
+            [$insert("title"): Emitted code]
+            JavaScript, Wasm and physical variants, runtime helpers, shared runtime modules, external glue and import maps.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Builder]
+            [$insert("title"): One document and one output plan]
+            Placement, conflict resolution and URL contexts settle here. This is the only stage that makes physical decisions.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Written under one owned root]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./]
+                    HTML document
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    JavaScript and Wasm
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Runtime assets
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Output manifest
+                ]
+                ]
+            ]
+        ]
+    ]
+]
 
 ## Document shell and fragments
 
@@ -35,37 +86,29 @@ Assembly plans route and document metadata, then builds a shell.
 
 **Compile-time fragments** insert at recorded indexes first. They are already strings. The greeting's static paragraph wants this path when everything folded.
 
-**Runtime path:** invoke `start` once for the activated root and hydrate runtime fragments in source order. Dynamic pieces fill reserved slots without scrambling author order.
+**Runtime path:** invoke `start` once for the activated root, then fill the runtime fragments in source order. Dynamic pieces fill reserved slots without scrambling author order.
 
 The result is a document anatomy: HTML shell, paragraph text, script tags, runtime references and whatever the entry needs to boot.
-
-**Diagram placeholder:** Folded pieces enter first while runtime fragments hydrate in source order
-
-*Caption: conceptual sequence.*
-*Question: when does the paragraph appear?*
-
-**Diagram placeholder:** HTML shell contains paragraph, scripts and runtime references
-
-*Caption: article-specific shell details remain illustrative.*
-*Question: what makes the page runnable?*
 
 ## Reactive and external work
 
 Reactive mount work is a **target-specific extension** of the page model, not a second compiler. Where the entry needs it, the builder wires backend-owned update strategy to the compiled source and sink metadata.
 
-External JavaScript assets arrive **demand-driven**. Import maps and glue appear because link facts and bindings required them, not because a global script tag fashion show looked nice.
+External JavaScript assets arrive **demand-driven**. Import maps and glue appear because link facts and bindings required them, not because a page collected script tags out of habit.
 
 ## Resources and output records
 
 The compiler hands over semantic facts and no physical decisions. A resource use is a stable origin plus the location that wanted it, and the strings carrying it still hold an unresolved anchor rather than a URL. Placement, conflicts, copying and link text are all builder work, and this is the stage that does it.
 
-**Liveness is exact.** Entry planning unions the resource uses reachable from the selected `start`, from reachable source and generated functions, from runtime and compile-time fragments, from entry settings and from provider requirements. Every physical-target-bearing file path was already a build input and a watch interest long before this — that happened before AST and never depended on reachability. A `.moth` file value and a site-root `@/` have no physical target. Emission is the narrower question. A resource that nothing reachable uses is never read, never hashed and never written, though the watcher still knows the physical targets that were authored.
+**Liveness is exact.** Entry planning unions the resource uses reachable from the selected `start`, from reachable source and generated functions, from runtime and compile-time fragments, from entry settings and from provider requirements. Every physical-target-bearing file path became a build input and a watch interest long before this. That happened before AST and never depended on reachability. A `.moth` path has no file value at all and earns a `SourceKindNoFileValue` diagnostic if something asks for one. A site-root `@/` is a structural piece with no physical target. Emission is the narrower question. A resource that nothing reachable uses is never read, never hashed and never written, though the watcher still knows the physical targets that were authored.
 
-**Then placement.** Project-local resources keep their path relative to `entry_root`. Package resources sit under one injective package prefix. Provider-managed output uses its declared stable path. Conflicts settle here: one origin at one path deduplicates, different origins at the same path fail with both authored locations, and resource output collides with HTML, JavaScript, Wasm and manifest output on equal terms. All of that completes before a single resource byte is read.
+**Then placement.** Project-local resources keep their path relative to `entry_root`. Package resources sit under one package prefix, chosen so no two packages can ever land on the same prefix. Provider-managed output uses its declared stable path. Conflicts settle here: one origin at one path deduplicates, different origins at the same path fail with both authored locations and resource output collides with HTML, JavaScript, Wasm and manifest output on equal terms. All of that completes before a single resource byte is read.
 
-**Only then, link text.** Each use gets a URL context, meaning the artefact whose URL rules actually observe the string: the page document for inline CSS, the stylesheet for standalone CSS. The builder renders a lexical relative path from that artefact's parent, with `/` separators, percent-encoded segments, `./` on same-or-descendant paths and `../` retained. A builder that cannot assign a context to a reachable use rejects it rather than guessing one.
+**Only then, link text.** Each use gets a URL context, meaning the artefact whose URL rules observe the string: the page document for inline CSS, the stylesheet for standalone CSS. The builder renders a lexical relative path from that artefact's parent, with `/` separators, percent-encoded segments, `./` on same-or-descendant paths and `../` retained. A builder that cannot assign a context to a reachable use rejects it rather than guessing one.
 
-The site root is the other structural piece and follows a different rule. It names no file, has no origin and joins no union, and it renders from the project-origin policy of the selected artefact. A builder with no such policy rejects a reachable site-root use during target contract validation; it never quietly settles for `/`, and that origin is never prepended to an ordinary resource URL.
+The site root is the other structural piece, and it plays by different rules. It names no file, has no origin and joins no union. It renders from the project-origin policy of the selected artefact instead.
+
+A builder with no such policy rejects a reachable site-root use during target contract validation. It never quietly settles for `/`. That origin is also never prepended to an ordinary resource URL, which keeps the two path systems from bleeding into each other.
 
 Nothing here scans rendered HTML, CSS or Markdown to rediscover files. The records were complete when they arrived.
 
@@ -73,26 +116,63 @@ Manifests remember what this builder produced. Incremental builds compare record
 
 ## Writing and ownership
 
+[diagram:
+    [$insert("label"): Nobody writes a file until the whole set is agreed]
+    [$insert("caption"): Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): Backends]
+            [$insert("title"): Emit records]
+            Each backend describes what it produced. None of them opens an output directory of its own.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Build system]
+            [$insert("title"): Validate the whole set]
+            Every declared path is checked together. A conflicting manifest is rejected here, before writing rather than after.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Build system]
+            [$insert("title"): Write and record]
+            Unchanged bytes are skipped. Everything written is recorded in the manifest.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Cleanup, keyed by builder and profile]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    A debug build never tidies up after a release build
+                ]
+                ]
+            ]
+        ]
+    ]
+]
+
 The build system owns output validation, writing, manifests and stale cleanup.
 
 Practical rules that keep disks sane:
 
 - skip writes when bytes did not change
-- clean stale files the builder still owns
-- never delete another builder's files by accident
+- clean stale files owned by the selected builder **and build profile**
+- never delete files owned by another builder or another profile
+- reject a conflicting manifest before writing rather than after
 - declare every produced path so ownership transitions stay honest
 
+Ownership is keyed by builder identity and build profile together. A debug build does not get to tidy up after a release build.
+
 Backends emit data into central records. They do not each open a private output directory and hope the next clean step guesses right.
-
-**Diagram placeholder:** Current records define writes and safe removal of stale owned files
-
-*Caption: exact output principle simplified.*
-*Question: who may remove a file?*
-
-**Diagram placeholder:** HTML, JavaScript, Wasm, runtime assets and manifest sit under one owned output root
-
-*Caption: conceptual output tree.*
-*Question: which files belong together?*
 
 ## Final checkpoint
 
@@ -115,7 +195,7 @@ Open the HTML. Find the fragment:
 
 That string travelled a long way: characters, tokens, shells, bindings, types, folded constants, template handoff, diagnostics that stayed quiet, HIR, memory rules, artefacts, entry plans, target assignment, lowering and assembly. Each owner removed one ambiguity and refused to rebuild the previous owner's work from bare source.
 
-There is no later primary tutorial page in this series. Deep dives live in language, memory and progress authorities when you need the fine print.
+No later primary tutorial page follows in this series. Deep dives live in language, memory and progress authorities when you need the fine print.
 
 ## What can fail here
 
@@ -126,7 +206,9 @@ There is no later primary tutorial page in this series. Deep dives live in langu
 - failed target record
 - stale-file ownership conflict
 
-A missing or unreadable file is not an assembly failure. File paths resolve once, before AST, so that diagnostic arrived many stages ago.
+A *missing* physical target is not an assembly failure. Paths resolve once during Stage 0, well before AST, so that diagnostic arrived many stages ago.
+
+An *unreadable* one is a different story. Resource bytes are read only after placement and conflict validation, so a file that resolved fine at Stage 0 and then became unreadable can still fail output emission as a filesystem error.
 
 Backend generation failures belong to the backend article. Assembly failures belong here.
 
@@ -145,7 +227,7 @@ Backend generation failures belong to the backend article. Assembly failures bel
 - **Accepted design:** build-system-owned output writing and manifests, and structural resource anchors the builder lowers once placement and a URL context exist.
 - **Current implementation:** HTML, resource and backend progress rows. Resource linking uses structural Resource/SiteRoot pieces, exact live-origin unions and builder-owned URL contexts.
 - **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` and entry-config plans.
-- **Deferred or outside scope:** backend-owned output directories, hidden stale-file deletion, content-addressed output names and general resource transforms.
+- **Deferred or outside scope:** backend-owned output directories, content-addressed output names and general resource transformation pipelines. Stale artefact cleanup itself is accepted and current, scoped to manifest paths the selected builder and profile own.
 
 ## Exit state
 

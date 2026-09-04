@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,7 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 05. Tokenization</p><p>Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.</p></section>
-<section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token carries at least:</p><ul><li>a <strong>kind</strong> (identifier, string literal, keyword-like form, delimiter, operator, ...)</li><li>the <strong>authored spelling</strong> as it appeared in source</li><li>a <strong>source location</strong> span pointing back at the file</li></ul><p>Take the page dependency clause:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@greeting</span> <span class='moth-code-nominal'>greet</span></code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">
+<section class="container"><h1>From characters to located tokens</h1><p>A parser that stares at an undifferentiated character stream spends its life guessing. Where does the identifier end? Is <code>=</code> part of <code>==</code> or a lonely assignment? Did a string already open?</p><p><strong>Tokenization</strong> (lexical analysis) cuts the stream into <strong>tokens</strong>: small classified chunks with spelling and source locations. Later stages stop arguing about character boundaries and start arguing about meaning.</p><h2>Token boundaries and spelling</h2><p>A token itself is two fields: a <strong>kind</strong> and a <strong>source location</strong> span pointing back at the file.</p><p>The text doesn&#39;t ride along inside the token. The kind carries a small handle instead, and the real payload lives in a side table the file owns. A quoted string resolves to its decoded value, while a numeric literal keeps the authored text so diagnostics can quote what you typed. Interning text once and passing handles keeps tokens small and comparisons cheap.</p><p>Take the page dependency clause:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@greeting</span> <span class='moth-code-nominal'>greet</span></code></pre><p>A lexer might emit a sequence in this spirit:</p><table style="">
             
             <tr style="">
                 
@@ -438,12 +788,67 @@ td {
 
 
                 <tr style="">
-             <td style=""><p> <code>@greeting</code></p></td> <td style=""><p> package or module path atom</p></td>
+             <td style=""><p> <code>@greeting</code></p></td> <td style=""><p> <code>Path</code>, a handle into the file&#39;s path table</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>greet</code></p></td> <td style=""><p> identifier</p></td>
+             <td style=""><p> <code>greet</code></p></td> <td style=""><p> <code>Symbol</code>, a handle into the string table</p></td>
         </tr>
             
-</table><p>Exact kind names live in the tokenizer. The teaching point stays fixed: boundaries enter here, meaning does not.</p><p>Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them. The lexer only marks the boundaries.</p><p><strong>Diagram placeholder:</strong> Source characters become located token kinds</p><p><em>Caption: simplified lexer view.</em> <em>Question: where do boundaries enter the pipeline?</em></p><h2>Source locations</h2><p>Every useful diagnostic eventually points at text the author wrote. Locations make that possible without forcing every later stage to keep the entire file string beside every node forever.</p><p>A span says &quot;these characters in this source identity.&quot; When interface binding later fails to find <code>greet</code>, the diagnostic can underline the selected name rather than shrug at &quot;somewhere in the module.&quot;</p><p>Tokenization attaches locations. It does not decide that <code>greet</code> is a function. That decision waits for binding and AST.</p><p><strong>Diagram placeholder:</strong> Token spans point back to exact source ranges</p><p><em>Caption: exact diagnostic principle, simplified data shape.</em> <em>Question: how can later stages point to authored text without reparsing?</em></p><h2>Code and document source kinds</h2><p>Not every file starts in the same lexical mode.</p><ul><li>Ordinary <strong><code>.moth</code></strong> starts in code mode.</li><li><strong>Moth template <code>.mtf</code></strong> starts in an implicit template body while preserving original source locations.</li><li>Plain <strong><code>.md</code></strong> is prepared before tokenization and does not use a tokenizer entry mode in the same way.</li></ul><p>Those paths converge. Moth template preparation synthesises an ordinary private <code>content #String</code> declaration whose initializer is a Markdown template over the body tokens. Markdown preparation can contribute the same declaration shape with a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.</p><p>The greeting project uses <code>.moth</code> files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.</p><p><strong>Diagram placeholder:</strong> moth, mtf and md use different entry preparation then converge</p><p><em>Caption: teaching simplification.</em> <em>Question: why avoid duplicate pipelines for documents and code?</em></p><h2>Lexical failures</h2><p>Some mistakes die at the first cut:</p><ul><li>invalid characters or escapes</li><li>malformed delimiters</li><li>symbolic spacing rules for operators, assignments and mutable declarations</li><li>numeric text that fails shared lexical grammar</li></ul><p><code>numeric_text</code> owns shared numeric grammar, normalisation, separators and exponents. Lexical numeric failure is not yet a semantic <code>Number</code> versus <code>Byte</code> debate. Semantic numeric types arrive later. Keep those layers separate when you read diagnostics.</p><h2>Boundary of ownership</h2><p>Tokenization recognises spelling, locations and delimiter context. It may reject unsupported directive forms at the syntax level through the merged directive registry.</p><p>It does <strong>not</strong>:</p><ul><li>resolve dependencies</li><li>build types</li><li>fold constants</li><li>understand templates as semantic structures</li><li>decide target support</li></ul><p>If a stage after the lexer rediscovers token boundaries from raw text, something has slipped.</p><h2>What can fail here</h2><ul><li>invalid character, escape, delimiter or lexical spacing</li><li>source-kind preparation failure</li><li>dependency, type and template semantic errors that only look lexical when misdiagnosed</li></ul><p>Defer semantic errors to their owning stages. A good lexer stays humble.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> give each source kind a separate parser and backend pipeline.</p><p><strong>Choice:</strong> adapt source kinds early, then share declaration and semantic stages.</p><p><strong>Benefit:</strong> one semantic owner for ordinary declarations and runtime lowering. Document content becomes data the rest of the compiler already understands.</p><p><strong>Cost:</strong> source-kind adapters must preserve locations and keep boundaries crisp.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> located tokens and retained source preparation.</li><li><strong>Current implementation:</strong> progress rows for source-kind coverage.</li><li><strong>Queued work:</strong> numeric roadmap may change later semantic ownership, not lexical token boundaries.</li><li><strong>Deferred or outside scope:</strong> tokenization does not infer target support or type identity.</li></ul><h2>Exit state</h2><p>You leave with located tokens and source-kind prepared payloads. Next: which declarations and dependency relationships those tokens describe.</p></section>
+</table><p>Notice what the lexer does <strong>not</strong> record: that <code>@greeting</code> names a dependency, or that <code>greet</code> is a function. It emits a path handle and a symbol handle. Header processing decides what those mean later.</p><p>Identifiers, delimiters, operators and literals each become discrete pieces. The parser will arrange them. The type checker will judge them.</p><p>Marking boundaries is the headline job, though not the only one. The lexer also classifies each piece, tracks locations, tracks string and template delimiter context, scans numeric text and raises its own spacing and directive diagnostics. What it leaves alone is meaning.</p><h2>Source locations</h2><p>Every useful diagnostic eventually points at text the author wrote. Locations make that possible without forcing every later stage to keep the entire file string beside every node forever.</p><p>A span says &quot;these characters in this source identity.&quot; When interface binding later fails to find <code>greet</code>, the diagnostic can underline the selected name rather than shrug at &quot;somewhere in the module.&quot;</p><p>Tokenization attaches locations. It does not decide that <code>greet</code> is a function. That decision waits for binding and AST.</p><h2>Code and document source kinds</h2><p>Not every file starts in the same lexical mode.</p><ul><li>Ordinary <strong><code>.moth</code></strong> starts in code mode.</li><li><strong>Moth template <code>.mtf</code></strong> starts in an implicit template body while preserving original source locations.</li><li>Plain <strong><code>.md</code></strong> is never tokenized as Moth at all. Preparation handles it and it claims no tokenizer entry mode.</li></ul><p>Those three are the whole list. <code>.bst</code> is not a compiler source kind, and a Moth-native build-script system stays deferred.</p><p>Those paths converge. Moth template preparation synthesises an ordinary private <code>content #String</code> declaration whose initializer is a Markdown template over the body tokens. Markdown preparation reaches the same shape by a blunter route: it renders the raw Markdown to HTML first, then hands that HTML over as a synthetic string literal. Later stages see ordinary declarations, not a forever-special document dialect in HIR.</p><p>The greeting project uses <code>.moth</code> files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.</p><figure class="moth-flow" aria-label=" Three source kinds, one semantic pipeline">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Entry</span>
+        <span class="moth-flow__title"> Three ways in</span>
+        <span class="moth-flow__description"><p>Each source kind starts in the lexical mode that suits it.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Entry preparation</div>
+        <div class="moth-flow__fanout">
+    <a class="moth-flow__detail" href=" ./">
+        <p><code>.moth</code> starts in code mode</p>
+</a><a class="moth-flow__detail" href=" ../templates-and-tir/">
+        <p><code>.mtf</code> starts inside a template body</p>
+</a><a class="moth-flow__detail" href=" ./">
+        <p><code>.md</code> is prepared before tokenizing</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../declarations-dependencies-and-ordering/">
+        <span class="moth-flow__eyebrow"> Converged</span>
+        <span class="moth-flow__title"> One ordinary declaration</span>
+        <span class="moth-flow__description"><p>Document kinds arrive as a private <code>content #String</code> constant. From here nothing downstream can tell them apart.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Shared</span>
+        <span class="moth-flow__title"> The same later stages</span>
+        <span class="moth-flow__description"><p>Binding, type checking and lowering serve docs and code with one set of owners.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Each source kind gets its own way in. After preparation they all look like ordinary declarations, so no later stage needs a document dialect.
+</figcaption>
+</figure><p><em>Why avoid duplicate pipelines for documents and code? Because a second pipeline is a second place for meaning to drift.</em></p><h2>Lexical failures</h2><p>Some mistakes die at the first cut:</p><ul><li>invalid characters or escapes</li><li>malformed delimiters</li><li>symbolic spacing rules for operators, assignments and mutable declarations</li><li>numeric text that fails shared lexical grammar</li></ul><p><code>numeric_text</code> owns shared numeric grammar, normalisation, separators and exponents. Lexical numeric failure is not yet a semantic <code>Number</code> versus <code>Byte</code> debate. Semantic numeric types arrive later. Keep those layers separate when you read diagnostics.</p><h2>Boundary of ownership</h2><p>Tokenization recognises spelling, locations and delimiter context. It may reject unsupported directive forms at the syntax level through the merged directive registry.</p><p>It does <strong>not</strong>:</p><ul><li>resolve dependencies</li><li>build types</li><li>fold constants</li><li>understand templates as semantic structures</li><li>decide target support</li></ul><p>If a stage after the lexer rediscovers token boundaries from raw text, something has slipped.</p><h2>What can fail here</h2><ul><li>invalid character, escape, delimiter or lexical spacing</li><li>source-kind preparation failure</li><li>dependency, type and template semantic errors that only look lexical when misdiagnosed</li></ul><p>Defer semantic errors to their owning stages. A good lexer stays humble.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> give each source kind a separate parser and backend pipeline.</p><p><strong>Choice:</strong> adapt source kinds early, then share declaration and semantic stages.</p><p><strong>Benefit:</strong> one semantic owner for ordinary declarations and runtime lowering. Document content becomes data the rest of the compiler already understands.</p><p><strong>Cost:</strong> source-kind adapters must preserve locations and keep boundaries crisp.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> located tokens and retained source preparation.</li><li><strong>Current implementation:</strong> progress rows for source-kind coverage.</li><li><strong>Queued work:</strong> queued numeric work may extend the <code>Number</code>, <code>NumberN</code> and <code>Byte</code> surface. The ownership split stays fixed: <code>numeric_text</code> owns lexical grammar, AST owns semantic typing, HIR owns numeric domains and failure.</li><li><strong>Deferred or outside scope:</strong> tokenization does not infer target support or type identity.</li></ul><h2>Exit state</h2><p>You leave with located tokens and source-kind prepared payloads. Next: which declarations and dependency relationships those tokens describe.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../project-graphs-and-modules">Previous</a> / <a href="../declarations-dependencies-and-ordering">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

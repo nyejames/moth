@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -431,25 +781,74 @@ td {
             
             <tr style="">
                 
-            <th scope="col" style=""><p> Stage family</p></th><th scope="col" style=""><p> Example failure</p></th>
+            <th scope="col" style=""><p> Stage</p></th><th scope="col" style=""><p> Example failure</p></th>
         
 </tr>
 
 
 
                 <tr style="">
-             <td style=""><p> Tokenizer</p></td> <td style=""><p> bad escape, broken delimiter</p></td>
+             <td style=""><p> Stage 0, graph and config</p></td> <td style=""><p> unresolved provider, invalid root role, no entry configured</p></td>
         </tr><tr style="">
-             <td style=""><p> Headers and binding</p></td> <td style=""><p> malformed shell, missing provider symbol</p></td>
+             <td style=""><p> Stage 1, tokenizer</p></td> <td style=""><p> bad escape, broken delimiter</p></td>
         </tr><tr style="">
-             <td style=""><p> AST</p></td> <td style=""><p> unknown name, type mismatch, bad template slot</p></td>
+             <td style=""><p> Stage 2, headers and interface binding</p></td> <td style=""><p> malformed shell, dependency symbol not visible</p></td>
         </tr><tr style="">
-             <td style=""><p> Borrow validation</p></td> <td style=""><p> conflicting exclusive access</p></td>
+             <td style=""><p> Stage 3, local declaration ordering</p></td> <td style=""><p> a declaration cycle inside one module</p></td>
+        </tr><tr style="">
+             <td style=""><p> Stage 4, AST</p></td> <td style=""><p> unknown name, type mismatch, bad template slot</p></td>
+        </tr><tr style="">
+             <td style=""><p> Stage 5, HIR validation</p></td> <td style=""><p> broken lowering invariant, malformed control flow</p></td>
+        </tr><tr style="">
+             <td style=""><p> Stage 6, borrow validation</p></td> <td style=""><p> conflicting exclusive access</p></td>
+        </tr><tr style="">
+             <td style=""><p> Lifetime analysis, after Stage 6 and unnumbered</p></td> <td style=""><p> a retained edge into shorter-lived storage</p></td>
         </tr><tr style="">
              <td style=""><p> Target validation</p></td> <td style=""><p> unsupported capability on a reachable function</p></td>
         </tr>
             
-</table><p>A single global &quot;parser error&quot; funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact construct the payload.</p><p><strong>Diagram placeholder:</strong> User failure and compiler failure take separate paths</p><p><em>Caption: accepted ownership map.</em> <em>Question: who can continue after each kind of failure?</em></p><h2>Diagnostic data lanes</h2><p>Two lanes matter.</p><p><strong><code>CompilerDiagnostic</code></strong> carries user-facing failures: source, syntax, import, config, type, rule, borrow and target-contract problems. These are the messages authors should fix.</p><p><strong><code>CompilerError</code></strong> carries internal and infrastructure failures: impossible compiler states, transformation bugs, filesystem failures, tooling or backend infrastructure collapse. These mean &quot;do not trust later results,&quot; not &quot;rename your variable.&quot;</p><p>Payloads include stable <strong>codes</strong>, <strong>descriptors</strong>, structured <strong>reasons</strong>, <strong>locations</strong> and <strong>secondary labels</strong>. They deliberately avoid baking final prose into every checker branch.</p><p>Deferred-feature diagnostics stay distinct from outside-design-scope diagnostics. &quot;Not implemented yet&quot; and &quot;not part of the language&quot; are different sentences.</p><h2>Semantic identities in messages</h2><p>Type diagnostics carry <strong>semantic type identities</strong> plus context. Rendering resolves user-facing names later through a render context and the relevant local type environment.</p><p>Why wait?</p><p>Because the same identity might print differently in different tools, and because pretty names are not the semantic authority. Source spelling, canonical paths and human wording remain distinct layers. A stable code must not be repurposed for a different semantic family when someone rewrites a sentence.</p><h2>Carrying and rendering</h2><p>Stages accumulate diagnostics locally. Builds merge them in <strong>canonical order</strong>: file order and module order, never worker-completion order.</p><p>Rendering happens at CLI or tooling boundaries. The same structured event can feed a terminal, a future editor integration or a test harness.</p><p>Module outcomes split cleanly:</p><ul><li><strong>Success</strong> carries an artefact and may retain structured warnings</li><li><strong>Diagnosed</strong> carries user diagnostics and <strong>no partial public interface</strong></li><li><strong>CompilerError</strong> aborts the owning project or package compilation because later results cannot be trusted</li></ul><p>Consumers blocked by a diagnosed required interface are not semantically compiled as if the provider half-worked. A failed root does not feed its dependents. Independent graph branches may continue under build-system orchestration for <code>check</code> or tooling. A backend never receives a partial linkable project.</p><p><strong>Diagram placeholder:</strong> One diagnosed module exposes no partial interface and a dependent waits</p><p><em>Caption: graph failure simplification.</em> <em>Question: what does the build publish when a provider fails?</em></p><p><strong>Diagram placeholder:</strong> One structured event feeds CLI and tooling views</p><p><em>Caption: exact data-lane principle, simplified renderer shape.</em> <em>Question: why defer wording?</em></p><h2>Parallel failures</h2><p>Workers may finish in any order. Merge order ignores that race. Canonical module order and original source order decide how humans and tools see the list.</p><p>Per-stage articles still own their contracts. This page owns the transport and lane model, not a catalogue of every code.</p><h2>What can fail here</h2><ul><li>user syntax, type, import, borrow or target failure</li><li>internal invariant, filesystem or backend failure</li></ul><p>Exact wording in examples should track current constructors when you verify against the tree. Do not fossilise a poetic error string that the code never emits.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> construct final prose inside each parser or checker branch.</p><p><strong>Choice:</strong> structured diagnostic payloads with deferred rendering.</p><p><strong>Benefit:</strong> CLI, dev server and tooling render the same semantic event. Codes stay stable while wording improves.</p><p><strong>Cost:</strong> descriptors and render contexts become maintained data, not afterthoughts.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> separate diagnostic and error lanes plus deterministic rendering order.</li><li><strong>Current implementation:</strong> progress matrix and current diagnostics owners.</li><li><strong>Queued work:</strong> <code>compiler-diagnostics-improvement-plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> this page does not catalogue every diagnostic code.</li></ul><h2>Exit state</h2><p>You leave knowing how failures travel, and what a trusted successful semantic result implies. Next: how successful meaning becomes explicit runtime control flow in HIR.</p></section>
+</table><p>A missing provider and a missing symbol look alike in a terminal and belong to different owners. Stage 0 resolves whether the provider exists at all. Stage 2 decides whether a name that provider publishes is visible here.</p><p>A single global &quot;parser error&quot; funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact construct the payload.</p><figure class="moth-flow" aria-label=" Two failure lanes that never merge">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Lane one</span>
+        <span class="moth-flow__title"> CompilerDiagnostic</span>
+        <span class="moth-flow__description"><p>Source, syntax, import, config, type, rule, borrow and target-contract problems. The author fixes these.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Rendered later, from the same event</div>
+        <div class="moth-flow__lane">
+    <a class="moth-flow__detail" href=" ../starting-a-build/">
+        <p>CLI output</p>
+</a><a class="moth-flow__detail" href=" ../starting-a-build/">
+        <p>Dev server and tooling views</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Lane two</span>
+        <span class="moth-flow__title"> CompilerError</span>
+        <span class="moth-flow__description"><p>Impossible states, transformation bugs, filesystem failures, backend collapse. Nobody renames a variable to fix one of these.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     The split is about who should act. One lane asks the author to change their code. The other says the compiler broke and later results cannot be trusted.
+</figcaption>
+</figure><h2>Diagnostic data lanes</h2><p>Two lanes matter.</p><p><strong><code>CompilerDiagnostic</code></strong> carries user-facing failures: source, syntax, import, config, type, rule, borrow and target-contract problems. These are the messages authors should fix.</p><p><strong><code>CompilerError</code></strong> carries internal and infrastructure failures: impossible compiler states, transformation bugs, filesystem failures, tooling or backend infrastructure collapse. These mean &quot;do not trust later results,&quot; not &quot;rename your variable.&quot;</p><p>Payloads include stable <strong>codes</strong>, <strong>descriptors</strong>, structured <strong>reasons</strong>, <strong>locations</strong> and <strong>secondary labels</strong>. They deliberately avoid baking final prose into every checker branch.</p><p>Deferred-feature diagnostics stay distinct from outside-design-scope diagnostics. &quot;Not implemented yet&quot; and &quot;not part of the language&quot; are different sentences.</p><h2>Semantic identities in messages</h2><p>Type diagnostics carry <strong>semantic type identities</strong> plus context. Rendering resolves user-facing names later through a render context and the relevant local type environment.</p><p>Why wait?</p><p>Because the same identity might print differently in different tools, and because pretty names are not the semantic authority. Source spelling, canonical paths and human wording remain distinct layers. A stable code must not be repurposed for a different semantic family when someone rewrites a sentence.</p><h2>Carrying and rendering</h2><p>Stages accumulate diagnostics locally. Builds merge them in <strong>canonical order</strong>: file order and module order, never worker-completion order.</p><p>Rendering happens at CLI or tooling boundaries. The same structured event can feed a terminal, a future editor integration or a test harness.</p><p>Module outcomes split cleanly:</p><ul><li><strong>Success</strong> carries an artefact and may retain structured warnings</li><li><strong>Diagnosed</strong> carries user diagnostics and <strong>no partial public interface</strong></li><li><strong>CompilerError</strong> aborts the owning project or package compilation because later results cannot be trusted</li></ul><p>A consumer blocked by a diagnosed required interface never compiles as if the provider half-worked. A failed root does not feed its dependents. Independent graph branches may continue under build-system orchestration for <code>check</code> or tooling. A backend never receives a partial linkable project.</p><h2>Parallel failures</h2><p>Workers may finish in any order. Merge order ignores that race. Canonical module order and original source order decide how humans and tools see the list.</p><p>Per-stage articles still own their contracts. This page owns the transport and lane model, not a catalogue of every code.</p><h2>What can fail here</h2><ul><li>user syntax, type, import, borrow or target failure</li><li>internal invariant, filesystem or backend failure</li></ul><p>Exact wording in examples should track current constructors when you verify against the tree. Do not fossilise a poetic error string that the code never emits.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> construct final prose inside each parser or checker branch.</p><p><strong>Choice:</strong> structured diagnostic payloads with deferred rendering.</p><p><strong>Benefit:</strong> CLI, dev server and tooling render the same semantic event. Codes stay stable while wording improves.</p><p><strong>Cost:</strong> descriptors and render contexts become maintained data, not afterthoughts.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> separate diagnostic and error lanes plus deterministic rendering order.</li><li><strong>Current implementation:</strong> progress matrix and current diagnostics owners.</li><li><strong>Queued work:</strong> none for this page right now.</li><li><strong>Deferred or outside scope:</strong> <code>compiler-diagnostics-improvement-plan.md</code> is paused until the diagnostics and token-layout work finishes, so it is not queued today. This page also does not catalogue every diagnostic code.</li></ul><h2>Exit state</h2><p>You leave knowing how failures travel, and what a trusted successful semantic result implies. Next: how successful meaning becomes explicit runtime control flow in HIR.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../templates-and-tir">Previous</a> / <a href="../hir">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

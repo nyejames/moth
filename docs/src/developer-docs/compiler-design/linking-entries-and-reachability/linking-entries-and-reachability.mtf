@@ -6,7 +6,7 @@ A module can compile completely, including its dormant top-level work, and still
 
 ## Compile versus activate
 
-Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered, borrow-validated and locally lifetime-analysed **before** any entry activates it.
+Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered and borrow-validated **before** any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.
 
 The compiler synthesises an implicit **`start`** for a normal root. Properties that matter:
 
@@ -19,17 +19,57 @@ Compilation never activates `start`. Entry assembly may activate it once after t
 
 Support roots and the project package facade have no implicit `start`.
 
-In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` remains a dependency module. Binding `greet` does not run page-level statements from greeting's root, because greeting is not the activated entry root.
+In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no page-level statements, because only an activated entry root runs root work.
 
-**Diagram placeholder:** All modules compile before one selected root activates
+[diagram:
+    [$insert("label"): Compiling is not activating]
+    [$insert("caption"): Every module goes through the full frontend. Only the entry decides which dormant start ever wakes up.]
 
-*Caption: exact conceptual distinction.*
-*Question: when does root work run?*
+    [stage:
+        [node:
+            [$insert("href"): ../module-artefacts-and-reuse/]
+            [$insert("eyebrow"): Compiled]
+            [$insert("title"): Every module in the graph]
+            Parsed, type-checked, lowered and borrow-validated. Dormant top-level work included.
+        ]
 
-**Diagram placeholder:** page root owns a dormant start selected by one entry
+        [$insert("details"):
+            [branch:
+                [$insert("label"): All still asleep]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    `@page.moth` and its owned sources
+                ]
+                [detail:
+                    [$insert("href"): ../project-graphs-and-modules/]
+                    Support roots and package facades
+                ]
+                ]
+            ]
+        ]
+    ]
 
-*Caption: simplified root map.*
-*Question: why do dependency roots stay dormant?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Selected]
+            [$insert("title"): One entry picks a root]
+            Entry assembly activates that root's implicit `start`, exactly once.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../target-planning-and-validation/]
+            [$insert("eyebrow"): Reachable]
+            [$insert("title"): The function union]
+            Walk call edges from the activated `start`. Everything else stays compiled but unemitted.
+        ]
+    ]
+]
+
+*Naming a dependency never runs its root work. Activation is explicit and entry-scoped, so importing a module can't quietly execute code.*
 
 ## Page fragments and root order
 
@@ -42,11 +82,6 @@ Fragments split into useful kinds:
 Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.
 
 The paragraph in `@page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
-
-**Diagram placeholder:** Folded and runtime fragments preserve source indexes
-
-*Caption: exact ordering principle simplified.*
-*Question: where does the paragraph enter?*
 
 ## Entry assembly
 
@@ -65,22 +100,17 @@ From activated `start`, the linker walks call edges through:
 - binding-backed calls
 - generated concrete functions
 
-The result is a **reachable function union** for the entry. Unreachable private helpers need not lower. Unsupported features in unreachable private functions need not fail target validation.
+The result is a **reachable function union** for the entry. Unreachable private helpers are still fully compiled and validated as HIR. What they skip is backend emission and the target validation that walks the selected union, so an unsupported feature in an unreachable private function does not sink the build.
 
 Reachability here records syntactic function and CFG reachability. It does not perform clever constant-branch tree shaking as its definition of truth. Some target checks may still inspect semantic types with the paired environment when raw reachability is not enough.
 
 Link facts also carry capabilities and assets the entry will need.
 
-**Diagram placeholder:** Reachable nodes are highlighted from start, with an unreachable helper left aside
-
-*Caption: teaching graph.*
-*Question: what reaches the backend?*
-
 ## Complete lifetime topology
 
-The exact reachable union is also the point where local lifetime summaries can be instantiated against actual callers, entry/package roots, and builder-supplied lifecycle roots.
+The exact reachable union is also the point where local lifetime summaries can be instantiated against actual callers, entry/package roots and builder-supplied lifecycle roots.
 
-Project/link validation completes the lifetime topology before target assignment. Linking does not reopen source or mutate HIR.
+In the accepted design, project and link validation completes the lifetime topology before target assignment. That topology validation is not implemented yet. Linking does not reopen source or mutate HIR either way.
 
 ## No deferred compilation
 
@@ -90,11 +120,12 @@ If a function is missing, the graph or artefact stage failed earlier. Link plann
 
 ## What can fail here
 
-- invalid root activity for a root role
-- missing entry candidate
-- fragment order conflict
-- unresolved reachable call
-- module diagnosis that blocks required assembly
+Link planning consumes published artefacts, so the failures it owns are narrow:
+
+- a required module blocked by its own diagnostics
+- an unresolved link identity, which signals a broken internal invariant rather than an author mistake
+
+Failures that feel like linking but land earlier: invalid root activity for a root role and a missing entry candidate are Stage 0 or early frontend concerns, and fragment and root metadata is validated before an artefact is ever published.
 
 Target capability failures wait for the next article even when they appear adjacent in real builds.
 
@@ -111,10 +142,10 @@ Target capability failures wait for the next article even when they appear adjac
 ## Roadmap and current status
 
 - **Accepted design:** entry-selected `start`, entry assembly and exact reachable union.
-- **Current implementation:** label transitional entry activation where the progress matrix differs.
+- **Current implementation:** selected normal modules compile their dormant `start` work, and entry assembly activates the selected `start` exactly once. Imported and API-only roots expose interfaces without activating anything.
 - **Queued work:** entry-config plans may change root metadata and must stay labelled.
 - **Deferred or outside scope:** link-time deferred source compilation.
 
 ## Exit state
 
-You leave with explicit roots, a reachable function union, and a validated project/link lifetime topology. Next: target assignment.
+You leave with explicit roots and a reachable function union. Complete project and link lifetime-topology validation sits in the accepted design and remains deferred. Next: target assignment.

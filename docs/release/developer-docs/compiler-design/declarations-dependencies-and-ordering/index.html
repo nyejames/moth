@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,51 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 06. Declarations, dependencies and ordering</p><p>Prepared shells, bound dependencies and local declaration order give each module its top-level silhouette before bodies type-check.</p></section>
-<section class="container"><h1>Finding the program&#39;s shape</h1><p>Bodies can wait. Before the compiler checks whether <code>greet(visitor)</code> type-checks, it needs the module&#39;s top-level shape: which declarations exist, which dependencies wait on providers and which local names depend on which other local names.</p><p>Header work finds that shape <strong>once</strong>. Later stages bind and consume retained syntax. They do not reparse the file from characters whenever a provider finishes.</p><h2>Prepared shells</h2><p>From located tokens, syntax preparation extracts <strong>shells</strong>:</p><ul><li>declaration shells for constants, functions, structs, choices, aliases, traits and conformances</li><li>dependency shells, direct selections and aliases</li><li>root-activity and fragment-placement metadata for normal roots</li><li>structural provider references for the graph</li><li>local declaration-ordering hints</li><li>source locations and remap information</li></ul><p>For the greeting module, shells include something like &quot;constant <code>greeting_prefix</code>&quot; and &quot;function <code>greet</code> with these parameter and return type shells.&quot; For the page, shells include the dependency binding of <code>greet</code>, the <code>visitor</code> binding and page fragment metadata around the HTML template.</p><p>Preparation does not type-check executable bodies. It does not open source provider interfaces. It records what source syntax already makes knowable without them.</p><h2>Three relationship classes</h2><p>Header processing keeps three edge families distinct. Mixing them is a reliable way to build a confusing compiler.</p><p><strong>Structural provider references</strong> belong to Stage 0 graph construction. They answer &quot;which module or package must exist before this consumer can bind?&quot;</p><p><strong>Dependency-bound symbol bindings</strong> belong to visibility and AST. They answer &quot;which public names from a provider become usable here, under which local spellings?&quot;</p><p><strong>Local declaration-ordering edges</strong> belong to Stage 3 inside one module. They answer &quot;which top-level declarations must be processed before which others in this module?&quot;</p><p>A dependency-bound declaration is never a node in the consumer&#39;s local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.</p><p><strong>Diagram placeholder:</strong> Structural, dependency-bound and local-ordering edges use separate arrows</p><p><em>Caption: exact ownership distinction.</em> <em>Question: which graph is being built in each sentence of a design discussion?</em></p><h2>Binding retained dependencies</h2><p><code>PreparedHeaderSyntax</code> exists <strong>before</strong> providers compile. Dependency shells wait with their source locations intact.</p><p>After <code>@greeting</code> compiles successfully, the build system schedules the page module. <strong>Interface binding</strong> resolves retained dependency shells against the immutable public interface:</p><ul><li>stable bound declaration identities</li><li>bound canonical type and folded-value facts</li><li>final file-local visibility</li><li>namespace records and collision results</li></ul><p>Binding does not retokenize. It does not reparse declaration syntax. It fills in what only a finished provider can supply.</p><p>Before binding, <code>greet</code> is a name in a dependency shell. After binding, it is a stable origin identity with known type facts the AST can trust.</p><p><strong>Diagram placeholder:</strong> Dependency shell gains stable provider identity and visible type facts</p><p><em>Caption: simplified retained syntax flow.</em> <em>Question: what waits for the provider?</em></p><h2>Local declaration ordering</h2><p>Inside one module, Stage 3 builds a <strong>declaration dependency DAG</strong> from retained local edges and sorts it.</p><p>Edges include facts AST needs before linear consumption:</p><ul><li>local type alias targets</li><li>local struct and choice field type references</li><li>local function parameter and return type references</li><li>local explicit constant type references</li><li>fixed collection capacities that use local constants</li><li>local constant initializer references</li><li>local trait and conformance ordering where required</li></ul><p><strong>Function-body references do not create ordering edges.</strong> Bodies may call functions declared later in the file. Only the top-level shape needs a stable process order.</p><p>Sorting uses stable tie-breaking so independent declarations keep source-order dignity. Same-file constants keep source-order semantics. Same-file forward references among constants are rejected. Cross-module constants arrive already folded in provider interfaces.</p><p>Dormant <code>start</code> appends after declarations. It never participates as a dependency node that other declarations wait on.</p><p><strong>Diagram placeholder:</strong> Dependencies flow into a stable declaration order</p><p><em>Caption: conceptual topological sort.</em> <em>Question: why does order matter if bodies can still call later functions?</em></p><h2>Cycles and visibility</h2><p>If two local declarations require each other in a way the edge set captures, the sort stops and a cycle diagnostic fires.</p><p>Visibility rules stay strict. User-visible names do not silently shadow one another across same-file declarations, dependencies, aliases, prelude symbols and builtins. One collision policy covers the surface.</p><p>Dependency-bound declarations influence visibility after binding. They still do not become local graph nodes for Stage 3.</p><p><strong>Diagram placeholder:</strong> Two declarations point at each other and a callout marks the cycle</p><p><em>Caption: failure-path teaching visual.</em> <em>Question: what stops the sort?</em></p><h2>What can fail here</h2><ul><li>malformed declaration shell or dependency shape</li><li>visibility collision or missing provider symbol</li><li>local declaration cycle or invalid forward reference</li><li>support roots or facades that illegally carry root runtime activity</li></ul><p>Final prose and rendering of diagnostics wait for the diagnostics article. Here the failures are structural.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> reparse source after providers compile, or copy declarations into each consumer.</p><p><strong>Choice:</strong> parse and retain syntax once, then bind immutable provider interfaces.</p><p><strong>Benefit:</strong> source locations, identities and graph scheduling stay aligned. Parallel workers can prepare shells early and bind later.</p><p><strong>Cost:</strong> prepared syntax carries more metadata across the build boundary.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> <code>PreparedHeaderSyntax</code>, <code>BoundModuleHeaders</code> and distinct relationship classes.</li><li><strong>Current implementation:</strong> header and dependency progress rows.</li><li><strong>Queued work:</strong> canonical module and project-value plans where they affect source contracts.</li><li><strong>Deferred or outside scope:</strong> this page does not teach body type checking.</li></ul><h2>Exit state</h2><p>You leave with bound visibility, stable dependency facts and ordered declarations. Next: how syntax acquires checked semantic meaning in the AST.</p></section>
+<section class="container"><h1>Finding the program&#39;s shape</h1><p>Bodies can wait. Before the compiler checks whether <code>greet(visitor)</code> type-checks, it needs the module&#39;s top-level shape: which declarations exist, which dependencies wait on providers and which local names depend on which other local names.</p><p>Header work finds that shape <strong>once</strong>. Later stages bind and consume retained syntax. They do not reparse the file from characters whenever a provider finishes.</p><h2>Prepared shells</h2><p>From located tokens, syntax preparation extracts <strong>shells</strong>:</p><ul><li>declaration shells for constants, functions, structs, choices, aliases, traits and conformances</li><li>dependency shells, direct selections and aliases</li><li>const-template, active-root start-body and trait-incompatibility shells</li><li>root-activity and fragment-placement metadata for normal roots</li><li>structural provider references and structural file references for the graph</li><li>source <code>#Config</code> contract shells</li><li>local declaration-ordering hints</li><li>source locations and remap information</li></ul><p>For the greeting source, shells include something like &quot;constant <code>greeting_prefix</code>&quot; and &quot;function <code>greet</code> with these parameter and return type shells.&quot; For the page, preparation keeps the <code>@greeting</code> dependency selection shell, the start-body token stream that contains <code>visitor</code> and the fragment-placement metadata around the HTML template.</p><p>Note what has <em>not</em> happened yet. <code>greet</code> is not bound to anything, and <code>visitor</code> is not a declaration the header stage understands. Binding resolves the first later, and AST parses the second out of the start body.</p><p>Preparation does not type-check executable bodies. It does not open source provider interfaces. It records what source syntax already makes knowable without them.</p><h2>Four relationship classes</h2><p>Header processing keeps four edge families distinct. Mixing them is a reliable way to build a confusing compiler. Each authored path row has exactly one role.</p><p><strong>Structural provider references</strong> belong to Stage 0 graph construction. They answer &quot;which module or package must exist before this consumer can bind?&quot;</p><p><strong>Structural file references</strong> also belong to Stage 0, plus physical-input resolution. They answer &quot;which file on disk does this path point at?&quot;</p><p><strong>Dependency-bound symbol bindings</strong> belong to visibility and AST. They answer &quot;which public names from a provider become usable here, under which local spellings?&quot;</p><p><strong>Local declaration-ordering edges</strong> belong to Stage 3 inside one module. They answer &quot;which top-level declarations must be processed before which others in this module?&quot;</p><p>A dependency-bound declaration is never a node in the consumer&#39;s local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.</p><figure class="moth-flow" aria-label=" Four kinds of edge, four owners">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../project-graphs-and-modules/">
+        <span class="moth-flow__eyebrow"> Stage 0</span>
+        <span class="moth-flow__title"> Structural references</span>
+        <span class="moth-flow__description"><p>Provider references ask which module must exist first. File references ask which file on disk a path points at.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../ast-semantics-and-types/">
+        <span class="moth-flow__eyebrow"> Visibility and AST</span>
+        <span class="moth-flow__title"> Dependency symbol bindings</span>
+        <span class="moth-flow__description"><p>Which public names from a provider become usable here, and under which local spellings.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Stage 3</span>
+        <span class="moth-flow__title"> Local ordering edges</span>
+        <span class="moth-flow__description"><p>Which top-level declarations inside this one module must be processed before which others.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     One authored path has exactly one role. When a design discussion gets confusing, it is usually because two of these four are being called the same thing.
+</figcaption>
+</figure><p><em>A dependency-bound declaration never becomes a node in the consumer&#39;s local graph. Copying provider declarations into every consumer would destroy identity and multiply the work.</em></p><h2>Binding retained dependencies</h2><p><code>PreparedHeaderSyntax</code> exists <strong>before</strong> providers compile. Dependency shells wait with their source locations intact.</p><p>In the walkthrough both files live in one directory-scoped module, so <code>greeting.moth</code> is owned source rather than a separate provider. The module compiles once and the retained <code>@greeting</code> clause binds inside it. Provider-first scheduling is for the other case, where a dependency resolves to a different module or package.</p><p>Either way, <strong>interface binding</strong> resolves retained dependency shells against a finished public interface:</p><ul><li>stable bound declaration identities</li><li>bound canonical type and folded-value facts</li><li>final file-local visibility</li><li>namespace records and collision results</li></ul><p>Binding does not retokenize. It does not reparse declaration syntax. It fills in what only a finished provider can supply.</p><p>Before binding, <code>greet</code> is a name in a dependency shell. After binding, it is a stable origin identity with known type facts the AST can trust.</p><h2>Local declaration ordering</h2><p>Inside one module, Stage 3 builds a <strong>declaration dependency DAG</strong> from retained local edges and sorts it.</p><p>Edges include facts AST needs before linear consumption:</p><ul><li>local type alias targets</li><li>local struct and choice field type references</li><li>local function parameter and return type references</li><li>local explicit constant type references</li><li>fixed collection capacities that use local constants</li><li>local constant initializer references</li><li>local trait and conformance ordering where required</li></ul><p><strong>Function-body references do not create ordering edges.</strong> Bodies may call functions declared later in the file. Only the top-level shape needs a stable process order.</p><p>Sorting uses stable tie-breaking so independent declarations keep their source order. Same-file constants keep source-order semantics. Same-file forward references among constants are rejected. Cross-module constants arrive already folded in provider interfaces.</p><p>Dormant <code>start</code> appends after declarations. It never participates as a dependency node that other declarations wait on.</p><h2>Cycles and visibility</h2><p>If two local declarations require each other in a way the edge set captures, the sort stops and a cycle diagnostic fires.</p><p>Visibility rules stay strict. User-visible names do not silently shadow one another across same-file declarations, dependencies, aliases, prelude symbols and builtins. One collision policy covers the surface.</p><p>Dependency-bound declarations influence visibility after binding. They still do not become local graph nodes for Stage 3.</p><h2>What can fail here</h2><ul><li>malformed declaration shell or dependency shape</li><li>visibility collision or missing provider symbol</li><li>local declaration cycle or invalid forward reference</li><li>support roots or facades that illegally carry root runtime activity</li></ul><p>Final prose and rendering of diagnostics wait for the diagnostics article. Here the failures are structural.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> reparse source after providers compile, or copy declarations into each consumer.</p><p><strong>Choice:</strong> parse and retain syntax once, then bind immutable provider interfaces.</p><p><strong>Benefit:</strong> source locations, identities and graph scheduling stay aligned. Parallel workers can prepare shells early and bind later.</p><p><strong>Cost:</strong> prepared syntax carries more metadata across the build boundary.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> <code>PreparedHeaderSyntax</code>, <code>BoundModuleHeaders</code> and distinct relationship classes.</li><li><strong>Current implementation:</strong> header and dependency progress rows.</li><li><strong>Queued work:</strong> no named roadmap plan changes these contracts. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.</li><li><strong>Deferred or outside scope:</strong> this page does not teach body type checking.</li></ul><h2>Exit state</h2><p>You leave with bound visibility, stable dependency facts and ordered declarations. Next: how syntax acquires checked semantic meaning in the AST.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../tokenization">Previous</a> / <a href="../ast-semantics-and-types">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

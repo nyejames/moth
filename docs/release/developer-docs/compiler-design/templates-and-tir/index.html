@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -429,7 +779,60 @@ td {
 <section class="container"><p><a href="../">Compiler design</a> / 09. Templates and TIR</p><p>First-class templates keep structure in AST-local TIR, then hand folded strings or neutral runtime data downstream.</p></section>
 <section class="container"><h1>Why templates need their own temporary IR</h1><p>Look at the page fragment again:</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-operator'>&lt;</span>p<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>visitor<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>p<span class='moth-code-operator'>&gt;</span>
-<span class='moth-code-delimiter'>]</span></code></pre><p>A template is not a string with holes poked by hope. It contains structure: wrappers, slots, child values, control flow and placement order. Flatten it too early and you lose the skeleton the checker and the runtime both need.</p><p>Moth gives templates a first-class home and a temporary <strong>Template IR (TIR)</strong> that lives only while AST work runs.</p><h2>Template structure</h2><p>The fragment wants a paragraph wrapper, an interpolation of a string-producing call and a stable place in the page&#39;s fragment order.</p><p>If the compiler treated the body as blind concatenation, it could still emit characters on a happy path. It would struggle to:</p><ul><li>type-check slot contents</li><li>fold pure pieces while keeping dynamic pieces honest</li><li>preserve source locations for diagnostics</li><li>attach constrained reactivity metadata</li><li>hand a neutral runtime plan to HIR without smuggling parser state</li></ul><p>Structure earns its keep.</p><p><strong>Diagram placeholder:</strong> Paragraph wrapper contains a dynamic name slot</p><p><em>Caption: teaching structure.</em> <em>Question: what does interpolation mean once structure exists?</em></p><h2>TIR phases</h2><p>One module AST build owns one <code>TemplateIrStore</code>. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store.</p><p>The phase sequence is:</p><pre style=""><code class='codeblock'>Parsed -&gt; Composed -&gt; Formatted -&gt; Finalized</code></pre><p>Teaching names for the parts:</p><ul><li><strong>slots</strong> name holes that receive values or nested content</li><li><strong>wrappers</strong> wrap content in outer structure such as tags</li><li><strong>control-flow edges</strong> capture template-local <code>if</code> and loop structure before it becomes ordinary CFG in HIR</li></ul><p>Exact view identity includes root, phase and value context. Consumers read through that authority rather than inventing parallel overlay stacks.</p><p>Folding requires <code>Composed</code> or later. AST-to-HIR handoff requires <code>Finalized</code>.</p><p><strong>Diagram placeholder:</strong> One template passes through four structural phases</p><p><em>Caption: accepted phase names, simplified records.</em> <em>Question: where does template structure live during AST?</em></p><h2>Folded and runtime paths</h2><p>AST finalisation walks prepared views and chooses a fate:</p><ul><li>fully constant templates <strong>fold into strings</strong></li><li>runtime <code>if</code> and loop bodies stay available for lazy lowering</li><li>runtime slot plans prepare sources and sites</li><li>helper-only artefacts drop away</li><li>top-level page fragments emit <strong>folded metadata</strong> with insertion indexes</li><li>runtime templates become <strong>neutral owned handoff payloads</strong></li></ul><p>Compile-time fragments never live in HIR. HIR receives ordinary string and control-flow work for runtime pieces only. The TIR store drops before the completed AST leaves the stage. It is temporary scaffolding, not permanent structure. No TIR id tours a public interface or backend.</p><p>For the greeting project, a fully static visitor and prefix can collapse toward the familiar fragment. If <code>visitor</code> were dynamic input, the structure would still check at compile time while runtime handoff carried the moving parts.</p><p><strong>Diagram placeholder:</strong> Static pieces become a string while dynamic pieces become neutral runtime handoff data</p><p><em>Caption: exact boundary, simplified shape.</em> <em>Question: what reaches HIR?</em></p><h2>Source-kind adapters</h2><p>Moth template <code>.mtf</code> and Markdown <code>.md</code> files do not invent forever-parallel compilers. They adapt into ordinary synthetic <code>content #String</code> declarations.</p><ul><li><code>.mtf</code> builds a private constant whose initializer is a structurally built <code>$md</code> template over the original body tokens</li><li><code>.md</code> can contribute the same declaration shape with a synthetic string-literal initializer after Markdown preparation</li></ul><p>Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: <code>@page.moth</code> remains the star, and document kinds prove the &quot;one semantic pipeline&quot; bet.</p><p>Tooling that wants only a rendered <code>.mtf</code> file asks the compiler&#39;s <strong>direct Moth template service</strong> for a folded <code>content</code> result. That service is a shorter compiler path over the same owners, stopping before HIR. It is not a second parser, and project tooling does not prepare, bind, order or fold the template itself.</p><p><strong>Diagram placeholder:</strong> moth, mtf and md reach one ordinary semantic path</p><p><em>Caption: simplified source-kind map.</em> <em>Question: how does document content enter the compiler without a second IR forever?</em></p><h2>Reactivity boundary</h2><p>Reactivity in Moth is a constrained template and UI <strong>source-and-sink</strong> model. It is not a general closure system and not a second semantic IR.</p><p>Durable ownership:</p><ul><li>declaration parsing recognises reactive markers as syntax</li><li>AST resolves ordinary types, stable source identity and subscriptions</li><li>HIR carries backend-neutral source, sink and reachability metadata</li><li>borrow validation treats subscriptions as read-only dependencies rather than active borrow lifetimes</li><li>target validation rejects unsupported runtime forms before lowering</li><li>update strategy stays backend-owned artefact policy</li></ul><p>If you need arbitrary higher-order function values, this is the wrong language feature to stretch.</p><h2>What can fail here</h2><ul><li>invalid template structure, slot type or formatting operation</li><li>bad reactive subscription</li><li>internal missing TIR authority (a <code>CompilerError</code>, not a casual user typo)</li></ul><p>TIR ownership must stay distinct from AST finalisation and HIR validation. Post-TIR parser optimisation plans may discuss performance. They do not redefine the semantic handoff.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> general macros, JSX-style external transforms or a separate markup compiler with its own type system.</p><p><strong>Choice:</strong> first-class constrained templates with AST-local TIR.</p><p><strong>Benefit:</strong> template structure gains semantic checks without a second backend language.</p><p><strong>Cost:</strong> TIR needs strict lifetime and handoff rules. It is not a public interface for users or backends.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> TIR remains AST-local and hands off folded strings or neutral runtime data.</li><li><strong>Current implementation:</strong> template and reactivity progress rows.</li><li><strong>Queued work:</strong> <code>post-tir-template-parser-optimization-plan.md</code> for performance discussion, labelled queued or deferred as appropriate.</li><li><strong>Deferred or outside scope:</strong> a general macro system or public TIR.</li></ul><h2>Exit state</h2><p>You leave with finalised TIR handoff, folded fragments and neutral runtime template data. Next: how a failure should travel through all these owners.</p></section>
+<span class='moth-code-delimiter'>]</span></code></pre><p>A template is not a string with holes poked by hope. It contains structure: wrappers, slots, child values, control flow and placement order. Flatten it too early and you lose the skeleton the checker and the runtime both need.</p><p>Moth gives templates a first-class home and a temporary <strong>Template IR (TIR)</strong> that lives only while AST work runs.</p><h2>Template structure</h2><p>The fragment wants a paragraph wrapper, an interpolation of a string-producing call and a stable place in the page&#39;s fragment order.</p><p>If the compiler treated the body as blind concatenation, it could still emit characters on a happy path. It would struggle to:</p><ul><li>type-check slot contents</li><li>fold pure pieces while keeping dynamic pieces honest</li><li>preserve source locations for diagnostics</li><li>attach constrained reactivity metadata</li><li>hand a neutral runtime plan to HIR without smuggling parser state</li></ul><p>Structure earns its keep.</p><h2>TIR phases</h2><p>One module AST build owns one <code>TemplateIrStore</code>. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store.</p><p>The phase sequence is:</p><pre style=""><code class='codeblock'>Parsed -&gt; Composed -&gt; Formatted -&gt; Finalized</code></pre><p>Teaching names for the parts:</p><ul><li><strong>slots</strong> name holes that receive values or nested content</li><li><strong>wrappers</strong> wrap content in outer structure such as tags</li><li><strong>control-flow edges</strong> capture template-local <code>if</code> and loop structure before it becomes ordinary CFG in HIR</li></ul><p>Exact view identity includes root, phase and value context. Consumers read through that authority rather than inventing parallel overlay stacks.</p><p>Folding requires <code>Composed</code> or later. AST-to-HIR handoff requires <code>Finalized</code>.</p><figure class="moth-flow" aria-label=" TIR lives and dies inside AST">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Built</span>
+        <span class="moth-flow__title"> Structure captured as TIR</span>
+        <span class="moth-flow__description"><p>Wrappers, slots, child values, control flow and placement order, kept as structure rather than flattened text.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Classified</span>
+        <span class="moth-flow__title"> prepare_tir_view labels each piece</span>
+        <span class="moth-flow__description"><p>Foldable, runtime or helper. One owner decides, so finalisation never re-litigates it.</p></span>
+    </a><br>
+</div>
+
+<div class="moth-flow__details">
+    <div class="moth-flow__branch">
+    <div class="moth-flow__branch-label"> Two exits</div>
+        <div class="moth-flow__fanout">
+    <a class="moth-flow__detail" href=" ../html-assembly-and-output/">
+        <p>Static pieces fold to strings with insertion indexes</p>
+</a><a class="moth-flow__detail" href=" ../hir/">
+        <p>Dynamic pieces become neutral runtime handoff data</p>
+</a>
+</div>
+</div>
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../hir/">
+        <span class="moth-flow__eyebrow"> Gone</span>
+        <span class="moth-flow__title"> The TIR store drops</span>
+        <span class="moth-flow__description"><p>No TIR identity survives the completed AST. HIR sees ordinary strings and control flow.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.
+</figcaption>
+</figure><h2>Folded and runtime paths</h2><p>Classification happens in one place. <code>prepare_tir_view</code> validates reachable TIR and labels each piece foldable, runtime or helper. AST finalisation then consumes exactly that preparation rather than deciding again:</p><ul><li>fully constant templates <strong>fold into strings</strong></li><li>runtime <code>if</code> and loop bodies stay available for lazy lowering</li><li>runtime slot plans prepare sources and sites</li><li>helper-only artefacts drop away</li><li>top-level page fragments emit <strong>folded metadata</strong> with insertion indexes</li><li>runtime templates become <strong>neutral owned handoff payloads</strong></li></ul><p>Compile-time fragments never live in HIR. HIR receives ordinary string and control-flow work for runtime pieces only. The TIR store drops before the completed AST leaves the stage. It is temporary scaffolding, not permanent structure. No TIR id tours a public interface or backend.</p><p>For the greeting project, a fully static visitor and prefix can collapse toward the familiar fragment. If <code>visitor</code> were dynamic input, the structure would still check at compile time while runtime handoff carried the moving parts.</p><h2>Source-kind adapters</h2><p>Moth template <code>.mtf</code> and Markdown <code>.md</code> files do not invent forever-parallel compilers. They adapt into ordinary synthetic <code>content #String</code> declarations.</p><ul><li><code>.mtf</code> builds a private constant whose initializer is a structurally built <code>$md</code> template over the original body tokens</li><li><code>.md</code> reaches the same shape after preparation renders the raw Markdown to HTML, and that rendered HTML becomes the synthetic string-literal initializer</li></ul><p>Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: <code>@page.moth</code> remains the star, and document kinds prove the &quot;one semantic pipeline&quot; bet.</p><p>Tooling that wants folded <code>.mtf</code> content asks the compiler&#39;s <strong>direct Moth template service</strong>. That service is a shorter path over the same owners, stopping before HIR. It is not a second parser, and project tooling never prepares, binds, orders or folds the template itself.</p><p>What comes back is folded content, not a finished artefact. It can still hold opaque resource and site-root anchors, because only a builder&#39;s link plan can resolve those. Output writing stays outside the service.</p><h2>Reactivity boundary</h2><p>Reactivity in Moth is a constrained template and UI <strong>source-and-sink</strong> model. It is not a general closure system and not a second semantic IR.</p><p>Durable ownership:</p><ul><li>declaration parsing recognises reactive markers as syntax</li><li>AST resolves ordinary types, stable source identity and subscriptions</li><li>HIR carries backend-neutral source, sink and reachability metadata</li><li>borrow validation treats subscriptions as read-only dependencies rather than active borrow lifetimes</li><li>target validation rejects unsupported runtime forms before lowering</li><li>update strategy stays backend-owned artefact policy</li></ul><p>If you need arbitrary higher-order function values, this is the wrong language feature to stretch.</p><h2>What can fail here</h2><ul><li>invalid template structure, slot type or formatting operation</li><li>bad reactive subscription</li><li>internal missing TIR authority (a <code>CompilerError</code>, not a casual user typo)</li></ul><p>TIR ownership must stay distinct from AST finalisation and HIR validation. Post-TIR parser optimisation plans may discuss performance. They do not redefine the semantic handoff.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> general macros, JSX-style external transforms or a separate markup compiler with its own type system.</p><p><strong>Choice:</strong> first-class constrained templates with AST-local TIR.</p><p><strong>Benefit:</strong> template structure gains semantic checks without a second backend language.</p><p><strong>Cost:</strong> TIR needs strict lifetime and handoff rules. It is not a public interface for users or backends.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> TIR remains AST-local and hands off folded strings or neutral runtime data.</li><li><strong>Current implementation:</strong> template and reactivity progress rows.</li><li><strong>Queued work:</strong> <code>post-tir-template-parser-optimization-plan.md</code> for performance discussion, labelled queued or deferred as appropriate.</li><li><strong>Deferred or outside scope:</strong> a general macro system or public TIR.</li></ul><h2>Exit state</h2><p>You leave with finalised TIR handoff, folded fragments and neutral runtime template data. Next: how a failure should travel through all these owners.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../compile-time-semantics">Previous</a> / <a href="../diagnostics">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

@@ -17,7 +17,7 @@ A lowerer receives explicit records:
 - external boundary classifications
 - builder lifecycle/runtime plan
 - per-function link facts
-- selected-function, import, capability and layout identities
+- selected-function, import, export and capability plans, plus the semantic layout identities the target needs
 
 A lowerer does **not**:
 
@@ -32,16 +32,70 @@ A lowerer does **not**:
 
 If a lowerer needs a fact, an earlier owner should have recorded it.
 
-The `ValidatedMemoryPlan` is the memory half of that rule. For this physical variant, it arrives with its physical decisions already settled: selected memory layout per allocation family, region and declared-region placement, planned affine-responsibility transitions, retained-edge obligation transitions and discharge operations, cleanup and destruction plans, and REC representation decisions. The lowerer encodes those decisions. It does not infer them from borrow facts, recompute a count delta or choose a cleanup site. Borrow facts and validated lifetime topology remain validation context and assertion material only.
+The `ValidatedMemoryPlan` is the memory half of that rule. It arrives with every physical decision already settled:
 
-Because the plan is built after target partition and target validation, it is scoped to **one physical variant**. The same source function can be lowered GC-native in a variant targeting a host collector and collector-free with REC-capable handles in a variant targeting full memory control. Those variants share the same validated topology and the same source semantics; only the physical plan differs.
+- selected memory layout per allocation family
+- region and declared-region placement
+- planned affine-responsibility transitions
+- retained-edge obligation transitions and discharge operations
+- cleanup and destruction plans
+- REC representation decisions
+
+The lowerer encodes those decisions and nothing more. It doesn't infer them from borrow facts, recompute a count delta or pick a cleanup site of its own. Borrow facts and validated lifetime topology stay in the room purely as validation context and assertion material.
+
+Because the plan is built after target partition and target validation, it is scoped to **one physical variant**. The same source function can lower GC-native in a variant targeting a host collector, and collector-free with REC-capable handles in a variant targeting full memory control.
+
+Those two variants share validated topology and source semantics. Their target, build profile, ABI identity, layout identity and runtime capability requirements can all differ, which is exactly why each one gets its own physical plan.
 
 For the walkthrough, target-labelled `start`, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
 
-**Diagram placeholder:** Selected target sends one HIR input to two target paths
+[diagram:
+    [$insert("label"): One validated input, two target paths]
+    [$insert("caption"): Everything before the split is decided once. After it, each backend only chooses how to spell the result.]
 
-*Caption: exact frontend boundary simplified.*
-*Question: what stays shared?*
+    [stage:
+        [node:
+            [$insert("href"): ../hir/]
+            [$insert("eyebrow"): Shared]
+            [$insert("title"): Validated HIR and its plans]
+            Meaning, borrow facts, link facts and the memory plan for this variant. Settled before any backend looks.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../target-planning-and-validation/]
+            [$insert("eyebrow"): Assignment]
+            [$insert("title"): Per-function target labels]
+            Target planning already decided which function runs where.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Target-native spelling]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./]
+                    JavaScript values, functions and host GC
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Wasm structured LIR, ABI and handles
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../html-assembly-and-output/]
+            [$insert("eyebrow"): Output]
+            [$insert("title"): Records for the builder]
+            Neither backend writes project files. Both hand back records.
+        ]
+    ]
+]
 
 ## JavaScript lowering
 
@@ -51,26 +105,22 @@ The JS backend speaks host values and functions. It leans on the host GC for rea
 
 ## Wasm lowering
 
-Accepted Wasm design prefers a **structured** path:
+The accepted final Wasm design uses a **structured** path:
 
 1. optionally derive a structured HIR view (not a second semantic authority)
 2. lower into backend-owned structured **LIR** (a lower IR)
 3. apply ABI, handles, layouts, memory and runtime imports
+
 Ownership-aware Wasm operations encode the plan's settled transitions at their planned semantic commit points. The lowerer emits planned discharge operations and retained-edge obligation transitions as provided. It does not derive ownership or obligation changes, recompute count deltas or choose cleanup sites.
 
-Beginner picture:
+In plain terms:
 
 - **ABI** is the calling and data contract between sides
 - **handles** name host or runtime objects without pretending every value is a raw integer the author meant
 - **layouts** describe how composite values sit in memory
 - **runtime imports** pull helpers the module refuses to reimplement alone
 
-Old dispatcher-loop LIR stories, `moth_start` bootstrap myths, `i64` Int bridges as the final story and per-module memory as the default are **removed final-design paths**. Teach them only as historical "do not rebuild this" notes, not as the architecture.
-
-**Diagram placeholder:** A derived backend view feeds structured blocks and ABI operations
-
-*Caption: accepted Wasm design, simplified records.*
-*Question: where does target structure enter?*
+Dispatcher-loop LIR, the `moth_start` bootstrap, the `i64` Int bridge and per-module memory all still exist in the Wasm backend today. Read them as **migration debt, not architecture**. The final design replaces them with structured LIR, no `moth_start`, an imported page-local memory and no `i64` bridge, and `html_project_backend_wasm_final_implementation_plan.md` owns that removal.
 
 ## Shared runtime and wrappers
 
@@ -78,16 +128,17 @@ Accepted HTML mixed-target design wants **page-local shared Wasm runtime and mem
 
 JavaScript companion facades and wrappers call Wasm exports through explicit handles and layout rules. The bridge is data, not guesswork.
 
-**Diagram placeholder:** JavaScript companion calls a Wasm export through explicit handles and layout rules
-
-*Caption: teaching boundary.*
-*Question: how do targets communicate?*
-
 ## External bindings and ownership facts
 
 Binding-backed calls lower through demand-driven glue. The binder's semantic interface already existed upstream. The lowerer maps stable external ids to imports, helpers or native operations.
 
-At a binding-backed boundary, the closed external-boundary classification and the `ValidatedMemoryPlan` supply the ownership and obligation behaviour for this physical variant. The lowerer encodes that settled result rather than rereading borrow facts to decide whether a call transfers or discharges responsibility. Borrow and last-use facts and validated lifetime topology remain upstream inputs and validation context, not a source for new physical decisions. Where the plan selected a GC-native representation, planned ownership-specific operations may be absent in the target encoding; where it selected affine, inferred-region, declared-region or REC handling, the lowerer emits exactly what the plan says. Every backend still requires the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
+At a binding-backed boundary, the closed external-boundary classification and the `ValidatedMemoryPlan` supply the ownership and obligation behaviour for this physical variant. The lowerer encodes that settled result rather than rereading borrow facts to work out whether a call transfers or discharges responsibility.
+
+Borrow facts, last-use facts and validated lifetime topology stay upstream inputs and validation context. They never become a source for new physical decisions here.
+
+What the lowerer emits follows the plan exactly. Where the plan chose a GC-native representation, planned ownership-specific operations may be absent from the target encoding. Where it chose affine, inferred-region, declared-region or REC handling, the lowerer emits what the plan says and nothing more.
+
+Every backend answers to the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 
 ## What can fail here
 
@@ -97,7 +148,7 @@ At a binding-backed boundary, the closed external-boundary classification and th
 - invalid selected target input that planning should have rejected
 - internal lowerer failure on the `CompilerError` lane
 
-User-facing target failures preferably die in validation, not mid-emission.
+Target validation must diagnose user-facing target failures before lowering starts. Meeting one mid-emission means an earlier owner skipped a check.
 
 ## Why Moth does it this way
 
@@ -114,7 +165,7 @@ User-facing target failures preferably die in validation, not mid-emission.
 - **Accepted design:** backend-neutral frontend, structured Wasm path and central output records.
 - **Current implementation:** progress rows and experimental backend status where still labelled.
 - **Queued work:** `html_project_backend_wasm_final_implementation_plan.md`.
-- **Deferred or removed:** old bootstrap and dispatcher paths remain historical context only.
+- **Deferred or removed in the final design:** the old bootstrap and dispatcher paths are current experimental implementation debt queued for deletion, not history.
 
 ## Exit state
 

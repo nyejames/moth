@@ -16,28 +16,48 @@ Each stage owns the failures it is uniquely equipped to see.
 
 [table:
     [th:
-        [: Stage family]
+        [: Stage]
         [: Example failure]
     ]
 
     [td:
-        [: Tokenizer]
+        [: Stage 0, graph and config]
+        [: unresolved provider, invalid root role, no entry configured]
+    ]
+
+    [td:
+        [: Stage 1, tokenizer]
         [: bad escape, broken delimiter]
     ]
 
     [td:
-        [: Headers and binding]
-        [: malformed shell, missing provider symbol]
+        [: Stage 2, headers and interface binding]
+        [: malformed shell, dependency symbol not visible]
     ]
 
     [td:
-        [: AST]
+        [: Stage 3, local declaration ordering]
+        [: a declaration cycle inside one module]
+    ]
+
+    [td:
+        [: Stage 4, AST]
         [: unknown name, type mismatch, bad template slot]
     ]
 
     [td:
-        [: Borrow validation]
+        [: Stage 5, HIR validation]
+        [: broken lowering invariant, malformed control flow]
+    ]
+
+    [td:
+        [: Stage 6, borrow validation]
         [: conflicting exclusive access]
+    ]
+
+    [td:
+        [: Lifetime analysis, after Stage 6 and unnumbered]
+        [: a retained edge into shorter-lived storage]
     ]
 
     [td:
@@ -46,12 +66,48 @@ Each stage owns the failures it is uniquely equipped to see.
     ]
 ]
 
+A missing provider and a missing symbol look alike in a terminal and belong to different owners. Stage 0 resolves whether the provider exists at all. Stage 2 decides whether a name that provider publishes is visible here.
+
 A single global "parser error" funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact construct the payload.
 
-**Diagram placeholder:** User failure and compiler failure take separate paths
+[diagram:
+    [$insert("label"): Two failure lanes that never merge]
+    [$insert("caption"): The split is about who should act. One lane asks the author to change their code. The other says the compiler broke and later results cannot be trusted.]
 
-*Caption: accepted ownership map.*
-*Question: who can continue after each kind of failure?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Lane one]
+            [$insert("title"): CompilerDiagnostic]
+            Source, syntax, import, config, type, rule, borrow and target-contract problems. The author fixes these.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Rendered later, from the same event]
+                [lane:
+                [detail:
+                    [$insert("href"): ../starting-a-build/]
+                    CLI output
+                ]
+                [detail:
+                    [$insert("href"): ../starting-a-build/]
+                    Dev server and tooling views
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Lane two]
+            [$insert("title"): CompilerError]
+            Impossible states, transformation bugs, filesystem failures, backend collapse. Nobody renames a variable to fix one of these.
+        ]
+    ]
+]
 
 ## Diagnostic data lanes
 
@@ -85,17 +141,7 @@ Module outcomes split cleanly:
 - **Diagnosed** carries user diagnostics and **no partial public interface**
 - **CompilerError** aborts the owning project or package compilation because later results cannot be trusted
 
-Consumers blocked by a diagnosed required interface are not semantically compiled as if the provider half-worked. A failed root does not feed its dependents. Independent graph branches may continue under build-system orchestration for `check` or tooling. A backend never receives a partial linkable project.
-
-**Diagram placeholder:** One diagnosed module exposes no partial interface and a dependent waits
-
-*Caption: graph failure simplification.*
-*Question: what does the build publish when a provider fails?*
-
-**Diagram placeholder:** One structured event feeds CLI and tooling views
-
-*Caption: exact data-lane principle, simplified renderer shape.*
-*Question: why defer wording?*
+A consumer blocked by a diagnosed required interface never compiles as if the provider half-worked. A failed root does not feed its dependents. Independent graph branches may continue under build-system orchestration for `check` or tooling. A backend never receives a partial linkable project.
 
 ## Parallel failures
 
@@ -124,8 +170,8 @@ Exact wording in examples should track current constructors when you verify agai
 
 - **Accepted design:** separate diagnostic and error lanes plus deterministic rendering order.
 - **Current implementation:** progress matrix and current diagnostics owners.
-- **Queued work:** `compiler-diagnostics-improvement-plan.md`.
-- **Deferred or outside scope:** this page does not catalogue every diagnostic code.
+- **Queued work:** none for this page right now.
+- **Deferred or outside scope:** `compiler-diagnostics-improvement-plan.md` is paused until the diagnostics and token-layout work finishes, so it is not queued today. This page also does not catalogue every diagnostic code.
 
 ## Exit state
 

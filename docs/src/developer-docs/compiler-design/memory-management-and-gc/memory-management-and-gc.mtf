@@ -7,7 +7,7 @@ Moth separates two questions that often get bundled together:
 
 Borrow validation answers access questions. Lifetime-region and escape validation proves one legal lifetime topology. A memory-strategy planner then chooses a representation for each validated allocation family.
 
-Garbage-collected representation can represent an already-proven topology, but garbage collection never supplies the proof. A capable full-control release backend must lower without a tracing or reachability collector.
+A garbage-collected representation can carry an already-proven topology, but garbage collection never supplies the proof. A capable full-control release backend must lower without a tracing or reachability collector.
 
 ## The sentence to keep
 
@@ -23,9 +23,98 @@ Access validation and lifetime validation work together, but they own different 
 
 **Lifetime and retained-edge analysis** checks one semantic lifetime owner, retained-edge outlives relationships, escapes, cycles, non-lexical intervals, cleanup frontiers, builder lifecycle roots and exported summaries.
 
+Those two sentences carry five terms worth unpacking before the rest of the page leans on them.
+
+**Affine** describes a cleanup responsibility exactly one owner holds at a time. It can pass to a new owner, but it never splits and never duplicates, so cleanup happens once at a proven final use. Borrowing a value doesn't take that responsibility. Transferring it does.
+
+A **retained edge** is one value holding onto another so the second must outlive the first. A list keeping its items alive has retained edges. A local reading a value briefly does not.
+
+A **non-lexical interval** is the stretch of control flow where something is genuinely still needed, which is usually shorter than the block it was declared in. The compiler picks the narrowest owner that works and widens only to the nearest enclosing owner on the same chain. It never slides sideways to an unrelated sibling scope or invents a broad owner to make the sums easier.
+
+A **cleanup frontier** is a point where cleanup is provably safe. Reaching one takes a full proof: every relevant retained edge is gone, no live alias remains, nothing can recreate an edge and no external holder or surviving aggregate still retains it. Partial confidence does not count.
+
+An **epoch** is one round of a fill-and-empty cycle. A collection repeatedly populated and cleared has many value epochs while the collection itself, and the memory backing it, outlives every one of them.
+
 Neither analysis depends on a collector. A GC backend must receive the same validated topology as a collector-free backend.
 
 ## The proof pipeline
+
+[diagram:
+    [$insert("label"): Legality is proven before representation is chosen]
+    [$insert("caption"): The first two steps decide whether the program is allowed at all. Only the last two decide how it gets stored. Swapping that order is the mistake this whole design exists to prevent.]
+
+    [stage:
+        [node:
+            [$insert("href"): ../borrow-validation-and-drops/]
+            [$insert("eyebrow"): Shared, target-independent]
+            [$insert("title"): Proof of legality]
+            Access rules, last use, lifetime topology, intervals, frontiers and epochs. True regardless of where the code runs.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Last shared artefact]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    Backend-neutral memory requirements, carrying no chosen strategy
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../target-planning-and-validation/]
+            [$insert("eyebrow"): Build-owned]
+            [$insert("title"): Target partition and validation]
+            Establishes which candidate physical variants exist. Sits between the two halves.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Per variant, compiler-owned]
+            [$insert("title"): Choice of representation]
+            Now the planner knows the target, profile and backend capabilities, so it can pick a strategy.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Strategies available]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./]
+                    Stack or inline placement
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Affine cleanup
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Inferred or declared regions
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    REC or a collector
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): Encoded]
+            [$insert("title"): ValidatedMemoryPlan]
+            One plan per physical variant. Lowering realises it without choosing anything of its own.
+        ]
+    ]
+]
 
 The accepted memory pipeline reads from one owner at each stage:
 
@@ -43,12 +132,12 @@ The accepted memory pipeline reads from one owner at each stage:
         -> backend lowering
 ]
 
-The pipeline has one seam worth memorising: everything above `backend-neutral memory requirements` is **shared**, and everything below it is **per physical variant**.
+The seam worth memorising: `backend-neutral memory requirements` is the last **shared** artefact. Build-owned target partition and target-contract validation come next and establish the candidate physical variants. Only after that does work become **per variant**.
 
 - **Shared topology** is target-independent and profile-independent. It decides what the program means and whether it is legal.
 - **Backend-neutral memory requirements** are the last shared artefact: family identity, owners, intervals, frontiers, retention facts, REC candidacy, declared-region membership. They deliberately contain no selected strategy.
 - **Target partition** is build-owned. It assigns functions to targets and, with target-contract validation, creates a candidate physical variant.
-- **Variant-specific physical planning** is compiler-owned. Only here does the planner know the target, the build profile and the backend's memory capabilities, so only here can it choose stack or inline placement, affine cleanup, an inferred region, a declared-region arena, REC or a garbage-collected representation. The planner does not only select a strategy: it also turns each semantic commit into one normalised per-family obligation transition, fuses same-family removals and additions, and decides root-to-edge and edge-to-root reclassification, all before lowering.
+- **Variant-specific physical planning** is compiler-owned. Only here does the planner know the target, the build profile and the backend's memory capabilities, so only here can it choose stack or inline placement, affine cleanup, inferred-region allocation, declared-region bulk reclamation (which a physical arena may or may not represent), REC or a garbage-collected representation. The planner does more than select a strategy. Before lowering, it turns each semantic commit into one normalised per-family obligation transition, fuses same-family removals and additions and decides root-to-edge and edge-to-root reclassification.
 - **`ValidatedMemoryPlan`** is that decision, one per physical variant.
 - **Lowering** realises the plan and encodes those planned transitions. It never picks a strategy of its own.
 
@@ -72,24 +161,64 @@ This fallback keeps the source program under the same legal topology. It does no
 
 One set of last-use and retained-edge facts feeds several decisions while each stage keeps its own responsibility:
 
-| Fact | Consumer |
-|---|---|
-| a shared or exclusive access may still be used | borrow conflict validation |
-| no later source use exists on every relevant path | optional affine transfer |
-| no capable source alias survives | cleanup-frontier proof |
-| a final-use persistent store commits | affine root to persistent edge reclassification |
-| a stored value is detached into an owned result | persistent edge to affine root reclassification |
-| a final loop iteration is statically known | final-iteration responsibility transfer |
-| no observer or recreating source survives an epoch | inferred-region epoch completion |
-| edge sets are mutually exclusive across paths or epochs | avoid a false cycle coexistence result |
+[table:
+    [th:
+        [: Fact]
+        [: Consumer]
+    ]
 
-Borrow validation supplies the facts; lifetime analysis and memory planning own the decisions.
+    [td:
+        [: a shared or exclusive access may still be used]
+        [: borrow conflict validation]
+    ]
+
+    [td:
+        [: no later source use exists on every relevant path]
+        [: optional affine transfer]
+    ]
+
+    [td:
+        [: no capable source alias survives]
+        [: cleanup-frontier proof]
+    ]
+
+    [td:
+        [: a final-use persistent store commits]
+        [: affine root to persistent edge reclassification]
+    ]
+
+    [td:
+        [: a stored value is detached into an owned result]
+        [: persistent edge to affine root reclassification]
+    ]
+
+    [td:
+        [: a final loop iteration is statically known]
+        [: final-iteration responsibility transfer]
+    ]
+
+    [td:
+        [: no observer or recreating source survives an epoch]
+        [: inferred-region epoch completion]
+    ]
+
+    [td:
+        [: edge sets are mutually exclusive across paths or epochs]
+        [: avoid a false cycle coexistence result]
+    ]
+]
+
+Borrow validation supplies the facts. Lifetime analysis and memory planning own the decisions.
 
 ## Explicit copies and declared regions
 
-Existing values use shared access by default. `copy` creates an independent graph and preserves its internal alias topology. A copied acyclic graph may enter an inferred or declared destination region. A copied cyclic graph must enter one declared region as a whole because declared regions provide Moth's only source mechanism for direct cycles.
+Existing values use shared access by default. `copy place` deep-copies the complete copyable graph, preserves its internal alias topology and shares no mutable allocation with the source. A non-copyable member, such as an external handle or resource, is a diagnostic rather than a silently surviving alias.
 
-A declared region provides one hard, count-free bulk lifetime. Last-use analysis still checks access within it, but it never releases a declared-region-owned allocation early. Declared-region exit reclaims the domain together.
+A copied acyclic graph may enter an inferred or declared destination region. A copied cyclic graph must enter one declared region as a whole, because declared regions are Moth's only source mechanism for direct cycles.
+
+A declared region gives its own allocations one hard, count-free bulk lifetime. Last-use analysis still checks access within it, but it never releases a declared-region-owned allocation early, and region exit reclaims the domain together.
+
+Count-free stops at the region boundary. An edge running from declared-region storage into an externally owned REC family stays a counted obligation, released at region exit before the bulk reclaim.
 
 ## Backend representations
 
@@ -97,8 +226,77 @@ Backends realise the validated memory plan through different physical mechanisms
 
 - **Collector-free release:** affine cleanup, inferred regions, declared regions and REC lower without tracing reachability.
 - **Debug or GC-native representation:** a collector may erase individual cleanup operations while preserving the same validated topology and source behaviour.
-- **Retained Edge Counting:** REC is selected because unresolved runtime-many persistent retained edges disappear independently and no earlier mechanism (static cleanup, inferred regions, frontiers, declared regions, field splitting or bounded retention) answers precisely enough. A selected counter carries the live counted persistent-edge obligations plus at most one affine-root obligation. REC is not general ARC or source-visible retain/release behaviour: ordinary aliases, parameters, temporary projections and `get()` results never contribute obligations, and REC never establishes legality. A final-use store can reclassify the affine root into one persistent edge, and a detached result can reclassify one persistent edge back into an affine root. Each has zero net counter traffic for that one reclassified edge. An operation that creates or removes several direct edges into the family still moves the count by the remainder. The planner fuses a same-family replacement, so the backend never emits a transient decrement to zero followed by an increment for that replacement.
+- **Retained Edge Counting:** a narrow counted representation for persistent retained edges that disappear independently, covered below.
 - **Physical coalescing:** a planner may keep storage slightly longer to reduce overhead. Coalescing never widens semantic topology, changes an outlives relationship or changes diagnostics.
+
+### Retained Edge Counting
+
+[diagram:
+    [$insert("label"): The planner works down a ladder before it reaches REC]
+    [$insert("caption"): Each step down the ladder costs more than the one above it, so the planner takes the first rung that answers precisely enough. A counter is the last option.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Cheapest]
+            [$insert("title"): Static cleanup]
+            The final use is statically known, so cleanup is a fixed point in the code with no bookkeeping at all.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Bulk]
+            [$insert("title"): Regions]
+            An inferred or declared region reclaims a whole domain at once. One decision covers many values.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Refinement]
+            [$insert("title"): Frontiers, splitting and bounded retention]
+            Cleanup frontiers, field splitting and cheap bounded retention narrow the problem before anything counts.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Last resort]
+            [$insert("title"): Retained Edge Counting]
+            Runtime-many edges disappearing independently, where a region would hold storage far too long.
+        ]
+    ]
+]
+
+REC is a last resort, and the planner works down that ladder before reaching it. Selection needs all three conditions:
+
+1. runtime-many persistent retained edges that disappear independently
+2. no earlier mechanism answers precisely enough, meaning static cleanup, inferred regions, frontiers, declared regions, field splitting and cheap bounded retention have all been ruled out
+3. falling back to a region would hold substantial storage materially longer than the values are useful
+
+A selected counter carries the live counted persistent-edge obligations plus at most one affine-root obligation.
+
+REC counts only **direct** persistent edges in the post-refinement family graph. Transitive reachability never counts, which is exactly what keeps it away from tracing.
+
+Contributing nothing at all:
+
+- ordinary aliases and parameters
+- temporary projections and `get()` results
+- read-only call borrows
+- statically known region-only edges
+- declared-region-owned targets
+
+One storage operation may still contribute several direct edges, so counting is per edge rather than per statement.
+
+REC is not general ARC, it is not source-visible retain/release behaviour and it never establishes legality.
+
+Reclassification runs both ways and costs nothing at the counter. A final-use store turns the affine root into one persistent edge. A detached result turns one persistent edge back into an affine root. Either way that single reclassified edge produces zero net counter traffic.
+
+An operation touching several direct edges at once still moves the count by whatever remains after those cancel out. And the planner fuses a same-family replacement, so the backend never emits a decrement to zero followed immediately by an increment for the same slot.
 
 Backends consume a validated memory plan. They do not infer source meaning, reconstruct lifetime topology or choose a new strategy when lowering.
 
@@ -122,9 +320,11 @@ Source failures use structured diagnostics. Missing compiler-owned metadata or a
 ## Roadmap and current status
 
 - **Accepted design:** static borrow and lifetime proof, explicit copies, inferred transfer, declared regions, direct source-created cycles requiring one declared region, REC as a narrow physical strategy and collector-free release on capable backends.
-- **Current implementation:** consult the memory rows in `docs/src/docs/progress/@page.moth`.
-- **Deferred implementation:** lifetime topology, complete retained-edge summaries, declared regions, REC, field splitting, builder lifecycle regions and collector-free verification remain separate implementation slices.
-- **Implementation debt:** current Wasm `DropIfOwned` paths may still consume advisory drop sites. Final lowering must consume the validated memory plan.
+- **Current implementation:** shared and exclusive access checking plus much local future-use analysis is partial and working. Public provenance summaries are partial. The Wasm ownership projection is experimental and currently consumes borrow-checker advisory `DropIfOwned` sites directly, which is migration debt rather than the accepted input.
+- **Queued work:** consolidate and implement the collector-free memory and REC plans named in `docs/roadmap/roadmap.md`.
+- **Deferred or outside scope:** lifetime topology, retained-edge liveness and epochs, declared regions and cycles, memory-strategy planning, REC, field splitting, region lowering, builder lifecycle roots and collector-free verification.
+
+Read this page as the accepted destination. The memory rows in `docs/src/docs/progress/@page.moth` are the authority on what runs today.
 
 ## Exit state
 

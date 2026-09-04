@@ -1,6 +1,6 @@
 # What a compiler does
 
-You type source. Something emits `<p>Hello, Priya!</p>`. Between those two facts sits a chain of transformations. Each step is a bit less like human prose and a bit more like something a machine can use.
+You type source. Something emits `<p>Hello, Priya!</p>`. Between those two facts sits a chain of transformations. Each step drifts further from human prose and closer to something a machine can use.
 
 People often shrink that chain to a slogan: "the compiler turns code into machine instructions." That slogan fails the greeting project early. The page may never touch native machine code. It still needs tokens, types, control-flow graphs, link plans and a builder that writes HTML. That work still counts as compiling.
 
@@ -26,10 +26,39 @@ Those files hold characters on disk. They do not yet hold a typed call graph, a 
 
 Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.
 
-**Diagram placeholder:** One source plan becomes different target forms while keeping the same meaning
+[diagram:
+    [$insert("label"): One source meaning grown into several target forms]
+    [$insert("caption"): The plan is authored once. Each target grows it into a different adult form without changing what the program means.]
 
-*Caption: teaching analogy for source meaning and target form.*
-*Question: which parts of the greeting project still look like source plan, and which already look like a page a browser can show?*
+    [stage:
+        [node:
+            [$insert("href"): ../ast-semantics-and-types/]
+            [$insert("eyebrow"): Source meaning]
+            [$insert("title"): The plan]
+            `greet` takes a visitor name and returns a greeting. One set of rules, checked once.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Grown forms]
+                [fanout:
+                [detail:
+                    [$insert("href"): ../backend-lowering/]
+                    JavaScript for browser work
+                ]
+                [detail:
+                    [$insert("href"): ../backend-lowering/]
+                    WebAssembly for neutral compute
+                ]
+                [detail:
+                    [$insert("href"): ../html-assembly-and-output/]
+                    HTML the browser displays
+                ]
+                ]
+            ]
+        ]
+    ]
+]
 
 ## A small vocabulary
 
@@ -47,11 +76,6 @@ A **build system** decides *what* to compile, in which order, with which inputs 
 
 Moth splits those jobs on purpose. The compiler library owns semantic meaning for modules. The build system owns project graphs, entry plans and writing files. Backends lower already-validated meaning into JavaScript or Wasm. The HTML builder assembles page-shaped outputs.
 
-**Diagram placeholder:** Three routes from source toward execution with overlapping responsibilities
-
-*Caption: teaching simplification, not a complete taxonomy.*
-*Question: where does execution happen for Priya's page?*
-
 ## Frontend, analysis and backend
 
 Compilers often speak of a **frontend**, **middle** analysis and a **backend**. Treat those as responsibilities, not a sacred phase diagram every language must copy.
@@ -64,10 +88,48 @@ The **backend** faces a concrete target. It lowers validated meaning into JavaSc
 
 Moth's compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI "the compiler."
 
-**Diagram placeholder:** Owner map for build system, frontend, analysis and backend
+[diagram:
+    [$insert("label"): Which part of Moth owns which job]
+    [$insert("caption"): Four owners, four questions. The build system asks which files matter, the frontend asks what they mean, analysis asks whether that meaning is safe and the backend asks how to say it in a target language.]
 
-*Caption: ownership categories from the canonical authorities.*
-*Question: who decides which files enter the graph, and who decides whether `visitor` type-checks?*
+    [stage:
+        [node:
+            [$insert("href"): ../starting-a-build/]
+            [$insert("eyebrow"): Build system]
+            [$insert("title"): Which files, in which order?]
+            Chooses the command, reads project config and builds the source graph.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../ast-semantics-and-types/]
+            [$insert("eyebrow"): Frontend]
+            [$insert("title"): What does this source mean?]
+            Tokenises, binds names, checks types and records source meaning.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../borrow-validation-and-drops/]
+            [$insert("eyebrow"): Analysis]
+            [$insert("title"): Is that meaning legal?]
+            Proves access safety, lifetimes, reachability and target capability.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): Backend]
+            [$insert("title"): How do we say it in the target?]
+            Lowers validated meaning into JavaScript, Wasm and glue. It never reopens source.
+        ]
+    ]
+]
+
+*Who decides which files enter the graph, and who decides whether `visitor` type-checks? Different owners, and that separation is the point.*
 
 ## Why intermediate representations exist
 
@@ -118,11 +180,6 @@ Each step deletes one class of question so the next owner can ask a harder one.
 
 **One fact, one owner.** If the AST already folded `greeting_prefix` to `"Hello"`, HIR should not re-parse the constant. If HIR already recorded a call edge to `greet`, the linker should not guess callees from string names in source. Duplication invites drift. Drift invites bugs that only appear on one backend.
 
-**Diagram placeholder:** Representation path from source text to target code
-
-*Caption: simplified Moth walkthrough.*
-*Question: why keep multiple forms instead of overwriting one tree in place?*
-
 ## What can fail here
 
 Failures arrive in families, not one grey cloud labelled "error."
@@ -149,7 +206,7 @@ Later articles assign exact diagnostic ownership. Here only the families matter:
 
 - **Accepted design:** a staged compiler library plus a build-owned project pipeline.
 - **Current implementation:** follow the progress matrix. Do not treat transitional backend handoff details as permanent law.
-- **Queued work:** canonical module compilation and mixed-target plans still shape how cleanly some handoffs land.
+- **Queued work:** the mixed JavaScript/Wasm backend plan. Canonical module compilation and scoped packages already landed.
 - **Deferred or outside scope:** this article does not teach a universal compiler taxonomy for every language.
 
 ## Exit state

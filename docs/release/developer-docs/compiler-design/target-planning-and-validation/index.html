@@ -335,6 +335,356 @@ td {
     border-bottom-style: solid;
     border-bottom-width: 1px;
     padding: 0rem 2rem 0rem 2rem;
+} .moth-flow {
+    --flow-main-width: 17rem;
+    --flow-stage-gap: 2.75rem;
+    --flow-branch-gap: 1.25rem;
+    --flow-node-radius: 0.7rem;
+
+    margin-block: 2.5rem;
+    color: inherit;
+}
+
+.moth-flow,
+.moth-flow * {
+    box-sizing: border-box;
+}
+
+.moth-flow__pipeline {
+    display: grid;
+    gap: var(--flow-stage-gap);
+}
+
+.moth-flow__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--flow-main-width) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 3rem;
+    min-width: 0;
+}
+
+.moth-flow__stage + .moth-flow__stage::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--flow-main-width) / 2);
+    top: calc(var(--flow-stage-gap) * -1);
+    width: 0;
+    height: calc(var(--flow-stage-gap) - 0.35rem);
+    border-left: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__stage + .moth-flow__stage::after {
+    content: "";
+    position: absolute;
+    left: calc((var(--flow-main-width) / 2) - 0.23rem);
+    top: -0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__main {
+    min-width: 0;
+}
+
+.moth-flow__details {
+    position: relative;
+    min-width: 0;
+}
+
+.moth-flow__details:not(:has(> *)) {
+    display: none;
+}
+
+.moth-flow__details:has(> *)::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 2.35rem;
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__details:has(> *)::after {
+    content: "";
+    position: absolute;
+    right: calc(100% - 0.05rem);
+    top: calc(50% - 0.22rem);
+    width: 0.42rem;
+    height: 0.42rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__node,
+.moth-flow__detail,
+.moth-flow__island-link {
+    color: inherit;
+    text-decoration: none;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: var(--flow-node-radius);
+
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.moth-flow__node:hover,
+.moth-flow__detail:hover,
+.moth-flow__island-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px currentColor;
+}
+
+.moth-flow__node:focus-visible,
+.moth-flow__detail:focus-visible,
+.moth-flow__island-link:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 3px;
+}
+
+.moth-flow__node {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+}
+
+.moth-flow__eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    opacity: 0.68;
+}
+
+.moth-flow__title {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.moth-flow__description {
+    font-size: 0.84rem;
+    line-height: 1.42;
+    opacity: 0.78;
+}
+
+.moth-flow__description:empty,
+.moth-flow__eyebrow:empty {
+    display: none;
+}
+
+.moth-flow__branch {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.moth-flow__branch-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.62;
+}
+
+.moth-flow__branch-label:empty {
+    display: none;
+}
+
+.moth-flow__lane {
+    display: flex;
+    align-items: stretch;
+    gap: var(--flow-branch-gap);
+    min-width: 0;
+}
+
+.moth-flow__detail {
+    position: relative;
+    display: grid;
+    align-content: center;
+    min-width: 9.5rem;
+    max-width: 14rem;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.82rem;
+    line-height: 1.32;
+    text-align: center;
+}
+
+.moth-flow__lane > * + *::before {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.01rem);
+    top: 50%;
+    width: var(--flow-branch-gap);
+    border-top: 1px solid currentColor;
+    pointer-events: none;
+}
+
+.moth-flow__lane > * + *::after {
+    content: "";
+    position: absolute;
+    right: calc(100% + 0.05rem);
+    top: calc(50% - 0.2rem);
+    width: 0.38rem;
+    height: 0.38rem;
+    border-top: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.moth-flow__island {
+    position: relative;
+    display: grid;
+    min-width: 11rem;
+    max-width: 16rem;
+}
+
+.moth-flow__island-link {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.85rem;
+    border-style: dashed;
+}
+
+.moth-flow__island-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.moth-flow__island-description {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    opacity: 0.75;
+}
+
+.moth-flow__fanout {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.8rem;
+    width: 100%;
+}
+
+.moth-flow__fanout > .moth-flow__detail {
+    width: 100%;
+    max-width: none;
+}
+
+.moth-flow__caption {
+    margin-block-start: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+
+.moth-flow__caption:empty {
+    display: none;
+}
+
+@media (max-width: 64rem) {
+    .moth-flow__stage {
+        grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+        column-gap: 2.4rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 7.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(7.5rem - 0.23rem);
+    }
+
+    .moth-flow__lane {
+        overflow-x: auto;
+        padding-block: 0.15rem;
+    }
+}
+
+@media (max-width: 46rem) {
+    .moth-flow {
+        --flow-stage-gap: 2.3rem;
+    }
+
+    .moth-flow__stage {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::before {
+        left: 50%;
+    }
+
+    .moth-flow__stage + .moth-flow__stage::after {
+        left: calc(50% - 0.23rem);
+    }
+
+    .moth-flow__details:has(> *)::before {
+        right: auto;
+        left: 50%;
+        top: -1.5rem;
+        width: 0;
+        height: 1.15rem;
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__details:has(> *)::after {
+        right: auto;
+        left: calc(50% - 0.22rem);
+        top: -0.6rem;
+        transform: rotate(135deg);
+    }
+
+    .moth-flow__lane {
+        display: grid;
+        gap: 1.35rem;
+        overflow: visible;
+    }
+
+    .moth-flow__detail,
+    .moth-flow__island {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .moth-flow__lane > * + *::before {
+        right: auto;
+        left: 50%;
+        top: calc(var(--flow-branch-gap) * -1);
+        width: 0;
+        height: var(--flow-branch-gap);
+        border-top: 0;
+        border-left: 1px solid currentColor;
+    }
+
+    .moth-flow__lane > * + *::after {
+        right: auto;
+        left: calc(50% - 0.19rem);
+        top: -0.48rem;
+        transform: rotate(135deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .moth-flow__node,
+    .moth-flow__detail,
+    .moth-flow__island-link {
+        transition: none;
+    }
 }</style>
   </head>
   <body style="">
@@ -427,7 +777,51 @@ td {
     </div>
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 16. Target planning and validation</p><p>Per-function target assignment and validation catch capability mismatches before any backend emits code.</p></section>
-<section class="container"><h1>Deciding where code can run</h1><p>Target planning receives an already-validated lifetime topology. It assigns targets and checks capabilities; it does not change region ownership or source legality.</p><p>Semantically valid Moth can still be unhostable on a chosen target. A function that touches the DOM does not belong in a pure Wasm partition that has no DOM. A backend should learn that <strong>before</strong> it emits half a module and shrugs.</p><p><strong>Target planning</strong> assigns functions. <strong>Target validation</strong> checks the assignment against capabilities.</p><h2>Roots and capabilities</h2><p>The build system supplies <strong>validation roots</strong> and candidate assignments from entry or package link planning. The compiler owns validation semantics over those inputs.</p><p>Distinguish two ideas people conflate:</p><ul><li><strong>semantic package provenance</strong> records where a fact came from in the Moth sense</li><li><strong>target capability</strong> records what a runtime target can host</li></ul><p>A function can be perfectly typed and still require a capability its assigned target lacks.</p><p>For the greeting walkthrough, <code>start</code>, <code>greet</code> and any template runtime work arrive with link facts and capability requirements. Even a humble string page teaches the machinery that larger apps need for DOM and friends.</p><p><strong>Diagram placeholder:</strong> Each function carries capability facts and target affinity</p><p><em>Caption: simplified link input.</em> <em>Question: what constrains assignment?</em></p><h2>Affinity and propagation</h2><p>Some functions are born with <strong>affinity</strong>. A JavaScript-owned <code>start</code> that must orchestrate page lifecycle wants the JS side. A DOM-touching helper wants JS. Neutral pure computation may default toward Wasm where the design supports it.</p><p>Requirements <strong>propagate backwards</strong> along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.</p><p><strong>Diagram placeholder:</strong> A DOM requirement travels from callee to callers</p><p><em>Caption: accepted propagation rule.</em> <em>Question: why does a caller move targets?</em></p><h2>Deterministic assignment</h2><p>A clean mental loop:</p><ol><li>take the reachable union and validated lifetime topology</li><li>run affinity/capability analysis</li><li>assign targets</li><li>record reasons</li><li>validate assigned functions</li><li>validate cross-target edges</li></ol><p>Determinism matters. The same program should not flip partitions because a hash map iterated differently at breakfast.</p><p><strong>Diagram placeholder:</strong> One reachable union splits into target-labelled functions</p><p><em>Caption: conceptual assignment.</em> <em>Question: where does each function run?</em></p><h2>Cross-target calls</h2><p>Mixed output needs bridges.</p><p><strong>JavaScript-to-Wasm</strong> calls may use wrappers under explicit ABI rules.</p><p><strong>Wasm-to-JavaScript Moth calls</strong> remain prohibited after propagation in the accepted model. The planner should push the JS requirement outward rather than leave a forbidden reverse edge for emission to discover.</p><p>That asymmetry is deliberate engineering, not an accident of today&#39;s engine.</p><p><strong>Diagram placeholder:</strong> JS-to-Wasm wrapper is allowed while Wasm-to-JS edge is rejected</p><p><em>Caption: exact edge rule simplified.</em> <em>Question: which bridge is legal?</em></p><h2>Entry-specific variants and check</h2><p>Partitioning is <strong>entry-specific</strong>. Different entries may need different physical variants of shared logic when their capability sets differ. Variant keys make those physical artefacts addressable.</p><p>The <code>check</code> command plans and validates, then stops before writing a full page output set. Tooling overlays extend analysis. They do not become a second artefact builder competing with HTML output.</p><h2>What can fail here</h2><ul><li>unsupported target feature on a reachable function</li><li>missing capability</li><li>invalid cross-target edge</li><li>unresolved layout requirement</li><li>whole-module HTML-Wasm behaviour still marked transitional or experimental in the progress matrix</li></ul><p>Unsupported features in unreachable private functions should not fail validation.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> compile a whole page to one target, or let emission discover unsupported calls mid-write.</p><p><strong>Choice:</strong> per-function deterministic partitioning with explicit validation.</p><p><strong>Benefit:</strong> mixed output can keep browser work in JavaScript and neutral work in Wasm.</p><p><strong>Cost:</strong> wrappers, ABI rules and assignment reasons add planning machinery.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> entry-specific target assignment and compiler-owned target validation.</li><li><strong>Current implementation:</strong> progress matrix for mixed-target coverage.</li><li><strong>Queued work:</strong> <code>html_project_backend_wasm_final_implementation_plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> whole-module target selection as the final model.</li></ul><h2>Exit state</h2><p>You leave with validated target assignments, capabilities, dependencies and physical variants. Next: how lowerers turn these explicit inputs into JavaScript and Wasm without reopening source.</p></section>
+<section class="container"><h1>Deciding where code can run</h1><p>Target planning receives an already-validated lifetime topology. It assigns targets and checks capabilities. It never changes region ownership or source legality.</p><p>Semantically valid Moth can still be unhostable on a chosen target. A function that touches the DOM does not belong in a pure Wasm partition that has no DOM. A backend should learn that <strong>before</strong> it emits half a module.</p><p><strong>Target planning</strong> is build-owned and assigns each reachable function to a target. <strong>Target validation</strong> is compiler-owned and checks that finished assignment against capabilities.</p><h2>Roots and capabilities</h2><p>The build system supplies <strong>validation roots</strong> and the completed per-function target assignment from entry or package link planning. The compiler owns validation semantics over that assignment. It judges the partition rather than choosing it.</p><p>Distinguish two ideas people conflate:</p><ul><li><strong>package provenance</strong> records where a fact came from. <code>PackageOrigin</code> says which kind of package it belongs to and <code>PackageBacking</code> says whether real Moth source or an external binding implements it.</li><li><strong>target capability</strong> is builder and backend metadata describing which semantic features, bindings and helpers a target supports, plus what each function requires.</li></ul><p>Neither one is source-visible target identity. Moth source cannot ask which physical target it is being compiled for.</p><p>A function can be perfectly typed and still require a capability its assigned target lacks.</p><p>For the greeting walkthrough, <code>start</code>, <code>greet</code> and any template runtime work arrive with link facts and capability requirements. Even a humble string page exercises the machinery that larger apps need for the DOM and everything around it.</p><h2>Affinity and propagation</h2><p>Some functions are born with <strong>affinity</strong>. A JavaScript-owned <code>start</code> that must orchestrate page lifecycle wants the JS side. A DOM-touching helper wants JS. Neutral pure computation may default toward Wasm where the design supports it.</p><p>Requirements <strong>propagate backwards</strong> along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.</p><figure class="moth-flow" aria-label=" A capability requirement travels backwards along call edges">
+        <div class="moth-flow__pipeline">
+            <section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Callee</span>
+        <span class="moth-flow__title"> Touches the DOM</span>
+        <span class="moth-flow__description"><p>This helper can only run where a DOM exists, so it is JavaScript-bound.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ./">
+        <span class="moth-flow__eyebrow"> Caller</span>
+        <span class="moth-flow__title"> Inherits the requirement</span>
+        <span class="moth-flow__description"><p>A caller that must reach the helper picks up the same constraint.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section><section class="moth-flow__stage">
+    <div class="moth-flow__main">
+        <a class="moth-flow__node" href=" ../linking-entries-and-reachability/">
+        <span class="moth-flow__eyebrow"> Root</span>
+        <span class="moth-flow__title"> start lands in JavaScript</span>
+        <span class="moth-flow__description"><p>The requirement surfaces at the entry. Neutral callees stay in Wasm where callers bridge correctly.</p></span>
+    </a>
+</div>
+
+<div class="moth-flow__details">
+    
+</div>
+</section>
+</div>
+
+<figcaption class="moth-flow__caption">
+     The helper needs the DOM, so anything that must reach it inherits the requirement. Constraints climb towards callers, which is why a caller can be moved by a decision made three calls away.
+</figcaption>
+</figure><h2>Deterministic assignment</h2><p>A clean mental loop:</p><ol><li>take the reachable union and validated lifetime topology</li><li>run affinity/capability analysis</li><li>assign targets</li><li>record reasons</li><li>validate assigned functions</li><li>validate cross-target edges</li></ol><p>Determinism matters. The same program should not flip partitions because a hash map iterated in a different order.</p><h2>Cross-target calls</h2><p>Mixed output needs bridges.</p><p><strong>JavaScript-to-Wasm</strong> calls may use wrappers under explicit ABI rules.</p><p><strong>Wasm-to-JavaScript Moth calls</strong> remain prohibited after propagation in the accepted model. The planner should push the JS requirement outward rather than leave a forbidden reverse edge for emission to discover.</p><p>That asymmetry is deliberate engineering, not an accident of today&#39;s engine.</p><h2>Entry-specific variants and check</h2><p>Partitioning is <strong>entry-specific</strong>. Different entries may need different physical variants of shared logic when their capability sets differ. Variant keys make those physical artefacts addressable.</p><p>The <code>check</code> command plans and validates, then stops before writing a full page output set. Tooling overlays extend analysis. They do not become a second artefact builder competing with HTML output.</p><h2>What can fail here</h2><ul><li>unsupported target feature on a reachable function</li><li>missing capability</li><li>invalid cross-target edge</li><li>whole-module HTML-Wasm behaviour still marked transitional or experimental in the progress matrix</li></ul><p>Unresolved layout requirements are not on that list. Layout and memory-strategy planning happens per variant <em>after</em> target validation, so those failures belong to the memory planner.</p><p>Unsupported features in unreachable private functions should not fail validation.</p><h2>Why Moth does it this way</h2><p><strong>Alternative:</strong> compile a whole page to one target, or let emission discover unsupported calls mid-write.</p><p><strong>Choice:</strong> per-function deterministic partitioning with explicit validation.</p><p><strong>Benefit:</strong> mixed output can keep browser work in JavaScript and neutral work in Wasm.</p><p><strong>Cost:</strong> wrappers, ABI rules and assignment reasons add planning machinery.</p><h2>Roadmap and current status</h2><ul><li><strong>Accepted design:</strong> entry-specific target assignment and compiler-owned target validation.</li><li><strong>Current implementation:</strong> progress matrix for mixed-target coverage.</li><li><strong>Queued work:</strong> <code>html_project_backend_wasm_final_implementation_plan.md</code>.</li><li><strong>Deferred or outside scope:</strong> whole-module target selection as the final model.</li></ul><h2>Exit state</h2><p>You leave with validated target assignments, capabilities, dependencies and physical variants. Next: how lowerers turn these explicit inputs into JavaScript and Wasm without reopening source.</p></section>
 <section class="container"><p><a href="../">Compiler design</a> / <a href="../linking-entries-and-reachability">Previous</a> / <a href="../backend-lowering">Next</a></p></section>
 <script>
 function __moth_is_ref(value) {

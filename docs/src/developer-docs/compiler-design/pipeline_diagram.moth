@@ -79,7 +79,7 @@ compiler_pipeline #= [diagram:
     [stage:
         [node:
             [$insert("href"): ./declarations-dependencies-and-ordering/]
-            [$insert("eyebrow"): Stages 2b-3]
+            [$insert("eyebrow"): Stages 2-3]
             [$insert("title"): Interface binding and declaration order]
             Once providers are ready, bind retained dependency syntax and topologically order local declarations.
         ]
@@ -110,7 +110,7 @@ compiler_pipeline #= [diagram:
             [$insert("href"): ./ast-semantics-and-types/]
             [$insert("eyebrow"): Stage 4]
             [$insert("title"): AST semantics]
-            Resolve types, fold constants and templates, specialise static control flow and commit generated requests.
+            Resolve types, fold constants and templates, specialise ordinary "if" control flow on a known Bool and commit generated requests.
         ]
 
         [$insert("details"):
@@ -228,7 +228,7 @@ compiler_pipeline #= [diagram:
             [$insert("href"): ./module-artefacts-and-reuse/]
             [$insert("eyebrow"): Boundary]
             [$insert("title"): Immutable module artefacts]
-            Publish successful module semantics, generated sidecars, link facts and reuse fingerprints.
+            Publish successful module semantics, generated sidecars and link facts. Reuse fingerprints are planned, not a current lane.
         ]
     ]
 

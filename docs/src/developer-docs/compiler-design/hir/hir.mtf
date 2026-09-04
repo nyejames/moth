@@ -26,11 +26,6 @@ with ordered runtime work in HIR spirit:
 
 The second form makes evaluation order and temporary storage obvious. Backends and analyses stop arguing about tree walk conventions.
 
-**Diagram placeholder:** One nested call becomes ordered locals, operations and a terminator
-
-*Caption: teaching simplification.*
-*Question: what does lowering make explicit?*
-
 ## HIR building blocks
 
 Teaching vocabulary:
@@ -41,14 +36,9 @@ Teaching vocabulary:
 - **terminators** for exits, branches and returns that end a block
 - **locals** for named temporary and source-rooted storage
 - **places** for locations you can read or write
-- **regions** for structured nesting where the IR needs them
+- **regions** for lexical scope nesting inside the IR. A HIR `RegionId` is not a source-declared region and not exact lifetime topology.
 
 Expression side effects linearise into statement preludes. The final value then feeds the next operation or terminator. Plain binary operations may remain for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic lowers through explicit checked numeric statements.
-
-**Diagram placeholder:** Blocks connect through branch and exit edges
-
-*Caption: conceptual CFG.*
-*Question: where do analyses walk?*
 
 ## Runtime template work
 
@@ -72,19 +62,45 @@ Source calls use explicit target classes:
 
 Generated concrete functions add another stable target class once materialised.
 
-HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operations, path and asset requirements, project-context provenance and generated-function requests.
+HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operations, resource uses, project-context provenance and generated-function requests.
 
 Those facts are the linking authority later stages consume.
 
-**Diagram placeholder:** Local, dependency-bound, generated and binding-backed calls point to explicit identities
+[diagram:
+    [$insert("label"): Link facts sit beside HIR, never inside it]
+    [$insert("caption"): Later stages read the facts on the right without touching the control flow on the left. Analysis writes side tables; it never rewrites the IR to taste.]
 
-*Caption: simplified link facts.*
-*Question: how does a backend know its dependencies?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Validated]
+            [$insert("title"): HIR control flow]
+            Blocks, statements, terminators and locals. Fixed once validation passes.
+        ]
 
-**Diagram placeholder:** HIR remains unchanged while link facts sit beside it
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Recorded alongside, per function]
+                [lane:
+                [detail:
+                    [$insert("href"): ../linking-entries-and-reachability/]
+                    Call edges to explicit identities
+                ]
+                [detail:
+                    [$insert("href"): ../target-planning-and-validation/]
+                    Helper and capability needs
+                ]
+                [detail:
+                    [$insert("href"): ../html-assembly-and-output/]
+                    Resource uses
+                ]
+                ]
+            ]
+        ]
+    ]
+]
 
-*Caption: exact side-data boundary, simplified shape.*
-*Question: what may analysis write without rewriting HIR?*
+*A backend learns its dependencies by reading those facts, not by guessing callees from names in source.*
 
 ## Validation boundary
 

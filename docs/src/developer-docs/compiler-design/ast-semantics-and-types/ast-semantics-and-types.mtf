@@ -19,10 +19,61 @@ A **semantic tree** (still often stored as AST nodes in Moth) adds resolved fact
 
 Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the dependency clauses.
 
-**Diagram placeholder:** Unresolved names gain symbol, argument and return facts
+[diagram:
+    [$insert("label"): The same call, before and after checking]
+    [$insert("caption"): Parsing refuses to invent any of the facts on the right. Each one needs a rule and a source of truth, which is exactly what this stage supplies.]
 
-*Caption: teaching simplification.*
-*Question: what does type checking add that parsing refused to invent?*
+    [stage:
+        [node:
+            [$insert("href"): ../declarations-dependencies-and-ordering/]
+            [$insert("eyebrow"): Before]
+            [$insert("title"): greet(visitor) as shape]
+            A call expression with an argument list. Grouping is known. Meaning is not.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): After]
+            [$insert("title"): greet(visitor) as fact]
+            A call with a known callee, a checked argument contract and a return type.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Facts added here]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    Which symbol `greet` names
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Which local `visitor` names
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Argument and return `TypeId` values
+                ]
+                [detail:
+                    [$insert("href"): ../diagnostics/]
+                    Whether the call is legal here
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../hir/]
+            [$insert("eyebrow"): Downstream]
+            [$insert("title"): Lowered without reopening]
+            HIR can lower the call without going back to the dependency clauses to ask what `greet` was.
+        ]
+    ]
+]
 
 ## Environments and visibility
 
@@ -31,11 +82,6 @@ AST consumes **bound file visibility**. It may validate semantic use of visible 
 Scopes nest inside bodies. The collision policy does not. All user-visible names share one rule: same-file declarations, source dependencies, binding-backed dependencies, aliases, prelude symbols and builtins cannot silently shadow one another.
 
 Local declarations, dependency bindings and reserved interfaces remain distinct origins even when their spellings sit in one lookup table.
-
-**Diagram placeholder:** Two visible declarations trigger one collision result
-
-*Caption: accepted visibility policy.*
-*Question: who owns a name when two dependencies want the same spelling?*
 
 ## Type identity
 
@@ -48,11 +94,6 @@ Why refuse donor-local indexes at the boundary? Because module-local numbering i
 `DataType` spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.
 
 Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.
-
-**Diagram placeholder:** Local handles point to stable semantic identities
-
-*Caption: exact identity principle, simplified storage.*
-*Question: why not share donor indexes into the consumer?*
 
 ## Receiving boundaries and coercion
 
@@ -73,18 +114,13 @@ Natural typing asks "what is this?" Contextual coercion asks "may this value ent
 
 On the page, `visitor` as a `String` meets `greet`'s `name` parameter at a receiving boundary. The constant `"Priya"` met `visitor`'s declaration boundary earlier.
 
-**Diagram placeholder:** A contextual boundary permits a documented coercion or requires a cast
-
-*Caption: simplified typing flow.*
-*Question: where does conversion happen, and who requested it?*
-
 ## Bodies, blocks and terminality
 
 Functions contain statements and expressions. Some constructs produce values: value-producing `if`, match and block-form `catch` act as closed receiving constructs rather than free-floating general expressions.
 
 They are valid only where a receiver is explicit. Every producing path must satisfy the receiving arity. Non-unit success returns must be **terminal** before HIR lowering: control must not fall off the end without producing the promised values.
 
-AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract and HIR reports an internal transformation error rather than a casual source shrug.
+AST owns those diagnostics. If HIR later sees a non-unit function that can fall through, AST broke its contract, so HIR reports an internal transformation error instead of blaming the author.
 
 HIR will make runtime control flow explicit. AST still owes a body that already makes sense.
 

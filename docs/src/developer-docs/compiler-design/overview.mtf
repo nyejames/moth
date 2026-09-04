@@ -1,13 +1,10 @@
 # From Moth source to a webpage
 
-We'll follow a small Moth program from files on disk to a generated HTML page. 
+We'll follow a small Moth program from files on disk to a generated HTML page.
 
-If you write Rust, you already know functions, enums, structs and ownership as a user. 
-You may not know terms like *intermediate representation*, *link plan* or *borrow validation* yet. 
+If you write Rust, you already know functions, enums, structs and ownership as a user. You may not have met *intermediate representation*, *link plan* or *borrow validation*. Each term arrives when the example needs it and gets explained on the spot.
 
-Each term shows up when the example needs it and will be explained step by step.
-
-These docs are focused on teaching rather than documenting the compiler's actual implemented behaviour.
+These docs teach the concepts rather than document every behaviour the compiler implements today.
 
 ## The small example project we'll follow
 
@@ -79,10 +76,6 @@ project tree
 
 Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.
 
-[$note: 
-    This diagram is a bit messed up atm, but can be fixed later when these docs are redrafted.
-    Exported from the main page but defined in diagrams/+package.moth
-]
 [compiler_pipeline]
 
 *Question: which step still looks like source, and which first looks like something a host can run?*
@@ -130,7 +123,7 @@ Later articles label four kinds of claim:
 
 - **Accepted design:** architecture or language contract the authorities already chose
 - **Current implementation:** behaviour the progress matrix records today
-- **Queued or active implementation:** named roadmap work still landing
+- **Queued work:** named roadmap work still landing
 - **Deferred or outside scope:** postponed on purpose, or rejected as a language shape
 
 The series links the progress matrix and roadmap. It does not paste either document into the articles. Accepted architecture stays the main teaching path.
@@ -145,5 +138,14 @@ The series links the progress matrix and roadmap. It does not paste either docum
 - `docs/roadmap/roadmap.md` for order and deferred design
 
 Educational pages explain those authorities. They do not outrank them.
+
+## Roadmap and current status
+
+- **Accepted design:** a staged compiler library with build-owned project orchestration, immutable module artefacts, entry-selected roots, per-function target assignment and a validated memory plan per physical variant.
+- **Current implementation:** the frontend through borrow validation, canonical module compilation, scoped packages, typed project config and the HTML builder's JavaScript path. Consult the progress matrix rather than this series for row-level detail.
+- **Queued work:** the mixed JavaScript and Wasm backend plan, entry-local config blocks, the numeric redesign and the collector-free memory and REC plans.
+- **Deferred or outside scope:** lifetime-region validation, memory-strategy planning, REC, artefact reuse and persistence, trait objects and source-visible reference types.
+
+Read the series as the accepted destination, with each page's own status section marking where today diverges.
 
 Next: what a compiler does between Priya's name and a paragraph on a page.

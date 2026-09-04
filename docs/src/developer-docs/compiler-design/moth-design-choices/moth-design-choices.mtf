@@ -22,11 +22,6 @@ Moth prefers the opposite trade. The source surface stays narrow, more like a vi
 
 You lose some "I can invent any abstraction" flexibility. You gain fewer competing paths through the frontend and backends. One owner answers each question.
 
-**Diagram placeholder:** Source surface shrinks while compiler responsibilities grow
-
-*Caption: where complexity lives.*
-*Question: who pays for the constraint when `greet` expands a template?*
-
 ## Language and build system together
 
 Many ecosystems treat the language and the package tool as strangers. Moth grows them from the same root system.
@@ -47,18 +42,13 @@ Templates are first-class. They are not string soup with a helper library. The c
 
 Contrast a general macro system or a trait-object heavy design. Those keep doors open at runtime. Moth settles structure early so backends inherit fewer open questions.
 
-**Diagram placeholder:** Source template contains the final paragraph structure
-
-*Caption: running-example preview of a first-class template.*
-*Question: why keep templates in the language instead of a separate markup compiler?*
-
 ## Access, errors and memory
 
 Memory design continues the same theme.
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
-Existing values use **shared** read-only access by default. Mutation needs explicit exclusive access through `~place`. **Copies** use explicit `copy`. **Moves** are inferred. You will not write lifetime annotations or a move keyword in source.
+Existing values use **shared** read-only access by default. Mutating an existing place needs explicit exclusive access through `~place`. A fresh value handed straight to a mutable parameter needs no `~`, because there is no existing place to contend over, though a mutable receiver still does. **Copies** use explicit `copy`. **Moves** are inferred. You will not write lifetime annotations or a move keyword in source.
 
 Errors prefer **`Error!`**, postfix propagation and **`catch`** over a second exception dialect fighting the first.
 
@@ -84,10 +74,61 @@ If a feature would force solver-heavy reasoning, implicit behaviour or backend l
 
 Do not call those refusals "missing features" as if every language must collect the same stamps.
 
-**Diagram placeholder:** Six rows compare mainstream alternatives with Moth choices
+[diagram:
+    [$insert("label"): Where each choice moves the work]
+    [$insert("caption"): Read every row the same way. Something the programmer would otherwise express, or the runtime would otherwise decide, becomes the compiler's job instead.]
 
-*Caption: conceptual trade-off map.*
-*Question: what does each choice move between the programmer and the compiler?*
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Given up]
+            [$insert("title"): Source-surface power]
+            Macros, reflection, trait objects, general closures, source-visible lifetimes and shadowing.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../compile-time-semantics/]
+            [$insert("eyebrow"): Absorbed]
+            [$insert("title"): Compiler bookkeeping]
+            The same problems still need solving. They move behind the source surface.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Who now does the work]
+                [lane:
+                [detail:
+                    [$insert("href"): ../compile-time-semantics/]
+                    Folding and trait evidence
+                ]
+                [detail:
+                    [$insert("href"): ../templates-and-tir/]
+                    Template structure
+                ]
+                [detail:
+                    [$insert("href"): ../borrow-validation-and-drops/]
+                    Inferred moves
+                ]
+                [detail:
+                    [$insert("href"): ../target-planning-and-validation/]
+                    Target planning
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../what-a-compiler-does/]
+            [$insert("eyebrow"): Bought]
+            [$insert("title"): One owner per question]
+            Fewer competing paths through the frontend and backends, and less to re-analyse downstream.
+        ]
+    ]
+]
 
 ## What can fail in this article's framing
 
@@ -108,7 +149,7 @@ When you propose an example, ask whether the progress matrix already supports it
 ## Roadmap and current status
 
 - **Accepted design:** design-scope, compiler and memory authorities agree on the bias above.
-- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias; grouped config, typed build values and explicit `@project` are implemented.
+- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values and explicit `@project` are implemented.
 - **Queued work:** numeric semantics, mixed backend plans and entry-local config remain labelled by plan status.
 - **Deferred or outside scope:** rejected language families stay outside scope even when a neighbouring language loves them.
 

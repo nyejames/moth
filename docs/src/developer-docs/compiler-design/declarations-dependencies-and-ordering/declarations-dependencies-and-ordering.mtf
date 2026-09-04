@@ -10,20 +10,26 @@ From located tokens, syntax preparation extracts **shells**:
 
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
 - dependency shells, direct selections and aliases
+- const-template, active-root start-body and trait-incompatibility shells
 - root-activity and fragment-placement metadata for normal roots
-- structural provider references for the graph
+- structural provider references and structural file references for the graph
+- source `#Config` contract shells
 - local declaration-ordering hints
 - source locations and remap information
 
-For the greeting module, shells include something like "constant `greeting_prefix`" and "function `greet` with these parameter and return type shells." For the page, shells include the dependency binding of `greet`, the `visitor` binding and page fragment metadata around the HTML template.
+For the greeting source, shells include something like "constant `greeting_prefix`" and "function `greet` with these parameter and return type shells." For the page, preparation keeps the `@greeting` dependency selection shell, the start-body token stream that contains `visitor` and the fragment-placement metadata around the HTML template.
+
+Note what has *not* happened yet. `greet` is not bound to anything, and `visitor` is not a declaration the header stage understands. Binding resolves the first later, and AST parses the second out of the start body.
 
 Preparation does not type-check executable bodies. It does not open source provider interfaces. It records what source syntax already makes knowable without them.
 
-## Three relationship classes
+## Four relationship classes
 
-Header processing keeps three edge families distinct. Mixing them is a reliable way to build a confusing compiler.
+Header processing keeps four edge families distinct. Mixing them is a reliable way to build a confusing compiler. Each authored path row has exactly one role.
 
 **Structural provider references** belong to Stage 0 graph construction. They answer "which module or package must exist before this consumer can bind?"
+
+**Structural file references** also belong to Stage 0, plus physical-input resolution. They answer "which file on disk does this path point at?"
 
 **Dependency-bound symbol bindings** belong to visibility and AST. They answer "which public names from a provider become usable here, under which local spellings?"
 
@@ -31,16 +37,47 @@ Header processing keeps three edge families distinct. Mixing them is a reliable 
 
 A dependency-bound declaration is never a node in the consumer's local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.
 
-**Diagram placeholder:** Structural, dependency-bound and local-ordering edges use separate arrows
+[diagram:
+    [$insert("label"): Four kinds of edge, four owners]
+    [$insert("caption"): One authored path has exactly one role. When a design discussion gets confusing, it is usually because two of these four are being called the same thing.]
 
-*Caption: exact ownership distinction.*
-*Question: which graph is being built in each sentence of a design discussion?*
+    [stage:
+        [node:
+            [$insert("href"): ../project-graphs-and-modules/]
+            [$insert("eyebrow"): Stage 0]
+            [$insert("title"): Structural references]
+            Provider references ask which module must exist first. File references ask which file on disk a path points at.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../ast-semantics-and-types/]
+            [$insert("eyebrow"): Visibility and AST]
+            [$insert("title"): Dependency symbol bindings]
+            Which public names from a provider become usable here, and under which local spellings.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Stage 3]
+            [$insert("title"): Local ordering edges]
+            Which top-level declarations inside this one module must be processed before which others.
+        ]
+    ]
+]
+
+*A dependency-bound declaration never becomes a node in the consumer's local graph. Copying provider declarations into every consumer would destroy identity and multiply the work.*
 
 ## Binding retained dependencies
 
 `PreparedHeaderSyntax` exists **before** providers compile. Dependency shells wait with their source locations intact.
 
-After `@greeting` compiles successfully, the build system schedules the page module. **Interface binding** resolves retained dependency shells against the immutable public interface:
+In the walkthrough both files live in one directory-scoped module, so `greeting.moth` is owned source rather than a separate provider. The module compiles once and the retained `@greeting` clause binds inside it. Provider-first scheduling is for the other case, where a dependency resolves to a different module or package.
+
+Either way, **interface binding** resolves retained dependency shells against a finished public interface:
 
 - stable bound declaration identities
 - bound canonical type and folded-value facts
@@ -50,11 +87,6 @@ After `@greeting` compiles successfully, the build system schedules the page mod
 Binding does not retokenize. It does not reparse declaration syntax. It fills in what only a finished provider can supply.
 
 Before binding, `greet` is a name in a dependency shell. After binding, it is a stable origin identity with known type facts the AST can trust.
-
-**Diagram placeholder:** Dependency shell gains stable provider identity and visible type facts
-
-*Caption: simplified retained syntax flow.*
-*Question: what waits for the provider?*
 
 ## Local declaration ordering
 
@@ -72,14 +104,9 @@ Edges include facts AST needs before linear consumption:
 
 **Function-body references do not create ordering edges.** Bodies may call functions declared later in the file. Only the top-level shape needs a stable process order.
 
-Sorting uses stable tie-breaking so independent declarations keep source-order dignity. Same-file constants keep source-order semantics. Same-file forward references among constants are rejected. Cross-module constants arrive already folded in provider interfaces.
+Sorting uses stable tie-breaking so independent declarations keep their source order. Same-file constants keep source-order semantics. Same-file forward references among constants are rejected. Cross-module constants arrive already folded in provider interfaces.
 
 Dormant `start` appends after declarations. It never participates as a dependency node that other declarations wait on.
-
-**Diagram placeholder:** Dependencies flow into a stable declaration order
-
-*Caption: conceptual topological sort.*
-*Question: why does order matter if bodies can still call later functions?*
 
 ## Cycles and visibility
 
@@ -88,11 +115,6 @@ If two local declarations require each other in a way the edge set captures, the
 Visibility rules stay strict. User-visible names do not silently shadow one another across same-file declarations, dependencies, aliases, prelude symbols and builtins. One collision policy covers the surface.
 
 Dependency-bound declarations influence visibility after binding. They still do not become local graph nodes for Stage 3.
-
-**Diagram placeholder:** Two declarations point at each other and a callout marks the cycle
-
-*Caption: failure-path teaching visual.*
-*Question: what stops the sort?*
 
 ## What can fail here
 
@@ -117,7 +139,7 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 
 - **Accepted design:** `PreparedHeaderSyntax`, `BoundModuleHeaders` and distinct relationship classes.
 - **Current implementation:** header and dependency progress rows.
-- **Queued work:** canonical module and project-value plans where they affect source contracts.
+- **Queued work:** no named roadmap plan changes these contracts. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
 - **Deferred or outside scope:** this page does not teach body type checking.
 
 ## Exit state
