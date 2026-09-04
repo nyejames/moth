@@ -15,8 +15,8 @@ pub(crate) struct PreparedModule {
     pub(crate) semantic: PreparedModuleInput,
     /// Whether the selected, actually prepared semantic source set contains a `.mtf` file.
     ///
-    /// This is deliberately separate from the compiler input's `source_files`: that table also
-    /// retains candidate source identities needed for ownership and diagnostics, while implicit
+    /// This remains separate from `PreparedModuleInput::candidate_source_ids`: the candidate IDs
+    /// preserve every owned source used for module-local provider resolution, while implicit
     /// builder providers may be enabled only by sources Stage 0 actually prepared and reached.
     pub(crate) contains_moth_template: bool,
 }

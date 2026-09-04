@@ -15,6 +15,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
 };
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -91,6 +92,7 @@ fn frontend_check_borrows_propagates_failures() {
         StyleDirectiveRegistry::built_ins(),
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),
         None,
+        Arc::new(SourceDatabase::empty()),
     );
     let messages = frontend
         .check_borrows(&hir)

@@ -382,15 +382,14 @@ impl ProjectModuleGraph {
     /// module's owned source IDs.
     ///
     /// WHAT: the one production path that projects the retained central `SourceTreeIndex`
-    ///       ownership authority into a canonical-path-to-StableModuleOriginIdentity map
-    ///       consumed by directory-module preparation to build the per-module
-    ///       SourceModuleOriginTable. The graph carries no source records; it reads the index
-    ///       directly so source ownership stays single-owned by the index.
-    /// WHY: the SourceModuleOriginTable must resolve each prepared source file to its
+    ///       ownership authority into a canonical-path-to-StableModuleOriginIdentity map. The
+    ///       enclosing project or package boundary uses this map once to build its shared
+    ///       `SourceModuleOriginTable`. The graph carries no source records, so source ownership
+    ///       stays single-owned by the index.
+    /// WHY: the shared SourceModuleOriginTable must resolve each boundary source identity to its
     ///      owning stable module origin without a second filesystem traversal or a parallel
-    ///      topology table. The index already carries every owned source record with its
-    ///      portable logical identity, so this lookup is a direct projection, not a scan or
-    ///      guess.
+    ///      topology table. The index already carries every owned source record with its portable
+    ///      logical identity, so this lookup is a direct projection, not a scan or guess.
     ///
     /// A canonical path owned by two modules, or an owned source whose logical identity module
     /// origin does not match its graph node origin, is a proven invariant violation surfaced

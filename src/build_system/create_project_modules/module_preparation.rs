@@ -36,9 +36,9 @@ use super::prepared_module::PreparedModule;
 use super::prepared_source::PreparedSourceInput;
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Parallel file-preparation scheduling policy.
 ///
@@ -166,16 +166,16 @@ impl FilePreparationStrategy {
 /// Provider-independent context for preparing one module's source files and aggregating
 /// `PreparedHeaderSyntax` without requiring provider interfaces.
 ///
-/// WHAT: owns only the inputs file preparation actually requires — style directives and the
-///       project path resolver — and works against a caller-owned `StringTable` and
-///       `SourceDatabase`. It deliberately excludes `ExternalPackageRegistry`, the import
-///       resolution table and builder runtime packages.
-/// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before the
-///      provider graph is compiled. Keeping provider-interface values out of this context makes
-///      the preparation phase genuinely provider-independent, so it cannot reach provider state
-///      and the orchestrator can schedule provider binding between `prepare_module` and
-///      semantic compilation without touching this context.
+/// WHAT: borrows the boundary-owned source database for identity lookups and owns only the
+///       preparation settings needed by each file. It works against a caller-owned `StringTable`
+///       and does not construct or retain another source identity table. It deliberately excludes
+///       `ExternalPackageRegistry`, the import resolution table and builder runtime packages.
+/// WHY: source identities belong to the project or package compilation boundary, while this phase
+///      only prepares retained syntax. Keeping provider-interface values out of this context makes
+///      preparation genuinely provider-independent, so it cannot reach provider state and the
+///      orchestrator can schedule provider binding between preparation and semantic compilation.
 pub(super) struct ModulePreparationContext<'a> {
+    pub(super) source_files: &'a SourceDatabase,
     pub(super) style_directives: &'a StyleDirectiveRegistry,
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
 }
@@ -193,8 +193,13 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     entry_file_role: Option<FileRole>,
     active_root_role: ModuleRootRole,
     expected_active_origin: StableModuleOriginIdentity,
-    source_module_origins: SourceModuleOriginTable,
-    source_files: SourceDatabase,
+    /// Ordered owned-source candidates used by the module's pre-slice source identity table.
+    /// Unselected candidates remain here because provider resolution historically considered this
+    /// complete module-local set, not only the files reached by header discovery.
+    candidate_source_ids: Vec<SourceId>,
+    /// One immutable origin table is shared by every prepared module in this project or package
+    /// boundary. Cloning this handle does not duplicate the boundary-wide rows.
+    source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: StringTable,
     prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
     resolved_file_references: ResolvedFileReferenceTable,
@@ -205,36 +210,42 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     timing_context: Option<crate::timing::TimingContext>,
 }
 
+/// One module's share of the boundary's completed source registration.
+///
+/// WHAT: the module's ordered owned candidates plus the boundary-wide origin table they index
+///       into.
+/// WHY: both are produced once by the enclosing project or package boundary and are immutable for
+///      the rest of the build. Passing them as one value keeps that shared provenance visible and
+///      stops a caller supplying candidates from one boundary and origins from another.
+pub(super) struct RegisteredModuleSources {
+    pub(super) candidate_source_ids: Vec<SourceId>,
+    pub(super) source_module_origins: Arc<SourceModuleOriginTable>,
+}
+
 impl ModulePreparationContext<'_> {
     /// Begin header-owned reachability discovery for one indexed directory module.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// The source database and origin table have already been built by the enclosing project or
+    /// package boundary. Discovery borrows the immutable source table and shares the immutable
+    /// origin-table handle, so no module or worker can allocate or copy boundary identities while
+    /// preparation is in flight.
     pub(super) fn begin_syntax_discovery<'a>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
-        origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
-        candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
+        registered_sources: RegisteredModuleSources,
         entry_file_path: &Path,
         entry_file_role: Option<FileRole>,
-        mut string_table: StringTable,
+        string_table: StringTable,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
-        let source_files = SourceDatabase::build(
-            candidate_source_paths,
-            entry_file_path,
-            self.project_path_resolver.as_ref(),
-            &mut string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-        let source_module_origins =
-            SourceModuleOriginTable::from_graph_ownership(&source_files, origin_by_canonical_path);
         Ok(ModuleSyntaxDiscovery {
             context: self,
             entry_file_path: entry_file_path.to_path_buf(),
             entry_file_role,
             active_root_role: stable_origin.role(),
             expected_active_origin: stable_origin,
-            source_module_origins,
-            source_files,
+            candidate_source_ids: registered_sources.candidate_source_ids,
+            source_module_origins: registered_sources.source_module_origins,
             string_table,
             prepared_outputs: Vec::new(),
             resolved_file_references: ResolvedFileReferenceTable::new(),
@@ -246,26 +257,23 @@ impl ModulePreparationContext<'_> {
         })
     }
 
-    /// Prepare one discovered module's source files and aggregate provider-independent header
-    /// syntax, retaining it with the module string-table context and the active root's file
-    /// identity for semantic compilation.
+    /// Prepare one selected module's source files and aggregate provider-independent header
+    /// syntax, retaining it with the module string-table context and the active root's `SourceId`
+    /// for semantic compilation.
     ///
     /// WHAT: prepares every source file against local string-table forks, merges chunk-local
-    ///       string tables in deterministic input order, and runs `prepare_header_syntax` to
+    ///       string tables in deterministic input order and runs `prepare_header_syntax` to
     ///       produce the retained `PreparedHeaderSyntax`. Directory Moth inputs consume retained
-    ///       token streams; synthetic Moth inputs consume complete outputs retained during
-    ///       discovery. Stops before provider-dependent binding.
-    ///       discovery. Stops before provider-dependent binding.
-    ///       After building the per-file source-origin table, resolves the entry file's `SourceId`
-    ///       through `SourceDatabase` once and validates that the table maps it to the expected
-    ///       loose origin.
-    /// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before
-    ///      the provider graph is compiled. This context owns no provider-interface values, so
+    ///       token streams, synthetic Moth inputs consume complete outputs retained during
+    ///       discovery and single-file compilation retains its own synthetic origin table.
+    ///       Preparation stops before provider-dependent binding.
+    /// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before the
+    ///      provider graph is compiled. This context owns no provider-interface values, so
     ///      preparation cannot reach provider state. Retaining the syntax, string-table context,
     ///      source identities and the active root `SourceId` lets semantic compilation begin with
-    ///      interface binding without retokenizing or reparsing source and without
-    ///      reconstructing module identity from paths. Provider binding is scheduled after this
-    ///      call, inside the compiler's module compilation service.
+    ///      interface binding without retokenizing or reparsing source and without reconstructing
+    ///      module identity from paths. Provider binding is scheduled after this call, inside the
+    ///      compiler's module compilation service.
     pub(super) fn prepare_module(
         &self,
         stable_origin: StableModuleOriginIdentity,
@@ -276,6 +284,16 @@ impl ModulePreparationContext<'_> {
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
+
+        // Single-file preparation uses its own temporary source identity domain. Its candidate
+        // order is the source database's deterministic logical-path order, matching the
+        // pre-slice module-local table built from these same input paths.
+        let candidate_source_ids = self
+            .source_files
+            .iter()
+            .map(|identity| identity.id)
+            .collect::<Vec<_>>();
+
         let module_file_count = module.len();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
 
@@ -283,17 +301,7 @@ impl ModulePreparationContext<'_> {
         // the active file is a normal runtime-capable root or an API-only support/facade root.
         let active_root_role = stable_origin.role();
 
-        // 1. Build the module source identity table against the caller-owned string table. Source
-        //    identities are deterministic and provider-free, so this needs no provider interface.
-        let source_files = Self::attach_source_files(
-            &mut string_table,
-            &self.project_path_resolver,
-            &module,
-            entry_file_path,
-        )?;
-
-        // 2. Rebind retained synthetic outputs against this module-owned source table, then
-        //    prepare all remaining files against one local string-table per worker chunk. Directory
+        // 1. Prepare all selected files against one local string-table per worker chunk. Directory
         //    Moth files parse retained Stage 0 tokens, synthetic Moth files consume their complete
         //    retained output, Moth templates tokenize their body once and plain Markdown bypasses
         //    tokenization. Merge/remap once before aggregating header syntax.
@@ -303,7 +311,6 @@ impl ModulePreparationContext<'_> {
             {
                 self.prepare_module_files(
                     &mut string_table,
-                    &source_files,
                     module,
                     entry_file_path,
                     active_root_role,
@@ -313,41 +320,36 @@ impl ModulePreparationContext<'_> {
         )?;
         warnings.extend(file_warnings);
 
-        // 3. Build the immutable per-file source-origin side table from the origin input. For
-        //    directory modules the graph-owned lookup resolves each source file to its owning
-        //    origin; for single-file compilation every file maps to the synthetic origin. The
-        //    table is remap-free and provider-independent: it carries no StringIds and needs no
-        //    provider interface.
-        let source_module_origins =
-            SourceModuleOriginTable::from_synthetic_origin(&source_files, &stable_origin);
+        // 2. Single-file compilation has a separate synthetic source-origin table because its
+        //    source IDs belong to a temporary identity domain. Directory discovery supplies the
+        //    shared boundary table through `begin_syntax_discovery` instead.
+        let source_module_origins = Arc::new(SourceModuleOriginTable::from_synthetic_origin(
+            self.source_files,
+            &stable_origin,
+        ));
 
-        // 4. Resolve the entry file's SourceId through the source database once and validate that
-        //    the per-file origin table maps it to the expected active origin. The active root must
-        //    have an owning origin, and that origin must match the origin declared by the
-        //    discovery/graph path. A missing entry identity, an unowned active source or an origin
-        //    mismatch is an internal CompilerError surfaced through the build-boundary messages.
-        //    The loose origin is then discarded: `PreparedModule` carries only the retained SourceId
-        //    so semantic compilation resolves the active origin from the table, not a loose
-        //    argument.
+        // 3. Resolve the entry file's `SourceId` through the boundary source database once and
+        //    validate that the synthetic origin table maps it to the expected active origin. The
+        //    active root must have an owning origin, and that origin must match the origin declared
+        //    by the single-file path.
         let active_root_file_id = Self::resolve_and_validate_active_root(
-            &source_files,
-            &source_module_origins,
+            self.source_files,
+            source_module_origins.as_ref(),
             &stable_origin,
             entry_file_path,
             &string_table,
         )?;
 
-        // Retain the deterministic preparation context so semantic compilation can continue against
-        // the same string table and source identities. The payload owns no `CompilerFrontend` or
-        // provider state: only syntax, the string table, source identities and warnings.
+        // Retain the deterministic preparation context so semantic compilation can continue
+        // against the same string table and boundary source identities.
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
+                candidate_source_ids,
                 source_module_origins,
                 prepared_header_syntax,
                 resolved_file_references: ResolvedFileReferenceTable::new(),
                 string_table,
-                source_files,
                 warnings,
                 source_file_count: module_file_count,
                 source_byte_count,
@@ -356,38 +358,17 @@ impl ModulePreparationContext<'_> {
         })
     }
 
-    /// Build the module `SourceDatabase` from input source paths against a caller-owned string
-    /// table and the project path resolver.
+    /// Resolve the entry file's `SourceId` from the boundary `SourceDatabase` and validate that
+    /// the supplied origin table maps it to the expected active origin.
     ///
-    /// WHAT: assigns deterministic source identities for the prepared module without touching any
-    ///       provider interface.
-    /// WHY: preparation needs source identities to drive file preparation and header syntax, but
-    ///      not the external package registry or dependency resolution table.
-    fn attach_source_files(
-        string_table: &mut StringTable,
-        project_path_resolver: &Option<ProjectPathResolver>,
-        module: &[PreparedSourceInput],
-        entry_file_path: &Path,
-    ) -> Result<SourceDatabase, CompilerMessages> {
-        SourceDatabase::build(
-            module.iter().map(|input_file| input_file.source_path()),
-            entry_file_path,
-            project_path_resolver.as_ref(),
-            string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
-    }
-
-    /// Resolve the entry file's `SourceId` from the `SourceDatabase` and validate that the
-    /// per-file source-origin table maps it to the expected active origin.
-    ///
-    /// WHAT: the active root must be present in the source file table and must have an owning
-    ///       origin in the source-origin table. That origin must equal the expected active origin
-    ///       declared by the discovery or single-file path. A missing entry identity, an unowned
-    ///       active source or an origin mismatch is an internal `CompilerError`.
+    /// WHAT: the active root must be present in the source identity table and must have an owning
+    ///       origin. That origin must equal the expected active origin declared by the discovery
+    ///       or single-file path. A missing entry identity, an unowned active source or an origin
+    ///       mismatch is an internal `CompilerError`.
     /// WHY: validating the active root origin during preparation lets `PreparedModule` discard the
-    ///      loose origin, then retains only the `SourceId` so the semantic projection resolves
-    ///      the active origin from the table rather than trusting a loose argument.
+    ///      loose origin, then retains only the `SourceId` and shared origin-table handle so
+    ///      semantic projection resolves the active origin from the identity domain rather than
+    ///      trusting a loose argument.
     fn resolve_and_validate_active_root(
         source_files: &SourceDatabase,
         source_module_origins: &SourceModuleOriginTable,
@@ -446,15 +427,15 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
-        source_files: &SourceDatabase,
         mut module: Vec<PreparedSourceInput>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
-        Self::rebind_synthetic_prepared_inputs(&mut module, source_files, string_table)?;
+        Self::rebind_synthetic_prepared_inputs(self.source_files, &mut module, string_table)?;
 
-        let entry_file_id = source_files
+        let entry_file_id = self
+            .source_files
             .get_by_canonical_path(entry_file_path)
             .map(|identity| identity.id);
 
@@ -478,7 +459,7 @@ impl ModulePreparationContext<'_> {
         let runtime_fragment_offset = 0usize;
 
         let prepare_context = FrontendFilePrepareContext {
-            source_files,
+            source_files: self.source_files,
             style_directives: self.style_directives,
             entry_file_path,
             options: &options,
@@ -515,16 +496,15 @@ impl ModulePreparationContext<'_> {
         )
     }
 
-    /// Rebind complete synthetic discovery outputs against the module's retained source table.
+    /// Rebind complete synthetic discovery outputs against the boundary-owned source database.
     ///
     /// WHAT: moves every provisional synthetic `SourceId` and source scope onto the exact
-    ///       `SourceDatabase` that `PreparedModule` retains for later semantic binding.
-    /// WHY: Stage 0 must discover and prepare files before the complete closure is known, but
-    ///      module preparation is the sole owner of final source identity. Keeping rebinding here
-    ///      prevents a discarded discovery-time table from becoming a second identity authority.
+    ///       database that later semantic stages borrow.
+    /// WHY: synthetic discovery still prepares before its complete closure is known, but directory
+    ///       modules now consume identities registered once by the enclosing boundary.
     fn rebind_synthetic_prepared_inputs(
-        module: &mut [PreparedSourceInput],
         source_files: &SourceDatabase,
+        module: &mut [PreparedSourceInput],
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
         for input in module {
@@ -878,7 +858,7 @@ impl ModuleSyntaxDiscovery<'_> {
             consumer_module_id,
             path_syntax,
             reference,
-            &self.source_files,
+            self.context.source_files,
             &mut self.string_table,
             discovered_content_sources,
         )
@@ -912,6 +892,7 @@ impl ModuleSyntaxDiscovery<'_> {
         let source_byte_len = source.source_byte_len();
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id = self
+            .context
             .source_files
             .get_by_canonical_path(&self.entry_file_path)
             .map(|identity| identity.id);
@@ -922,7 +903,7 @@ impl ModuleSyntaxDiscovery<'_> {
             active_root_role: self.active_root_role,
         };
         let prepare_context = FrontendFilePrepareContext {
-            source_files: &self.source_files,
+            source_files: self.context.source_files,
             style_directives: self.context.style_directives,
             entry_file_path: &self.entry_file_path,
             options: &options,
@@ -1032,7 +1013,7 @@ impl ModuleSyntaxDiscovery<'_> {
             messages
         })?;
         let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
-            &self.source_files,
+            self.context.source_files,
             &self.source_module_origins,
             &self.expected_active_origin,
             &self.entry_file_path,
@@ -1042,11 +1023,11 @@ impl ModuleSyntaxDiscovery<'_> {
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
+                candidate_source_ids: self.candidate_source_ids,
                 source_module_origins: self.source_module_origins,
                 prepared_header_syntax,
                 resolved_file_references: self.resolved_file_references,
                 string_table: self.string_table,
-                source_files: self.source_files,
                 warnings: self.warnings,
                 source_file_count,
                 source_byte_count: self.source_byte_count,

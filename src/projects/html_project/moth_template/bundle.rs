@@ -43,6 +43,7 @@ use crate::projects::html_project::moth_template::input::MothTemplateSourceUnit;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The project-local package identity of one direct-template compilation request.
 ///
@@ -232,7 +233,7 @@ pub(super) fn prepare_file_value_bundle(
     Ok(MothTemplateFileValueBundle {
         prepared_content_sources,
         resolved_file_references,
-        source_files,
+        source_files: Arc::new(source_files),
         module_origin: Some(module_origin),
     })
 }

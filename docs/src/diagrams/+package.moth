@@ -8,7 +8,7 @@ flow_diagram_css #= [$css:
     .moth-flow {
         --flow-main-width: 17rem;
         --flow-stage-gap: 2.75rem;
-        --flow-branch-gap: 1.25rem;
+        --flow-branch-gap: 1.3rem;
         --flow-node-radius: 0.7rem;
 
         margin-block: 2.5rem;
@@ -124,7 +124,7 @@ flow_diagram_css #= [$css:
 
     .moth-flow__node {
         display: grid;
-        gap: 0.35rem;
+        gap: 0.6rem;
         width: 100%;
         padding: 0.9rem 1rem;
     }
@@ -156,7 +156,7 @@ flow_diagram_css #= [$css:
 
     .moth-flow__branch {
         display: grid;
-        gap: 0.55rem;
+        gap: 1rem;
         min-width: 0;
     }
 
@@ -176,6 +176,7 @@ flow_diagram_css #= [$css:
         display: flex;
         align-items: stretch;
         gap: var(--flow-branch-gap);
+        padding: 3rem;
         min-width: 0;
     }
 
@@ -279,7 +280,7 @@ flow_diagram_css #= [$css:
 
         .moth-flow__lane {
             overflow-x: auto;
-            padding-block: 0.15rem;
+            padding-block: 0rem;
         }
     }
 

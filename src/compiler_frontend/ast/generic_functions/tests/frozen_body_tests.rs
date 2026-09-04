@@ -217,7 +217,8 @@ fn capture_test_body(
             })
             .expect("test path rows should be unique");
     }
-    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
+    let facts =
+        Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
     let no_content_value = |_path: &InternedPath| -> Result<PublicFoldedValue, CompilerError> {
         Err(CompilerError::compiler_error(
             "test body has no content value resolver",
@@ -278,7 +279,7 @@ fn direct_content_body_fixture() -> (
             ),
         })
         .expect("content fixture path rows should be unique");
-    let facts = Stage0ResolutionFacts::ordinary(resolved_references, source_files);
+    let facts = Stage0ResolutionFacts::ordinary(resolved_references, source_files.into());
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("frozen-content-tests"),
         "main".to_owned(),
@@ -570,7 +571,8 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
             })
             .expect("remapping fixture path rows should be unique");
     }
-    let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
+    let facts =
+        Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
     let frozen = StableBodySyntax::capture(
         &original,
         &source_file,
@@ -1004,7 +1006,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .context
         .stage0_resolution_facts = Some(Arc::new(Stage0ResolutionFacts::ordinary(
         resolved_references,
-        SourceDatabase::empty(),
+        SourceDatabase::empty().into(),
     )));
 
     let mut preparation = build_result
@@ -1229,7 +1231,8 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
                 ),
             })
             .expect("collision fixture path rows should be unique");
-        let facts = Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty());
+        let facts =
+            Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
         let frozen =
             StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
                 Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(

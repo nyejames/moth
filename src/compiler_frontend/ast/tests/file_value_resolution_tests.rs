@@ -323,9 +323,10 @@ fn compile_fixture(
         .collect::<Vec<_>>();
 
     let mut string_table = StringTable::new();
-    let source_files =
+    let source_files = Arc::new(
         SourceDatabase::build(all_paths.iter(), &entry_path, None, &mut string_table)
-            .expect("fixture source identities should build");
+            .expect("fixture source identities should build"),
+    );
     let file_id_for = |path: &str| {
         source_files
             .get_by_canonical_path(&PathBuf::from(path))
@@ -479,8 +480,8 @@ fn compile_fixture(
         style_directives,
         external_package_registry,
         None,
+        Arc::clone(&source_files),
     );
-    frontend.set_source_files(source_files);
     let sorted = frontend
         .sort_headers(headers, &resolved_references)
         .expect("header sorting should succeed");
@@ -556,13 +557,15 @@ fn resolve_file_value_fixture(
 > {
     let mut string_table = StringTable::new();
     let source_path_buf = PathBuf::from("@page.moth");
-    let source_files = SourceDatabase::build(
-        std::iter::once(&source_path_buf),
-        &source_path_buf,
-        None,
-        &mut string_table,
-    )
-    .expect("fixture source identity should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            std::iter::once(&source_path_buf),
+            &source_path_buf,
+            None,
+            &mut string_table,
+        )
+        .expect("fixture source identity should build"),
+    );
     let source_file = source_files
         .get_by_canonical_path(&source_path_buf)
         .expect("fixture source identity should be present")
@@ -614,7 +617,7 @@ fn resolve_file_value_fixture(
     .with_file_value_resolution(Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
-            source_files,
+            Arc::clone(&source_files),
         ))),
         module_resources: Rc::clone(&module_resources),
         module_origin: Some(module_origin.clone()),

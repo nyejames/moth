@@ -21,6 +21,8 @@ use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId as CompilerSourceId};
+use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
@@ -34,7 +36,7 @@ use std::sync::Arc;
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
-use super::module_preparation::ModulePreparationContext;
+use super::module_preparation::{ModulePreparationContext, RegisteredModuleSources};
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
@@ -93,12 +95,10 @@ pub(crate) struct ModuleCompilationJob {
 ///
 /// Discovery records these descriptors while canonical sources still mutate the shared external
 /// provider state. The descriptors are prepared only after every canonical boundary has finished
-/// discovery, so each transient job forks the final canonical registry/cache/resolution state.
 struct CheckOnlyModuleSpec {
     owner_module_id: ModuleId,
     source_id: SourceId,
     candidate_source_ids: Vec<SourceId>,
-    source_origin_lookup: FxHashMap<PathBuf, StableModuleOriginIdentity>,
     stable_origin: StableModuleOriginIdentity,
 }
 
@@ -165,15 +165,51 @@ fn resolve_directory_dependency_path(
         })
 }
 
+/// Resolve the module's ordered source-tree candidates into the enclosing boundary's source IDs.
+///
+/// The source tree and boundary source database are deterministic projections of the same
+/// canonical files, but their `SourceId` types deliberately remain separate. The build layer uses
+/// its IDs for ownership and reachability; the compiler payload uses boundary-database IDs for
+/// semantic external-import candidate paths. Mapping by canonical path preserves the candidate
+/// order without copying or rebuilding source records.
+fn resolve_boundary_candidate_source_ids(
+    candidate_source_ids: &[SourceId],
+    source_tree_index: &super::source_tree_index::SourceTreeIndex,
+    source_files: &SourceDatabase,
+    string_table: &StringTable,
+) -> Result<Vec<CompilerSourceId>, CompilerMessages> {
+    candidate_source_ids
+        .iter()
+        .map(|source_id| {
+            let source = source_tree_index.source(*source_id);
+            source_files
+                .get_by_canonical_path(source.canonical_path())
+                .map(|identity| identity.id)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "module inventory: source ID {} path {:?} is not in the boundary source file table",
+                            source_id.index(),
+                            source.canonical_path(),
+                        )),
+                        string_table,
+                    )
+                })
+        })
+        .collect()
+}
+
 /// Immutable Stage 0 owners shared while the serial discovery pass prepares graph modules.
 struct ModuleDiscoveryContext<'a> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
+    source_files: &'a SourceDatabase,
     directory_dependency_resolution: DirectoryDependencyResolution<'a>,
     project_module_graph: &'a ProjectModuleGraph,
-    source_origin_lookup: &'a FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    /// One boundary-owned source-origin table shared by every prepared module and check-only
+    /// source in this project or package boundary.
+    source_module_origins: Arc<SourceModuleOriginTable>,
 }
-
 /// Normal entry modules grouped by the populated graph's compile waves.
 ///
 /// WHAT: owns the wave-preserving data contract between module inventory and directory
@@ -189,6 +225,8 @@ pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    /// Shared immutable source origins for this project or package boundary.
+    source_module_origins: Arc<SourceModuleOriginTable>,
     /// Transient check-only units, kept separate from canonical publication lanes.
     check_only_jobs: Vec<CheckOnlyModuleCompilationJob>,
     /// Deferred transient source descriptors awaiting the final canonical provider state.
@@ -211,12 +249,12 @@ impl ModuleCompilationSchedule {
     /// Prepare deferred transient jobs from the final canonical provider state.
     ///
     /// Canonical discovery for every project and source-package boundary must complete before
-    /// this method is called. Each job still receives its own clone, so transient provider
-    /// mutations cannot leak to canonical discovery or sibling jobs.
-    #[allow(clippy::too_many_arguments)]
+    /// this method is called. Each job receives the same immutable boundary source database and
+    /// source-origin table while transient provider mutations remain isolated to the job.
     pub(crate) fn prepare_check_only_jobs(
         &mut self,
         style_directives: &StyleDirectiveRegistry,
+        source_files: &SourceDatabase,
         project_path_resolver: &ProjectPathResolver,
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
@@ -227,6 +265,7 @@ impl ModuleCompilationSchedule {
             return Ok(());
         }
         let preparation_context = ModulePreparationContext {
+            source_files,
             style_directives,
             project_path_resolver: Some(project_path_resolver.clone()),
         };
@@ -236,7 +275,6 @@ impl ModuleCompilationSchedule {
                 owner_module_id,
                 source_id,
                 candidate_source_ids,
-                source_origin_lookup,
                 stable_origin,
             } = spec;
             self.check_only_jobs.push(prepare_check_only_module(
@@ -249,7 +287,7 @@ impl ModuleCompilationSchedule {
                 project_path_resolver,
                 external_imports,
                 directory_dependency_resolution,
-                &source_origin_lookup,
+                Arc::clone(&self.source_module_origins),
                 stable_origin,
                 &fork_source,
                 string_table,
@@ -295,6 +333,7 @@ impl ModuleCompilationSchedule {
 pub(crate) fn discover_all_modules_in_project(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -306,6 +345,7 @@ pub(crate) fn discover_all_modules_in_project(
     discover_all_modules_in_project_with_check_only(
         config,
         project_path_resolver,
+        source_files,
         project_module_graph,
         style_directives,
         external_imports,
@@ -326,6 +366,7 @@ pub(crate) fn discover_all_modules_in_project(
 pub(crate) fn discover_all_modules_in_project_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -338,6 +379,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
+        source_files,
         project_module_graph,
         style_directives,
         external_imports,
@@ -358,6 +400,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
 pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     package_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -370,6 +413,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
+        source_files,
         package_module_graph,
         style_directives,
         external_imports,
@@ -387,6 +431,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
 fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -401,6 +446,13 @@ fn discover_all_modules_in_boundary(
     let source_origin_lookup = project_module_graph
         .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // Construct one immutable source-origin table for this project or package boundary. Prepared
+    // module payloads retain only cloned `Arc` handles, never per-module origin rows.
+    let source_module_origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
+        source_files,
+        &source_origin_lookup,
+    ));
+    drop(source_origin_lookup);
 
     if require_normal_entry && project_module_graph.entry_modules().is_empty() {
         return Err(config_diagnostic_messages(
@@ -423,9 +475,10 @@ fn discover_all_modules_in_boundary(
         ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
+            source_files,
             directory_dependency_resolution,
             project_module_graph,
-            source_origin_lookup: &source_origin_lookup,
+            source_module_origins: Arc::clone(&source_module_origins),
         },
         external_imports,
         resource_inputs,
@@ -458,6 +511,7 @@ fn discover_all_modules_in_boundary(
         resolved_edges,
         source_package_dependencies,
         check_only_specs,
+        source_module_origins,
         string_table,
     )?;
     Ok(schedule)
@@ -530,11 +584,19 @@ fn prepare_check_only_module(
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
-    source_origin_lookup: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    source_module_origins: Arc<SourceModuleOriginTable>,
     stable_origin: StableModuleOriginIdentity,
     fork_source: &StringTableForkSource,
+
     string_table: &mut StringTable,
 ) -> Result<CheckOnlyModuleCompilationJob, CompilerMessages> {
+    let boundary_candidate_source_ids = resolve_boundary_candidate_source_ids(
+        candidate_source_ids,
+        source_tree_index,
+        preparation_context.source_files,
+        string_table,
+    )?;
+
     let source = source_tree_index.source(source_id);
     if !matches!(
         source.classification(),
@@ -579,10 +641,10 @@ fn prepare_check_only_module(
     let (local_string_table, string_table_base_len) = fork.into_parts();
     let mut syntax = preparation_context.begin_syntax_discovery(
         stable_origin,
-        source_origin_lookup,
-        candidate_source_ids
-            .iter()
-            .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+        RegisteredModuleSources {
+            candidate_source_ids: boundary_candidate_source_ids,
+            source_module_origins,
+        },
         &entry_file_path,
         Some(FileRole::Normal),
         local_string_table,
@@ -929,6 +991,7 @@ fn order_discovered_modules_by_compile_waves(
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     check_only_specs: Vec<CheckOnlyModuleSpec>,
+    source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: &mut StringTable,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     let waves = project_module_graph
@@ -1005,6 +1068,7 @@ fn order_discovered_modules_by_compile_waves(
         waves: grouped_waves,
         provider_bindings,
         source_package_dependencies,
+        source_module_origins,
         check_only_jobs: Vec::new(),
         check_only_specs,
     })
@@ -1031,9 +1095,10 @@ fn discover_modules_serial_provider_capable(
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
+        source_files,
         directory_dependency_resolution,
         project_module_graph,
-        source_origin_lookup,
+        source_module_origins,
     } = context;
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
@@ -1041,6 +1106,7 @@ fn discover_modules_serial_provider_capable(
     let mut check_only_specs = Vec::new();
     let fork_source = string_table.fork_source();
     let preparation_context = ModulePreparationContext {
+        source_files,
         style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -1058,6 +1124,12 @@ fn discover_modules_serial_provider_capable(
                 )
             })
             .collect::<Vec<_>>();
+        let boundary_candidate_source_ids = resolve_boundary_candidate_source_ids(
+            &candidate_source_ids,
+            source_tree_index,
+            source_files,
+            string_table,
+        )?;
         let source_order = candidate_source_ids
             .iter()
             .enumerate()
@@ -1105,10 +1177,10 @@ fn discover_modules_serial_provider_capable(
             });
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin.clone(),
-            source_origin_lookup,
-            candidate_source_ids
-                .iter()
-                .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+            RegisteredModuleSources {
+                candidate_source_ids: boundary_candidate_source_ids,
+                source_module_origins: Arc::clone(&source_module_origins),
+            },
             &seed.entry_path,
             None,
             local_string_table,
@@ -1313,7 +1385,6 @@ fn discover_modules_serial_provider_capable(
                 owner_module_id: seed.module_id,
                 source_id: check_only_source_id,
                 candidate_source_ids: candidate_source_ids.clone(),
-                source_origin_lookup: source_origin_lookup.clone(),
                 stable_origin: stable_origin.clone(),
             });
         }

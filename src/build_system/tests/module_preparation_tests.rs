@@ -110,13 +110,15 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .clone();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        canonical_paths.iter().map(PathBuf::as_path),
-        &entry_file_path,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            canonical_paths.iter().map(PathBuf::as_path),
+            &entry_file_path,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     // Tokenize each source file once so the retained token stream is available for header
     // preparation, mirroring the single Stage 0 lexical pass in production discovery.
@@ -138,14 +140,14 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         })
         .collect();
 
-    let mut frontend = CompilerFrontend::new(
+    let frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         style_directives,
         Arc::new(ExternalPackageRegistry::new()),
         None,
+        Arc::clone(&source_files),
     );
-    frontend.set_source_files(source_files);
 
     FrontendPreparationFixture {
         _temp_dir: temp_dir,
@@ -207,13 +209,15 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let canonical_b = fs::canonicalize(&file_b).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        &[&canonical_a, &canonical_b],
-        &canonical_a,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            &[&canonical_a, &canonical_b],
+            &canonical_a,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     let module_table_size_before = string_table.len();
 
@@ -223,8 +227,8 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         StyleDirectiveRegistry::built_ins(),
         Arc::new(ExternalPackageRegistry::new()),
         None,
+        Arc::clone(&source_files),
     );
-    frontend.set_source_files(source_files);
 
     let options = HeaderParseOptions {
         entry_file_id: frontend
@@ -428,13 +432,15 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let canonical_entry = fs::canonicalize(&entry_file).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        std::iter::once(canonical_entry.as_path()),
-        &canonical_entry,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            std::iter::once(canonical_entry.as_path()),
+            &canonical_entry,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     let style_directives = StyleDirectiveRegistry::built_ins();
     let input_files = vec![tokenized_moth_prepared_input(
@@ -478,6 +484,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     // directives and the project path resolver — so it can run before any provider interface
     // exists.
     let preparation_context = super::ModulePreparationContext {
+        source_files: &source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -520,20 +527,17 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
             .any(|header| matches!(header.kind, HeaderKind::Function { .. })),
         "retained PreparedHeaderSyntax should carry the parsed public generic function declaration"
     );
-    assert_eq!(
-        prepared.semantic.source_files.iter().count(),
-        1,
-        "retained source identity table should carry the one source file"
-    );
+    // `PreparedModuleInput` retains the active root identity and source count, while the shared
+    // source database remains owned by the compilation boundary.
     assert_eq!(prepared.semantic.source_file_count, 1);
     assert_eq!(prepared.semantic.source_byte_count, source_byte_count);
     assert_eq!(
         prepared
             .semantic
-            .entry_file_path()
+            .entry_file_path(&source_files)
             .expect("preparation retains the active root identity"),
         canonical_entry.as_path(),
-        "the entry file is derived from the retained active root, not carried as a second argument"
+        "the entry file is resolved through the shared source database"
     );
 
     // Semantic compilation is one compiler service call. Stage 0 supplies completed provider
@@ -542,6 +546,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let source_provider_dependencies = Default::default();
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
+        source_files: &source_files,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
@@ -632,13 +637,15 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        std::iter::once(canonical_entry.as_path()),
-        &canonical_entry,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            std::iter::once(canonical_entry.as_path()),
+            &canonical_entry,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
     let style_directives = StyleDirectiveRegistry::built_ins();
     let input_files = vec![tokenized_moth_prepared_input(
         &source_files,
@@ -672,6 +679,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     .expect("API-only stable origin should construct");
     let source_byte_count = source_byte_count(&input_files);
     let preparation_context = super::ModulePreparationContext {
+        source_files: &source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -699,6 +707,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let source_provider_dependencies = Default::default();
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
+        source_files: &source_files,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
@@ -857,13 +866,15 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let canonical_c = fs::canonicalize(&file_c).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        &[&canonical_a, &canonical_b, &canonical_c],
-        &canonical_a,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            &[&canonical_a, &canonical_b, &canonical_c],
+            &canonical_a,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     let module_table_size_before = string_table.len();
 
@@ -873,8 +884,8 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         StyleDirectiveRegistry::built_ins(),
         Arc::new(ExternalPackageRegistry::new()),
         None,
+        Arc::clone(&source_files),
     );
-    frontend.set_source_files(source_files);
 
     let input_files = vec![
         tokenized_moth_prepared_input(
@@ -906,13 +917,13 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &frontend.source_files,
         style_directives: &frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.clone(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &frontend.source_files,
             input_files,
             &canonical_a,
             ModuleRootRole::Normal,
@@ -1073,15 +1084,16 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .first()
         .expect("test should create an entry file")
         .clone();
-
     let mut string_table = StringTable::new();
-    let source_files = SourceDatabase::build(
-        canonical_paths.iter().map(PathBuf::as_path),
-        &entry_file_path,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            canonical_paths.iter().map(PathBuf::as_path),
+            &entry_file_path,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     let style_directives = StyleDirectiveRegistry::built_ins();
     let input_files = canonical_paths
@@ -1104,8 +1116,8 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         style_directives,
         Arc::new(ExternalPackageRegistry::new()),
         None,
+        Arc::clone(&source_files),
     );
-    frontend.set_source_files(source_files);
 
     let source_byte_count = source_byte_count(&input_files);
     assert_eq!(
@@ -1114,13 +1126,13 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     );
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &frontend.source_files,
         style_directives: &frontend.style_directives,
         project_path_resolver: frontend.project_path_resolver.clone(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &frontend.source_files,
             input_files,
             &entry_file_path,
             ModuleRootRole::Normal,
@@ -1251,13 +1263,13 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
@@ -1304,13 +1316,13 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
@@ -1705,13 +1717,13 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
@@ -1755,13 +1767,13 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,

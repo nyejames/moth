@@ -597,10 +597,10 @@ impl ModuleMaterialisationContext {
     }
 
     /// Materialise the exact template row selected by the boundary publication index.
-    pub(crate) fn materialise_ast_at(
+    pub(crate) fn materialise_ast_at<'a>(
         &self,
         template_index: usize,
-        input: ModuleMaterialisationInput<'_>,
+        input: ModuleMaterialisationInput<'a>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let artefact = self.artefacts.get(template_index).ok_or_else(|| {
             CompilerMessages::from_error_ref(
@@ -638,10 +638,10 @@ fn check_materialisation_row_identity(
 }
 
 impl GenericTemplateArtefact {
-    fn materialise_ast(
+    fn materialise_ast<'a>(
         &self,
         context: &ModuleMaterialisationContext,
-        input: ModuleMaterialisationInput<'_>,
+        input: ModuleMaterialisationInput<'a>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let ModuleMaterialisationInput {
             identity,

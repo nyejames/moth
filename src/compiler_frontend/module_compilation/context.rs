@@ -16,6 +16,7 @@ use crate::compiler_frontend::module_compilation::options::FrontendOptions;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 
 use std::sync::Arc;
@@ -28,6 +29,11 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// their graph-owned stable origin.
     pub(crate) root_role_override: Option<ModuleRootRole>,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
+    /// Immutable source identities registered once by the enclosing compilation boundary.
+    ///
+    /// This context borrows the boundary's handle. Only a consumer that genuinely outlives the
+    /// call - the frontend's retained Stage 0 facts - clones it.
+    pub(crate) source_files: &'a Arc<SourceDatabase>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) external_packages: Arc<ExternalPackageRegistry>,
     /// Boundary-local resolved `#Config` values, collected before semantic AST construction.

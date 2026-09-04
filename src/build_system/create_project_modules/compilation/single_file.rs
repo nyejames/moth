@@ -29,6 +29,7 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -54,6 +55,7 @@ use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
 use super::super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 use super::super::prepared_module::PreparedModule;
+use super::super::prepared_source::PreparedSourceInput;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::non_utf8_filesystem_name_error;
 use super::super::resource_inputs::ResourceInputRegistry;
@@ -370,10 +372,19 @@ fn compile_single_file_frontend_with_target(
         }
     };
 
-    // Preparation is provider-independent: it owns no external package registry, dependency
-    // resolution table or builder runtime packages. Constructing it before the compilation context
-    // keeps that separation visible at the one place both are built.
+    // Preparation retains the existing synthetic temporary-table lifecycle: register the complete
+    // reachable candidate set before rebinding prepared outputs, then discard this table with the
+    // single-file compilation boundary.
+    let source_files = SourceDatabase::build(
+        input_files.iter().map(PreparedSourceInput::source_path),
+        &entry_path,
+        Some(&project_path_resolver),
+        string_table,
+    )
+    .map(Arc::new)
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let preparation_context = ModulePreparationContext {
+        source_files: &source_files,
         style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -402,7 +413,12 @@ fn compile_single_file_frontend_with_target(
             return Err(messages);
         }
     };
-    attach_single_file_resolved_references(&mut prepared, resolved_file_references, string_table)?;
+    attach_single_file_resolved_references(
+        &mut prepared,
+        &source_files,
+        resolved_file_references,
+        string_table,
+    )?;
 
     let source_facts =
         config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
@@ -432,6 +448,7 @@ fn compile_single_file_frontend_with_target(
         build_profile,
         root_role_override: None,
         project_path_resolver: Some(project_path_resolver),
+        source_files: &source_files,
         style_directives,
         external_packages: Arc::clone(&external_packages),
         build_config_values: Arc::new(build_config_values),
@@ -595,29 +612,29 @@ fn compile_single_file_frontend_with_target(
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
-/// Rebind synthetic Stage 0 file-reference rows to the final module source identities.
+/// Rebind synthetic Stage 0 file-reference rows to the boundary's temporary source identities.
 ///
-/// Synthetic discovery must resolve paths before the complete source closure is known, so it
-/// retains canonical target paths until `prepare_module` builds the authoritative `SourceDatabase`.
-/// This helper performs that one identity join and publishes the same resolved table consumed by
-/// directory modules; it does not probe the filesystem or reinterpret any path syntax.
+/// Synthetic discovery resolves paths before the complete source closure is known, so it retains
+/// canonical target paths until the enclosing single-file boundary builds its authoritative
+/// `SourceDatabase`. This helper performs that one identity join and publishes the same resolved
+/// table consumed by directory modules; it does not probe the filesystem or reinterpret path
+/// syntax.
 fn attach_single_file_resolved_references(
     prepared: &mut PreparedModule,
+    source_files: &SourceDatabase,
     references: Vec<SingleFileResolvedReference>,
     string_table: &StringTable,
 ) -> Result<(), CompilerMessages> {
     let mut resolved_table = ResolvedFileReferenceTable::new();
 
     for reference in references {
-        let source_file = prepared
-            .semantic
-            .source_files
+        let source_file = source_files
             .get_by_canonical_path(&reference.source_path)
             .map(|identity| identity.id)
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
-                        "synthetic file-reference owner {:?} is absent from the module source table",
+                        "synthetic file-reference owner {:?} is absent from the boundary source database",
                         reference.source_path
                     )),
                     string_table,
@@ -641,15 +658,13 @@ fn attach_single_file_resolved_references(
                 })
             }
             SingleFileReferenceOutcome::Source { canonical } => {
-                let target_file = prepared
-                    .semantic
-                    .source_files
+                let target_file = source_files
                     .get_by_canonical_path(&canonical)
                     .map(|identity| identity.id)
                     .ok_or_else(|| {
                         CompilerMessages::from_error_ref(
                             CompilerError::compiler_error(format!(
-                                "synthetic file-reference target {:?} is absent from the module source table",
+                                "synthetic file-reference target {:?} is absent from the boundary source database",
                                 canonical
                             )),
                             string_table,

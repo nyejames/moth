@@ -63,8 +63,9 @@ use crate::compiler_frontend::public_interface::{
     build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
+#[cfg(feature = "boracle")]
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
@@ -105,27 +106,28 @@ pub(crate) fn compile_module(
 ) -> Result<ModuleCompilationOutcome, CompilerError> {
     // The entry file is a retained preparation identity, so it is resolved from the payload
     // rather than repeated as an argument the caller must keep in sync.
-    let entry_file_path = prepared.entry_file_path()?.to_path_buf();
+    let entry_file_path = prepared
+        .entry_file_path(context.source_files)?
+        .to_path_buf();
     let entry_file_path = entry_file_path.as_path();
 
     let PreparedModuleInput {
         active_root_file_id,
+        candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
         resolved_file_references,
         string_table,
-        source_files,
         warnings,
         source_file_count,
         source_byte_count,
     } = prepared;
     resolved_file_references.validate()?;
-
-    // The active module origin is resolved from the per-file source-origin table using the
-    // retained active root SourceId, not from a loose origin argument. Preparation already
-    // validated the active root's table origin against the expected active origin, so the
-    // semantic projection re-derives the same origin from the table and validates every
-    // directly-defined public header against it.
+    // The active module origin is resolved from the shared boundary source-origin table using the
+    // retained active-root `SourceId`, not from a loose origin argument. Preparation already
+    // validated the active root's table origin against the expected active origin, so the semantic
+    // projection re-derives the same origin from the table and validates every directly-defined
+    // public header against it.
     let active_module_origin = source_module_origins
         .origin_for(active_root_file_id)?
         .ok_or_else(|| {
@@ -142,8 +144,8 @@ pub(crate) fn compile_module(
         context.style_directives.to_owned(),
         Arc::clone(&context.external_packages),
         context.project_path_resolver.clone(),
+        Arc::clone(context.source_files),
     );
-    compiler.set_source_files(source_files);
 
     let compile_result = run_semantic_stages(
         &mut compiler,
@@ -151,6 +153,7 @@ pub(crate) fn compile_module(
         known_generated,
         warnings,
         SemanticStageInputs {
+            candidate_source_ids,
             prepared_header_syntax,
             source_module_origins,
             active_root_file_id,
@@ -218,18 +221,17 @@ pub(crate) fn compile_module_for_boracle(
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<BoracleModuleInput, CompilerMessages> {
     let entry_file_path = prepared
-        .entry_file_path()
+        .entry_file_path(context.source_files)
         .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?
         .to_path_buf();
     let entry_file_path = entry_file_path.as_path();
-
     let PreparedModuleInput {
         active_root_file_id,
+        candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
         resolved_file_references,
         string_table,
-        source_files,
         warnings,
         source_file_count,
         source_byte_count,
@@ -257,8 +259,8 @@ pub(crate) fn compile_module_for_boracle(
         context.style_directives.to_owned(),
         Arc::clone(&context.external_packages),
         context.project_path_resolver.clone(),
+        Arc::clone(context.source_files),
     );
-    compiler.set_source_files(source_files);
 
     match run_semantic_stages(
         &mut compiler,
@@ -267,6 +269,7 @@ pub(crate) fn compile_module_for_boracle(
         warnings,
         SemanticStageInputs {
             prepared_header_syntax,
+            candidate_source_ids,
             source_module_origins,
             active_root_file_id,
             active_module_origin,
@@ -292,14 +295,18 @@ pub(crate) fn compile_module_for_boracle(
 
 /// Everything one semantic stage run reads from the prepared payload.
 ///
-/// WHAT: the retained syntax and module-local identity facts [`run_semantic_stages`] consumes,
-///       after the string table and source-file table have moved into the `CompilerFrontend`.
-/// WHY: eight values from one prepared module travel together through the whole stage sequence.
+/// WHAT: the retained syntax, ordered candidate source IDs and module-local identity facts
+///       [`run_semantic_stages`] consumes, after the string table remains local to the compiler
+///       and the source database is borrowed from the enclosing compilation boundary. The
+///       source-origin table is an immutable boundary handle shared by all module runs in that
+///       identity domain.
+/// WHY: nine values from one prepared module travel together through the whole stage sequence.
 ///      Naming the bundle keeps `compile_module` readable as setup, one stage run and one
 ///      classification, instead of a parameter list that hides which value came from where.
 struct SemanticStageInputs<'a> {
     prepared_header_syntax: PreparedHeaderSyntax,
-    source_module_origins: SourceModuleOriginTable,
+    candidate_source_ids: Vec<SourceId>,
+    source_module_origins: Arc<SourceModuleOriginTable>,
     active_root_file_id: SourceId,
     active_module_origin: StableModuleOriginIdentity,
     entry_file_path: &'a Path,
@@ -352,6 +359,7 @@ fn run_semantic_stages(
     let _ = request;
     let SemanticStageInputs {
         prepared_header_syntax,
+        candidate_source_ids,
         source_module_origins,
         active_root_file_id,
         active_module_origin,
@@ -360,6 +368,37 @@ fn run_semantic_stages(
         source_byte_count,
         resolved_file_references,
     } = inputs;
+
+    // Resolve the ordered candidate source IDs before header syntax is consumed. These are the
+    // module's complete owned candidates, including sources not reached by the header walk, and
+    // therefore preserve the pre-slice per-module source-table scope for external imports.
+    let source_logical_paths = if context.project_path_resolver.is_some() {
+        candidate_source_ids
+            .iter()
+            .map(|source_id| {
+                compiler
+                    .source_files
+                    .get(*source_id)
+                    .map(|identity| {
+                        identity
+                            .logical_path
+                            .to_portable_string(&compiler.string_table)
+                    })
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "semantic module compilation: candidate source ID {} is not in the boundary source file table",
+                                source_id.index()
+                            )),
+                            &compiler.string_table,
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
+
     let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
     let active_root_role = context
         .root_role_override
@@ -778,14 +817,8 @@ fn run_semantic_stages(
 
     // Collect provider-resolved imports used by this module after the frontend has
     // consumed them. HIR still carries only stable external IDs; this side payload is for
-    // backend asset/glue planning. Source logical paths are derived from the retained
-    // source identity table, not from raw source inputs.
-    let source_logical_paths = collect_source_logical_paths_from_table(
-        &compiler.source_files,
-        &compiler.string_table,
-        context.project_path_resolver.is_some(),
-    );
-
+    // backend asset/glue planning. The source paths were resolved from the ordered module-local
+    // candidate IDs before syntax consumption, not from the boundary-wide source database.
     let external_import_candidates = collect_external_import_candidates_for_source_files(
         &source_logical_paths,
         external_dependency_resolution_table,
@@ -1017,27 +1050,4 @@ fn record_borrow_counters(report: &BorrowCheckReport) {
         FrontendCounter::BorrowValueFactCount,
         report.analysis.value_facts.len(),
     );
-}
-
-/// Render the module's source logical paths from the retained source identity table.
-///
-/// WHAT: iterates the `SourceDatabase` built during preparation and renders each identity's
-///       portable logical path. Returns an empty vector when no project path resolver was used
-///       during preparation, matching the prior raw-source path behaviour.
-/// WHY: semantic compilation derives source logical paths from retained identities instead of
-///      carrying raw source paths, so the preparation/semantic boundary stays free of
-///      `PreparedSourceInput`. UTF-8 validity was already enforced when the table was built.
-fn collect_source_logical_paths_from_table(
-    source_files: &SourceDatabase,
-    string_table: &StringTable,
-    has_project_path_resolver: bool,
-) -> Vec<String> {
-    if !has_project_path_resolver {
-        return Vec::new();
-    }
-
-    source_files
-        .iter()
-        .map(|identity| identity.logical_path.to_portable_string(string_table))
-        .collect()
 }

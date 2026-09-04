@@ -1036,6 +1036,18 @@ impl SourceTreeIndex {
         &self.sources
     }
 
+    /// Iterate canonical source paths in the deterministic logical-identity order assigned by
+    /// Stage 0.
+    ///
+    /// Directory and source-package boundaries pass this inventory directly to the compiler's
+    /// source database. The iterator exposes no second discovery path and preserves the
+    /// boundary-local source-tree ordering without allocating another path list.
+    pub(crate) fn canonical_source_paths_in_logical_order(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &Path> {
+        self.sources.iter().map(|record| record.canonical_path())
+    }
+
     /// One source record addressed by its dense `SourceId`.
     ///
     /// `source_id` must be a valid `SourceId` produced by this index. A valid `SourceId` always

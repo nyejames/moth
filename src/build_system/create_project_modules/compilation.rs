@@ -23,6 +23,7 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -235,6 +236,7 @@ struct SourcePackageModuleInventory {
     package_identity: StablePackageIdentity,
     root_module_id: ModuleId,
     path_resolver: ProjectPathResolver,
+    source_files: Arc<SourceDatabase>,
     graph: ProjectModuleGraph,
     schedule: module_inventory::ModuleCompilationSchedule,
     /// Canonical source facts merged before transient jobs fork their string-table base.
@@ -251,6 +253,7 @@ struct SourcePackageModuleInventory {
 struct SourcePackageCheckOnlyInventory {
     dependency_prefix: String,
     path_resolver: ProjectPathResolver,
+    source_files: Arc<SourceDatabase>,
     check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
@@ -517,6 +520,16 @@ pub(crate) fn compile_directory_frontend(
         }
     };
     let project_path_resolver = project_setup.resolver;
+    let project_source_files = SourceDatabase::from_ordered_canonical_files(
+        project_setup
+            .source_tree_index
+            .canonical_source_paths_in_logical_order(),
+        project_path_resolver.entry_root(),
+        Some(&project_path_resolver),
+        string_table,
+    )
+    .map(Arc::new)
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let config_globals = builder_surface.config_globals().clone();
 
     // 2. Build every source-package inventory and the project inventory before semantic
@@ -554,6 +567,14 @@ pub(crate) fn compile_directory_frontend(
             dependency_prefix,
             package_index,
         );
+        let package_source_files = SourceDatabase::from_ordered_canonical_files(
+            package_index.canonical_source_paths_in_logical_order(),
+            package_path_resolver.entry_root(),
+            Some(&package_path_resolver),
+            string_table,
+        )
+        .map(Arc::new)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_2,
             crate::timing::TimingMetric::BoundaryInventory,
@@ -562,6 +583,7 @@ pub(crate) fn compile_directory_frontend(
         let package_waves = match module_inventory::discover_all_modules_in_package_with_check_only(
             config,
             &package_path_resolver,
+            &package_source_files,
             &mut package_graph,
             style_directives,
             &mut external_imports,
@@ -599,6 +621,7 @@ pub(crate) fn compile_directory_frontend(
             package_identity: package_index.stable_package_identity().clone(),
             root_module_id,
             path_resolver: package_path_resolver,
+            source_files: package_source_files,
             graph: package_graph,
             schedule: package_waves,
             canonical_source_facts,
@@ -630,6 +653,7 @@ pub(crate) fn compile_directory_frontend(
         match module_inventory::discover_all_modules_in_project_with_check_only(
             config,
             &project_path_resolver,
+            &project_source_files,
             &mut project_setup.project_module_graph,
             style_directives,
             &mut external_imports,
@@ -684,6 +708,7 @@ pub(crate) fn compile_directory_frontend(
             );
             inventory.schedule.prepare_check_only_jobs(
                 style_directives,
+                &inventory.source_files,
                 &inventory.path_resolver,
                 &mut external_imports,
                 package_resolution,
@@ -694,6 +719,7 @@ pub(crate) fn compile_directory_frontend(
     if mode.includes_check_only() {
         project_schedule.prepare_check_only_jobs(
             style_directives,
+            &project_source_files,
             &project_path_resolver,
             &mut external_imports,
             directory_dependency_resolution,
@@ -776,6 +802,7 @@ pub(crate) fn compile_directory_frontend(
             package_identity,
             root_module_id,
             path_resolver,
+            source_files,
             graph,
             schedule,
             canonical_source_facts: source_facts,
@@ -811,6 +838,7 @@ pub(crate) fn compile_directory_frontend(
                 config,
                 build_profile,
                 &path_resolver,
+                Arc::clone(&source_files),
                 style_directives,
                 &external_packages,
                 builder_surface,
@@ -855,6 +883,7 @@ pub(crate) fn compile_directory_frontend(
             source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
                 dependency_prefix,
                 path_resolver: deferred_path_resolver,
+                source_files,
                 check_only_jobs,
                 provider_bindings,
                 source_package_dependencies,
@@ -873,6 +902,7 @@ pub(crate) fn compile_directory_frontend(
     for inventory in source_package_check_only_inventories {
         let SourcePackageCheckOnlyInventory {
             dependency_prefix,
+            source_files,
             path_resolver,
             check_only_jobs,
             provider_bindings,
@@ -900,6 +930,7 @@ pub(crate) fn compile_directory_frontend(
                     config,
                     build_profile,
                     &path_resolver,
+                    Arc::clone(&source_files),
                     style_directives,
                     &external_packages,
                     builder_surface,
@@ -934,6 +965,7 @@ pub(crate) fn compile_directory_frontend(
             config,
             build_profile,
             &project_path_resolver,
+            Arc::clone(&project_source_files),
             style_directives,
             &external_packages,
             builder_surface,

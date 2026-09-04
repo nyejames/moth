@@ -125,7 +125,7 @@ pub(crate) struct Stage0ResolutionFacts {
 enum Stage0ResolutionFactsBacking {
     Ordinary {
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceDatabase,
+        source_files: Arc<SourceDatabase>,
     },
     FrozenGeneric {
         references: FxHashMap<PathSyntaxId, FrozenResolvedFileReference>,
@@ -181,7 +181,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
 impl Stage0ResolutionFacts {
     pub(crate) fn ordinary(
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceDatabase,
+        source_files: Arc<SourceDatabase>,
     ) -> Self {
         Self {
             backing: Stage0ResolutionFactsBacking::Ordinary {

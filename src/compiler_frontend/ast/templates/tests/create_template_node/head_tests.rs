@@ -277,7 +277,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     .with_file_value_resolution(Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
-            source_files,
+            source_files.into(),
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,

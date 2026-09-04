@@ -32,6 +32,7 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 const TEMPLATE_PATH: &str = "site/intro.mtf";
 const MARKDOWN_PATH: &str = "site/docs/intro.md";
@@ -80,13 +81,15 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 
     let template_path = Path::new(TEMPLATE_PATH);
     let markdown_path = Path::new(MARKDOWN_PATH);
-    let source_files = SourceDatabase::build(
-        [template_path, markdown_path],
-        template_path,
-        None,
-        &mut string_table,
-    )
-    .expect("bundle source identities should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            [template_path, markdown_path],
+            template_path,
+            None,
+            &mut string_table,
+        )
+        .expect("bundle source identities should build"),
+    );
     let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
@@ -148,7 +151,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     let bundle = MothTemplateFileValueBundle {
         prepared_content_sources: vec![prepared_markdown],
         resolved_file_references,
-        source_files,
+        source_files: Arc::clone(&source_files),
         module_origin: Some(module_origin.clone()),
     };
 

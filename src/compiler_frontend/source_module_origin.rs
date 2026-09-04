@@ -1,24 +1,21 @@
-//! Module-local source-origin side table mapping prepared source files to owning module origins.
+//! Boundary-wide source-origin side table for prepared module sources.
 //!
-//! WHAT: owns the immutable, remap-free side table that resolves each prepared source file
-//! identity (`SourceId`) to its owning `StableModuleOriginIdentity`. The table is
-//!       populated from the build-system-owned central `SourceTreeIndex` through the
-//!       `ProjectModuleGraph` for directory modules, or from the single synthetic normal-module
-//!       origin for single-file compilation. It carries no `StringId` values, so it requires no
-//!       remap during string-table fork/merge.
-//! WHY: canonical public type projection needs to resolve a nominal declaration's defining
-//!      source file to its graph-owned stable module origin. Without this table the projection
-//!      path trusts one loose module-origin argument for every declaration, which cannot
-//!      distinguish an active root from an imported root or a donor file. The table makes the
-//!      owning origin a per-file fact derived from the graph, so the projection validates the
-//!      active root's origin instead of assuming it.
+//! WHAT: owns the immutable, remap-free mapping from each `SourceId` in one project or package
+//!       compilation boundary to its owning `StableModuleOriginIdentity`. The graph-owned
+//!       canonical-path lookup builds the table once, and prepared modules share an `Arc` handle
+//!       instead of retaining independent row copies.
+//! WHY: canonical public type projection needs to resolve a nominal declaration's defining source
+//!      file to its graph-owned stable module origin. Sharing one table preserves that per-source
+//!      fact across every module in the same boundary while keeping source identity single-owned.
+//!      The table carries no `StringId` values, so it requires no remap during string-table
+//!      fork/merge.
 //!
-//! Boundary: this table is a semantic side table, not a topology owner. It is populated from
-//! the existing graph/source-index ownership and adds no filesystem scan, longest-prefix
-//! ownership guess or parallel topology table. Source-package files outside the project module
-//! graph are not owned by any project module: their entry is an explicit `None` until separate
-//! package graphs exist. They are not directly defined public exports and do not participate in
-//! active-root origin projection.
+//! Boundary: this table is a semantic side table, not a topology owner. It is populated from the
+//! existing graph/source-index ownership and adds no filesystem scan, longest-prefix ownership
+//! guess or parallel topology table. A source record outside the current graph's owned set has an
+//! explicit `None` entry; it is not directly defined public export material and does not
+//! participate in active-root origin projection. Single-file compilation intentionally uses a
+//! separate synthetic table for its temporary identity domain.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
@@ -28,29 +25,31 @@ use rustc_hash::FxHashMap;
 
 use std::path::PathBuf;
 
-/// Immutable module-local side table mapping each prepared source file to its owning stable
-/// module origin.
+/// Immutable boundary-wide side table mapping every source identity in one compilation boundary to
+/// its owning stable module origin.
 ///
-/// Keyed by `SourceId` (the deterministic local source identity from `SourceDatabase`).
+/// Keyed by `SourceId` (the deterministic boundary source identity from `SourceDatabase`).
 /// Values are `StableModuleOriginIdentity` (the graph-owned cross-build origin). Entries for
-/// source files not owned by any project module (source-package files) are `None`.
+/// source files not owned by a graph module are `None`.
 ///
 /// The table is immutable after construction and remap-free by construction:
 /// `StableModuleOriginIdentity` carries only owned `String` values and a `ModuleRootRole`,
-/// never `StringId` or `InternedPath`, so string-table fork/merge does not touch it.
+/// never `StringId` or `InternedPath`, so string-table fork/merge does not touch it. One
+/// `Arc<SourceModuleOriginTable>` is built per project or source-package boundary and shared by
+/// its prepared modules; single-file compilation uses a separate synthetic table.
 pub(crate) struct SourceModuleOriginTable {
     origins: Vec<Option<StableModuleOriginIdentity>>,
 }
 
 impl SourceModuleOriginTable {
-    /// Build the table for directory-module compilation from the graph-owned source-origin
-    /// lookup.
+    /// Build one shared table for a project or source-package compilation boundary from the
+    /// graph-owned source-origin lookup.
     ///
-    /// Each source file identity in `source_files` is mapped to its owning origin by looking up
-    /// its canonical OS path in `origin_by_canonical_path`. Files not present in the lookup
-    /// (source-package files outside the project module graph) map to `None` and are not an
-    /// error: they are not directly defined public exports and do not participate in
-    /// active-root origin projection.
+    /// Each boundary source identity is mapped to its owning origin by looking up its canonical OS
+    /// path in `origin_by_canonical_path`. Files not present in the lookup (for example,
+    /// source-package files outside a project module graph) map to `None` and are not an error:
+    /// they are not directly defined public exports and do not participate in active-root origin
+    /// projection.
     pub(crate) fn from_graph_ownership(
         source_files: &SourceDatabase,
         origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
@@ -80,11 +79,10 @@ impl SourceModuleOriginTable {
         Self { origins }
     }
 
-    /// Resolve the owning stable module origin for one source file.
+    /// Resolve the owning stable module origin for one boundary source identity.
     ///
-    /// Returns `Ok(Some(origin))` for a project-module-owned source file and `Ok(None)` for an
-    /// in-range source-package file not owned by the current project module graph (an explicit
-    /// migration state until separate package graphs exist). An out-of-range `SourceId` is an
+    /// Returns `Ok(Some(origin))` for a source file owned by a graph module and `Ok(None)` for an
+    /// in-range source file without a graph-owned module origin. An out-of-range `SourceId` is an
     /// internal invariant violation surfaced through `Err(CompilerError)` rather than silently
     /// returning `None`, so callers cannot conflate an unowned file with a corrupt identity.
     pub(crate) fn origin_for(

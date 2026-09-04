@@ -93,13 +93,15 @@ impl FrontendProject {
         .expect("project path resolver should build");
 
         let mut string_table = StringTable::new();
-        let source_files = SourceDatabase::build(
-            &canonical_files,
-            &entry_file,
-            Some(&resolver),
-            &mut string_table,
-        )
-        .expect("source file table should build");
+        let source_files = Arc::new(
+            SourceDatabase::build(
+                &canonical_files,
+                &entry_file,
+                Some(&resolver),
+                &mut string_table,
+            )
+            .expect("source file table should build"),
+        );
         let logical_paths = canonical_files
             .iter()
             .map(|canonical_file| {
@@ -112,14 +114,14 @@ impl FrontendProject {
             })
             .collect::<Vec<_>>();
 
-        let mut frontend = CompilerFrontend::new(
+        let frontend = CompilerFrontend::new(
             Config::new(canonical_project_root).frontend_options(),
             string_table,
             style_directives,
             Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),
             Some(resolver),
+            Arc::clone(&source_files),
         );
-        frontend.set_source_files(source_files);
 
         Self {
             _temp_dir: temp_dir,

@@ -607,6 +607,33 @@ depths only; the child map lives and dies with the builder.
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
 - [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
+This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
+identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
+is assigned. **1B-beta** replaced the per-module tables with one boundary-lifetime database. The
+remaining registration-barrier work — the bounded single-file candidate inventory, source slots and
+text loading, `SourceId`-set module inputs and deletion of synthetic rebinding — is **1B-gamma**,
+and covers 1B3, 1B4, 1B5 and the config/bootstrap barrier in 1B2.
+
+**Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
+rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
+`Arc<Stage0ResolutionFacts>` inside a lifetime-free `ScopeShared`, so giving it a `'build` borrow
+infected every type reaching a `ScopeContext` — the whole AST parser — to reach one table that is
+immutable for the build. The `Arc` also removes a real deep copy: the facts derive `Clone` and
+previously owned the table by value, which is the broad source-database `Clone` the architecture
+document prohibits. `SourceDatabase` is no longer `Clone`, so a future deep copy is a compile
+error. Short-lived function contexts (`ModulePreparationContext`, `FrontendFilePrepareContext`)
+still take plain `&SourceDatabase`; only stored owners hold the `Arc`.
+
+**Module scope decision, recorded against 1B5.** Widening the database to the boundary widened
+every module's external-import candidate set with it, because `run_semantic_stages` derived its
+source logical paths by iterating the whole table. Each prepared module now carries an ordered
+`candidate_source_ids: Vec<SourceId>` and resolves only those against the boundary database. The
+set is the module's owned *candidates*, not its header-reachable sources: the pre-slice per-module
+table was built from candidates, so unreachable owned sources contributed logical paths and must
+continue to. `directory_module_external_import_candidates_are_scoped_to_owned_sources` is the
+regression guard; it fails if that derivation widens again. This vector is the ID-set module input
+1B5 asks for, arriving early because the widening required it.
+
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
 Slice order note, recorded at activation: the encoding cannot be selected before byte offsets exist.

@@ -51,27 +51,86 @@ fn source_database_build_orders_records_by_portable_logical_path() {
 }
 
 #[test]
-fn source_id_round_trips_database_record_indices() {
+fn source_ids_are_distinct_and_same_module_sources_follow_portable_order() {
     let paths = [
-        PathBuf::from("/project/00.moth"),
-        PathBuf::from("/project/01.moth"),
-        PathBuf::from("/project/02.moth"),
-        PathBuf::from("/project/03.moth"),
-        PathBuf::from("/project/04.moth"),
+        PathBuf::from("/project/alpha/z.moth"),
+        PathBuf::from("/project/alpha/a.moth"),
+        PathBuf::from("/project/beta/root.moth"),
     ];
     let mut string_table = StringTable::new();
     let database = SourceDatabase::build(
         paths.iter(),
-        Path::new("/project/00.moth"),
+        Path::new("/project/alpha/a.moth"),
         None,
         &mut string_table,
     )
     .expect("source identities should build");
 
-    for index in [0, 2, 4] {
-        let id = SourceId::from_index(index);
-        let record = database.get(id).expect("database record should exist");
-        assert_eq!(record.id, id);
-        assert_eq!(id.index(), index);
-    }
+    let alpha_a = database
+        .get_by_canonical_path(&paths[1])
+        .expect("alpha/a source should be registered")
+        .id;
+    let alpha_z = database
+        .get_by_canonical_path(&paths[0])
+        .expect("alpha/z source should be registered")
+        .id;
+    let beta_root = database
+        .get_by_canonical_path(&paths[2])
+        .expect("beta/root source should be registered")
+        .id;
+
+    assert_ne!(alpha_a, alpha_z);
+    assert_ne!(alpha_a, beta_root);
+    assert_ne!(alpha_z, beta_root);
+
+    let alpha_logical_paths = database
+        .iter()
+        .filter(|record| record.canonical_os_path.starts_with("/project/alpha"))
+        .map(|record| record.logical_path.to_portable_string(&string_table))
+        .collect::<Vec<_>>();
+    assert_eq!(alpha_logical_paths, vec!["a.moth", "z.moth"]);
+}
+
+#[test]
+fn one_canonical_source_reachable_from_two_modules_has_one_record() {
+    let module_a_source = PathBuf::from("/project/alpha.moth");
+    let module_b_source = PathBuf::from("/project/beta.moth");
+    let shared_source = PathBuf::from("/project/shared.moth");
+    let boundary_paths = [
+        module_a_source.clone(),
+        module_b_source.clone(),
+        shared_source.clone(),
+    ];
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::from_ordered_canonical_files(
+        boundary_paths.iter(),
+        &module_a_source,
+        None,
+        &mut string_table,
+    )
+    .expect("boundary source identities should build");
+
+    let module_a_view = database
+        .insert(
+            shared_source.clone(),
+            &module_a_source,
+            None,
+            &mut string_table,
+        )
+        .expect("module A should resolve the shared source");
+    let module_b_view = database
+        .insert(
+            shared_source.clone(),
+            &module_b_source,
+            None,
+            &mut string_table,
+        )
+        .expect("module B should resolve the shared source");
+    let shared_record_count = database
+        .iter()
+        .filter(|record| record.canonical_os_path == shared_source)
+        .count();
+
+    assert_eq!(module_a_view, module_b_view);
+    assert_eq!(shared_record_count, 1);
 }

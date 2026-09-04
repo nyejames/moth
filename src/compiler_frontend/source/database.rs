@@ -13,7 +13,10 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 /// Source identity records in deterministic logical-path order.
-#[derive(Debug, Clone, Default)]
+///
+/// The database is not `Clone`. One boundary registers it once and shares it as an `Arc`, so a
+/// deep copy would silently duplicate identities that are meant to be unique for the build.
+#[derive(Debug, Default)]
 pub struct SourceDatabase {
     files: Vec<SourceRecord>,
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
@@ -24,10 +27,11 @@ impl SourceDatabase {
         Self::default()
     }
 
-    /// Build deterministic source identities for one module.
+    /// Build deterministic source identities from an unordered file list.
     ///
     /// Canonical files are sorted by portable logical path before identities are assigned, so
-    /// assignment does not depend on filesystem iteration order.
+    /// assignment does not depend on filesystem iteration order. Callers that already hold a
+    /// sorted boundary inventory use [`Self::from_ordered_canonical_files`] instead.
     pub fn build<I>(
         canonical_files: I,
         entry_file_path: &Path,
@@ -39,61 +43,63 @@ impl SourceDatabase {
         I::IntoIter: ExactSizeIterator,
         I::Item: AsRef<Path>,
     {
-        let fallback_root = entry_file_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+        let mut rows = logical_rows_for_canonical_files(
+            canonical_files,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )?;
+        rows.sort_by(|(_, left), (_, right)| left.portable_sort_key.cmp(&right.portable_sort_key));
+        Self::from_ordered_logical_rows(rows)
+    }
 
-        let canonical_files = canonical_files.into_iter();
-        let mut rows = Vec::with_capacity(canonical_files.len());
+    /// Build source identities from an already sorted boundary inventory.
+    ///
+    /// Stage 0 owns filesystem discovery and sorts its canonical source inventory by portable
+    /// logical identity before assigning its boundary-local handles. Directory and source-package
+    /// compilation pass that order here so the compiler assigns its own `SourceId` values without
+    /// re-walking or re-sorting the inventory.
+    pub(crate) fn from_ordered_canonical_files<I>(
+        canonical_files: I,
+        entry_file_path: &Path,
+        project_path_resolver: Option<&ProjectPathResolver>,
+        string_table: &mut StringTable,
+    ) -> Result<Self, CompilerError>
+    where
+        I: IntoIterator,
+        I::IntoIter: ExactSizeIterator,
+        I::Item: AsRef<Path>,
+    {
+        let rows = logical_rows_for_canonical_files(
+            canonical_files,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )?;
+        Self::from_ordered_logical_rows(rows)
+    }
 
-        for canonical in canonical_files {
-            let canonical = canonical.as_ref();
-            let logical = if let Some(resolver) = project_path_resolver {
-                resolver.logical_path_for_canonical_file(canonical, string_table)?
-            } else {
-                logical_path_for_single_file_mode(canonical, &fallback_root)
-            };
-
-            let portable_sort_key = logical
-                .to_str()
-                .ok_or_else(|| {
-                    CompilerError::file_error(
-                        &logical,
-                        format!(
-                            "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                        ),
-                        string_table,
-                    )
-                })?
-                .replace('\\', "/");
-
-            rows.push((canonical.to_path_buf(), logical, portable_sort_key));
-        }
-
-        rows.sort_by(|(_, _, left_key), (_, _, right_key)| left_key.cmp(right_key));
-
-        let mut files = Vec::with_capacity(rows.len());
+    fn from_ordered_logical_rows<I>(rows: I) -> Result<Self, CompilerError>
+    where
+        I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
+    {
+        let mut files = Vec::new();
         let mut canonical_to_id = FxHashMap::default();
 
-        for (index, (canonical, logical, _)) in rows.into_iter().enumerate() {
-            let id = SourceId::from_index(index);
-            let logical_path = InternedPath::try_from_filesystem_path(&logical, string_table)
-                .map_err(|NonUtf8PathComponent { path }| {
-                    CompilerError::file_error(
-                        &path,
-                        format!(
-                            "Source file logical path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                        ),
-                        string_table,
-                    )
-                })?;
+        for (canonical, logical) in rows {
+            if canonical_to_id.contains_key(&canonical) {
+                return Err(CompilerError::compiler_error(format!(
+                    "Source identity inventory registered canonical source path {} more than once",
+                    canonical.display(),
+                )));
+            }
 
+            let id = SourceId::from_index(files.len());
             canonical_to_id.insert(canonical.clone(), id);
             files.push(SourceRecord {
                 id,
                 canonical_os_path: canonical,
-                logical_path,
+                logical_path: logical.interned,
             });
         }
 
@@ -123,25 +129,13 @@ impl SourceDatabase {
             return Ok(record.id);
         }
 
-        let fallback_root = entry_file_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        let logical = if let Some(resolver) = project_path_resolver {
-            resolver.logical_path_for_canonical_file(&canonical_path, string_table)?
-        } else {
-            logical_path_for_single_file_mode(&canonical_path, &fallback_root)
-        };
-        let logical_path = InternedPath::try_from_filesystem_path(&logical, string_table)
-            .map_err(|NonUtf8PathComponent { path }| {
-                CompilerError::file_error(
-                    &path,
-                    format!(
-                        "Source file logical path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                    ),
-                    string_table,
-                )
-            })?;
+        let logical = interned_logical_path(
+            &canonical_path,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )?;
+        let logical_path = logical.interned;
 
         let id = SourceId::from_index(self.files.len());
         self.canonical_to_id.insert(canonical_path.clone(), id);
@@ -161,6 +155,88 @@ impl SourceDatabase {
     pub fn iter(&self) -> std::slice::Iter<'_, SourceRecord> {
         self.files.iter()
     }
+}
+
+/// One source's logical path in both the interned form records keep and the portable spelling
+/// unsorted inventories order by.
+struct LogicalSourcePath {
+    interned: InternedPath,
+    portable_sort_key: String,
+}
+
+fn logical_rows_for_canonical_files<I>(
+    canonical_files: I,
+    entry_file_path: &Path,
+    project_path_resolver: Option<&ProjectPathResolver>,
+    string_table: &mut StringTable,
+) -> Result<Vec<(PathBuf, LogicalSourcePath)>, CompilerError>
+where
+    I: IntoIterator,
+    I::IntoIter: ExactSizeIterator,
+    I::Item: AsRef<Path>,
+{
+    let canonical_files = canonical_files.into_iter();
+    let mut rows = Vec::with_capacity(canonical_files.len());
+
+    for canonical in canonical_files {
+        let canonical = canonical.as_ref();
+        let logical = interned_logical_path(
+            canonical,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )?;
+        rows.push((canonical.to_path_buf(), logical));
+    }
+
+    Ok(rows)
+}
+
+/// Resolve one canonical file's logical path and intern it.
+///
+/// Single-file mode has no project resolver, so it falls back to the entry file's directory.
+fn interned_logical_path(
+    canonical_file: &Path,
+    entry_file_path: &Path,
+    project_path_resolver: Option<&ProjectPathResolver>,
+    string_table: &mut StringTable,
+) -> Result<LogicalSourcePath, CompilerError> {
+    let logical = match project_path_resolver {
+        Some(resolver) => resolver.logical_path_for_canonical_file(canonical_file, string_table)?,
+        None => {
+            let fallback_root = entry_file_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."));
+            logical_path_for_single_file_mode(canonical_file, &fallback_root)
+        }
+    };
+
+    let portable_sort_key = logical
+        .to_str()
+        .ok_or_else(|| non_utf8_logical_path_error(&logical, string_table))?
+        .replace('\\', "/");
+    let interned = InternedPath::try_from_filesystem_path(&logical, string_table).map_err(
+        |NonUtf8PathComponent { path }| non_utf8_logical_path_error(&path, string_table),
+    )?;
+
+    Ok(LogicalSourcePath {
+        interned,
+        portable_sort_key,
+    })
+}
+
+fn non_utf8_logical_path_error(
+    logical_path: &Path,
+    string_table: &mut StringTable,
+) -> CompilerError {
+    CompilerError::file_error(
+        logical_path,
+        format!(
+            "Source file logical path {logical_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+        ),
+        string_table,
+    )
 }
 
 fn logical_path_for_single_file_mode(canonical_file: &Path, source_root: &Path) -> PathBuf {

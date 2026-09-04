@@ -87,7 +87,7 @@ pub(crate) struct MothTemplateFileValueBundle {
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     /// Source identities of the template and all prepared content dependencies. The template's
     /// own canonical path must be present.
-    pub(crate) source_files: SourceDatabase,
+    pub(crate) source_files: Arc<SourceDatabase>,
     /// The owning module origin resource pieces intern against.
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
 }
@@ -170,6 +170,7 @@ pub(crate) fn compile_moth_template_source(
                     Some(&path_resolver),
                     string_table,
                 )
+                .map(Arc::new)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
                 None,
             ),
@@ -248,7 +249,7 @@ pub(crate) fn compile_moth_template_source(
         Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                 resolved_file_references,
-                source_files.clone(),
+                Arc::clone(&source_files),
             ))),
             module_resources: Rc::clone(&module_resources),
             module_origin,

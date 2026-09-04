@@ -54,8 +54,10 @@ struct MaterialisingRequest {
 }
 
 /// Materialise every request this module emitted from its own AST.
-pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots(
-    context: &ModuleCompilationContext<'_>,
+pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots<
+    'build,
+>(
+    context: &ModuleCompilationContext<'build>,
     request_ids: &[GeneratedRequestId],
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
@@ -91,8 +93,8 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
 }
 
 /// Materialise one request, completing every nested request it raises first.
-fn materialise_generated_request(
-    context: &ModuleCompilationContext<'_>,
+fn materialise_generated_request<'build>(
+    context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
     request: &MaterialisingRequest,
     transaction: &mut GeneratedFunctionTransaction<'_>,
@@ -208,6 +210,7 @@ fn materialise_generated_request(
         context.style_directives.to_owned(),
         Arc::clone(&context.external_packages),
         context.project_path_resolver.clone(),
+        Arc::clone(context.source_files),
     );
     for nested_request_id in &nested_request_ids {
         let nested_identity = transaction

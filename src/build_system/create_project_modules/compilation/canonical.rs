@@ -31,6 +31,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -88,6 +89,7 @@ pub(super) struct BoundaryCompilationContext<'a> {
     config: &'a Config,
     build_profile: FrontendBuildProfile,
     project_path_resolver: &'a ProjectPathResolver,
+    source_files: Arc<SourceDatabase>,
     style_directives: &'a StyleDirectiveRegistry,
     external_packages: &'a Arc<ExternalPackageRegistry>,
     builder_surface: &'a BuilderSurface,
@@ -117,6 +119,7 @@ impl<'a> BoundaryCompilationContext<'a> {
         config: &'a Config,
         build_profile: FrontendBuildProfile,
         project_path_resolver: &'a ProjectPathResolver,
+        source_files: Arc<SourceDatabase>,
         style_directives: &'a StyleDirectiveRegistry,
         external_packages: &'a Arc<ExternalPackageRegistry>,
         builder_surface: &'a BuilderSurface,
@@ -141,6 +144,7 @@ impl<'a> BoundaryCompilationContext<'a> {
             config,
             build_profile,
             project_path_resolver,
+            source_files,
             style_directives,
             external_packages,
             builder_surface,
@@ -639,6 +643,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         let compile_context = ModuleCompilationContext {
             options: self.boundary.config.frontend_options(),
             build_profile: self.boundary.build_profile,
+            source_files: &self.boundary.source_files,
             root_role_override: (check_only_provider_bindings.is_some()
                 || check_only_source_package_dependencies.is_some())
             .then_some(ModuleRootRole::Support),

@@ -119,7 +119,9 @@ pub(crate) struct CompilerFrontend {
     pub(crate) string_table: StringTable,
     pub(crate) project_path_resolver: Option<ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
-    pub(crate) source_files: SourceDatabase,
+    /// Immutable source identities registered once by the enclosing compilation boundary and
+    /// shared, never copied, by every module compiled inside it.
+    pub(crate) source_files: Arc<SourceDatabase>,
 }
 
 /// Shared immutable inputs used while one source file is prepared against a local string table.
@@ -246,6 +248,7 @@ impl CompilerFrontend {
         style_directives: StyleDirectiveRegistry,
         external_package_registry: Arc<ExternalPackageRegistry>,
         project_path_resolver: Option<ProjectPathResolver>,
+        source_files: Arc<SourceDatabase>,
     ) -> Self {
         Self {
             external_package_registry,
@@ -253,13 +256,8 @@ impl CompilerFrontend {
             string_table,
             project_path_resolver,
             options,
-            source_files: SourceDatabase::empty(),
+            source_files,
         }
-    }
-
-    /// Attach per-module file identities built during Stage 0.
-    pub(crate) fn set_source_files(&mut self, source_files: SourceDatabase) {
-        self.source_files = source_files;
     }
 
     // -----------------------------
@@ -446,12 +444,11 @@ impl CompilerFrontend {
         let file_value_resolution = Some(Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                 resolved_file_references,
-                self.source_files.clone(),
+                Arc::clone(&self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
         }));
-
         Ast::new(
             AstBuildInput {
                 source_build_config_contract_names: Arc::new(

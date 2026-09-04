@@ -102,7 +102,7 @@ fn test_file_value_resolution_services(
     Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
             resolved_references,
-            SourceDatabase::empty(),
+            SourceDatabase::empty().into(),
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
