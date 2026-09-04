@@ -12,9 +12,7 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallArgument, normalize_call_arguments,
-};
+use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
@@ -89,7 +87,6 @@ impl HandledFallibleHostCall {
         propagation_location: Option<SourceLocation>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
-        let normalized_args = normalize_call_arguments(&self.args);
         let expression_handling = match &handling {
             FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
             FallibleHandling::Handler { .. } => FallibleExpressionHandling::Recover,
@@ -99,7 +96,7 @@ impl HandledFallibleHostCall {
             Expression::handled_fallible_host_function_call_with_typed_arguments(
                 HandledFallibleHostFunctionCallInput {
                     id: self.name,
-                    args: normalized_args,
+                    args: self.args,
                     result_type_ids: self.result_type_ids,
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
@@ -126,11 +123,9 @@ impl HandledFallibleCall {
         self,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
-        let normalized_args = normalize_call_arguments(&self.args);
-
         Expression::function_call_with_typed_arguments(
             self.name,
-            normalized_args,
+            self.args,
             self.result_type_ids,
             type_environment,
             self.call_location,
@@ -143,7 +138,6 @@ impl HandledFallibleCall {
         propagation_location: Option<SourceLocation>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
-        let normalized_args = normalize_call_arguments(&self.args);
         let expression_handling = match &handling {
             FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
             FallibleHandling::Handler { .. } => FallibleExpressionHandling::Recover,
@@ -152,7 +146,7 @@ impl HandledFallibleCall {
         let function_call_expression =
             Expression::handled_fallible_function_call_with_typed_arguments(
                 self.name,
-                normalized_args,
+                self.args,
                 self.result_type_ids,
                 expression_handling,
                 type_environment,

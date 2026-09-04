@@ -7,9 +7,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallArgument, normalize_call_arguments,
-};
+use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
@@ -471,10 +469,9 @@ fn finish_external_function_call_expression(
         .into());
     }
 
-    let normalized_args = normalize_call_arguments(&args);
     Ok(Expression::host_function_call_with_typed_arguments(
         id,
-        normalized_args,
+        args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         location,

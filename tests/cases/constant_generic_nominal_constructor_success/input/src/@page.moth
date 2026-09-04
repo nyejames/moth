@@ -1,0 +1,12 @@
+Box type T = |
+    value T,
+|
+
+Maybe type T ::
+    Some | value T |,
+;
+
+boxed #Box of Int = Box(1)
+selected #Maybe of Int = Maybe::Some(2)
+
+io.line([: generic nominal constant [boxed.value] choice])

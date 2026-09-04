@@ -9968,6 +9968,13 @@ contract = "language.constants.constructor_expression_acceptance"
 role = "primary"
 
 [[case]]
+id = "constant_generic_nominal_constructor_success"
+path = "constant_generic_nominal_constructor_success"
+tags = ["integration", "constants", "dependency-resolution", "generics", "structs"]
+contract = "language.constants.generic_nominal_constructor_acceptance"
+role = "primary"
+
+[[case]]
 id = "linear_constant_resolution_order"
 path = "linear_constant_resolution_order"
 tags = ["integration", "constants", "dependency-resolution", "header-sorting"]

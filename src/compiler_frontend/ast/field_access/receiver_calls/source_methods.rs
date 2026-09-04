@@ -11,7 +11,7 @@ use super::shared::{TraitSurfaceReceiverMethod, receiver_result_type_ids_for_cal
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallAccessMode, CallArgument, ParameterSlot, normalize_call_arguments,
+    CallAccessMode, CallArgument, ParameterSlot,
 };
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
@@ -329,7 +329,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     let method_call_expression = Expression::method_call_with_typed_arguments(
         receiver_expression,
         method_path,
-        normalize_call_arguments(&args),
+        args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_location.clone(),

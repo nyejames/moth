@@ -10,7 +10,6 @@ use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::expressions::call_argument::normalize_call_arguments;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::fallible_handling::token_stream_starts_fallible_handling_suffix;
@@ -291,7 +290,7 @@ pub(super) fn parse_map_builtin_member_typed(
         receiver_expression,
         builtin,
         mutating_receiver_required,
-        normalize_call_arguments(&args),
+        args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_location.clone(),

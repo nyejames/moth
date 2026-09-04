@@ -14,7 +14,6 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - Improve the `tmp/test_brackets.mtf` error example.
-- A module constant whose initializer constructs a generic nominal (`boxed #Box of Int = Box(1)`) fails with `MOTH-INFRA-0001 Parsed call argument retained out-of-range parameter slot 0`. Present on main at `011c799fe`, before the alias-hardening merge, and independent of whether the annotation is written directly or through a type alias. A non-generic constructor in the same position folds correctly, so the fault is in parameter-slot retention for a generic nominal constructor at constant-folding time.
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)

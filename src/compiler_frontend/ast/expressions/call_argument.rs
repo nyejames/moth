@@ -197,11 +197,3 @@ pub(crate) fn order_call_arguments_by_retained_slot(
 
     Ok(ordered)
 }
-
-/// Clone a call-argument slice into an owned vector.
-///
-/// WHAT: canonical no-op normalization for argument lists that are already resolved.
-/// WHY: provides a single call site for expression constructors that expect `Vec<CallArgument>`.
-pub(crate) fn normalize_call_arguments(args: &[CallArgument]) -> Vec<CallArgument> {
-    args.to_vec()
-}

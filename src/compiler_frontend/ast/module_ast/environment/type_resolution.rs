@@ -884,6 +884,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         }
                     })?;
 
+                    // Publish the completed constructor field signature to the canonical
+                    // nominal definition before any constant initializer can intern a generic
+                    // instance.  Generic instances eagerly cache substituted fields; leaving
+                    // this base definition empty makes an instance created by an earlier type
+                    // annotation retain a zero-parameter constructor view forever.
+                    if let Some(&struct_type_id) =
+                        self.nominal_type_ids_by_path.get(&header.tokens.src_path)
+                    {
+                        let field_definitions = self
+                            .field_definitions_from_declarations(&resolved_fields, string_table)?;
+                        self.type_environment
+                            .update_struct_fields(struct_type_id, field_definitions);
+                    }
+
                     // Store resolved constructor shell types for constant parsing.
                     Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                         .insert(header.tokens.src_path.to_owned(), resolved_fields);
@@ -928,6 +942,41 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )
                     }
                     .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+
+                    // Publish the completed payload signature before a constant annotation can
+                    // intern a generic choice instance.  As with structs, the canonical
+                    // environment owns the eager substituted-instance cache, so updating the
+                    // base definition is what refreshes any instance created from its shell.
+                    if let Some(&choice_type_id) =
+                        self.nominal_type_ids_by_path.get(&header.tokens.src_path)
+                    {
+                        let mut variant_definitions = Vec::with_capacity(resolved_variants.len());
+                        for (tag, variant) in resolved_variants.iter().enumerate() {
+                            let payload = match &variant.payload {
+                                ChoiceVariantPayload::Unit => ChoiceVariantPayloadDefinition::Unit,
+                                ChoiceVariantPayload::Record { fields } => {
+                                    let field_definitions = self
+                                        .field_definitions_from_declarations(
+                                            fields,
+                                            string_table,
+                                        )?;
+                                    ChoiceVariantPayloadDefinition::Record {
+                                        fields: field_definitions,
+                                    }
+                                }
+                            };
+                            variant_definitions.push(ChoiceVariantDefinition {
+                                name: variant.id,
+                                tag,
+                                payload,
+                                location: variant.location.clone(),
+                            });
+                        }
+                        self.type_environment.update_choice_variants(
+                            choice_type_id,
+                            variant_definitions.into_boxed_slice(),
+                        );
+                    }
 
                     // Store resolved constructor shell types for constant parsing.
                     Rc::make_mut(&mut self.choice_variant_shells_by_path)
