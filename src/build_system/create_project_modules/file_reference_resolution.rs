@@ -452,7 +452,9 @@ fn resolve_physical_target_cached(
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 let missing = resolve_missing_target_evidence(candidate, string_table)?;
-                if missing
+                if missing.non_directory_ancestor {
+                    PhysicalResolution::Invalid(PhysicalInvalidReason::TargetNotRegular)
+                } else if missing
                     .canonical_ancestor
                     .as_deref()
                     .is_some_and(|ancestor| !ancestor.starts_with(containment_root))
@@ -485,6 +487,7 @@ fn resolve_physical_target_cached(
 struct MissingTargetEvidence {
     watch_path: PathBuf,
     canonical_ancestor: Option<PathBuf>,
+    non_directory_ancestor: bool,
 }
 
 /// Resolve a missing target component by component, following dangling symlinks lexically so
@@ -560,6 +563,9 @@ fn resolve_missing_target_evidence(
                         {
                             return Ok(MissingTargetEvidence {
                                 watch_path: next,
+                                non_directory_ancestor: fs::symlink_metadata(&current)
+                                    .map(|metadata| !metadata.is_dir())
+                                    .unwrap_or(false),
                                 canonical_ancestor: canonicalize_existing_path(
                                     &current,
                                     string_table,
@@ -588,6 +594,7 @@ fn resolve_missing_target_evidence(
         return Ok(MissingTargetEvidence {
             watch_path: pending.clone(),
             canonical_ancestor: canonicalize_existing_path(&pending, string_table)?,
+            non_directory_ancestor: false,
         });
     }
 }

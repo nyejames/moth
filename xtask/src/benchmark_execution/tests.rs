@@ -208,7 +208,7 @@ fn successful_cli_process_rejects_invalid_live_observations_with_bounded_evidenc
             failure
                 .stdout_evidence
                 .as_deref()
-                .is_some_and(|evidence| evidence.contains(observation_output)),
+                .is_some_and(|evidence| normalize_newlines(evidence).contains(observation_output)),
             "{name} should retain bounded stdout evidence"
         );
     }
@@ -369,7 +369,7 @@ fn preflight_executes_every_case_once_and_aggregates_failures_in_manifest_order(
     assert_eq!(failures[0].case_id, "first_case");
     assert_eq!(failures[1].case_id, "second_case");
     assert_eq!(
-        fs::read_to_string(count_path).expect("invocation log should exist"),
+        normalize_newlines(&fs::read_to_string(count_path).expect("invocation log should exist")),
         "check\nbuild\n"
     );
 }
@@ -635,6 +635,10 @@ fn frontend_case(id: &str, workload_index: usize) -> BenchmarkCase {
     }
 }
 
+fn normalize_newlines(value: &str) -> String {
+    value.replace("\r\n", "\n")
+}
+
 #[cfg(unix)]
 fn create_expected_invocation_executable(path: &Path, expected_args: &[&str]) {
     use std::os::unix::fs::PermissionsExt;
@@ -709,10 +713,43 @@ fn create_output_executable(path: &Path, stdout: &str, stderr: &str, exit_code: 
 
 #[cfg(windows)]
 fn create_output_executable(path: &Path, stdout: &str, stderr: &str, exit_code: i32) {
-    let script = format!(
-        "@echo off\r\n<nul set /p=\"{stdout}\"\r\n<nul set /p=\"{stderr}\" 1>&2\r\nexit /b {exit_code}\r\n"
-    );
+    let stdout_commands = batch_output_commands(stdout, "");
+    let stderr_commands = batch_output_commands(stderr, " 1>&2");
+    let script = format!("@echo off\r\n{stdout_commands}{stderr_commands}exit /b {exit_code}\r\n");
     fs::write(path, script).expect("mock executable should be written");
+}
+
+#[cfg(windows)]
+fn batch_output_commands(output: &str, redirect: &str) -> String {
+    if output.is_empty() {
+        return String::new();
+    }
+
+    let output_without_trailing_newline = output.strip_suffix('\n').unwrap_or(output);
+    output_without_trailing_newline
+        .split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            format!("echo({}{redirect}\r\n", escape_batch_line(line))
+        })
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+#[cfg(windows)]
+fn escape_batch_line(line: &str) -> String {
+    let mut escaped = String::with_capacity(line.len());
+    for character in line.chars() {
+        match character {
+            '%' => escaped.push_str("%%"),
+            '^' | '&' | '|' | '<' | '>' => {
+                escaped.push('^');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 #[cfg(unix)]

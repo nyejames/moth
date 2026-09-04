@@ -60,6 +60,7 @@ pub fn assert_directory(path: &Path) {
 }
 
 /// Assert that `path` is a symlink.
+#[cfg(unix)]
 #[track_caller]
 pub fn assert_symlink(path: &Path) {
     match std::fs::symlink_metadata(path) {

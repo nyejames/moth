@@ -302,7 +302,7 @@ fn load_canonical_case_specs_at(
             return Err(FixtureLoadError::filesystem(format!(
                 "Canonical case '{}' at fixture '{}' has '{}' but it is not a regular file.",
                 case_name,
-                fixture_root.display(),
+                portable_path_text(fixture_root),
                 EXPECT_FILE_NAME
             )));
         }
@@ -315,8 +315,8 @@ fn load_canonical_case_specs_at(
             return Err(FixtureLoadError::filesystem(format!(
                 "Canonical case '{}' at fixture '{}' is missing required expectation file '{}'.",
                 case_name,
-                fixture_root.display(),
-                expect_path.display()
+                portable_path_text(fixture_root),
+                portable_path_text(&expect_path)
             )));
         }
         Err(error) => {

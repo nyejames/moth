@@ -10,6 +10,7 @@ use super::super::{
     BackendId, CaseRole, EXPECT_FILE_NAME, GOLDEN_DIR_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME,
     TestRunnerOptions,
 };
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::fs;
 use std::path::Path;
 
@@ -83,8 +84,8 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     assert!(
         error.message.contains("Canonical case 'case'")
             && error.message.contains("missing required expectation file")
-            && error.message.contains(&case_root.display().to_string())
-            && error.message.contains(&expected_path.display().to_string()),
+            && error.message.contains(&portable_path_text(&case_root))
+            && error.message.contains(&portable_path_text(&expected_path)),
         "unexpected error: {error}"
     );
 }

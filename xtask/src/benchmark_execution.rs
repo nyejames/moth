@@ -12,6 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::fmt::{Display, Formatter};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bench_observations::{average_observations, parse_stdout_observations};
@@ -147,6 +148,7 @@ pub(crate) fn preflight_cases(
     let mut failures = Vec::new();
 
     for case in cases {
+        announce_preflight_case(case);
         match execute_case(context, case) {
             Ok(execution) => executions.push(execution),
             Err(failure) => failures.push(failure),
@@ -158,6 +160,20 @@ pub(crate) fn preflight_cases(
     } else {
         Err(failures)
     }
+}
+
+/// Report the case before entering compiler code.
+///
+/// Stderr is unbuffered in normal process execution, but flush explicitly so
+/// the identity survives a compiler stack overflow while the preflight is
+/// still in progress.
+fn announce_preflight_case(case: &BenchmarkCase) {
+    let mut stderr = io::stderr().lock();
+    writeln!(stderr, "Preflighting benchmark case '{}'", case.id)
+        .expect("benchmark preflight case identity should be writable");
+    stderr
+        .flush()
+        .expect("benchmark preflight case identity should be flushable");
 }
 
 pub(crate) fn format_case_failures(

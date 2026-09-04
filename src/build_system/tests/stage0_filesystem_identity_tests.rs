@@ -205,7 +205,7 @@ mod non_utf8_filesystem_identity {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 mod non_utf8_single_file_identity {
     use super::*;
     use crate::compiler_frontend::compiler_errors::ErrorType;
@@ -235,7 +235,6 @@ mod non_utf8_single_file_identity {
         let entry = root.join("main.");
         let bad_ext = OsString::from_vec(vec![0xC3, 0x28]);
         let entry_with_bad_ext = entry.with_extension(bad_ext);
-        fs::write(&entry_with_bad_ext, "x ~= 1\n").expect("should write entry file");
 
         let config = Config::new(entry_with_bad_ext.clone());
         let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
@@ -259,6 +258,7 @@ mod non_utf8_single_file_identity {
         assert_file_infrastructure_error(&messages);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn single_file_rejects_non_utf8_entry_name() {
         let temp = tempfile::tempdir().expect("should create temp dir");
@@ -284,6 +284,60 @@ mod non_utf8_single_file_identity {
         );
         let Err(messages) = messages else {
             panic!("non-UTF-8 entry file name should be rejected");
+        };
+
+        assert_file_infrastructure_error(&messages);
+    }
+}
+
+#[cfg(windows)]
+mod non_utf8_windows_single_file_identity {
+    use super::*;
+    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
+        let (error_type, message, _location) = messages
+            .first_infrastructure_error_for_tests()
+            .expect("expected an infrastructure file error");
+        assert_eq!(
+            *error_type,
+            ErrorType::File,
+            "unpaired-wide single-file input should be a File infrastructure error"
+        );
+        assert!(
+            message.contains("UTF-8"),
+            "error message should mention UTF-8: {message}"
+        );
+    }
+
+    #[test]
+    fn single_file_rejects_unpaired_wide_extension() {
+        let temp = tempfile::tempdir().expect("should create temp dir");
+        let root = temp.path().to_path_buf();
+        let entry = root.join("main.");
+        let bad_ext = OsString::from_wide(&[0xD800]);
+        let entry_with_bad_ext = entry.with_extension(bad_ext);
+
+        let config = Config::new(entry_with_bad_ext.clone());
+        let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+        let mut string_table = StringTable::new();
+
+        let extension = entry_with_bad_ext
+            .extension()
+            .expect("entry should have an extension");
+        let messages = super::compilation::compile_single_file_frontend(
+            &config,
+            crate::compiler_frontend::FrontendBuildProfile::Dev,
+            &StyleDirectiveRegistry::default(),
+            &mut builder_surface,
+            extension,
+            &mut string_table,
+        );
+        let Err(messages) = messages else {
+            panic!("unpaired-wide extension should be rejected");
         };
 
         assert_file_infrastructure_error(&messages);

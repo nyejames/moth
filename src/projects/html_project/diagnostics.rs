@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::path::Path;
 
 pub(crate) fn missing_homepage_messages(
@@ -104,5 +105,5 @@ fn html_config_messages(
 }
 
 fn path_id(path: &Path, string_table: &mut StringTable) -> StringId {
-    string_table.get_or_intern(path.display().to_string())
+    string_table.get_or_intern(portable_path_text(path))
 }

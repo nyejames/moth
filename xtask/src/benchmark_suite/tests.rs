@@ -157,10 +157,43 @@ fn create_output_executable(path: &Path, stdout: &str, stderr: &str, exit_code: 
 
 #[cfg(windows)]
 fn create_output_executable(path: &Path, stdout: &str, stderr: &str, exit_code: i32) {
-    let script = format!(
-        "@echo off\r\n<nul set /p=\"{stdout}\"\r\n<nul set /p=\"{stderr}\" 1>&2\r\nexit /b {exit_code}\r\n"
-    );
+    let stdout_commands = batch_output_commands(stdout, "");
+    let stderr_commands = batch_output_commands(stderr, " 1>&2");
+    let script = format!("@echo off\r\n{stdout_commands}{stderr_commands}exit /b {exit_code}\r\n");
     fs::write(path, script).expect("mock executable should be written");
+}
+
+#[cfg(windows)]
+fn batch_output_commands(output: &str, redirect: &str) -> String {
+    if output.is_empty() {
+        return String::new();
+    }
+
+    let output_without_trailing_newline = output.strip_suffix('\n').unwrap_or(output);
+    output_without_trailing_newline
+        .split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            format!("echo({}{redirect}\r\n", escape_batch_line(line))
+        })
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+#[cfg(windows)]
+fn escape_batch_line(line: &str) -> String {
+    let mut escaped = String::with_capacity(line.len());
+    for character in line.chars() {
+        match character {
+            '%' => escaped.push_str("%%"),
+            '^' | '&' | '|' | '<' | '>' => {
+                escaped.push('^');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn clean_fixed_output() -> &'static str {
