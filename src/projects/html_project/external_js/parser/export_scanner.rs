@@ -111,7 +111,26 @@ impl<'a> ExportScanner<'a> {
                 );
                 self.skip_to_statement_end();
             } else if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
-                self.read_import_statement();
+                if self
+                    .source
+                    .get(self.pos + "import".len()..)
+                    .is_some_and(|rest| rest.starts_with(".meta"))
+                {
+                    self.advance_chars("import".len());
+                } else {
+                    self.read_import_statement();
+                }
+            } else if self.peek_str("require") && self.is_word_boundary_at("require".len()) {
+                self.read_require_statement();
+            } else if self.current_char_opt() == Some('/')
+                && !self.peek_str("//")
+                && !self.peek_str("/*")
+            {
+                if self.slash_starts_regular_expression() {
+                    self.skip_regular_expression();
+                } else {
+                    self.advance_char();
+                }
             } else {
                 self.advance_char();
             }
@@ -152,6 +171,17 @@ impl<'a> ExportScanner<'a> {
             let span = self.make_span(export_start_byte, export_start_line, export_start_column);
             self.emit_diagnostic(
                 "Re-export forms such as `export { name }` are not supported in Moth JS modules.",
+                JsDiagnosticKind::ReExport,
+                span,
+            );
+            self.skip_to_statement_end();
+            return;
+        }
+
+        if self.consume_char('*') {
+            let span = self.make_span(export_start_byte, export_start_line, export_start_column);
+            self.emit_diagnostic(
+                "Re-export forms such as `export * from \"...\"` are not supported in Moth JS modules.",
                 JsDiagnosticKind::ReExport,
                 span,
             );
@@ -381,6 +411,86 @@ impl<'a> ExportScanner<'a> {
 
         self.advance_to_byte(statement_end);
         self.skip_to_statement_end();
+    }
+
+    fn read_require_statement(&mut self) {
+        let require_start_byte = self.pos;
+        let require_start_line = self.line;
+        let require_start_column = self.column;
+
+        self.advance_chars("require".len());
+        self.skip_whitespace_and_comments();
+
+        if !self.consume_char('(') {
+            return;
+        }
+
+        self.emit_diagnostic(
+            "CommonJS `require()` is not supported in Moth JS modules.",
+            JsDiagnosticKind::CommonJsExport,
+            JsSourceSpan::range(
+                require_start_byte,
+                self.pos,
+                require_start_line,
+                require_start_column,
+            ),
+        );
+        self.skip_to_statement_end();
+    }
+
+    fn slash_starts_regular_expression(&self) -> bool {
+        match self.source[..self.pos]
+            .chars()
+            .rev()
+            .find(|character| !character.is_whitespace())
+        {
+            None => true,
+            Some(character) => matches!(
+                character,
+                '(' | '['
+                    | '{'
+                    | ','
+                    | ';'
+                    | '='
+                    | '!'
+                    | '?'
+                    | ':'
+                    | '&'
+                    | '|'
+                    | '~'
+                    | '^'
+                    | '%'
+                    | '*'
+                    | '<'
+                    | '>'
+            ),
+        }
+    }
+
+    fn skip_regular_expression(&mut self) {
+        self.advance_char();
+        let mut in_character_class = false;
+
+        while !self.is_at_end() {
+            let character = self.current_char();
+            if character == '\\' {
+                self.advance_char();
+                self.advance_char();
+                continue;
+            }
+            if character == '[' {
+                in_character_class = true;
+            } else if character == ']' {
+                in_character_class = false;
+            } else if character == '/' && !in_character_class {
+                self.advance_char();
+                while !self.is_at_end() && self.current_char().is_ascii_alphabetic() {
+                    self.advance_char();
+                }
+                return;
+            }
+            self.advance_char();
+        }
     }
 
     // ------------------------
@@ -631,6 +741,24 @@ impl<'a> ExportScanner<'a> {
                 continue;
             }
 
+            if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
+                if self
+                    .source
+                    .get(self.pos + "import".len()..)
+                    .is_some_and(|rest| rest.starts_with(".meta"))
+                {
+                    self.advance_chars("import".len());
+                } else {
+                    self.read_import_statement();
+                }
+                continue;
+            }
+
+            if self.peek_str("require") && self.is_word_boundary_at("require".len()) {
+                self.read_require_statement();
+                continue;
+            }
+
             let ch = self.current_char();
             if ch == '{' {
                 brace_depth += 1;
@@ -753,6 +881,26 @@ impl<'a> ExportScanner<'a> {
                     } else if self.peek_str("/*") {
                         self.skip_block_comment();
                         continue;
+                    } else if depth == 1
+                        && self.peek_str("import")
+                        && self.is_word_boundary_at("import".len())
+                    {
+                        if self
+                            .source
+                            .get(self.pos + "import".len()..)
+                            .is_some_and(|rest| rest.starts_with(".meta"))
+                        {
+                            self.advance_chars("import".len());
+                        } else {
+                            self.read_import_statement();
+                        }
+                        continue;
+                    } else if depth == 1
+                        && self.peek_str("require")
+                        && self.is_word_boundary_at("require".len())
+                    {
+                        self.read_require_statement();
+                        continue;
                     }
                     self.advance_char();
                 }
@@ -797,6 +945,21 @@ impl<'a> ExportScanner<'a> {
             } else {
                 break;
             }
+        }
+    }
+
+    fn skip_whitespace_and_comments(&mut self) {
+        loop {
+            self.skip_whitespace();
+            if self.peek_str("//") {
+                self.skip_line_comment();
+                continue;
+            }
+            if self.peek_str("/*") {
+                self.skip_block_comment();
+                continue;
+            }
+            break;
         }
     }
 
@@ -896,12 +1059,69 @@ impl<'a> ExportScanner<'a> {
     }
 }
 
-fn extract_static_import_specifier(statement: &str) -> Option<String> {
-    if let Some(from_index) = find_word(statement, "from") {
-        return parse_string_literal_from(&statement[from_index + "from".len()..]);
+fn strip_js_comments_preserving_strings(source: &str) -> String {
+    let mut stripped = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character == '"' || character == '\'' {
+            stripped.push(character);
+            let quote = character;
+            while let Some(inner) = chars.next() {
+                stripped.push(inner);
+                if inner == '\\' {
+                    if let Some(escaped) = chars.next() {
+                        stripped.push(escaped);
+                    }
+                    continue;
+                }
+                if inner == quote {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if character == '/' {
+            match chars.peek().copied() {
+                Some('/') => {
+                    chars.next();
+                    for comment_character in chars.by_ref() {
+                        if comment_character == '\n' {
+                            stripped.push('\n');
+                            break;
+                        }
+                    }
+                }
+                Some('*') => {
+                    chars.next();
+                    let mut previous = '\0';
+                    for comment_character in chars.by_ref() {
+                        if previous == '*' && comment_character == '/' {
+                            break;
+                        }
+                        previous = comment_character;
+                    }
+                    stripped.push(' ');
+                }
+                _ => stripped.push(character),
+            }
+            continue;
+        }
+
+        stripped.push(character);
     }
 
-    parse_string_literal_from(statement)
+    stripped
+}
+
+fn extract_static_import_specifier(statement: &str) -> Option<String> {
+    let stripped = strip_js_comments_preserving_strings(statement);
+    if let Some(from_index) = find_word(&stripped, "from") {
+        return parse_string_literal_from(&stripped[from_index + "from".len()..]);
+    }
+
+    parse_string_literal_from(&stripped)
 }
 
 fn find_word(text: &str, word: &str) -> Option<usize> {

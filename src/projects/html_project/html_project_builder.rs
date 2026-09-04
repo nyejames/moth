@@ -326,7 +326,18 @@ impl BackendBuilder for HtmlProjectBuilder {
         );
         builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
-        builder_surface.expose_html_core_packages();
+        crate::builder_surface::core_packages::register_core_math_package(
+            &mut builder_surface.binding_packages,
+        );
+        crate::builder_surface::core_packages::register_core_text_package(
+            &mut builder_surface.binding_packages,
+        );
+        crate::builder_surface::core_packages::register_core_random_package(
+            &mut builder_surface.binding_packages,
+        );
+        crate::builder_surface::core_packages::register_core_time_package(
+            &mut builder_surface.binding_packages,
+        );
 
         let canvas_metadata = register_web_canvas_package(&mut builder_surface.binding_packages);
         builder_surface

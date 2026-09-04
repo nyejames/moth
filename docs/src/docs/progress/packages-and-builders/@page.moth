@@ -150,13 +150,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: First-party no-third-party-dependencies guard]
-            [: Supported]
-            [: Targeted package-manager, vendored-root, allowed-runtime-import and rejected-bare-import coverage.]
+            [: Partial]
+            [: Targeted package-manager, vendored-root, allowed-runtime-import and rejected-module-import coverage.]
             [: Validation / packages]
-            [: The [$html:<code>first-party-deps</code>] validation owner inspects only first-party implementation roots and the inline Moth runtime source. User-owned and future dependency packages, generated glue, documentation, tests and benchmarks remain outside its scan.]
+            [: The [$html:<code>first-party-deps</code>] validation owner inspects first-party implementation roots plus the compiler-owned JavaScript inventory. Physical [$html:<code>.js</code>] assets, Core helper bodies, inline lowering templates and registered runtime modules are checked. User-owned and future dependency packages, generated glue, documentation, tests and benchmarks remain outside its scan.]
         ]
     ]
 ]
+
 
 #[section, $md:
     ## Core packages

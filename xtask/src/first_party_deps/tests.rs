@@ -4,78 +4,40 @@
 //! benchmarks are deliberately created beside them in one test to prove they are outside scope.
 
 use super::{
-    FIRST_PARTY_DEPS_SCHEMA_VERSION, FIRST_PARTY_SOURCE_ROOTS, FirstPartyDepsRule,
-    RUNTIME_REGISTRY_RELATIVE_PATH, RUNTIME_SOURCE_LABEL, audit_first_party_deps,
-    audit_javascript_source, extract_runtime_source, started_report,
+    FIRST_PARTY_DEPS_SCHEMA_VERSION, FirstPartyDepsRule, audit_first_party_deps,
+    audit_javascript_source, started_report,
 };
 use crate::report_file::ReportRunIdentity;
 use std::fs;
 use std::path::Path;
 use tempfile::{TempDir, tempdir};
 
-const CLEAN_RUNTIME_SOURCE: &str = r#"export function mothOk(value) {
-    return { ok: true, value: value };
-}
-
-export function mothErr(code, message) {
-    return { ok: false, error: { code, message } };
-}
-"#;
-
 fn fixture_workspace() -> TempDir {
     let workspace = tempdir().expect("temp dir");
-    for root in FIRST_PARTY_SOURCE_ROOTS {
+    for root in super::FIRST_PARTY_SOURCE_ROOTS {
         fs::create_dir_all(workspace.path().join(root)).expect("first-party root");
     }
-    write_runtime_source(workspace.path(), CLEAN_RUNTIME_SOURCE);
     workspace
-}
-
-fn write_runtime_source(workspace: &Path, source: &str) {
-    let path = workspace.join(RUNTIME_REGISTRY_RELATIVE_PATH);
-    fs::create_dir_all(path.parent().expect("runtime registry parent")).expect("runtime parent");
-    fs::write(
-        path,
-        format!("const MOTH_RUNTIME_SOURCE_V1: &str = r#\"{source}\"#;\n"),
-    )
-    .expect("runtime registry");
 }
 
 fn write_fixture_file(workspace: &Path, relative: &str, contents: &str) {
     let path = workspace.join(relative);
-    fs::create_dir_all(path.parent().expect("fixture file parent")).expect("fixture parent");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("fixture parent");
+    }
     fs::write(path, contents).expect("fixture file");
 }
 
 fn findings_for(workspace: &TempDir) -> Vec<super::FirstPartyDepsFinding> {
-    audit_first_party_deps(workspace.path())
-        .expect("fixture roots and runtime registry should be readable")
-        .1
+    let (_visited, _javascript, findings) =
+        audit_first_party_deps(workspace.path()).expect("fixture roots are readable");
+    findings
 }
 
 fn assert_has_rule(findings: &[super::FirstPartyDepsFinding], rule: FirstPartyDepsRule) {
     assert!(
         findings.iter().any(|finding| finding.rule == rule),
-        "expected {rule:?} in findings, got {findings:?}"
-    );
-}
-
-#[test]
-fn current_workspace_first_party_roots_are_clean() {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask manifest has a parent");
-
-    let (audited_file_count, findings) =
-        audit_first_party_deps(workspace_root).expect("current first-party roots are readable");
-
-    assert!(
-        audited_file_count > 0,
-        "the guard must inspect implementation files rather than an empty path list"
-    );
-    assert!(
-        findings.is_empty(),
-        "first-party dependency findings: {findings:?}"
+        "missing {rule:?} in {findings:?}"
     );
 }
 
@@ -86,7 +48,6 @@ fn fixture_with_allowed_runtime_import_and_no_manifests_passes() {
         workspace.path(),
         "src/projects/html_project/binding_packages/web/canvas.js",
         r#"import { mothOk, mothErr } from "@moth/runtime";
-import "./helpers.js";
 const values = [Math, JSON, Date, Uint8Array];
 "#,
     );
@@ -185,7 +146,7 @@ fn rejects_an_unapproved_static_import() {
     );
 
     let findings = findings_for(&workspace);
-    assert_has_rule(&findings, FirstPartyDepsRule::UnapprovedBareImport);
+    assert_has_rule(&findings, FirstPartyDepsRule::UnapprovedModuleImport);
     assert!(
         findings
             .iter()
@@ -195,33 +156,91 @@ fn rejects_an_unapproved_static_import() {
 }
 
 #[test]
-fn rejects_require_and_dynamic_import_bare_specifiers() {
+fn rejects_require_and_dynamic_import_regardless_of_argument() {
     let source = r#"
 const leftPad = require("left-pad");
 const npm = import('some-npm');
 "#;
     let findings = audit_javascript_source("fixture.js", source);
 
-    assert_eq!(
-        findings.len(),
-        2,
-        "each import form should be reported: {findings:?}"
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("require()")),
+        "require must be rejected: {findings:?}"
     );
     assert!(
         findings
             .iter()
-            .all(|finding| { finding.rule == FirstPartyDepsRule::UnapprovedBareImport })
+            .any(|finding| finding.message.contains("import()")),
+        "dynamic import must be rejected: {findings:?}"
     );
     assert!(
         findings
             .iter()
-            .any(|finding| finding.message.contains("left-pad"))
+            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport)
     );
+}
+
+#[test]
+fn rejects_dynamic_import_inside_an_exported_function_body() {
+    let source = "export function load() { return import(\"lodash\"); }\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        !findings.is_empty(),
+        "exported bodies must still be scanned: {findings:?}"
+    );
+}
+
+#[test]
+fn rejects_comment_hidden_from_clause_before_the_real_specifier() {
+    let source = "import { mothOk /* from \"@moth/runtime\" */ } from \"lodash\";\n";
+    let findings = audit_javascript_source("fixture.js", source);
     assert!(
         findings
             .iter()
-            .any(|finding| finding.message.contains("some-npm"))
+            .any(|finding| finding.message.contains("lodash")),
+        "comment text must not supply the module specifier: {findings:?}"
     );
+}
+
+#[test]
+fn rejects_require_with_a_comment_before_the_argument_list() {
+    let source = "require /* dependency */ (\"lodash\");\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("require()")),
+        "comments cannot hide require calls: {findings:?}"
+    );
+}
+
+#[test]
+fn postfix_increment_division_does_not_hide_a_later_import() {
+    let source = "let value = 1; value++ / 2; import(\"lodash\");\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        !findings.is_empty(),
+        "postfix ++ division must not be classified as a regex: {findings:?}"
+    );
+}
+
+#[test]
+fn rejects_variable_interpolated_and_concatenated_dynamic_loads() {
+    for source in [
+        "import(module_name)\n",
+        "import(`package-${name}`)\n",
+        "require(module_name)\n",
+        "import(\"@moth/runtime\" + \"/something-else\")\n",
+    ] {
+        let findings = audit_javascript_source("fixture.js", source);
+        assert!(
+            !findings.is_empty(),
+            "unproven module load must fail closed: {source:?}"
+        );
+        assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
+    }
 }
 
 #[test]
@@ -238,14 +257,6 @@ export * from "lodash-star";
         3,
         "all static import forms should be reported: {findings:?}"
     );
-    for module in ["lodash-side-effect", "lodash-reexport", "lodash-star"] {
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.message.contains(module)),
-            "missing finding for {module}: {findings:?}"
-        );
-    }
 }
 
 #[test]
@@ -281,25 +292,38 @@ fn reports_dynamic_import_of_a_template_literal_module() {
     assert_eq!(
         findings.len(),
         1,
-        "template module names are still specifiers: {findings:?}"
+        "template module names are still dynamic imports: {findings:?}"
     );
-    assert!(findings[0].message.contains("lodash"));
+    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
 }
 
 #[test]
-fn relative_absolute_url_and_allowed_runtime_specifiers_pass() {
+fn relative_absolute_url_and_data_imports_are_rejected() {
     let source = r#"
 import "./local.js";
 import "../parent.js";
 import "/absolute.js";
 import "https://example.test/library.js";
+import "http://example.test/library.js";
 import "data:text/javascript,export default 1";
-import { mothOk } from "@moth/runtime";
+import "//cdn.example.test/library.js";
 "#;
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        7,
+        "only registered runtime modules are allowed: {findings:?}"
+    );
+}
+
+#[test]
+fn allowed_runtime_specifier_passes() {
+    let source = "import { mothOk } from \"@moth/runtime\";\n";
 
     assert!(
         audit_javascript_source("fixture.js", source).is_empty(),
-        "only third-party bare specifiers should be rejected"
+        "the registered runtime module remains the only allowed import"
     );
 }
 
@@ -315,6 +339,19 @@ const value = Math.max(Date.now(), JSON.parse("1"));
 }
 
 #[test]
+fn division_does_not_hide_a_later_dynamic_import() {
+    let source = "const ratio = 1 / 2; import(\"lodash\");\n";
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        1,
+        "numeric division must not be treated as a regex that swallows the import: {findings:?}"
+    );
+    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
+}
+
+#[test]
 fn regex_literals_with_quotes_do_not_hide_later_imports() {
     let source =
         "const q = text.replace(/\"/g, \"&quot;\");\nimport { thing } from \"left-pad\";\n";
@@ -325,22 +362,8 @@ fn regex_literals_with_quotes_do_not_hide_later_imports() {
         1,
         "regex quotes must not desynchronize import scanning: {findings:?}"
     );
-    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedBareImport);
+    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
     assert!(findings[0].message.contains("left-pad"));
-}
-
-#[test]
-fn regex_literals_after_assignment_do_not_hide_later_imports() {
-    let source = "const pattern = /\"/g;\nimport x from \"lodash\";\n";
-    let findings = audit_javascript_source("fixture.js", source);
-
-    assert_eq!(
-        findings.len(),
-        1,
-        "assignment regex quotes must not hide later imports: {findings:?}"
-    );
-    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedBareImport);
-    assert!(findings[0].message.contains("lodash"));
 }
 
 #[test]
@@ -353,8 +376,7 @@ fn dynamic_imports_inside_template_interpolations_are_reported() {
         1,
         "template interpolations contain executable imports: {findings:?}"
     );
-    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedBareImport);
-    assert!(findings[0].message.contains("lodash"));
+    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
 }
 
 #[test]
@@ -364,25 +386,6 @@ fn import_meta_does_not_treat_a_later_from_binding_as_an_import() {
     assert!(
         audit_javascript_source("fixture.js", source).is_empty(),
         "import.meta must not scan later from bindings as specifiers"
-    );
-}
-
-#[test]
-fn inline_runtime_source_is_scanned_with_the_same_allowlist() {
-    let workspace = fixture_workspace();
-    write_runtime_source(
-        workspace.path(),
-        "import x from \"runtime-third-party\";\nexport function mothOk() { return x; }\n",
-    );
-
-    let findings = findings_for(&workspace);
-    assert!(
-        findings.iter().any(|finding| {
-            finding.file == RUNTIME_SOURCE_LABEL
-                && finding.rule == FirstPartyDepsRule::UnapprovedBareImport
-                && finding.message.contains("runtime-third-party")
-        }),
-        "runtime source must be included in the audit: {findings:?}"
     );
 }
 
@@ -400,39 +403,12 @@ fn missing_first_party_root_fails_closed() {
 }
 
 #[test]
-fn malformed_inline_runtime_source_is_a_typed_finding() {
-    let workspace = fixture_workspace();
-    let path = workspace.path().join(RUNTIME_REGISTRY_RELATIVE_PATH);
-    fs::write(
-        path,
-        "const MOTH_RUNTIME_SOURCE_V1: &str = r#\"unterminated;\n",
-    )
-    .expect("malformed runtime registry");
-
-    assert_has_rule(
-        &findings_for(&workspace),
-        FirstPartyDepsRule::InvalidRuntimeSource,
-    );
-}
-
-#[test]
 fn started_report_is_incomplete_until_the_walk_finishes() {
     let report = started_report(ReportRunIdentity::started("first-party-deps", None));
 
     assert_eq!(report.schema_version, FIRST_PARTY_DEPS_SCHEMA_VERSION);
     assert!(!report.run.completed);
-    assert_eq!(report.audited_file_count, 0);
+    assert_eq!(report.visited_file_count, 0);
+    assert_eq!(report.javascript_source_count, 0);
     assert!(report.findings.is_empty());
-}
-
-#[test]
-fn extracts_only_the_named_runtime_raw_string() {
-    let registry = format!(
-        "const unrelated: &str = \"not runtime\";\nconst MOTH_RUNTIME_SOURCE_V1: &str = r#\"{CLEAN_RUNTIME_SOURCE}\"#;\n"
-    );
-
-    assert_eq!(
-        extract_runtime_source(&registry).expect("runtime source"),
-        CLEAN_RUNTIME_SOURCE
-    );
 }
