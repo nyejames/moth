@@ -1,0 +1,304 @@
+@html center, span
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
+
+page_title #= "Packages and Builders Progress Matrix"
+page_description #= "Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."
+page_head #= theme_head
+
+red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
+pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
+orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
+green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
+
+#[navbar]
+#[title, center: PACKAGES AND BUILDERS PROGRESS]
+
+#[section, $md:
+    This page tracks current implementation status for Moth packages and project builders.
+    It also records the important accepted gaps and next extensions for partial package surfaces so
+    later work does not need to rediscover them from implementation details.
+
+    The @../ (compiler progress matrix) tracks the core language, compiler, memory work and backend
+    implementation. Backend implementation progress belongs there even when a project builder consumes
+    that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or
+    a project builder.
+
+    Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do
+    not. Package acquisition, resolver and package-manager sequencing remains roadmap work rather than
+    something this matrix designs.
+
+    ## How to read and edit this page
+
+    - Keep package rows focused on the implemented v1 surface and the most useful accepted next gaps.
+    - Update a package row while working on that package so deferred extensions do not need to be
+      rediscovered later.
+    - Keep project-builder rows separate from backend implementation rows.
+    - Put user-facing package and builder explanations in `docs/src/docs/packages/**` and the relevant
+      project documentation.
+    - Put implementation sequencing and unaccepted proposals in `docs/roadmap/roadmap.md`.
+    - Use the status labels from this page's legend. Put backend-specific or deliberately deferred nuance
+      in the notes column instead of inventing new status labels.
+]
+
+#[section, $md:
+    ## Status legend
+
+    [styled_table:
+        [header: [: Status] [: Meaning] ]
+
+        [data:
+            [: Supported]
+            [: Implemented for the current supported surface and expected to compile, type check and run through its advertised builder/runtime path.]
+        ]
+
+        [data:
+            [: Partial]
+            [: A useful subset is implemented, but important common operations, package surfaces or builder behaviour remain incomplete.]
+        ]
+
+        [data:
+            [: Experimental]
+            [: Present in the repository, but not part of the Alpha stability promise.]
+        ]
+
+        [data:
+            [: Deferred]
+            [: Accepted or design-compatible follow-up work that is not currently implemented.]
+        ]
+    ]
+
+    ## Coverage legend
+
+    [styled_table:
+        [header: [: Coverage] [: Meaning] ]
+
+        [data:
+            [: Broad]
+            [: Multiple focused cases exist, including success and failure coverage.]
+        ]
+
+        [data:
+            [: Targeted]
+            [: Dedicated coverage exists, but not across all important edges.]
+        ]
+
+        [data:
+            [: Thin]
+            [: Coverage exists indirectly or through only a small number of cases.]
+        ]
+
+        [data:
+            [: None]
+            [: No clear canonical coverage found.]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## Package model and infrastructure
+
+    [styled_table:
+        [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes] ]
+
+        [data:
+            [: Prelude policy]
+            [: Supported]
+            [: Targeted prelude symbol registration, namespace-alias plumbing and collision rejection coverage.]
+            [: Frontend / JS]
+            [: The builtin prelude policy registers [$html:<code>io</code>] as a namespace alias to [$html:<code>@core/io</code>] and leaves compiler-owned [$html:<code>Error</code>] as a bare language symbol. Prelude is visibility policy, not a package origin or backing. There is no [$html:<code>@core/prelude</code>] package.]
+        ]
+
+        [data:
+            [: Binding-backed platform packages]
+            [: Partial]
+            [: Broad package dependency, external constant, external signature, provider-created JS package, runtime asset/glue, Core package, prelude and backend validation coverage.]
+            [: Frontend / JS]
+            [: Rust-side and provider-created binding-backed packages expose free functions, opaque types and compile-time scalar constants. Project-local and builder-owned annotated [$html:<code>.js</code>] files can create JS-backed package surfaces. Binding-backed packages do not expose receiver methods. Unsupported reachable calls for an active backend fail before lowering.]
+        ]
+
+        [data:
+            [: Source-backed package roots]
+            [: Partial]
+            [: Targeted AST-backed config loading, known-key and shape enforcement, self-contained config dependency rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.]
+            [: Frontend / HTML]
+            [: Source-backed packages and regular modules share module-root and visibility rules. [$html:<code>config.moth</code>] is compiled as one self-contained source before package discovery and rejects every dependency clause before path resolution.]
+        ]
+
+        [data:
+            [: Builder-provided source-backed packages]
+            [: Partial]
+            [: Targeted builder source-backed package root registration and HTML Builder package coverage.]
+            [: Frontend / HTML]
+            [: Builders expose source-backed packages through [$html:<code>BuilderSurface.source_packages</code>]. The HTML builder provides [$html:<code>@html</code>] as a source-backed package. Builder and project-local prefix collisions are hard config errors.]
+        ]
+
+        [data:
+            [: Project-local packages]
+            [: Partial]
+            [: Targeted structural support-package roots, rejected legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.]
+            [: Frontend / HTML]
+            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. Legacy config-driven [$html:<code>package_folders</code>] paths and the historical default [$html:<code>lib/</code>] are removed. Independently registered Builder/Core source packages retain their own package boundaries.]
+        ]
+
+        [data:
+            [: Builder runtime packages]
+            [: Partial]
+            [: Targeted built-in JS-backed package, runtime asset, runtime module, import-map, glue and backend validation coverage.]
+            [: HTML / JS]
+            [: Builder-owned runtime packages such as [$html:<code>@web/canvas</code>] are binding-backed packages. They share the specialised external package registry and HTML external JS asset/glue pipeline with provider-created imports.]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## Core packages
+
+    [styled_table:
+        [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes and accepted next gaps] ]
+
+        [data:
+            [: Core IO package]
+            [: Partial]
+            [: Console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics.]
+            [: Frontend / JS / HTML-Wasm validation]
+            [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>] and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. Filesystem, network, timers, event queues and targeted input sources remain separate design work rather than assumed IO additions.]
+        ]
+
+        [data:
+            [: Core math package]
+            [: Partial]
+            [: Targeted direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.]
+            [: JS / HTML-Wasm validation]
+            [: [$html:<code>@core/math</code>] exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. Common mathematical gaps should be filled before expanding into specialised APIs.]
+        ]
+
+        [data:
+            [: Core text package]
+            [: Partial]
+            [: Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder and Wasm-unsupported coverage.]
+            [: JS / HTML]
+            [: [$html:<code>@core/text</code>] exposes string helpers such as length, emptiness, containment, prefix and suffix checks. HTML-JS [$html:<code>text.length</code>] counts Unicode scalar values with the same unit as [$html:<code>Char</code>]. Common Unicode-aware inspection, search and transformation gaps remain the priority for later slices.]
+        ]
+
+        [data:
+            [: Core random package]
+            [: Partial]
+            [: Targeted dependency, JS helper, runtime smoke, arity, type-error and Wasm-unsupported coverage.]
+            [: JS / HTML]
+            [: [$html:<code>@core/random</code>] exposes random Float and inclusive random Int helpers. Seeded random and additional common distributions remain deferred. Exact generator algorithm identity is not currently a cross-backend semantic promise, so JS may use a backend-local implementation while portable observable contracts remain stable.]
+        ]
+
+        [data:
+            [: Core time package]
+            [: Partial]
+            [: Targeted dependency, direct alias, namespace, helper, runtime smoke, fallible parse/catch, arity/type diagnostic, old-name rejection, opaque-field rejection and backend validation coverage.]
+            [: JS / HTML]
+            [: [$html:<code>@core/time</code>] exposes opaque Duration, TimeMark and Timestamp values plus the first JS-backed time helper slice. Calendar, civil-time and time-zone APIs remain future work. Time values, parsing and other deterministic semantics must stay backend-neutral rather than inheriting JavaScript-specific behaviour.]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## HTML project builder
+
+    [styled_table:
+        [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes and accepted next gaps] ]
+
+        [data:
+            [: HTML project builds]
+            [: Supported]
+            [: Broad routing, API-only artifact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage.]
+            [: HTML / JS]
+            [: This is the release-critical project builder. Only roots with HTML artefact activity participate in page, runtime asset, resource-output and homepage planning. Backend implementation and HTML-Wasm progress remain on the compiler progress matrix.]
+        ]
+
+        [data:
+            [: Moth template [$html:<code>.mtf</code>] content assets]
+            [: Partial]
+            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.]
+            [: HTML builder / frontend]
+            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates without an explicit directive also default to Markdown and explicit directives override that default. They bind extensionlessly into [$html:<code>.moth</code>] and must fully fold.]
+        ]
+
+        [data:
+            [: Plain Markdown [$html:<code>.md</code>] content assets]
+            [: Supported]
+            [: Broad extensionless dependency, direct alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension and module-root rejection coverage.]
+            [: HTML builder / frontend]
+            [: [$html:<code>.md</code>] files render to HTML at compile time and synthesize one private [$html:<code>content #String</code>] constant. They do not parse Moth declarations, interpolation, templates, frontmatter or metadata.]
+        ]
+
+        [data:
+            [: Builder-supported source file kinds]
+            [: Partial]
+            [: Targeted moth template and Markdown source-kind registry, extensionless resolution, unsupported-kind diagnostics, source discovery and tokenizer/preparation coverage.]
+            [: Stage 0 / frontend]
+            [: Builders can declare non-[$html:<code>.moth</code>] source file kinds that participate in source dependency discovery and frontend preparation. The HTML builder currently implements [$html:<code>.mtf</code>] and plain Markdown [$html:<code>.md</code>] content assets.]
+        ]
+
+        [data:
+            [: HTML Builder package [$html:<code>@html</code>]]
+            [: Partial]
+            [: Source-backed Builder package registration plus docs-site use across templates, style helpers, tables, code blocks and canvas wrappers.]
+            [: HTML builder]
+            [: [$html:<code>@html</code>] provides compile-time HTML helpers and source-owned wrappers over lower-level builder bindings such as [$html:<code>@web/canvas</code>]. It should grow only where helpers are broadly useful to HTML projects rather than becoming a general web framework.]
+        ]
+
+        [data:
+            [: Canvas package [$html:<code>@web/canvas</code>]]
+            [: Partial]
+            [: Binding-backed package registration, opaque handle types, runtime assets/glue and current drawing API coverage.]
+            [: HTML / JS]
+            [: The current surface covers canvas element management, 2D context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. Canvas is deliberately allowed a broader expansion target than most packages because visuals and animation make it a useful Moth language and runtime stress-test surface.]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## Accepted deferred package and builder work
+
+    [styled_table:
+        [header: [: Surface] [: Status] [: Coverage / diagnostic direction] [: Notes] ]
+
+        [data:
+            [: Source-backed package HIR caching]
+            [: Deferred]
+            [: No precompiled source-backed package cache.]
+            [: Source-backed packages are compiled from source each build. Caching stays deferred until package identities and the package system are stable.]
+        ]
+
+        [data:
+            [: Package manager]
+            [: Deferred]
+            [: No package manager, remote registries, lockfiles or dependency resolver.]
+            [: Project dependency declarations, resolver/catalog handoff and package-manager foundations are owned by their later roadmap work. This matrix records status only and does not design that system.]
+        ]
+
+        [data:
+            [: External JS package expansion]
+            [: Deferred]
+            [: JS provider diagnostics reject unsupported public binding forms.]
+            [: The HTML builder supports annotated single-file [$html:<code>.js</code>] imports and builder-owned JS-backed packages. Additional binding forms should be added only when their package contract is clear and they fit existing package ownership.]
+        ]
+
+        [data:
+            [: Generic external package functions]
+            [: Deferred]
+            [: External signature validation rejects unsupported generic external surfaces.]
+            [: Binding-backed packages currently expose concrete functions, opaque types and constants only. Generic external functions remain deferred and must not be introduced just to flesh out a package.]
+        ]
+    ]
+]
+
+#[section, $md:
+    ## Maintenance rule
+
+    Keep this page concise but useful as a handoff between package iterations.
+
+    - Record the important common missing operations while a package is being worked on.
+    - Move implementation sequencing and unaccepted package ideas to `docs/roadmap/roadmap.md`.
+    - Keep backend implementation status on @../ (the compiler progress matrix).
+    - Keep package API explanations and examples in `docs/src/docs/packages/**`.
+    - Add a new package row only after that package's scope and semantic contract have been deliberately considered.
+    - Do not invent package origins or tiers to classify importance. Use only the package model accepted by the canonical package documentation.
+]

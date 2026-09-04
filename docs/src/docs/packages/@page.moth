@@ -49,6 +49,9 @@ page_head #= language_theme_head
     Unlike languages that expose any reachable filesystem path, Moth resolves
     source dependencies from the owning module root and stops at each module facade.
     Project-local support packages share code without opening private paths.
+
+    The @../progress/packages-and-builders (packages and builders progress matrix)
+    records current package and project-builder support.
 ]
 
 #[section:
