@@ -134,6 +134,23 @@ pub(super) fn canonicalize_local_ordering_hints(
                 .get(&header.source_file)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
+            if hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling {
+                match resolve_visible_named_type_path(
+                    ParsedNamedTypeReference::Qualified(hint.path().as_components()),
+                    visibility,
+                ) {
+                    VisibleNamedTypeResolution::Declaration(path) => {
+                        canonical.insert(LocalDeclarationOrderingHint::source_owned(path));
+                    }
+                    VisibleNamedTypeResolution::External
+                    | VisibleNamedTypeResolution::Unresolved => {
+                        // Non-declarations have no header graph participant. AST resolution owns
+                        // the eventual unknown-type or namespace-misuse diagnostic.
+                    }
+                }
+                continue;
+            }
+
             let mut matching_dependency = None;
             for dependency in file_dependency_clauses {
                 let selections = match dependency.selections(selection_table) {
@@ -172,22 +189,6 @@ pub(super) fn canonicalize_local_ordering_hints(
                 }
                 // External symbols and virtual or provider dependencies have no header graph
                 // participant, so the dependency-spelled hint is dropped here.
-            } else if hint.origin() == LocalDeclarationOrderingHintOrigin::ProviderSpelling
-                && hint.path().len() > 1
-            {
-                match resolve_visible_named_type_path(
-                    ParsedNamedTypeReference::Qualified(hint.path().as_components()),
-                    visibility,
-                ) {
-                    VisibleNamedTypeResolution::Declaration(path) => {
-                        canonical.insert(LocalDeclarationOrderingHint::source_owned(path));
-                    }
-                    VisibleNamedTypeResolution::External
-                    | VisibleNamedTypeResolution::Unresolved => {
-                        // Non-declarations have no header graph participant. AST resolution owns
-                        // the eventual unknown-type or namespace-misuse diagnostic.
-                    }
-                }
             } else {
                 // Same-file or already-canonical hint: preserve it.
                 canonical.insert(hint);

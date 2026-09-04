@@ -120,7 +120,7 @@ pub(super) fn collect_named_type_ordering_hint(
             // Keep every namespace component in the retained spelling. The declaration-file
             // visibility environment owns the mapping from this local path to its canonical
             // source declaration once provider binding has completed.
-            hints.insert(LocalDeclarationOrderingHint::provider_spelling(
+            hints.insert(LocalDeclarationOrderingHint::qualified_type_spelling(
                 InternedPath::from_components(path.to_vec()),
             ));
         }

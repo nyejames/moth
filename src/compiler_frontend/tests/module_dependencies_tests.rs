@@ -538,6 +538,46 @@ fn qualified_alias_target_orders_provider_declaration_before_alias() {
 }
 
 #[test]
+fn qualified_type_hint_ignores_colliding_structural_provider_path() {
+    let (headers, mut string_table) = parse_module_headers(
+        &[
+            (
+                "src/app.moth",
+                "@models as models\n\
+                 @models/Target as other\n\
+                 Alias as models.Target\n",
+            ),
+            ("src/models.moth", "Target = |value Int|\n"),
+            ("src/models/Target.moth", "Other = |value Int|\n"),
+        ],
+        "src/app.moth",
+    );
+
+    let sorted =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect("qualified type spelling must not collide with a structural provider path");
+    let positions = sorted
+        .headers
+        .iter()
+        .enumerate()
+        .filter(|(_, header)| !matches!(header.kind, HeaderKind::StartFunction))
+        .map(|(index, header)| (header_name(header, &string_table), index))
+        .collect::<Vec<_>>();
+    let position = |name: &str| {
+        positions
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, index)| *index)
+            .unwrap_or_else(|| panic!("expected {name} declaration in {positions:?}"))
+    };
+
+    assert!(
+        position("Target") < position("Alias"),
+        "qualified namespace resolution must win over an unrelated matching dependency path: {positions:?}"
+    );
+}
+
+#[test]
 fn qualified_alias_in_struct_field_orders_provider_declaration_before_struct() {
     let (headers, mut string_table) = parse_module_headers(
         &[

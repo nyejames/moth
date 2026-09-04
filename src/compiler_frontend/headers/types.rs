@@ -256,14 +256,16 @@ impl HeaderExportMode {
 
 /// Provenance for one conservative declaration-ordering hint.
 ///
-/// WHAT: distinguishes a same-file path from an intentionally independent provider spelling and
-/// from another file's generated content constant.
+/// WHAT: distinguishes a same-file path from a provider dependency spelling, a qualified type
+/// namespace spelling, and another file's generated content constant.
 /// WHY: final source rebinding must reject missing prefixes for same-file paths while preserving
-/// provider spellings and content-constant targets exactly for later canonicalization and Stage 3.
+/// the other spellings exactly for their distinct binding-time canonicalization paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LocalDeclarationOrderingHintOrigin {
     SourceOwned,
     ProviderSpelling,
+    /// A namespace-qualified type spelling resolved directly through bound namespace visibility.
+    QualifiedTypeSpelling,
     /// A content source's synthetic `content` constant.
     ///
     /// WHAT: the path targets `<content source>/content` of another prepared file, recorded from a
@@ -315,6 +317,15 @@ impl LocalDeclarationOrderingHint {
         Self {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ProviderSpelling,
+            occurrence: None,
+        }
+    }
+
+    /// Record a namespace-qualified type spelling for direct visibility resolution.
+    pub fn qualified_type_spelling(path: InternedPath) -> Self {
+        Self {
+            path,
+            origin: LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling,
             occurrence: None,
         }
     }
@@ -376,9 +387,10 @@ impl LocalDeclarationOrderingHint {
                 .path
                 .try_rebind_required_prefix(provisional_source_file, logical_path)?,
 
-            // Provider spellings and content-constant targets never carry the referencing file's
-            // prefix, so final source identity does not rewrite them.
+            // Provider, qualified-type and content-constant spellings never carry the referencing
+            // file's prefix, so final source identity does not rewrite them.
             LocalDeclarationOrderingHintOrigin::ProviderSpelling
+            | LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling
             | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
         };
         Ok(Self {
