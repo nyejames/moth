@@ -150,22 +150,14 @@ fn source_registry_always_constructs_moth_source_metadata() {
 }
 
 #[test]
-fn reserved_origins_are_representable_in_source_metadata() {
-    let standard = PackageMetadata::source(PackageOrigin::Standard);
-    assert_eq!(standard.origin, PackageOrigin::Standard);
-    assert_eq!(standard.backing, PackageBacking::MothSource);
-
+fn dependency_origin_is_representable_in_source_metadata() {
     let dependency = PackageMetadata::source(PackageOrigin::Dependency);
     assert_eq!(dependency.origin, PackageOrigin::Dependency);
     assert_eq!(dependency.backing, PackageBacking::MothSource);
 }
 
 #[test]
-fn reserved_origins_are_representable_in_binding_metadata() {
-    let standard = PackageMetadata::binding(PackageOrigin::Standard);
-    assert_eq!(standard.origin, PackageOrigin::Standard);
-    assert_eq!(standard.backing, PackageBacking::ExternalBinding);
-
+fn dependency_origin_is_representable_in_binding_metadata() {
     let dependency = PackageMetadata::binding(PackageOrigin::Dependency);
     assert_eq!(dependency.origin, PackageOrigin::Dependency);
     assert_eq!(dependency.backing, PackageBacking::ExternalBinding);

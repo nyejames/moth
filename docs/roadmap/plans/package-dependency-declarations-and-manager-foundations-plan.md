@@ -155,7 +155,7 @@ A dependency never sees the consuming project's `@project` or unqualified build 
 - only direct dependencies are visible to project source
 - transitive dependencies remain private to their package graphs
 - the same canonical package may be declared once only
-- Core, Standard, Builder and project-local support packages are not declared through the external dependency surface
+- Core, Builder and project-local support packages are not declared through the external dependency surface
 - `@project`, project modules, relative paths and parent traversal are invalid package declarations
 - source dependencies never trigger implicit package acquisition
 - Stage 0 performs no undeclared filesystem probing

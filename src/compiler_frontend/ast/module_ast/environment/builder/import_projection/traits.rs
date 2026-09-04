@@ -349,7 +349,6 @@ fn imported_trait_path(origin: &OriginTraitId, string_table: &mut StringTable) -
     let mut path = InternedPath::from_single_str("<imported-trait>", string_table);
     let package_origin = match origin.module_origin().package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
-        crate::builder_surface::PackageOrigin::Standard => "standard",
         crate::builder_surface::PackageOrigin::Builder => "builder",
         crate::builder_surface::PackageOrigin::ProjectLocal => "project",
         crate::builder_surface::PackageOrigin::Dependency => "dependency",

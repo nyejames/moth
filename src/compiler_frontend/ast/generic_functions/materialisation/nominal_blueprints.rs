@@ -1206,7 +1206,6 @@ fn append_materialisation_module_origin(
 ) {
     let package_origin = match origin.package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
-        crate::builder_surface::PackageOrigin::Standard => "standard",
         crate::builder_surface::PackageOrigin::Builder => "builder",
         crate::builder_surface::PackageOrigin::ProjectLocal => "project",
         crate::builder_surface::PackageOrigin::Dependency => "dependency",
