@@ -21,6 +21,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 - [Never return contracts](./plans/never-return-contract-plan.md)
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
+- [Core collection sorting](./plans/core-collection-sorting-plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
 ## Adding and maintaining plans
