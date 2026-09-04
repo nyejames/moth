@@ -161,7 +161,15 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics.]
             [: Frontend / JS / HTML-Wasm validation]
-            [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>] and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. Filesystem, network, timers, event queues and targeted input sources remain separate design work rather than assumed IO additions.]
+            [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>] and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. Its future scope and the surface that should remain permanently preluded require a dedicated design pass before major expansion. Filesystem, network, timers, event queues and targeted input sources remain candidate inputs to that review rather than pre-assigned additions or separate packages.]
+        ]
+
+        [data:
+            [: Core collections package]
+            [: Partial]
+            [: Broad literal, fixed/growable mutation, indexing, fallibility, AST/HIR call target, JS helper and diagnostic coverage.]
+            [: Frontend / JS / HTML-Wasm validation]
+            [: [$html:<code>@core/collections</code>] provides the compiler-owned collection operation identities behind fixed and growable collection members. Common non-sorting gaps still need a focused package audit. The accepted stable-by-default sorting contract is owned by its specialised package plan and remains blocked on final mixed-backend collection support.]
         ]
 
         [data:
@@ -275,17 +283,17 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
-            [: External JS package expansion]
+            [: Binding-backed JS package expansion]
             [: Deferred]
             [: JS provider diagnostics reject unsupported public binding forms.]
             [: The HTML builder supports annotated single-file [$html:<code>.js</code>] imports and builder-owned JS-backed packages. Additional binding forms should be added only when their package contract is clear and they fit existing package ownership.]
         ]
 
         [data:
-            [: Generic external package functions]
+            [: Generic binding-backed package functions]
             [: Deferred]
-            [: External signature validation rejects unsupported generic external surfaces.]
-            [: Binding-backed packages currently expose concrete functions, opaque types and constants only. Generic external functions remain deferred and must not be introduced just to flesh out a package.]
+            [: External signature validation rejects unsupported generic binding-backed surfaces.]
+            [: Binding-backed packages currently expose concrete functions, opaque types and constants only. Generic binding-backed functions remain deferred and must not be introduced just to flesh out a package.]
         ]
     ]
 ]
