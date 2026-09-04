@@ -4,15 +4,17 @@ This is the main todo list and future design / implementation roadmap for Moth.
 
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
 
-Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for what is currently implemented, partially complete or deferred.
+Use the [Compiler Progress Matrix](docs/src/docs/progress/@page.moth) for language, compiler, memory and backend status.
+Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
 
 ---
 
 # Plans
 
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
-- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Active in parallel with diagnostics. Phase 0 package foundations hardening is next.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
+- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
 - Improve the `tmp/test_brackets.mtf` error example.
 - [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
@@ -25,7 +27,7 @@ Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for 
 
 ## Adding and maintaining plans
 
-This roadmap owns the order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
+This roadmap owns the normal serial order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
 
 **Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
 
@@ -36,6 +38,8 @@ This roadmap owns the order. A plan owns its own work and nothing else. Mark a p
 **Delete a plan in the commit that completes it.** Do not mark it complete and commit that, then delete it later - the intermediate state is a file that claims to be work and is not. Removing it in the completion commit means the commit that finished the work is also the commit that retired the plan, so Git history alone answers "when did this land". A deleted plan is recoverable if it is genuinely needed again.
 
 **Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/src/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
+
+**Package programme exception.** Files under `docs/roadmap/plans/packages/` are living implementation companions rather than ordinary short-lived plans. The umbrella may link package plans and package plans may link specialised plans in that directory. They remain after a current version completes so later work retains implementation rationale, quirks and blockers. Completed checklists should be removed or compressed. Canonical package documentation remains the semantic authority. The main roadmap links only the umbrella programme, and the normal deletion and no-plan-link rules still apply everywhere else.
 
 ---
 
@@ -207,9 +211,9 @@ The [package dependency declarations and package-manager foundations plan](./pla
 
 - Should try to prevent dependency explosion as much as possible, make adding dependencies with lots of dependencies harder or discouraged.
 - Idea of "Golden" packages (and silver, bronze etc):
-    1. Golden dependencies have 0 dependencies themselves (outside of std or core)
-    2. Silver dependencies only have golden dependencies
-    3. Bronze dependencies only have silver or gold dependencies
+    1. Golden dependencies have 0 dependencies themselves outside first-party Core packages.
+    2. Silver dependencies only have golden dependencies.
+    3. Bronze dependencies only have silver or gold dependencies.
     4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
 - Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
 - The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.
