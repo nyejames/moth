@@ -23,6 +23,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::SourceLocation;
+use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
 };
@@ -35,7 +36,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
+use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts_with_string_table;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -68,6 +69,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 fn assert_project_context_diagnostic(
     error: ProjectAssemblyError,
     expected_reason: ProjectContextEscapeReason,
+    expected_location: Option<(&str, CharPosition, CharPosition)>,
 ) {
     let mut string_table = StringTable::new();
     let messages = error.into_messages(&mut string_table);
@@ -94,18 +96,23 @@ fn assert_project_context_diagnostic(
         &diagnostic.payload,
         DiagnosticPayload::ProjectContextEscape { reason } if *reason == expected_reason
     ));
-
     let scope = diagnostic
         .primary_location
         .scope
         .to_portable_string(&messages.string_table);
-    assert!(
-        !scope.is_empty(),
-        "ProjectContext facade diagnostic must retain a source scope"
-    );
+    if let Some((expected_scope, expected_start, expected_end)) = expected_location {
+        assert_eq!(scope, expected_scope);
+        assert_eq!(diagnostic.primary_location.start_pos, expected_start);
+        assert_eq!(diagnostic.primary_location.end_pos, expected_end);
+    } else {
+        assert!(
+            !scope.is_empty(),
+            "ProjectContext facade diagnostic must retain a source scope"
+        );
+    }
 }
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn resource(
@@ -119,6 +126,28 @@ fn resource(
     )
 }
 
+fn map_synthetic_function_declaration_locations(
+    hir: &mut HirModule,
+    entry_point: &str,
+    string_table: &mut StringTable,
+) {
+    let scope = SourceLocation::from_path(Path::new(entry_point), string_table).scope;
+    for (index, function) in hir.functions.iter().enumerate() {
+        let line_number = index as i32 + 1;
+        let location = SourceLocation::new(
+            scope.clone(),
+            CharPosition {
+                line_number,
+                char_column: 1,
+            },
+            CharPosition {
+                line_number,
+                char_column: 8,
+            },
+        );
+        hir.side_table.map_function(&location, function);
+    }
+}
 /// Build one retained module with exact HIR link facts and optional resource-bearing functions.
 ///
 /// WHAT: models only the lanes consumed by entry/package assembly: function origins, cross-module
@@ -220,8 +249,11 @@ fn synthetic_module(
         .map(|function| (function.id, SyntheticInterfaceProvenance::empty()))
         .collect();
 
-    let function_link_facts = collect_module_function_link_facts(&hir)
-        .expect("synthetic HIR should produce function link facts");
+    let mut function_string_table = StringTable::new();
+    map_synthetic_function_declaration_locations(&mut hir, entry_point, &mut function_string_table);
+    let function_link_facts =
+        collect_module_function_link_facts_with_string_table(&hir, &function_string_table)
+            .expect("synthetic HIR should produce function link facts");
     Module {
         executable: ModuleExecutable {
             hir,
@@ -258,6 +290,21 @@ fn synthetic_module(
             materialisation_context: None,
         },
     }
+}
+
+fn refresh_synthetic_function_link_facts(module: &mut Module) {
+    let entry_point = module.metadata.entry_point.to_string_lossy().into_owned();
+    let mut function_string_table = StringTable::new();
+    map_synthetic_function_declaration_locations(
+        &mut module.executable.hir,
+        &entry_point,
+        &mut function_string_table,
+    );
+    module.link_facts.functions = collect_module_function_link_facts_with_string_table(
+        &module.executable.hir,
+        &function_string_table,
+    )
+    .expect("synthetic HIR should refresh function link facts");
 }
 
 fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticInterface {
@@ -388,7 +435,11 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     .expect("synthetic frontend should satisfy retained-boundary invariants");
     let check_error = validate_frontend_facade_boundaries(&frontend)
         .expect_err("check facade validation should reject ProjectContext provenance");
-    assert_project_context_diagnostic(check_error, ProjectContextEscapeReason::ExportedDeclaration);
+    assert_project_context_diagnostic(
+        check_error,
+        ProjectContextEscapeReason::ExportedDeclaration,
+        None,
+    );
 
     let ProjectFrontendCompilation {
         project,
@@ -406,7 +457,11 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         }
         Err(error) => error,
     };
-    assert_project_context_diagnostic(build_error, ProjectContextEscapeReason::ExportedDeclaration);
+    assert_project_context_diagnostic(
+        build_error,
+        ProjectContextEscapeReason::ExportedDeclaration,
+        None,
+    );
 }
 
 #[test]
@@ -458,9 +513,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
             "helper",
         )),
     );
-    child_module.link_facts.functions =
-        collect_module_function_link_facts(&child_module.executable.hir)
-            .expect("source-package helper HIR should refresh link facts");
+    refresh_synthetic_function_link_facts(&mut child_module);
 
     let declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(exported_origin.clone()),
@@ -536,7 +589,21 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         Ok(_) => panic!("source-package facade should reject ProjectContext helper provenance"),
         Err(error) => error,
     };
-    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ReachableExecutable);
+    assert_project_context_diagnostic(
+        error,
+        ProjectContextEscapeReason::ReachableExecutable,
+        Some((
+            "external/lib/@lib.moth",
+            CharPosition {
+                line_number: 2,
+                char_column: 1,
+            },
+            CharPosition {
+                line_number: 2,
+                char_column: 8,
+            },
+        )),
+    );
 }
 
 #[test]
@@ -612,7 +679,7 @@ fn source_package_facade_rejects_project_context_public_declaration() {
         }
         Err(error) => error,
     };
-    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ExportedDeclaration);
+    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ExportedDeclaration, None);
 }
 
 #[test]
@@ -761,10 +828,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
             "helper",
         )),
     );
-    child_module.link_facts.functions =
-        collect_module_function_link_facts(&child_module.executable.hir)
-            .expect("synthetic helper HIR should refresh link facts");
-
+    refresh_synthetic_function_link_facts(&mut child_module);
     let declaration = PublicDeclarationRecord {
         origin: OriginDeclarationId::Function(exported_origin.clone()),
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
@@ -819,7 +883,21 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         Ok(_) => panic!("project facade should reject ProjectContext helper provenance"),
         Err(error) => error,
     };
-    assert_project_context_diagnostic(error, ProjectContextEscapeReason::ReachableExecutable);
+    assert_project_context_diagnostic(
+        error,
+        ProjectContextEscapeReason::ReachableExecutable,
+        Some((
+            "provider/+provider.moth",
+            CharPosition {
+                line_number: 2,
+                char_column: 1,
+            },
+            CharPosition {
+                line_number: 2,
+                char_column: 8,
+            },
+        )),
+    );
 }
 
 #[test]

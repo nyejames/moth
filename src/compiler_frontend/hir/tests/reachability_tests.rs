@@ -310,6 +310,75 @@ fn reachable_function_provenance_unions_only_reachable_functions() {
 }
 
 #[test]
+fn first_project_context_function_preserves_breadth_first_direct_provenance() {
+    let mut module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+            function(FunctionId(2), BlockId(2)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![
+                    call_statement(0, CallTarget::Local(FunctionId(1))),
+                    call_statement(1, CallTarget::Local(FunctionId(2))),
+                ],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                Vec::new(),
+                HirTerminator::Return(unit_expression(1)),
+            ),
+            block(
+                BlockId(2),
+                Vec::new(),
+                HirTerminator::Return(unit_expression(2)),
+            ),
+        ],
+    );
+    let first_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "first-helper",
+    );
+    let second_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "second-helper",
+    );
+    let first_provenance = SyntheticInterfaceProvenance::single(first_member.clone());
+    module
+        .function_provenance
+        .insert(FunctionId(1), first_provenance.clone());
+    module.function_provenance.insert(
+        FunctionId(2),
+        SyntheticInterfaceProvenance::single(second_member),
+    );
+
+    let reachability = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("reachable function provenance should be collected");
+    let offending_function = reachability
+        .first_project_context_function()
+        .expect("first reachable ProjectContext function should be retained");
+
+    assert_eq!(offending_function.function_id(), FunctionId(1));
+    assert_eq!(
+        offending_function
+            .synthetic_interface_provenance()
+            .members(),
+        first_provenance.members(),
+        "the first offender must retain only its direct member-granular provenance"
+    );
+    assert!(
+        offending_function.diagnostic_location().is_none(),
+        "the compatibility collector intentionally has no source string table"
+    );
+}
+
+#[test]
 fn function_link_facts_reject_missing_function_provenance() {
     let module = hir_module(
         FunctionId(0),

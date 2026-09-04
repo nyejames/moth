@@ -16,7 +16,8 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
-    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
+    collect_module_function_link_facts_with_string_table,
+    collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -281,9 +282,11 @@ fn materialise_generated_request(
         .insert(request.identity.clone(), function_id);
     increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
     let borrow_analysis = check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
-    let functions = collect_module_function_link_facts(&hir_module).map_err(|error| {
-        CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-    })?;
+    let functions = collect_module_function_link_facts_with_string_table(
+        &hir_module,
+        &generated_compiler.string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &generated_compiler.string_table))?;
     let reachability = collect_reachability_from_function_link_facts(&functions, &[function_id])
         .map_err(|error| {
             CompilerMessages::from_error_ref(error, &generated_compiler.string_table)

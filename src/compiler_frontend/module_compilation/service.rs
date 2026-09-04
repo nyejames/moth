@@ -28,7 +28,7 @@ use crate::compiler_frontend::hir::functions::{
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
+use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts_with_string_table;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
@@ -657,8 +657,9 @@ fn run_semantic_stages(
     // Link facts are the validated-HIR owner for direct call targets. The convergence
     // observation model consumes these facts after HIR validation rather than scanning
     // source or introducing a second HIR call graph.
-    let function_link_facts = collect_module_function_link_facts(&hir_module)
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let function_link_facts =
+        collect_module_function_link_facts_with_string_table(&hir_module, &compiler.string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
     #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {

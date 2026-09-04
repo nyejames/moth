@@ -980,7 +980,6 @@ impl BuildConfigResolutionError {
     }
 
     /// Return the authored contract location when this error has one.
-    #[allow(dead_code)]
     pub(crate) fn contract_location(&self) -> Option<&SourceLocation> {
         match self {
             Self::SourceContractConflict { first, .. }
@@ -1157,13 +1156,15 @@ impl ResolvedBuildConfigMap {
 
 /// Borrowed indexes for one already-validated canonical configuration boundary.
 ///
-/// WHAT: retains references to canonical source, fixed-project and direct-project facts without
-/// copying any fact payload. A transient check-only unit can then validate and resolve only its
-/// own source facts against this index.
-/// WHY: check-only compilation must not clone the entire canonical contract vector for every
-/// transient unit. The canonical resolver already validated these facts before the index is
-/// built; only transient facts and any resolution output are owned per unit.
+/// WHAT: retains the validated canonical value map and references to canonical source,
+///       fixed-project and direct-project facts without copying any fact payload. A transient
+///       check-only unit can then validate and resolve only its own source facts against this index.
+/// WHY: check-only compilation must not clone the canonical contract vector or reselect its
+///       providers and defaults for every transient unit. The canonical resolver already validated
+///       these facts and values before the index is built; only transient facts and any resolution
+///       output are owned per unit.
 pub(crate) struct BuildConfigResolutionIndex<'a> {
+    canonical_values: &'a ResolvedBuildConfigMap,
     source_by_name: BTreeMap<&'a BuildInputName, &'a BuildConfigContractFact>,
     fixed_project_by_name: BTreeMap<&'a BuildInputName, &'a BuildConfigContractFact>,
     direct_project_by_name: BTreeMap<&'a BuildInputName, &'a BuildConfigContractFact>,
@@ -1177,6 +1178,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
     /// this index is constructed, so rebuilding those owned errors would defeat the borrowed
     /// boundary and add no recovery path.
     pub(crate) fn from_validated(
+        canonical_values: &'a ResolvedBuildConfigMap,
         source_facts: &'a [BuildConfigContractFact],
         fixed_project_facts: &'a [BuildConfigContractFact],
         direct_project_facts: &'a [BuildConfigContractFact],
@@ -1194,6 +1196,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
             direct_project_by_name.entry(fact.name()).or_insert(fact);
         }
         Self {
+            canonical_values,
             source_by_name,
             fixed_project_by_name,
             direct_project_by_name,
@@ -1229,10 +1232,9 @@ impl<'a> BuildConfigResolutionIndex<'a> {
 
     /// Resolve one transient unit against borrowed canonical facts.
     ///
-    /// Canonical facts are never cloned or concatenated with the transient slice. A transient
-    /// duplicate must agree with its canonical namesake, but the canonical fact remains the
-    /// provider of the resolved value; only names introduced by the transient unit are resolved
-    /// from its private facts.
+    /// Canonical values are cloned as the starting map, preserving the owning boundary's provider
+    /// and default decisions. A transient duplicate must agree with its canonical namesake, but
+    /// only names introduced by the transient unit are resolved from its private facts.
     pub(crate) fn resolve_with_transient_source_facts(
         &self,
         transient_source_facts: &[BuildConfigContractFact],
@@ -1268,41 +1270,10 @@ impl<'a> BuildConfigResolutionIndex<'a> {
             }
         }
 
-        let mut resolved = BTreeMap::new();
-
-        // Canonical source names retain canonical precedence over a matching transient
-        // declaration, exactly as the former concatenated vector did.
-        for (name, source) in &self.source_by_name {
-            let value = resolve_one_build_config_value(
-                name,
-                self.fixed_project_by_name.get(name).copied(),
-                self.direct_project_by_name.get(name).copied(),
-                Some(*source),
-                explicit_inputs,
-                builder_globals,
-            )?;
-            resolved.insert((*name).clone(), value);
-        }
-
-        // Direct project contracts without a canonical source contract still belong to the
-        // boundary map and must remain visible to the transient module.
-        for (name, direct_project) in &self.direct_project_by_name {
-            if self.source_by_name.contains_key(name) {
-                continue;
-            }
-            let value = resolve_one_build_config_value(
-                name,
-                None,
-                Some(*direct_project),
-                None,
-                explicit_inputs,
-                builder_globals,
-            )?;
-            resolved.insert((*name).clone(), value);
-        }
+        let mut resolved = self.canonical_values.clone();
 
         // Finally resolve names introduced only by this transient source unit. Canonical names
-        // and direct-project names above already own their result.
+        // and direct-project names already retain their canonical result above.
         for (name, source) in &transient_by_name {
             if self.source_by_name.contains_key(name)
                 || self.direct_project_by_name.contains_key(name)
@@ -1317,18 +1288,18 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                 explicit_inputs,
                 builder_globals,
             )?;
-            resolved.insert((*name).clone(), value);
+            resolved.entries.insert((*name).clone(), value);
         }
 
         for input in explicit_inputs.iter() {
-            if !resolved.contains_key(input.name()) {
+            if !resolved.entries.contains_key(input.name()) {
                 return Err(BuildConfigResolutionError::UnknownExplicitInput {
                     input: input.clone(),
                 });
             }
         }
 
-        Ok(ResolvedBuildConfigMap { entries: resolved })
+        Ok(resolved)
     }
 }
 

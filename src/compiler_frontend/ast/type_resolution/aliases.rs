@@ -31,30 +31,25 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 /// context.
 /// WHY: aliases are published only after their target `TypeId` is complete, so every use-site
 /// projection can consume the required identity without retrying resolution.
-pub(super) fn visible_type_alias_annotation(
+pub(super) fn visible_type_alias_annotation<'a>(
     name: StringId,
-    context: &TypeResolutionContext<'_>,
-) -> Option<ResolvedTypeAlias> {
+    context: &'a TypeResolutionContext<'_>,
+) -> Option<&'a ResolvedTypeAlias> {
     increment_ast_counter(AstCounter::VisibleTypeAliasLookupAttempts);
 
     let alias_path = context.visible_type_aliases?.get(&name)?;
-    let alias = context
-        .resolved_type_aliases?
-        .get(alias_path.local_path())?
-        .clone();
-
-    Some(alias)
+    context.resolved_type_aliases?.get(alias_path.local_path())
 }
 
 /// Look up a visible type alias by namespace-qualified name.
 ///
 /// WHAT: returns completed metadata when the namespace record exposes a source declaration that
 /// is a resolved type alias.
-pub(super) fn visible_namespaced_type_alias_annotation(
+pub(super) fn visible_namespaced_type_alias_annotation<'a>(
     namespace: StringId,
     name: StringId,
-    context: &TypeResolutionContext<'_>,
-) -> Option<ResolvedTypeAlias> {
+    context: &'a TypeResolutionContext<'_>,
+) -> Option<&'a ResolvedTypeAlias> {
     increment_ast_counter(AstCounter::VisibleTypeAliasLookupAttempts);
 
     let alias_path = context
@@ -64,12 +59,7 @@ pub(super) fn visible_namespaced_type_alias_annotation(
             Some(NamespaceTypeMember::SourceDeclaration(path)) => Some(path),
             _ => None,
         })?;
-    let alias = context
-        .resolved_type_aliases?
-        .get(alias_path.local_path())?
-        .clone();
-
-    Some(alias)
+    context.resolved_type_aliases?.get(alias_path.local_path())
 }
 
 /// Project completed alias metadata into the general annotation result used by type resolution.
@@ -77,10 +67,10 @@ pub(super) fn visible_namespaced_type_alias_annotation(
 /// The alias table itself stores the required target identity. This conversion is deliberately
 /// kept at the use site because other annotation contexts may still represent inference.
 pub(super) fn resolve_alias_annotation(
-    alias: ResolvedTypeAlias,
+    alias: &ResolvedTypeAlias,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
     Ok(ResolvedTypeAnnotation {
-        diagnostic_type: alias.diagnostic_type,
+        diagnostic_type: alias.diagnostic_type.clone(),
         type_id: Some(alias.target_type_id),
     })
 }

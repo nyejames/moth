@@ -9,6 +9,7 @@
 //! branches, inspect borrow facts, or perform backend lowering.
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
+use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
@@ -20,16 +21,87 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::synthetic_interface_provenance::{
+    SyntheticInterfaceClass, SyntheticInterfaceProvenance,
+};
 
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
+
+/// A compact, self-contained source location for a HIR function declaration.
+///
+/// HIR source locations normally borrow interned path components from the module compiler's
+/// `StringTable`. Link facts outlive that compiler, so this lane copies only the declaration
+/// scope strings and positions instead of retaining the complete table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HirFunctionDiagnosticLocation {
+    scope: Box<[String]>,
+    start_pos: CharPosition,
+    end_pos: CharPosition,
+}
+
+impl HirFunctionDiagnosticLocation {
+    fn from_source_location(location: &SourceLocation, string_table: &StringTable) -> Self {
+        Self {
+            scope: location
+                .scope
+                .as_components()
+                .iter()
+                .map(|component| string_table.resolve(*component).to_owned())
+                .collect(),
+            start_pos: location.start_pos,
+            end_pos: location.end_pos,
+        }
+    }
+
+    /// Reconstruct a regular diagnostic location using the caller's output string table.
+    pub(crate) fn to_source_location(&self, string_table: &mut StringTable) -> SourceLocation {
+        SourceLocation::new(
+            crate::compiler_frontend::symbols::interned_path::InternedPath::from_components(
+                self.scope
+                    .iter()
+                    .map(|component| string_table.intern(component))
+                    .collect(),
+            ),
+            self.start_pos,
+            self.end_pos,
+        )
+    }
+}
+
+/// The first reachable local function with a direct ProjectContext dependency.
+///
+/// The function ID and direct provenance remain paired so boundary diagnostics identify the
+/// offending declaration without reconstructing provenance from a union of all reachable
+/// functions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableProjectContextFunction {
+    function_id: FunctionId,
+    synthetic_interface_provenance: SyntheticInterfaceProvenance,
+    diagnostic_location: Option<HirFunctionDiagnosticLocation>,
+}
+
+impl ReachableProjectContextFunction {
+    #[cfg(test)]
+    pub(crate) fn function_id(&self) -> FunctionId {
+        self.function_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn synthetic_interface_provenance(&self) -> &SyntheticInterfaceProvenance {
+        &self.synthetic_interface_provenance
+    }
+
+    pub(crate) fn diagnostic_location(&self) -> Option<&HirFunctionDiagnosticLocation> {
+        self.diagnostic_location.as_ref()
+    }
+}
 
 /// Reachable HIR surface from the selected root functions.
 ///
@@ -52,18 +124,22 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
     pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
     reachable_function_provenance: SyntheticInterfaceProvenance,
+    first_project_context_function: Option<ReachableProjectContextFunction>,
     backend_selection: HirBackendSelection,
 }
 
 /// Deterministic direct link facts for one base HIR function.
 ///
 /// In addition to the entry block, each row carries the complete direct synthetic-interface
-/// provenance retained for its local function.
+/// provenance retained for its local function. Functions with direct ProjectContext provenance
+/// also retain an owned declaration location so boundary diagnostics outlive the compiler's source
+/// string table.
 #[derive(Clone, Debug)]
 pub(crate) struct HirFunctionLinkFacts {
     pub(crate) function_id: FunctionId,
     entry_block: BlockId,
     pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
+    declaration_location: Option<HirFunctionDiagnosticLocation>,
 }
 
 /// Deterministic direct link facts for one reachable block inside a base HIR function.
@@ -432,8 +508,31 @@ struct HirReachabilityContext<'index, 'hir> {
 }
 
 /// Record direct CFG and call facts for every function without selecting an entry root.
+///
+/// This compatibility wrapper intentionally omits declaration locations for hand-built callers
+/// that do not retain the compiler's `StringTable`. Production compilation uses
+/// [`collect_module_function_link_facts_with_string_table`] below.
+#[cfg(test)]
 pub(crate) fn collect_module_function_link_facts(
     hir: &HirModule,
+) -> Result<HirModuleLinkFacts, CompilerError> {
+    collect_module_function_link_facts_inner(hir, None)
+}
+
+/// Record direct CFG and call facts while retaining self-contained declaration locations.
+///
+/// Only the scope strings and span positions are copied from `string_table`; the complete table
+/// remains owned by the compiler and is not retained in link facts.
+pub(crate) fn collect_module_function_link_facts_with_string_table(
+    hir: &HirModule,
+    string_table: &StringTable,
+) -> Result<HirModuleLinkFacts, CompilerError> {
+    collect_module_function_link_facts_inner(hir, Some(string_table))
+}
+
+fn collect_module_function_link_facts_inner(
+    hir: &HirModule,
+    string_table: Option<&StringTable>,
 ) -> Result<HirModuleLinkFacts, CompilerError> {
     let index = HirReachabilityIndex::new(hir)?;
     let mut function_ids = hir
@@ -464,12 +563,29 @@ pub(crate) fn collect_module_function_link_facts(
                     "HIR function {function_id:?} is missing a synthetic-interface provenance fact"
                 ))
             })?;
+        let declaration_location = string_table
+            .filter(|_| {
+                synthetic_interface_provenance
+                    .contains_class(SyntheticInterfaceClass::ProjectContext)
+            })
+            .and_then(|string_table| {
+                hir.side_table
+                    .hir_source_location_for_hir(HirLocation::Function(function_id))
+                    .or_else(|| {
+                        hir.side_table
+                            .ast_location_for_hir(HirLocation::Function(function_id))
+                    })
+                    .map(|location| {
+                        HirFunctionDiagnosticLocation::from_source_location(location, string_table)
+                    })
+            });
         let context = HirReachabilityContext::new(&index, function_id, function.entry);
         let function_block_facts = context.collect()?;
         functions.push(HirFunctionLinkFacts {
             function_id,
             entry_block: function.entry,
             synthetic_interface_provenance,
+            declaration_location,
         });
         blocks.extend(function_block_facts);
     }
@@ -504,6 +620,20 @@ pub(crate) fn collect_reachability_from_function_link_facts(
                 )));
             };
             visited_function_order.push(function_id);
+            if reachability.first_project_context_function.is_none()
+                && function
+                    .synthetic_interface_provenance
+                    .contains_class(SyntheticInterfaceClass::ProjectContext)
+            {
+                reachability.first_project_context_function =
+                    Some(ReachableProjectContextFunction {
+                        function_id,
+                        synthetic_interface_provenance: function
+                            .synthetic_interface_provenance
+                            .clone(),
+                        diagnostic_location: function.declaration_location.clone(),
+                    });
+            }
             reachability
                 .reachable_function_provenance
                 .merge(&function.synthetic_interface_provenance);
@@ -568,12 +698,20 @@ impl HirReachability {
     pub(crate) fn backend_selection(&self) -> &HirBackendSelection {
         &self.backend_selection
     }
-    /// Provenance union for every local function reached from the selected roots.
+    /// Test-only provenance union for every local function reached from the selected roots.
     ///
-    /// The value is retained separately from block runtime facts so boundary policy can inspect
-    /// all reached functions, including helpers with no reachable runtime statements.
+    /// The aggregate verifies that the reachability walk includes helper functions even when they
+    /// have no reachable runtime statements.
+    #[cfg(test)]
     pub(crate) fn reachable_function_provenance(&self) -> &SyntheticInterfaceProvenance {
         &self.reachable_function_provenance
+    }
+
+    /// First reached function whose direct provenance contains ProjectContext.
+    pub(crate) fn first_project_context_function(
+        &self,
+    ) -> Option<&ReachableProjectContextFunction> {
+        self.first_project_context_function.as_ref()
     }
 
     fn merge(&mut self, direct: &HirBlockRuntimeFacts) {

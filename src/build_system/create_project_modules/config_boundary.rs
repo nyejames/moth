@@ -180,24 +180,41 @@ pub(super) fn first_unknown_build_config_input(
 
 /// One effective project field shared by fixed source providers and `@project`.
 ///
-/// The snapshot keeps the semantic folded value and canonical type together with the optional
-/// primitive build-input projection. Direct project `#Config` records retain their selected
-/// provider metadata; ordinary fixed fields retain fixed provenance. Both consumers below read
-/// this same record, so they cannot disagree about presence, value, type or location.
-#[derive(Clone, Debug)]
+/// The snapshot keeps the semantic folded value and canonical type together with the field's
+/// capability/provenance kind. Direct project `#Config` records retain their selected provider
+/// metadata; ordinary fixed fields retain fixed provenance; arbitrary metadata remains visible
+/// only through `@project`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct EffectiveProjectField {
     pub(super) name: String,
     pub(super) type_identity: CanonicalTypeIdentity,
     pub(super) value: PublicFoldedValue,
-    pub(super) build_input_type: Option<BuildInputType>,
-    pub(super) primitive_value: Option<PrimitiveBuildValue>,
-    pub(super) required: bool,
-    pub(super) default: Option<PrimitiveBuildValue>,
     pub(super) location: SourceLocation,
-    pub(super) value_location: Option<BuildConfigValueLocation>,
-    pub(super) origin: BuildConfigValueOrigin,
     pub(super) fingerprint: BuildConfigFingerprint,
-    direct: bool,
+    pub(super) kind: EffectiveProjectFieldKind,
+}
+
+/// Capabilities and provenance retained for one effective project field.
+///
+/// Keeping these cases together makes fixed-provider and direct-config projections exhaustive:
+/// metadata cannot accidentally acquire build-config contract state, while direct contracts always
+/// carry the values needed to preserve their already-selected provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum EffectiveProjectFieldKind {
+    FixedPrimitive {
+        value_type: BuildInputType,
+        value: Option<PrimitiveBuildValue>,
+        required: bool,
+    },
+    DirectConfig {
+        contract: BuildInputType,
+        value: Option<PrimitiveBuildValue>,
+        required: bool,
+        default: Option<PrimitiveBuildValue>,
+        origin: BuildConfigValueOrigin,
+        value_location: Option<BuildConfigValueLocation>,
+    },
+    Metadata,
 }
 
 /// Build one deterministic snapshot of the project fields visible at this build boundary.
@@ -363,15 +380,16 @@ fn effective_project_field_from_resolution_record(
         name: name.as_str().to_owned(),
         type_identity: canonical_type_identity_for_build_input(record.contract),
         value,
-        build_input_type: Some(record.contract),
-        primitive_value: record.value.clone(),
-        required: record.required,
-        default: record.default.clone(),
         location: record.qualifier_location.clone(),
-        value_location: record.value_location.clone(),
-        origin: record.origin,
         fingerprint: record.fingerprint,
-        direct: true,
+        kind: EffectiveProjectFieldKind::DirectConfig {
+            contract: record.contract,
+            value: record.value.clone(),
+            required: record.required,
+            default: record.default.clone(),
+            origin: record.origin,
+            value_location: record.value_location.clone(),
+        },
     })
 }
 
@@ -389,55 +407,57 @@ fn effective_fixed_project_field(
         name: build_name.as_str().to_owned(),
         type_identity: canonical_type_identity_for_build_input(build_input_type),
         value,
-        build_input_type: Some(build_input_type),
-        primitive_value,
-        required,
-        default: None,
         location,
-        value_location: None,
-        origin: BuildConfigValueOrigin::FixedProjectField,
         fingerprint,
-        direct: false,
+        kind: EffectiveProjectFieldKind::FixedPrimitive {
+            value_type: build_input_type,
+            value: primitive_value,
+            required,
+        },
     })
 }
 
 fn effective_project_field_from_metadata(field: &ProjectMetadataField) -> EffectiveProjectField {
-    let (build_input_type, primitive_value) = fixed_build_value_from_metadata(field)
-        .map_or((None, None), |(value_type, value)| {
-            (Some(value_type), value)
-        });
+    let kind = match fixed_build_value_from_metadata(field) {
+        Some((value_type, value)) => EffectiveProjectFieldKind::FixedPrimitive {
+            value_type,
+            value,
+            required: false,
+        },
+        None => EffectiveProjectFieldKind::Metadata,
+    };
     let fingerprint = project_metadata_fingerprint(&field.name, &field.type_identity, &field.value);
     EffectiveProjectField {
         name: field.name.clone(),
         type_identity: field.type_identity.clone(),
         value: field.value.clone(),
-        build_input_type,
-        primitive_value,
-        required: false,
-        default: None,
         location: field.location.clone(),
-        value_location: None,
-        origin: BuildConfigValueOrigin::FixedProjectField,
         fingerprint,
-        direct: false,
+        kind,
     }
 }
 
-/// Convert the primitive/optional fields in one effective snapshot into fixed provider facts.
+/// Convert fixed primitive fields in one effective snapshot into fixed provider facts.
 pub(super) fn fixed_project_contract_facts(
     fields: &[EffectiveProjectField],
 ) -> Vec<BuildConfigContractFact> {
     fields
         .iter()
-        .filter(|field| !field.direct)
         .filter_map(|field| {
-            let value_type = field.build_input_type?;
+            let EffectiveProjectFieldKind::FixedPrimitive {
+                value_type,
+                value,
+                required,
+            } = &field.kind
+            else {
+                return None;
+            };
             let name = BuildInputName::new(&field.name).ok()?;
             Some(BuildConfigContractFact::new(
                 name,
-                value_type,
-                field.required,
-                field.primitive_value.clone(),
+                *value_type,
+                *required,
+                value.clone(),
                 field.location.clone(),
             ))
         })
@@ -450,23 +470,33 @@ pub(super) fn direct_project_contract_facts(
 ) -> Vec<BuildConfigContractFact> {
     fields
         .iter()
-        .filter(|field| field.direct)
-        .map(|field| {
-            BuildConfigContractFact::new(
-                BuildInputName::new(&field.name)
-                    .expect("effective direct project field has a valid name"),
-                field
-                    .build_input_type
-                    .expect("effective direct project field has a build-input type"),
-                field.required,
-                field.default.clone(),
-                field.location.clone(),
-            )
-            .with_resolved_provider(
-                field.primitive_value.clone(),
-                field.origin,
-                field.fingerprint,
-                field.value_location.clone(),
+        .filter_map(|field| {
+            let EffectiveProjectFieldKind::DirectConfig {
+                contract,
+                value,
+                required,
+                default,
+                origin,
+                value_location,
+            } = &field.kind
+            else {
+                return None;
+            };
+            Some(
+                BuildConfigContractFact::new(
+                    BuildInputName::new(&field.name)
+                        .expect("effective direct project field has a valid name"),
+                    *contract,
+                    *required,
+                    default.clone(),
+                    field.location.clone(),
+                )
+                .with_resolved_provider(
+                    value.clone(),
+                    *origin,
+                    field.fingerprint,
+                    value_location.clone(),
+                ),
             )
         })
         .collect()

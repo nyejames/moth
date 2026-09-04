@@ -1128,27 +1128,41 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
     )
     .expect("canonical facts should resolve");
     let index = crate::compiler_frontend::build_config::BuildConfigResolutionIndex::from_validated(
+        &canonical,
         &canonical_facts,
         &[],
         &[],
     );
+    let changed_globals = builder_globals(&[("canonical_value", PrimitiveBuildValue::Int(99))]);
     let first_check_only = index
         .resolve_with_transient_source_facts(
             &first_check_only_facts,
             &BuildConfigInputSet::new(),
-            &BuilderConfigGlobalSet::new(),
+            &changed_globals,
         )
         .expect("the first check-only unit should resolve independently");
     let second_check_only = index
         .resolve_with_transient_source_facts(
             &second_check_only_facts,
             &BuildConfigInputSet::new(),
-            &BuilderConfigGlobalSet::new(),
+            &changed_globals,
         )
         .expect("the second check-only unit should resolve independently");
 
     let transient_name =
         BuildInputName::new("transient_value").expect("test input name should validate");
+    let canonical_name =
+        BuildInputName::new("canonical_value").expect("test input name should validate");
+    assert_eq!(
+        first_check_only.get(&canonical_name),
+        canonical.get(&canonical_name),
+        "check-only resolution must retain the canonical provider result"
+    );
+    assert_eq!(
+        second_check_only.get(&canonical_name),
+        canonical.get(&canonical_name),
+        "each check-only unit must retain the same canonical provider result"
+    );
     assert!(canonical.get(&transient_name).is_none());
     assert_eq!(
         first_check_only
@@ -1195,8 +1209,20 @@ fn check_only_conflict_keeps_canonical_and_transient_locations_in_their_own_tabl
         None,
         transient_location.clone(),
     );
-    let index =
-        BuildConfigResolutionIndex::from_validated(std::slice::from_ref(&canonical_fact), &[], &[]);
+    let canonical_values = resolve_build_config_values(
+        std::slice::from_ref(&canonical_fact),
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &builder_globals(&[("shared_setting", PrimitiveBuildValue::Int(7))]),
+    )
+    .expect("canonical contract should resolve");
+    let index = BuildConfigResolutionIndex::from_validated(
+        &canonical_values,
+        std::slice::from_ref(&canonical_fact),
+        &[],
+        &[],
+    );
 
     let error = index
         .resolve_with_transient_source_facts(

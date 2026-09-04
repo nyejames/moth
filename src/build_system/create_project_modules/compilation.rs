@@ -1700,6 +1700,7 @@ fn compile_module_waves(
     // Canonical fact ownership is indexed once per boundary. Transient units borrow this index
     // instead of cloning and concatenating the canonical fact vector for every unit.
     let build_config_index = BuildConfigResolutionIndex::from_validated(
+        context.build_config_values.as_ref(),
         &context.canonical_source_facts,
         &context.fixed_project_facts,
         &context.direct_project_facts,
@@ -2017,6 +2018,7 @@ fn compile_check_only_jobs_after_canonical(
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     // Reuse one borrowed canonical fact index for every deferred transient unit.
     let build_config_index = BuildConfigResolutionIndex::from_validated(
+        context.build_config_values.as_ref(),
         &context.canonical_source_facts,
         &context.fixed_project_facts,
         &context.direct_project_facts,

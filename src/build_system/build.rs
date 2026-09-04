@@ -1085,12 +1085,14 @@ fn collect_facade_reachability(
             &reachable_module.link_facts.functions,
             &roots,
         )?;
-        if reachability
-            .reachable_function_provenance()
-            .contains_class(SyntheticInterfaceClass::ProjectContext)
-        {
+        if let Some(offending_function) = reachability.first_project_context_function() {
             let mut string_table = StringTable::new();
-            let location = project_context_location_for_module(reachable_module, &mut string_table);
+            let location = offending_function
+                .diagnostic_location()
+                .map(|location| location.to_source_location(&mut string_table))
+                .unwrap_or_else(|| {
+                    project_context_location_for_module(reachable_module, &mut string_table)
+                });
             return Err(ProjectAssemblyError::project_context_escape(
                 ProjectContextEscapeReason::ReachableExecutable,
                 location,
