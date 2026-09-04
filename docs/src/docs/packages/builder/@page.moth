@@ -16,7 +16,8 @@ page_head #= language_theme_head
 
     The HTML builder provides source-backed compile-time helpers through
     `@html` and binding-backed runtime drawing through `@web/canvas`. The
-    @../../progress (progress matrix) records current support.
+    @../../progress/packages-and-builders (packages and builders progress matrix)
+    records current support and accepted next gaps.
 
     ## Package pages
 
