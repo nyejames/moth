@@ -67,8 +67,9 @@ Read `docs/roadmap/plans/package-dependency-declarations-and-manager-foundations
 preserve its ownership boundary. This programme must not implement its declaration, alias, resolver
 or dependency-package graph work.
 
-When the accepted collection sorting plan is incorporated, read it from its final location under
-this directory. Do not reconstruct its contract from this umbrella.
+The accepted collection sorting plan lives at
+`docs/roadmap/plans/packages/core-collections-sorting.md`. Treat that plan as the specialised
+implementation companion for sorting and do not reconstruct its contract from this umbrella.
 
 ## Scope
 
@@ -415,7 +416,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
-| 7a | Collection sorting | `core-collections-sorting.md` | Accepted plan exists on `core-collection-sorting-plan`, migration pending | Preserve the accepted stable-by-default `sort` contract and implement it only after its mixed-backend prerequisites |
+| 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve the accepted stable-by-default `sort` contract and implement it only after its mixed-backend prerequisites |
 | 8 | `@core/json` | `core-json.md` | Accepted package, TODO: design when activated | Design and implement a useful JSON v1 without reflection, generic derivation or a representation Moth cannot express correctly |
 | 9 | Programme review | this plan | Deferred | Audit useful completeness, choose whether another candidate deserves a package design and leave the tracker coherent |
 
@@ -470,8 +471,8 @@ The current broad future list stays candidate input until that review.
 
 #### `@core/collections`
 
-Do not redesign sorting. Move the accepted sorting plan into this directory when its branch is
-incorporated, retain its contract and link it from the collection plan.
+Do not redesign sorting. The accepted sorting plan already lives in this directory. Retain its
+contract and link it from the collection plan.
 
 Review non-sorting gaps against collection, borrow and memory-management authorities. Operations such
 as whole-domain clear may carry lifetime and retained-edge meaning, so package convenience must not
@@ -575,6 +576,7 @@ Delivered before Phase 0:
 - split package and project-builder progress into its own matrix
 - link package reference pages to that matrix
 - create this umbrella plan and living-plan rules
+- move the accepted collection sorting plan into the package programme directory
 - sync the package branch with the published diagnostics data-layout checkpoint
 
 The implementation worktree must still establish and record a clean validation baseline.
@@ -657,11 +659,10 @@ input, lifecycle and recovery coverage appropriate to that phase.
 
 ### Phase 8 - `@core/collections` follow-up and sorting handoff
 
-Create `core-collections.md` and audit non-sorting gaps. Incorporate
-`core-collections-sorting.md` only when its branch and prerequisites are ready.
+Create `core-collections.md` and audit non-sorting gaps. Follow
+`core-collections-sorting.md` only when its mixed-backend prerequisites are ready.
 
-Do not use this phase to bypass the mixed JavaScript and Wasm prerequisites in the accepted sorting
-plan.
+Do not use this phase to bypass those prerequisites or reopen the accepted sorting contract.
 
 Mandatory closeout: full phase gate plus fixed and growable collection scenarios that exercise
 mutation, aliasing, fallibility and retained identity.
