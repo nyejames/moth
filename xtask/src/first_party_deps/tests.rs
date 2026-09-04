@@ -142,6 +142,17 @@ fn rejects_a_lockfile_under_a_first_party_root() {
 }
 
 #[test]
+fn rejects_deno_package_metadata_under_a_first_party_root() {
+    let workspace = fixture_workspace();
+    write_fixture_file(workspace.path(), "packages/html/deno.json", "{}\n");
+
+    assert_has_rule(
+        &findings_for(&workspace),
+        FirstPartyDepsRule::PackageManagerManifest,
+    );
+}
+
+#[test]
 fn rejects_a_node_modules_directory() {
     let workspace = fixture_workspace();
     fs::create_dir_all(workspace.path().join("packages/html/node_modules"))
@@ -235,6 +246,44 @@ export * from "lodash-star";
             "missing finding for {module}: {findings:?}"
         );
     }
+}
+
+#[test]
+fn reports_from_bindings_and_string_named_import_clauses() {
+    let source = r#"
+import { from as source } from "lodash-from";
+import { "feature-name" as feature } from "lodash-named";
+"#;
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        2,
+        "clause names must not hide the module: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("lodash-from"))
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("lodash-named"))
+    );
+}
+
+#[test]
+fn reports_dynamic_import_of_a_template_literal_module() {
+    let source = "const module = import(`lodash`);\n";
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        1,
+        "template module names are still specifiers: {findings:?}"
+    );
+    assert!(findings[0].message.contains("lodash"));
 }
 
 #[test]

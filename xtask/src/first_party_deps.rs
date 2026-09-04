@@ -60,6 +60,9 @@ const FORBIDDEN_MANIFEST_BASENAMES: &[&str] = &[
     "pnpm-lock.yaml",
     "bun.lock",
     "bun.lockb",
+    "deno.json",
+    "deno.jsonc",
+    "deno.lock",
 ];
 
 /// Directory names that identify copied or vendored third-party code.
@@ -462,10 +465,8 @@ fn from_specifier<'a>(
                 if let Some(Token::String(specifier)) = tokens.get(index + 1) {
                     return Some((specifier.as_str(), form));
                 }
-
-                break;
             }
-            Token::Identifier(_) => {}
+            Token::Identifier(_) | Token::String(_) => {}
             Token::Punctuation('{' | '}' | '*' | ',') => {}
             _ => break,
         }
@@ -690,24 +691,48 @@ fn read_quoted_string(bytes: &[u8], index: &mut usize) -> String {
 
 fn scan_template_literal(bytes: &[u8], index: &mut usize, tokens: &mut Vec<Token>) {
     *index += 1;
+    let mut literal = String::new();
+    let mut interpolated = false;
 
     while *index < bytes.len() {
         let byte = bytes[*index];
         *index += 1;
         if byte == b'\\' {
-            *index = (*index + 1).min(bytes.len());
+            if let Some(escaped) = bytes.get(*index).copied() {
+                *index += 1;
+                if !interpolated {
+                    literal.push(match escaped {
+                        b'n' => '\n',
+                        b'r' => '\r',
+                        b't' => '\t',
+                        b'0' => '\0',
+                        b'`' => '`',
+                        b'$' => '$',
+                        b'\\' => '\\',
+                        other => other as char,
+                    });
+                }
+            }
             continue;
         }
         if byte == b'`' {
+            if !interpolated {
+                tokens.push(Token::String(literal));
+            }
             return;
         }
         if byte == b'$' && bytes.get(*index) == Some(&b'{') {
+            interpolated = true;
             *index += 1;
             tokens.extend(tokenize_javascript_from(
                 bytes,
                 index,
                 TokenizeStop::Interpolation,
             ));
+            continue;
+        }
+        if !interpolated {
+            literal.push(byte as char);
         }
     }
 }
