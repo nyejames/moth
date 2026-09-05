@@ -1347,6 +1347,115 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     }
 }
 
+/// Every prepared output carries the `SourceId` its input already held, under all three
+/// preparation strategies.
+///
+/// WHAT: identity is assigned at the source-registration barrier, before a strategy is selected,
+///       so preparation reads an identity rather than producing one.
+/// WHY: a worker that allocated or re-derived an identity would make `SourceId` depend on the
+///      scheduling strategy. The prepared-file invariant gate checks that a file's identity
+///      agrees with its own header streams, not that it agrees with the database, so a
+///      consistently wrong identity satisfies it. `ParallelPerFile` has no other end-to-end
+///      preparation coverage at all.
+#[test]
+fn every_preparation_strategy_stamps_the_registered_source_identity() {
+    for strategy in [
+        super::FilePreparationStrategy::Serial,
+        super::FilePreparationStrategy::ParallelPerFile,
+        super::FilePreparationStrategy::ParallelChunked,
+    ] {
+        // Descending names make input order the reverse of canonical logical order, so an
+        // identity re-derived from a file's position in the module would not match the one the
+        // database assigned.
+        let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
+            .rev()
+            .map(|index| {
+                (
+                    format!("{index}.moth"),
+                    format!("value_{index} #= {index}\n"),
+                )
+            })
+            .collect();
+        let file_source_refs = fixture_source_refs(&file_sources);
+        let mut fixture = frontend_preparation_fixture(&file_source_refs);
+
+        // The identity each input carries was assigned by the source database at registration,
+        // before any strategy existed to influence it.
+        let registered_ids: Vec<SourceId> = fixture
+            .input_files
+            .iter()
+            .map(PreparedSourceInput::source_id)
+            .collect();
+        assert!(
+            registered_ids.windows(2).any(|pair| pair[0] > pair[1]),
+            "the fixture must not present inputs in identity order, or a position-derived \
+             identity would pass: {registered_ids:?}"
+        );
+
+        let options = HeaderParseOptions {
+            entry_file_id: fixture
+                .frontend
+                .source_files
+                .get_by_canonical_path(&fixture.entry_file_path)
+                .map(|record| record.id),
+            project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
+            entry_file_role: None,
+            active_root_role: ModuleRootRole::Normal,
+        };
+        let fork_source = fixture.frontend.string_table.fork_source();
+
+        let chunks = {
+            let prepare_context = FrontendFilePrepareContext {
+                source_files: &fixture.frontend.source_files,
+                style_directives: &fixture.frontend.style_directives,
+                entry_file_path: &fixture.entry_file_path,
+                options: &options,
+            };
+
+            super::ModulePreparationContext::prepare_module_file_chunks(
+                std::mem::take(&mut fixture.input_files),
+                &fork_source,
+                &prepare_context,
+                0,
+                0,
+                strategy,
+            )
+        };
+
+        if strategy == super::FilePreparationStrategy::ParallelChunked {
+            assert!(
+                chunks.len() > 1,
+                "the chunked arm is vacuous unless the fixture spans several chunks, got \
+                 {} for {} files",
+                chunks.len(),
+                registered_ids.len()
+            );
+        }
+
+        let mut stamped_file_count = 0usize;
+        for chunk in &chunks {
+            for prepared_file in &chunk.results {
+                let Ok(output) = &prepared_file.result else {
+                    panic!("every fixture source should prepare under {strategy:?}");
+                };
+                assert_eq!(
+                    output.file_id,
+                    Some(registered_ids[prepared_file.file_index]),
+                    "{strategy:?} must stamp the registered identity on file index {}",
+                    prepared_file.file_index
+                );
+                stamped_file_count += 1;
+            }
+        }
+
+        assert_eq!(
+            stamped_file_count,
+            registered_ids.len(),
+            "{strategy:?} should prepare every selected source once"
+        );
+    }
+}
+
 #[test]
 fn chunked_file_preparation_preserves_warning_source_order() {
     let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)

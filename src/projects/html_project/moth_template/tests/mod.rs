@@ -5,6 +5,7 @@
 //! WHY: this API is intentionally not wired into project builds yet, so module-local tests protect
 //! the tooling-facing boundary without adding integration artifacts.
 
+use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
@@ -12,18 +13,21 @@ use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidConfigReason,
 };
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
     MothTemplateInput, MothTemplatePathScope, MothTemplateScopeConstant, MothTemplateSource,
     compile_moth_template,
 };
+use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -561,6 +565,95 @@ fn content_reference_onto_the_entry_reuses_its_registered_kind() {
             "the entry's own canonical path must not be registered under a second kind: {conflicts:?}"
         );
     }
+}
+
+/// `zeta.mtf` names `gamma` then `alpha`, so BFS/reference order is zeta, gamma, alpha.
+/// Canonical logical order is alpha, gamma, zeta. Identities must follow the latter.
+#[test]
+fn content_source_identities_follow_canonical_logical_order_not_reference_order() {
+    let temp_dir = temp_project(&[
+        ("zeta.mtf", "# Zeta\n\n[@gamma.mtf]\n\n[@alpha.mtf]"),
+        ("gamma.mtf", "# Gamma"),
+        ("alpha.mtf", "# Alpha"),
+    ]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("zeta.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+    assert_eq!(units.len(), 1);
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let bundle = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    )
+    .expect("the content closure should prepare");
+
+    let id_for = |name: &str| {
+        let path = fs::canonicalize(temp_dir.path().join(name))
+            .unwrap_or_else(|error| panic!("{name} should canonicalize: {error}"));
+        bundle
+            .source_files
+            .get_by_canonical_path(&path)
+            .unwrap_or_else(|| panic!("{name} should have a source identity"))
+            .id
+    };
+
+    let alpha = id_for("alpha.mtf");
+    let gamma = id_for("gamma.mtf");
+    let zeta = id_for("zeta.mtf");
+    assert!(
+        alpha < gamma && gamma < zeta,
+        "canonical order is alpha, gamma, zeta; got alpha={alpha:?}, gamma={gamma:?}, zeta={zeta:?}"
+    );
+}
+
+/// Discovery prepares every source before identities exist, so a reference's tokens - and the
+/// diagnostics cloned from them - start out carrying the provisional interned filesystem path.
+/// A retained resolution diagnostic must name the module-relative logical source, not that
+/// absolute path, or the failure a user reads points outside the project.
+#[test]
+fn retained_resolution_diagnostics_name_the_final_logical_source() {
+    let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let bundle = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    )
+    .expect("an unresolvable reference is a retained diagnostic, not a bundle failure");
+
+    let diagnostic = bundle
+        .resolved_file_references
+        .iter()
+        .find_map(|reference| match &reference.outcome {
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => Some(diagnostic),
+            _ => None,
+        })
+        .expect("a reference to an absent target should retain a diagnostic");
+
+    let scope = diagnostic.primary_location.scope.to_path_buf(&string_table);
+    assert_eq!(
+        scope,
+        Path::new("page.mtf"),
+        "the diagnostic should name the logical source, got {scope:?}"
+    );
 }
 
 #[test]

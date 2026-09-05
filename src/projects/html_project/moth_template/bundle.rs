@@ -1,16 +1,17 @@
 //! Stage 0 bundle construction for one direct Moth template compilation.
 //!
 //! WHAT: walks one template's content-source fixed point with the build-owned physical resolver,
-//!       prepares every nested `.mtf`/`.md` dependency in deterministic discovery order and
-//!       assembles the compiler service's file-value bundle.
+//!       collects every nested `.mtf`/`.md` dependency, assigns source identities in canonical
+//!       logical order, rebinds the one discovery-prepared output per source onto those identities
+//!       and assembles the compiler service's file-value bundle.
 //! WHY:  physical file-reference resolution stays build-owned. The compiler service folds settled
 //!       Stage 0 facts and never probes the filesystem, while watch and invalidation policy stays
 //!       with this direct API's callers.
 //!
 //! The fixed point mirrors synthetic single-file discovery: content targets resolve relative to
-//! the compiling template's directory (this lane's entry root), nested `.mtf`/`.md` sources join
-//! the same source identity table before their own preparation, and every prepared occurrence
-//! keeps its settled outcome. Route and output placement are never built here.
+//! the compiling template's directory (this lane's entry root), the walk collects the canonical
+//! candidate set in BFS order, identities are assigned once from that set, and every prepared
+//! occurrence keeps its settled outcome. Route and output placement are never built here.
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::create_project_modules::file_reference_resolution::{
@@ -31,7 +32,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -40,7 +41,7 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use crate::projects::html_project::moth_template::input::MothTemplateSourceUnit;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -104,33 +105,10 @@ pub(super) fn prepare_file_value_bundle(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    // 1. Register the template's identity so preparation stamps the final SourceId.
-    let mut source_files = SourceDatabase::empty();
-    source_files
-        .insert(
-            unit.source_path.clone(),
-            SourceKind::Compiler(SourceFileKind::MothTemplate),
-            &unit.source_path,
-            Some(&path_resolver),
-            string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let Some(entry_file_id) = source_files
-        .get_by_canonical_path(&unit.source_path)
-        .map(|identity| identity.id)
-    else {
-        return Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "direct Moth template did not register its own source identity",
-            ),
-            string_table,
-        ));
-    };
-
-    // 2. Walk the content fixed point: nested `.mtf`/`.md` targets join the source set and are
-    //    prepared in BFS order, so no second scan or parse exists for this lane.
-    let options = HeaderParseOptions {
-        entry_file_id: Some(entry_file_id),
+    // 1. Walk the content fixed point without assigning SourceIds. Nested `.mtf`/`.md` targets
+    //    join the candidate set in BFS order; identities wait until that set is complete.
+    let discovery_options = HeaderParseOptions {
+        entry_file_id: None,
         project_path_resolver: Some(&path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
@@ -140,91 +118,63 @@ pub(super) fn prepare_file_value_bundle(
     let mut resolver =
         SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
 
+    let mut candidates: FxHashMap<PathBuf, SourceFileKind> = FxHashMap::default();
+    candidates.insert(unit.source_path.clone(), SourceFileKind::MothTemplate);
+
+    let mut loaded: FxHashMap<PathBuf, Result<String, CompilerError>> = FxHashMap::default();
+    loaded.insert(
+        unit.source_path.clone(),
+        Ok(std::mem::take(&mut unit.source_text)),
+    );
+
     let mut queue = VecDeque::new();
     queue.push_back(QueuedSource::Entry);
-    let mut prepared_content_sources = Vec::new();
-    let mut resolved_file_references = ResolvedFileReferenceTable::new();
+    // One row per visited source, in discovery order. Pairing the path with its own prepared
+    // output here keeps the identity rebinding below from depending on two vectors staying
+    // the same length.
+    let mut prepared_sources: Vec<(PathBuf, FileFrontendPrepareOutput)> = Vec::new();
+    let mut pending_references = Vec::new();
     let mut visited = FxHashSet::default();
+    let discovery_files = SourceDatabase::empty();
 
     while let Some(pending) = queue.pop_front() {
-        let visit_path = match &pending {
-            QueuedSource::Entry => unit.source_path.clone(),
-            QueuedSource::Content { path, .. } => path.clone(),
+        let (path, kind) = match pending {
+            QueuedSource::Entry => (unit.source_path.clone(), SourceFileKind::MothTemplate),
+            QueuedSource::Content { path, kind } => (path, kind),
         };
-        if !visited.insert(visit_path) {
+        if !visited.insert(path.clone()) {
             continue;
         }
-        let (path, kind, source_code, owner_source_file) = match pending {
-            QueuedSource::Entry => {
-                let path = unit.source_path.clone();
-                let source_id = source_files
-                    .get_by_canonical_path(&path)
-                    .map(|identity| identity.id)
-                    .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "entry source {path:?} has no identity before source-text retention"
-                            )),
-                            string_table,
-                        )
-                    })?;
-                source_files
-                    .retain_text(source_id, std::mem::take(&mut unit.source_text))
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                let source_code = source_files.retained_text(source_id).ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "entry source {path:?} lost its retained source text"
-                        )),
-                        string_table,
-                    )
-                })?;
-                (path, SourceFileKind::MothTemplate, source_code, source_id)
-            }
-            QueuedSource::Content { path, kind } => {
-                let source_id = source_files
-                    .get_by_canonical_path(&path)
-                    .map(|identity| identity.id)
-                    .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "content source {path:?} has no identity before preparation"
-                            )),
-                            string_table,
-                        )
-                    })?;
-                let source_code = match source_files.retained_text(source_id) {
-                    Some(source_code) => source_code,
+        let prepared = {
+            let source_code = match loaded.get(&path) {
+                Some(Ok(source_code)) => source_code.as_str(),
+                Some(Err(error)) => {
                     // Loading moved earlier than preparation, so a recorded read failure is
                     // reported here instead: this is the point at which the read failed before.
-                    None => {
-                        return Err(match source_files.source_load_error(source_id) {
-                            Some(error) => {
-                                CompilerMessages::from_error_ref(error.clone(), string_table)
-                            }
-                            None => CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(format!(
-                                    "content source {path:?} has no retained source text"
-                                )),
-                                string_table,
-                            ),
-                        });
-                    }
-                };
-                (path, kind, source_code, source_id)
-            }
+                    return Err(CompilerMessages::from_error_ref(
+                        error.clone(),
+                        string_table,
+                    ));
+                }
+                None => {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "content source {path:?} has no retained source text"
+                        )),
+                        string_table,
+                    ));
+                }
+            };
+            prepare_one_source(
+                &discovery_files,
+                &path,
+                kind,
+                source_code,
+                &discovery_options,
+                style_directives,
+                string_table,
+            )?
         };
-
-        // 3. Prepare one file against the settled identity table.
-        let prepared = prepare_one_source(
-            &source_files,
-            &path,
-            kind,
-            source_code,
-            &options,
-            style_directives,
-            string_table,
-        )?;
         let path_syntax_table = prepared.path_syntax.table();
         let structural_references = prepared.structural_file_references.references();
 
@@ -232,29 +182,120 @@ pub(super) fn prepare_file_value_bundle(
             let resolved = resolver
                 .resolve(&path, path_syntax_table, reference, string_table)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            let outcome = settle_reference_outcome(
-                resolved,
-                &mut source_files,
-                &path_resolver,
+            collect_content_candidate(
+                &resolved,
+                &mut candidates,
+                &mut loaded,
                 &mut queue,
                 &source_file_kinds,
                 string_table,
             )?;
-            resolved_file_references
-                .push(ResolvedFileReference {
-                    source_file: owner_source_file,
-                    path_syntax: reference.path_syntax,
-                    class: reference.class,
-                    outcome,
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            pending_references.push(resolved);
         }
+        prepared_sources.push((path, prepared));
+    }
 
-        // The template's own prepared output stays with the compiler service; only dependencies
-        // are handed to it.
-        if path != unit.source_path {
-            prepared_content_sources.push(prepared);
+    // 2. Assign identities from the complete candidate set in canonical logical order, rebind
+    //    each discovery-prepared output onto those finished SourceIds, and join physical
+    //    outcomes onto the classified table.
+    let classified_rows = candidates
+        .into_iter()
+        .map(|(path, kind)| (path, SourceKind::Compiler(kind)))
+        .collect::<Vec<_>>();
+    let mut source_files = SourceDatabase::build_classified(
+        classified_rows,
+        &unit.source_path,
+        Some(&path_resolver),
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    for (path, snapshot) in loaded {
+        let source_id = source_id_for_path(
+            &source_files,
+            &path,
+            string_table,
+            "has no identity after classified registration",
+        )?;
+        match snapshot {
+            Ok(source_code) => source_files
+                .retain_text(source_id, source_code)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+            Err(_) => {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "content source {path:?} kept a read failure past preparation"
+                    )),
+                    string_table,
+                ));
+            }
         }
+    }
+
+    let mut prepared_content_sources = Vec::new();
+    for (path, mut prepared) in prepared_sources {
+        if path == unit.source_path {
+            continue;
+        }
+        let record = source_files.get_by_canonical_path(&path).ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "source {path:?} has no identity before rebinding"
+                )),
+                string_table,
+            )
+        })?;
+        let canonical_os_path = record.canonical_os_path.clone().ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "final source identity {} has no canonical path",
+                    record.id.index()
+                )),
+                string_table,
+            )
+        })?;
+        prepared
+            .rebind_source_identity(record.id, record.logical_path.clone(), canonical_os_path)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        prepared
+            .freeze_path_syntax(string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        prepared_content_sources.push(prepared);
+    }
+
+    let mut resolved_file_references = ResolvedFileReferenceTable::new();
+    for resolved in pending_references {
+        // Discovery prepared this reference's owner before any identity existed, so its tokens
+        // and the diagnostics cloned from them carry the provisional interned filesystem path.
+        // Prepared outputs were rebound above; a diagnostic is separately owned and must be
+        // rebound here, or a missing-target failure would name an absolute path.
+        let owner = source_files
+            .get_by_canonical_path(&resolved.source_path)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "source {:?} owner has no classified source identity",
+                        resolved.source_path
+                    )),
+                    string_table,
+                )
+            })?;
+        let owner_source_file = owner.id;
+        let owner_logical_path = owner.logical_path.clone();
+        let path_syntax = resolved.path_syntax;
+        let class = resolved.class;
+        let mut outcome = resolved_outcome_from_physical(resolved, &source_files, string_table)?;
+        if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
+            diagnostic.rebind_source_identity(&owner_logical_path);
+        }
+        resolved_file_references
+            .push(ResolvedFileReference {
+                source_file: owner_source_file,
+                path_syntax,
+                class,
+                outcome,
+            })
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
 
     Ok(MothTemplateFileValueBundle {
@@ -265,17 +306,76 @@ pub(super) fn prepare_file_value_bundle(
     })
 }
 
-/// Map one build-owned physical outcome onto the compiler-facing resolved row, queueing content
-/// targets so the fixed point reaches every nested dependency.
+/// Record one physically resolved content target in the candidate set and queue it.
 ///
-/// This is the direct lane's identity join: canonical target paths resolved before the full
-/// source inventory was known become the bundle database's `SourceId`s here.
-fn settle_reference_outcome(
-    resolved: SingleFileResolvedReference,
-    source_files: &mut SourceDatabase,
-    path_resolver: &ProjectPathResolver,
+/// Loading happens here, before the caller's visited check, so it must dedupe on the loaded
+/// snapshot rather than on the queue. A path already collected keeps the kind its own producer
+/// authored. Only a genuinely new path is classified here, because a lexical spelling can resolve
+/// onto a target whose extension names another kind, and asserting a second kind for one
+/// canonical path is the conflict the source database rejects.
+fn collect_content_candidate(
+    resolved: &SingleFileResolvedReference,
+    candidates: &mut FxHashMap<PathBuf, SourceFileKind>,
+    loaded: &mut FxHashMap<PathBuf, Result<String, CompilerError>>,
     queue: &mut VecDeque<QueuedSource>,
     source_file_kinds: &SourceFileKindRegistry,
+    string_table: &mut StringTable,
+) -> Result<(), CompilerMessages> {
+    match &resolved.outcome {
+        SingleFileReferenceOutcome::IdentifiedSourceKind => {
+            if resolved.class != PreparedFileReferenceClass::SourceKindNoFileValue {
+                return Err(incompatible_class_messages(string_table));
+            }
+            Ok(())
+        }
+        SingleFileReferenceOutcome::Source { canonical } => {
+            if resolved.class != PreparedFileReferenceClass::ContentSource {
+                return Err(incompatible_class_messages(string_table));
+            }
+
+            let kind = if let Some(&kind) = candidates.get(canonical) {
+                kind
+            } else {
+                let extension = canonical
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or_default();
+                let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "resolved supported content target has no registered source kind",
+                        ),
+                        string_table,
+                    ));
+                };
+                candidates.insert(canonical.clone(), kind);
+                kind
+            };
+
+            if !loaded.contains_key(canonical) {
+                // A read failure is recorded against the snapshot rather than returned here. The
+                // reference is still queued so the failure surfaces when this source is popped
+                // for preparation, which is where it surfaced before loading moved earlier.
+                let snapshot = extract_source_code(canonical, string_table);
+                loaded.insert(canonical.clone(), snapshot);
+            }
+            queue.push_back(QueuedSource::Content {
+                path: canonical.clone(),
+                kind,
+            });
+            Ok(())
+        }
+        SingleFileReferenceOutcome::NoPhysicalTarget
+        | SingleFileReferenceOutcome::Resource { .. }
+        | SingleFileReferenceOutcome::Diagnostic(_) => Ok(()),
+    }
+}
+
+/// Map one build-owned physical outcome onto the compiler-facing resolved row using the finished
+/// classified identity table.
+fn resolved_outcome_from_physical(
+    resolved: SingleFileResolvedReference,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<ResolvedFileReferenceOutcome, CompilerMessages> {
     match resolved.outcome {
@@ -294,85 +394,38 @@ fn settle_reference_outcome(
                 owner_relative_path,
             },
         )),
-        SingleFileReferenceOutcome::IdentifiedSourceKind => {
-            if resolved.class != PreparedFileReferenceClass::SourceKindNoFileValue {
-                return Err(incompatible_class_messages(string_table));
-            }
-
-            Ok(ResolvedFileReferenceOutcome::Target(
-                ResolvedFileReferenceTarget::IdentifiedSourceKind,
-            ))
-        }
+        SingleFileReferenceOutcome::IdentifiedSourceKind => Ok(
+            ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::IdentifiedSourceKind),
+        ),
         SingleFileReferenceOutcome::Source { canonical } => {
-            if resolved.class != PreparedFileReferenceClass::ContentSource {
-                return Err(incompatible_class_messages(string_table));
-            }
-
-            // A nested content source is never re-prepared: the identity table dedupes, and the
-            // caller's visited set skips a file already reached. Loading happens here, before that
-            // visited check, so it must dedupe on the slot rather than on the queue.
-            //
-            // A path already registered keeps the kind its own producer authored. Only a genuinely
-            // new path is classified here, because a lexical spelling can resolve onto a target
-            // whose extension names another kind, and asserting a second kind for one canonical
-            // path is the conflict the source database rejects.
-            let registered = source_files
-                .get_by_canonical_path(&canonical)
-                .and_then(|record| match record.kind {
-                    Some(SourceKind::Compiler(kind)) => Some((record.id, kind)),
-                    _ => None,
-                });
-            let (target_file, kind) = match registered {
-                Some(reused) => reused,
-                None => {
-                    let extension = canonical
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                        .unwrap_or_default();
-                    let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
-                        return Err(CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(
-                                "resolved supported content target has no registered source kind",
-                            ),
-                            string_table,
-                        ));
-                    };
-                    let target_file = source_files
-                        .insert(
-                            canonical.clone(),
-                            SourceKind::Compiler(kind),
-                            canonical.as_path(),
-                            Some(path_resolver),
-                            string_table,
-                        )
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    (target_file, kind)
-                }
-            };
-            if source_files.retained_text(target_file).is_none()
-                && source_files.source_load_error(target_file).is_none()
-            {
-                // A read failure is recorded against the slot rather than returned here. The
-                // reference is still queued so the failure surfaces when this source is popped
-                // for preparation, which is where it surfaced before loading moved earlier.
-                let outcome = match extract_source_code(&canonical, string_table) {
-                    Ok(source_code) => source_files.retain_text(target_file, source_code),
-                    Err(error) => source_files.record_source_load_error(target_file, error),
-                };
-                outcome.map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            }
-            queue.push_back(QueuedSource::Content {
-                path: canonical,
-                kind,
-            });
-
+            let source = source_id_for_path(
+                source_files,
+                &canonical,
+                string_table,
+                "has no classified source identity",
+            )?;
             Ok(ResolvedFileReferenceOutcome::Target(
-                ResolvedFileReferenceTarget::ContentSource {
-                    source: target_file,
-                },
+                ResolvedFileReferenceTarget::ContentSource { source },
             ))
         }
     }
+}
+
+fn source_id_for_path(
+    source_files: &SourceDatabase,
+    path: &Path,
+    string_table: &mut StringTable,
+    missing: &str,
+) -> Result<SourceId, CompilerMessages> {
+    source_files
+        .get_by_canonical_path(path)
+        .map(|identity| identity.id)
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!("source {path:?} {missing}")),
+                string_table,
+            )
+        })
 }
 
 fn prepare_one_source(

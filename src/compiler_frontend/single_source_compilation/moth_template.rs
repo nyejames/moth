@@ -172,6 +172,12 @@ pub(crate) fn compile_moth_template_source(
                 )
             }
             None => {
+                // A request without a Stage 0 bundle compiles one in-memory source. The one-row
+                // inventory is classified here so this arm assigns `SourceId` through the same
+                // canonical-order constructor as the bundle-bearing arm, which classified its
+                // whole closure before this match. Only `single_source_compilation`'s own tests
+                // reach here today: the sole production caller, the HTML direct-template API,
+                // always supplies a bundle.
                 let mut source_files = SourceDatabase::build_classified(
                     std::iter::once((
                         request.source_path.to_path_buf(),

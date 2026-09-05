@@ -600,12 +600,12 @@ depths only; the child map lives and dies with the builder.
 ### Slice group 1B — Replace per-module source tables with build-lifetime registration
 
 - [ ] **1B1 — registration index and ID domain:** add the `compiler_frontend/source/` owner; keep `SourceTreeIndex`, source-package inventories and path resolution as the only filesystem discovery path; have those owners produce/move compact candidate rows into one sorted compiler-facing `SourceRegistrationIndex` rather than duplicating their tree/root metadata; implement `SourceId(NonZeroU32)` and the deterministic `CompilationRoot` record at ID 1
-- [ ] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
+- [x] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
-- [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
+- [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
 identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
@@ -783,13 +783,55 @@ origin, then module-relative path (`source_tree_index.rs:223-241,1642`). Two lan
   `alpha.mtf` from `zeta.mtf` therefore keeps `zeta` before `alpha`, and sibling content IDs follow
   authored reference order. That is exactly the reachability order 1B2 forbids.
 
-`build_classified` has two production callers, not three: `source_discovery.rs:482` and the dead
-`moth_template.rs:175` arm. `source_discovery.rs:1420` is `#[cfg(test)]`. The registration-index
-constructors have two, both in directory-project and package compilation (`compilation.rs:541,593`).
+`build_classified` had two callers, one of them the test-only `moth_template.rs` arm, so
+`source_discovery.rs:482` was the only production one; `source_discovery.rs:1420` is
+`#[cfg(test)]`. 1B2-b adds the direct-template lane as its second production caller. The
+registration-index constructors have two, both in directory-project and package compilation
+(`compilation.rs:541,593`).
 No build reaches both kinds of constructor: CLI and dev-server dispatch are mutually exclusive
 (`mod.rs:177-190`; dev-server `build_loop:111` calls the ordinary project build). Closing these two
 clauses is **1B1-b** (registration index for discovered lanes) and **1B2-b** (canonical order for the
 direct-template lane).
+
+**Delivered as 1B2-b.** The direct-template lane now separates the two concerns its walk fused.
+The BFS collects the complete candidate closure with each source's authored kind and loads its
+text, assigning no identities; `SourceDatabase::build_classified` then sorts that closure by
+canonical logical path once and assigns every `SourceId`. `zeta.mtf` referring to `gamma` then
+`alpha` now yields alpha, gamma, zeta.
+
+Preparing each source twice to reach that order would have been the obvious implementation and is
+the one to avoid: the discarded pass's strings stay interned in the caller's table forever. The
+lane instead follows `source_discovery.rs:543-562` - prepare once against the provisional path,
+then `rebind_source_identity` plus `freeze_path_syntax` onto the classified identity. That is one
+`prepare_one_source` call per source.
+
+Rebinding prepared outputs is not sufficient on its own. A resolution diagnostic is cloned from
+the reference's location before identities exist, and is owned by the resolved-reference row
+rather than by the prepared output, so it needs its own
+`CompilerDiagnostic::rebind_source_identity`. Without it a missing-target failure named
+`/private/var/folders/.../page.mtf` instead of `page.mtf`;
+`retained_resolution_diagnostics_name_the_final_logical_source` pins that.
+
+The `moth_template.rs` `None` arm was kept and its comment corrected: it compiles one in-memory
+source through the same canonical-order constructor, but only `single_source_compilation`'s own
+tests reach it, because the sole production caller always supplies a bundle. Removing that arm
+belongs to **7C**, not here.
+
+**Delivered as 1B7-b.** `every_preparation_strategy_stamps_the_registered_source_identity`
+asserts that every prepared output's `file_id` is the identity its input already carried, under
+`Serial`, `ParallelPerFile` and `ParallelChunked`. The fixture names files in descending order so
+input order is the reverse of canonical identity order, and asserts that, because an identity
+re-derived from a file's position would otherwise pass. Eight files plan two chunks, so the
+chunked arm is not a single-chunk no-op.
+
+The earlier disposition that dropped this test as "structurally impossible" was wrong for the
+reason it gave and right by accident: the registration barrier does make a worker's re-derivation
+unreachable *today*, but the test is a regression guard on that barrier, not a bug hunt. It earns
+its place on evidence: perturbing the identity in the `ParallelPerFile` dispatch arm alone makes
+it the only failing test in the 4875-test lib suite. `ParallelPerFile` had no end-to-end
+preparation coverage before it - `parallel_file_preparation_produces_deterministic_ordered_output`
+asserts `ParallelChunked`. Coarser perturbations are caught by the prepared-file invariant gate,
+which checks a file's identity against its own header streams rather than against the database.
 
 `ProjectGlobalsInterface` and the source database reach canonical compilation as two arguments of one
 `BoundaryCompilationContext` (`compilation.rs:1022-1050`), so they do share one project identity
