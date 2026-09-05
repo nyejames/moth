@@ -311,27 +311,44 @@ fn settle_reference_outcome(
             // A nested content source is never re-prepared: the identity table dedupes, and the
             // caller's visited set skips a file already reached. Loading happens here, before that
             // visited check, so it must dedupe on the slot rather than on the queue.
-            let extension = canonical
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .unwrap_or_default();
-            let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "resolved supported content target has no registered source kind",
-                    ),
-                    string_table,
-                ));
+            //
+            // A path already registered keeps the kind its own producer authored. Only a genuinely
+            // new path is classified here, because a lexical spelling can resolve onto a target
+            // whose extension names another kind, and asserting a second kind for one canonical
+            // path is the conflict the source database rejects.
+            let registered = source_files
+                .get_by_canonical_path(&canonical)
+                .and_then(|record| match record.kind {
+                    Some(SourceKind::Compiler(kind)) => Some((record.id, kind)),
+                    _ => None,
+                });
+            let (target_file, kind) = match registered {
+                Some(reused) => reused,
+                None => {
+                    let extension = canonical
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .unwrap_or_default();
+                    let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
+                        return Err(CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "resolved supported content target has no registered source kind",
+                            ),
+                            string_table,
+                        ));
+                    };
+                    let target_file = source_files
+                        .insert(
+                            canonical.clone(),
+                            SourceKind::Compiler(kind),
+                            canonical.as_path(),
+                            Some(path_resolver),
+                            string_table,
+                        )
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    (target_file, kind)
+                }
             };
-            let target_file = source_files
-                .insert(
-                    canonical.clone(),
-                    SourceKind::Compiler(kind),
-                    canonical.as_path(),
-                    Some(path_resolver),
-                    string_table,
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
             if source_files.retained_text(target_file).is_none()
                 && source_files.source_load_error(target_file).is_none()
             {

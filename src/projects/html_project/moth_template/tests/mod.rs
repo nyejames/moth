@@ -529,6 +529,40 @@ fn files_input_repeated_markdown_content_value_is_inlined_twice() {
     );
 }
 
+/// A lexical `.mtf` spelling can resolve onto a `.md` target, so the entry's authored kind and the
+/// kind its own canonical extension names disagree. A content reference that lands back on that
+/// same canonical path must reuse the registered identity rather than assert the second kind,
+/// which the source database rejects as a conflict.
+#[cfg(unix)]
+#[test]
+fn content_reference_onto_the_entry_reuses_its_registered_kind() {
+    let temp_dir = temp_project(&[("page.md", "# Page\n\n[@page.md]")]);
+    std::os::unix::fs::symlink(
+        temp_dir.path().join("page.md"),
+        temp_dir.path().join("entry.mtf"),
+    )
+    .expect("the template spelling should symlink onto its Markdown target");
+    let mut string_table = StringTable::new();
+
+    let result = compile_moth_template(
+        request(MothTemplateInput::Files(vec![
+            temp_dir.path().join("entry.mtf"),
+        ])),
+        &mut string_table,
+    );
+
+    if let Err(messages) = result {
+        let conflicts: Vec<_> = messages
+            .diagnostics()
+            .filter(|diagnostic| format!("{:?}", diagnostic.payload).contains("conflicting kinds"))
+            .collect();
+        assert!(
+            conflicts.is_empty(),
+            "the entry's own canonical path must not be registered under a second kind: {conflicts:?}"
+        );
+    }
+}
+
 #[test]
 fn unreadable_content_value_surfaces_its_own_read_failure() {
     let temp_dir = temp_project(&[("page.mtf", "About\n\n[@docs/legal.md]")]);

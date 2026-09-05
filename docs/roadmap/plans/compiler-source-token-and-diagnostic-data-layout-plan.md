@@ -604,8 +604,8 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
-- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
-- [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
+- [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
+- [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
 identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
@@ -737,30 +737,67 @@ this slice removed the last carrier, `FrontendSourceFileIdentity`, whose three f
 not. One `source_identity_facts` lookup in `pipeline.rs` now reads those facts from the record for
 all three consumers — tokenization, plain-Markdown preparation and retained-token rebinding. Header
 parse options borrow the path resolver instead of cloning one per module, which made
-`HeaderParseOptions` `Copy` and removed ten resolver clones. The clause's remaining sentence,
-"retain canonical OS paths only as cold source-record data", is not closed here: `FileTokens`
-`.canonical_os_path` and `ModuleSymbols::canonical_os_path_by_source` are this plan's own slice
-group 2C property. The `CompilerFrontend<'build>` borrow is the `Arc<SourceDatabase>` sharing
-decision recorded immediately above.
+`HeaderParseOptions` `Copy` and removed ten resolver clones. **1B6 stays open** for its last
+sentence, "retain canonical OS paths only as cold source-record data": `FileTokens.canonical_os_path`
+(`tokenizer/tokens.rs:255`) and `ModuleSymbols::canonical_os_path_by_source` still own a second copy.
+An earlier note here called those slice group 2C's property; that was wrong — 2C's own checklist
+covers logical path owners and never names these fields. They belong to 1B6 and land in **1B6-b**.
+The `CompilerFrontend<'build>` borrow is the `Arc<SourceDatabase>` sharing decision recorded above.
 
 **Delivered as 1B7-a.** The design authority's source-size bound ("Source size and complexity
 limits") is enforced at `SourceDatabase::retain_text`, the one point a snapshot becomes owned. The
 lane follows the record's `provenance`: an authored physical source too large for `u32` byte
 offsets fails as a user-facing file error carrying that record's own interned identity, so the
-terminal and dev-server renderers can locate it; a compiler-produced snapshot of that size is a
+terminal and dev-server renderers can name the file; no source excerpt accompanies it, because the
+oversized snapshot is refused before retention. A compiler-produced snapshot of that size is a
 compiler bug. The size policy applies only to a record that can still accept a snapshot, because a
 second retain is a lifecycle violation that must be reported as the compiler's mistake rather than
 preempted by a message about the user's file.
 
-**The serial/parallel ID test 1B7 named is vacuous, and that is the 1B2 barrier working.**
+**1B7 stays open for its cross-strategy test, and the reason it looked unnecessary is worth keeping.**
 `SourceId` is assigned at the registration barrier, before any `FilePreparationStrategy` exists:
-`module_preparation.rs` contains no `push_record`, `SourceId::from_index` or database construction,
-and `prepare_module_file_chunk` only reads an ID its input already carries. A cross-strategy
-equality test could therefore never fail, so none was written. The property that *can* fail —
-identities following canonical logical-path order rather than insertion order — is covered by
+`module_preparation.rs` selects the strategy at `:545-562` against an already-immutable source
+context, and `:823` only reads an ID its input already carries. So the test cannot expose a *current*
+bug. It can still expose a future one: a refactor that let a worker allocate or re-derive an identity
+would make prepared outputs disagree with the database, and nothing else in the suite would notice.
+That is a plausible bug, so the test earns its place and lands in **1B7-b**. The related property
+that identities follow canonical logical order rather than insertion order is already covered by
 `source_database_build_orders_records_by_portable_logical_path`
-(`src/compiler_frontend/source/tests.rs:215`), which fails if the sort is removed without running
-preparation at all.
+(`src/compiler_frontend/source/tests.rs:215`); that test does not exercise preparation at all and
+cannot substitute for the cross-strategy contract.
+
+**1B1 and 1B2 stay open: two discovered lanes never reach a sorted registration index.** Directory and
+package builds project their `SourceTreeIndex`/package inventories into one sorted
+`SourceRegistrationIndex` before any structural work, ordered by `SourceLogicalIdentity` — module
+origin, then module-relative path (`source_tree_index.rs:223-241,1642`). Two lanes do not:
+
+- **Single-file/synthetic discovery** registers BFS-order candidates and sorts once at finalization by
+  `portable_sort_key` (`source_discovery.rs:475-493`; `database.rs:100-103`). The result is canonical
+  and traversal-independent, but it is a second ordering key, not the registration index 1B1 names.
+  The tree key groups by module origin and places rooted identities before unrooted ones, which a flat
+  path string cannot express.
+- **Direct-template compilation never sorts at all.** `compile.rs:94-109` always supplies
+  `Some(file_value_bundle)`, so the `build_classified` arm at `moth_template.rs:175` is dead for the
+  production caller. `bundle.rs:108-118` assigns the entry ID and `:326-334` assigns content IDs as
+  references are encountered, then `:263` publishes that database unchanged. An entry referring to
+  `alpha.mtf` from `zeta.mtf` therefore keeps `zeta` before `alpha`, and sibling content IDs follow
+  authored reference order. That is exactly the reachability order 1B2 forbids.
+
+`build_classified` has two production callers, not three: `source_discovery.rs:482` and the dead
+`moth_template.rs:175` arm. `source_discovery.rs:1420` is `#[cfg(test)]`. The registration-index
+constructors have two, both in directory-project and package compilation (`compilation.rs:541,593`).
+No build reaches both kinds of constructor: CLI and dev-server dispatch are mutually exclusive
+(`mod.rs:177-190`; dev-server `build_loop:111` calls the ordinary project build). Closing these two
+clauses is **1B1-b** (registration index for discovered lanes) and **1B2-b** (canonical order for the
+direct-template lane).
+
+`ProjectGlobalsInterface` and the source database reach canonical compilation as two arguments of one
+`BoundaryCompilationContext` (`compilation.rs:1022-1050`), so they do share one project identity
+context; bundling them into a context type now would pre-empt Phase 4's `FrozenIdentityContext`.
+
+**1B4 stays open, and 1C closes it.** Its loading, dense-slot-map and conflict-rejection halves are
+delivered; the compact registration-slot/loaded-record split is 1C6 by the relocation recorded above,
+and the `Finalized` state remains the `&mut` ownership convention recorded against 1B4's lifecycle.
 
 **Module scope decision, recorded against 1B5.** Widening the database to the boundary widened
 every module's external-import candidate set with it, because `run_semantic_stages` derived its
