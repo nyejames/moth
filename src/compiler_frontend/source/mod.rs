@@ -19,5 +19,5 @@ mod tests;
 
 pub(crate) use database::SourceDatabase;
 pub(crate) use id::SourceId;
-pub(crate) use record::{SourceProvenance, SourceRecord};
+pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord};
 pub(crate) use registration::SourceRegistrationIndex;

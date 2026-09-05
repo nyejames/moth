@@ -8,7 +8,7 @@
 //! owner is the only physical resolver for directory paths, so later stages receive settled
 //! targets and cannot rediscover the filesystem. It never parses expressions or reads bytes.
 
-use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
+use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
@@ -249,17 +249,10 @@ impl<'a> FileReferenceResolver<'a> {
                         )),
                     });
                 }
-                let target_source_index = self.indexed_source(
-                    consumer_module_id,
-                    &canonical,
-                    SourceFileKind::from_extension(
-                        canonical
-                            .extension()
-                            .and_then(|extension| extension.to_str())
-                            .unwrap_or_default(),
-                    ),
-                )?;
+                let target_source_index = self.indexed_source(consumer_module_id, &canonical)?;
                 discovered_content_sources.push(target_source_index);
+                // `indexed_source` already proved this canonical path is compiler semantic, so
+                // only the identity is still missing here.
                 let target_file_id = source_files
                     .get_by_canonical_path(&canonical)
                     .map(|identity| identity.id)
@@ -349,7 +342,6 @@ impl<'a> FileReferenceResolver<'a> {
         &self,
         consumer_module_id: ModuleId,
         canonical: &Path,
-        expected_kind: Option<SourceFileKind>,
     ) -> Result<SourceRecordIndex, CompilerError> {
         let source_index = self
             .source_tree_index
@@ -374,18 +366,14 @@ impl<'a> FileReferenceResolver<'a> {
             )));
         }
 
-        let SourceClassification::CompilerSemantic(actual_kind) = record.classification() else {
+        // Kind is not compared here: this tree record is the same one whose classification the
+        // source database registered, so a comparison would check that value against itself.
+        let SourceClassification::CompilerSemantic(_) = record.classification() else {
             return Err(CompilerError::compiler_error(format!(
                 "canonical source target {:?} is not compiler semantic",
                 canonical
             )));
         };
-        if expected_kind != Some(*actual_kind) {
-            return Err(CompilerError::compiler_error(format!(
-                "canonical source target {:?} has source kind {:?}, expected {:?}",
-                canonical, actual_kind, expected_kind
-            )));
-        }
 
         Ok(source_index)
     }

@@ -13,14 +13,14 @@ pub(crate) use validation::validate_directory_output_settings;
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
-use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::single_source_compilation::{
     ConfigCompilationRequest, compile_config_source,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -132,6 +132,7 @@ pub(crate) fn compile_project_config_file(
         .map(|source_files| {
             source_files.insert(
                 canonical_config_path.clone(),
+                SourceKind::Compiler(SourceFileKind::Moth),
                 &canonical_config_path,
                 None,
                 string_table,

@@ -31,7 +31,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -109,6 +109,7 @@ pub(super) fn prepare_file_value_bundle(
     source_files
         .insert(
             unit.source_path.clone(),
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
             &unit.source_path,
             Some(&path_resolver),
             string_table,
@@ -325,6 +326,7 @@ fn settle_reference_outcome(
             let target_file = source_files
                 .insert(
                     canonical.clone(),
+                    SourceKind::Compiler(kind),
                     canonical.as_path(),
                     Some(path_resolver),
                     string_table,

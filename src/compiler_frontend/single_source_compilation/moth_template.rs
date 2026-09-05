@@ -42,7 +42,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -172,8 +172,11 @@ pub(crate) fn compile_moth_template_source(
                 )
             }
             None => {
-                let mut source_files = SourceDatabase::build(
-                    [request.source_path],
+                let mut source_files = SourceDatabase::build_classified(
+                    std::iter::once((
+                        request.source_path.to_path_buf(),
+                        SourceKind::Compiler(SourceFileKind::MothTemplate),
+                    )),
                     request.source_path,
                     Some(&path_resolver),
                     string_table,

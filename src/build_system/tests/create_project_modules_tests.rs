@@ -58,7 +58,7 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -772,6 +772,112 @@ fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independe
         ]
     );
     assert_eq!(forward[2].selected_source_names, vec!["greet", "greet"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let payload = root.join("payload.bin");
+    let entry = root.join("main.moth");
+    fs::write(&payload, "#[:ok]\n").expect("should write unrecognized-extension payload");
+    symlink(&payload, &entry).expect("should symlink recognized source name onto payload");
+
+    let config = Config::new(root.clone());
+    let resolver = configured_resolver(&config);
+    let style_directives = test_style_directives();
+    let (source_files, input_files, _string_table) =
+        collect_synthetic_inputs_for_test(&entry, &resolver, &style_directives);
+
+    let canonical = fs::canonicalize(&entry).expect("symlinked entry should canonicalize");
+    assert_eq!(
+        canonical
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("bin"),
+        "canonical target must keep the unrecognized extension"
+    );
+    let record = source_files
+        .get_by_canonical_path(&canonical)
+        .expect("discovered source should retain its identity");
+    assert_eq!(
+        record.kind,
+        Some(SourceKind::Compiler(SourceFileKind::Moth)),
+        "authored .moth kind must survive a canonical .bin target"
+    );
+    assert!(
+        input_files
+            .iter()
+            .any(|input| matches!(input, PreparedSourceInput::MothPrepared { .. })),
+        "discovery must prepare the authored Moth source rather than reject it as provider-owned"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(source_root.join("main.moth"), "value #= 1\n").expect("should write entry");
+    let payload = source_root.join("payload.bin");
+    fs::write(&payload, "template body\n").expect("should write unrecognized-extension payload");
+    symlink(&payload, source_root.join("page.mtf"))
+        .expect("should symlink a template name onto the payload");
+
+    let config = Config::new(root.clone());
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+    let mut string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &source_file_kinds,
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should discover the symlinked template");
+
+    let registration_index = source_tree_index.source_registration_index();
+    let source_files = SourceDatabase::from_ordered_registration_index(
+        &registration_index,
+        resolver.entry_root(),
+        Some(&resolver),
+        &mut string_table,
+    )
+    .expect("indexed inventory should register");
+
+    let canonical = fs::canonicalize(source_root.join("page.mtf"))
+        .expect("symlinked template should canonicalize");
+    assert_eq!(
+        canonical
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("bin"),
+        "canonical target must keep the unrecognized extension"
+    );
+    assert_eq!(
+        source_files
+            .get_by_canonical_path(&canonical)
+            .and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate)),
+        "Stage 0's authored .mtf classification must reach the record"
+    );
 }
 
 #[test]

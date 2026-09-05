@@ -11,7 +11,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -38,7 +38,6 @@ pub(super) struct PreparedDiscoverySource {
     pub(super) prepared_output: FileFrontendPrepareOutput,
     pub(super) source_byte_len: usize,
     pub(super) source_code: String,
-    pub(super) source_kind: SourceFileKind,
 }
 
 pub(super) fn prepare_discovery_source(
@@ -103,6 +102,7 @@ pub(super) fn prepare_discovery_source_text(
     // closure is complete, and this table dies with the traversal.
     source_files.insert(
         file_path.to_path_buf(),
+        SourceKind::Compiler(SourceFileKind::Moth),
         entry_file_path,
         project_path_resolver.as_ref(),
         string_table,
@@ -121,7 +121,6 @@ pub(super) fn prepare_discovery_source_text(
         prepared_output,
         source_byte_len: source.len(),
         source_code: source,
-        source_kind: SourceFileKind::Moth,
     })
 }
 
@@ -140,6 +139,7 @@ pub(super) fn prepare_discovery_template_source(
 
     source_files.insert(
         file_path.to_path_buf(),
+        SourceKind::Compiler(SourceFileKind::MothTemplate),
         entry_file_path,
         project_path_resolver.as_ref(),
         string_table,
@@ -159,7 +159,6 @@ pub(super) fn prepare_discovery_template_source(
         prepared_output,
         source_byte_len,
         source_code: source,
-        source_kind: SourceFileKind::MothTemplate,
     })
 }
 

@@ -5,7 +5,9 @@
 //! deliberately not stored here.
 
 use super::record::SourceRecordState;
-use super::{SourceId, SourceProvenance, SourceRecord, SourceRegistrationIndex};
+use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
+#[cfg(test)]
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -39,11 +41,16 @@ impl SourceDatabase {
         Self::default()
     }
 
-    /// Build deterministic source identities from an unordered file list.
+    /// Build deterministic source identities from canonical paths alone, for tests.
     ///
     /// Canonical files are sorted by portable logical path before identities are assigned, so
-    /// assignment does not depend on filesystem iteration order. Directory boundaries that
-    /// already own sorted registration rows use [`Self::from_ordered_registration_index`] instead.
+    /// assignment does not depend on filesystem iteration order.
+    ///
+    /// WHY test-only: every production lane knows the authored kind of what it registers and
+    /// supplies it, because canonicalize can resolve a recognized spelling onto a target whose
+    /// extension names another kind. A fixture that owns nothing but canonical paths has no such
+    /// spelling to lose, so it may derive the kind from the extension instead.
+    #[cfg(test)]
     pub fn build<I>(
         canonical_files: I,
         entry_file_path: &Path,
@@ -55,13 +62,44 @@ impl SourceDatabase {
         I::IntoIter: ExactSizeIterator,
         I::Item: AsRef<Path>,
     {
-        let mut rows = logical_rows_for_canonical_files(
-            canonical_files,
+        Self::build_classified(
+            canonical_files.into_iter().map(|path| {
+                let path = path.as_ref().to_path_buf();
+                let kind = physical_source_kind(&path);
+                (path, kind)
+            }),
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )
+    }
+
+    /// Build deterministic source identities from canonical paths that already carry a kind.
+    ///
+    /// WHAT: sorts the same way as [`Self::build`], then registers each row with the supplied
+    ///       kind rather than re-deriving it from the canonical extension.
+    /// WHY: Stage 0 classifies the lexical file name before canonicalize. A `page.mtf` symlink
+    ///      to `payload.bin` must remain a template even though the canonical extension is
+    ///      unrecognized.
+    pub(crate) fn build_classified<I>(
+        rows: I,
+        entry_file_path: &Path,
+        project_path_resolver: Option<&ProjectPathResolver>,
+        string_table: &mut StringTable,
+    ) -> Result<Self, CompilerError>
+    where
+        I: IntoIterator<Item = (PathBuf, SourceKind)>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let mut rows = logical_rows_for_classified_files(
+            rows,
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
-        rows.sort_by(|(_, left), (_, right)| left.portable_sort_key.cmp(&right.portable_sort_key));
+        rows.sort_by(|(_, _, left), (_, _, right)| {
+            left.portable_sort_key.cmp(&right.portable_sort_key)
+        });
         Self::from_ordered_logical_rows(rows)
     }
 
@@ -98,8 +136,10 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerError> {
-        let rows = logical_rows_for_canonical_files(
-            registration_index.canonical_paths(),
+        let rows = logical_rows_for_classified_files(
+            registration_index
+                .rows()
+                .map(|(canonical_path, kind)| (canonical_path.to_path_buf(), kind)),
             entry_file_path,
             project_path_resolver,
             string_table,
@@ -109,9 +149,9 @@ impl SourceDatabase {
 
     fn append_ordered_logical_rows<I>(&mut self, rows: I) -> Result<(), CompilerError>
     where
-        I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
+        I: IntoIterator<Item = (PathBuf, SourceKind, LogicalSourcePath)>,
     {
-        for (canonical, logical) in rows {
+        for (canonical, kind, logical) in rows {
             if self.canonical_to_id.contains_key(&canonical) {
                 return Err(CompilerError::compiler_error(format!(
                     "Source identity inventory registered canonical source path {} more than once",
@@ -119,7 +159,7 @@ impl SourceDatabase {
                 )));
             }
 
-            self.push_record(canonical, logical.interned);
+            self.push_record(canonical, logical.interned, kind);
         }
 
         Ok(())
@@ -127,7 +167,7 @@ impl SourceDatabase {
 
     fn from_ordered_logical_rows<I>(rows: I) -> Result<Self, CompilerError>
     where
-        I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
+        I: IntoIterator<Item = (PathBuf, SourceKind, LogicalSourcePath)>,
     {
         let mut database = Self::empty();
         database.append_ordered_logical_rows(rows)?;
@@ -188,9 +228,15 @@ impl SourceDatabase {
     /// A repeated canonical path returns the existing identity only when its logical path matches.
     /// A conflicting logical spelling is rejected. New records append after the existing records,
     /// matching the traversal-time registration behavior.
+    ///
+    /// Callers supply the authored kind their own lane compiles the source as. Kind is a property
+    /// of that unique record, not a second identity key: a repeated canonical path keeps the
+    /// stored kind because one canonical path cannot yield two records. Path-only registration
+    /// that holds no authored spelling uses [`Self::build`].
     pub fn insert(
         &mut self,
         canonical_path: PathBuf,
+        kind: SourceKind,
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
@@ -214,12 +260,16 @@ impl SourceDatabase {
             }
             return Ok(record.id);
         }
-
-        Ok(self.push_record(canonical_path, logical.interned))
+        Ok(self.push_record(canonical_path, logical.interned, kind))
     }
 
     /// Append one record and return the identity its position assigns.
-    fn push_record(&mut self, canonical_path: PathBuf, logical_path: InternedPath) -> SourceId {
+    fn push_record(
+        &mut self,
+        canonical_path: PathBuf,
+        logical_path: InternedPath,
+        kind: SourceKind,
+    ) -> SourceId {
         let id = SourceId::from_index(self.files.len());
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.files.push(SourceRecord {
@@ -227,6 +277,7 @@ impl SourceDatabase {
             canonical_os_path: Some(canonical_path),
             logical_path,
             state: SourceRecordState::Registered,
+            kind: Some(kind),
             provenance: SourceProvenance::AuthoredPhysical,
         });
         id
@@ -282,7 +333,26 @@ fn compilation_root_record() -> SourceRecord {
         canonical_os_path: None,
         logical_path: InternedPath::new(),
         state: SourceRecordState::Registered,
+        kind: None,
         provenance: SourceProvenance::CompilationRoot,
+    }
+}
+
+/// Derive a physical source kind from a canonical path extension, for [`SourceDatabase::build`].
+///
+/// Every production lane supplies an authored kind to [`SourceDatabase::build_classified`],
+/// [`SourceDatabase::insert`] or the Stage 0 registration index instead, so this derivation only
+/// serves test fixtures. Recognized extensions become compiler kinds; every other physical path is
+/// provider-owned, so `None` on a record can only mean the reserved compilation root.
+#[cfg(test)]
+fn physical_source_kind(canonical_path: &Path) -> SourceKind {
+    let extension = canonical_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("");
+    match SourceFileKind::from_extension(extension) {
+        Some(kind) => SourceKind::Compiler(kind),
+        None => SourceKind::ProviderOwned,
     }
 }
 
@@ -293,29 +363,27 @@ struct LogicalSourcePath {
     portable_sort_key: String,
 }
 
-fn logical_rows_for_canonical_files<I>(
-    canonical_files: I,
+fn logical_rows_for_classified_files<I>(
+    classified: I,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
-) -> Result<Vec<(PathBuf, LogicalSourcePath)>, CompilerError>
+) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError>
 where
-    I: IntoIterator,
+    I: IntoIterator<Item = (PathBuf, SourceKind)>,
     I::IntoIter: ExactSizeIterator,
-    I::Item: AsRef<Path>,
 {
-    let canonical_files = canonical_files.into_iter();
-    let mut rows = Vec::with_capacity(canonical_files.len());
+    let classified = classified.into_iter();
+    let mut rows = Vec::with_capacity(classified.len());
 
-    for canonical in canonical_files {
-        let canonical = canonical.as_ref();
+    for (canonical, kind) in classified {
         let logical = interned_logical_path(
-            canonical,
+            &canonical,
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
-        rows.push((canonical.to_path_buf(), logical));
+        rows.push((canonical, kind, logical));
     }
 
     Ok(rows)

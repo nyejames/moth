@@ -1,5 +1,6 @@
 //! Retained identity metadata for one frontend source record.
 
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use std::path::PathBuf;
@@ -11,6 +12,20 @@ pub enum SourceProvenance {
     CompilationRoot,
     /// Source authored as a physical file.
     AuthoredPhysical,
+}
+
+/// Lexical classification of a physical source record.
+///
+/// WHAT: distinguishes compiler-recognized source from provider-owned identity records.
+/// WHY: Stage 0 registers the whole sorted canonical inventory, including provider-owned
+///      physical files that exist to hold an identity rather than to be compiled. The
+///      provider-owned extension stays on `canonical_os_path`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceKind {
+    /// The source kind its producer classified from the authored spelling.
+    Compiler(SourceFileKind),
+    /// A provider-owned physical file that is not compiled.
+    ProviderOwned,
 }
 
 /// Identity and loading lifecycle for one source record.
@@ -89,5 +104,14 @@ pub struct SourceRecord {
     pub canonical_os_path: Option<PathBuf>,
     pub logical_path: InternedPath,
     pub(super) state: SourceRecordState,
+    /// Kind of this source's authored spelling, absent only for the reserved compilation root.
+    ///
+    /// WHAT: stores whether this physical record is a compiler-recognized source or
+    ///       provider-owned, as classified by the producer that registered it.
+    /// WHY: the producer knows the authored name, and canonicalize can resolve a recognized
+    ///      spelling onto a target whose extension names another kind. Storing the answer also
+    ///      spares every consumer holding a `SourceId` from re-parsing a cold path. `None`
+    ///      identifies the reserved compilation root, which is not a file.
+    pub kind: Option<SourceKind>,
     pub provenance: SourceProvenance,
 }

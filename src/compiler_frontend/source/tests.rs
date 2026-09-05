@@ -1,5 +1,8 @@
-use super::{SourceDatabase, SourceId, SourceProvenance};
-use crate::builder_surface::SourceFileKindRegistry;
+use super::{
+    SourceDatabase, SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex,
+};
+
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
@@ -17,6 +20,133 @@ fn source_id_uses_the_non_zero_option_niche() {
     assert_eq!(size_of::<SourceId>(), 4);
     assert_eq!(align_of::<SourceId>(), 4);
     assert_eq!(size_of::<Option<SourceId>>(), 4);
+}
+
+#[test]
+fn registered_physical_sources_carry_the_kind_named_by_their_extension() {
+    let moth_path = PathBuf::from("/project/main.moth");
+    let template_path = PathBuf::from("/project/page.mtf");
+    let markdown_path = PathBuf::from("/project/notes.md");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        [&moth_path, &template_path, &markdown_path],
+        &moth_path,
+        None,
+        &mut string_table,
+    )
+    .expect("recognized sources should register");
+
+    assert_eq!(
+        database
+            .get_by_canonical_path(&moth_path)
+            .and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::Moth))
+    );
+    assert_eq!(
+        database
+            .get_by_canonical_path(&template_path)
+            .and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
+    );
+    assert_eq!(
+        database
+            .get_by_canonical_path(&markdown_path)
+            .and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::PlainMarkdown))
+    );
+}
+
+#[test]
+fn registered_provider_owned_physical_sources_keep_their_identity() {
+    let path = PathBuf::from("/project/drawing.js");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(std::iter::once(&path), &path, None, &mut string_table)
+        .expect("provider-owned physical sources should register");
+    let record = database
+        .get_by_canonical_path(&path)
+        .expect("provider-owned identity should be retained");
+
+    assert_eq!(record.kind, Some(SourceKind::ProviderOwned));
+    assert_eq!(record.id, SourceId::from_index(1));
+    assert_eq!(record.canonical_os_path.as_deref(), Some(path.as_path()));
+}
+
+#[test]
+fn classified_registration_keeps_authored_kind_when_canonical_extension_disagrees() {
+    let path = PathBuf::from("/project/payload.bin");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build_classified(
+        std::iter::once((
+            path.clone(),
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
+        )),
+        &path,
+        None,
+        &mut string_table,
+    )
+    .expect("authored-kind registration should succeed");
+    let record = database
+        .get_by_canonical_path(&path)
+        .expect("classified source should retain its identity");
+
+    assert_eq!(
+        record.kind,
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate)),
+        "authored kind must survive a canonical extension that would derive ProviderOwned"
+    );
+}
+
+#[test]
+fn append_ordered_registration_index_keeps_authored_kind_when_canonical_extension_disagrees() {
+    let path = PathBuf::from("/project/payload.bin");
+    let mut string_table = StringTable::new();
+    let registration_index = SourceRegistrationIndex::from_ordered_rows(std::iter::once((
+        path.as_path(),
+        SourceKind::Compiler(SourceFileKind::MothTemplate),
+    )));
+    let mut database = SourceDatabase::empty();
+    database
+        .append_ordered_registration_index(&registration_index, &path, None, &mut string_table)
+        .expect("authored-kind registration should succeed");
+    let record = database
+        .get_by_canonical_path(&path)
+        .expect("indexed source should retain its identity");
+
+    assert_eq!(
+        record.kind,
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate)),
+        "authored kind must survive a canonical extension that would derive ProviderOwned"
+    );
+}
+
+#[test]
+fn insert_keeps_authored_kind_when_canonical_extension_disagrees() {
+    let path = PathBuf::from("/project/payload.bin");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+    database
+        .insert(
+            path.clone(),
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
+            &path,
+            None,
+            &mut string_table,
+        )
+        .expect("authored-kind insert should succeed");
+    let record = database
+        .get_by_canonical_path(&path)
+        .expect("inserted source should retain its identity");
+
+    assert_eq!(
+        record.kind,
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate)),
+        "authored kind must survive a canonical extension that would derive ProviderOwned"
+    );
+}
+
+#[test]
+fn source_record_identity_row_stays_within_its_measured_width() {
+    assert_eq!(size_of::<SourceRecord>(), 80);
 }
 
 #[test]
@@ -64,6 +194,7 @@ fn appended_sources_also_begin_after_the_reserved_root() {
     let id = database
         .insert(
             canonical_path.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
             &canonical_path,
             None,
             &mut string_table,
@@ -187,6 +318,7 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
     let module_a_view = database
         .insert(
             shared_source.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
             &module_a_source,
             None,
             &mut string_table,
@@ -195,6 +327,7 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
     let module_b_view = database
         .insert(
             shared_source.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
             &module_b_source,
             None,
             &mut string_table,
@@ -220,6 +353,7 @@ fn conflicting_logical_identity_for_canonical_source_is_rejected() {
     database
         .insert(
             canonical_path.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
             &first_entry_path,
             None,
             &mut string_table,
@@ -228,6 +362,7 @@ fn conflicting_logical_identity_for_canonical_source_is_rejected() {
     let error = database
         .insert(
             canonical_path,
+            SourceKind::Compiler(SourceFileKind::Moth),
             &conflicting_entry_path,
             None,
             &mut string_table,

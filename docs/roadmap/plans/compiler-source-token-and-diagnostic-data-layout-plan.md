@@ -687,23 +687,24 @@ claiming two identities, which is what the new rejection enforces.
 **Two 1B4 clauses remain outstanding after this slice, both moved rather than declined.** Each is
 locked architecture in `docs/compiler-data-layout-design.md`:
 
-- `SourceRecord` must own `kind: SourceKind` (design doc, "Source records"), which the compiler
-  record does not have today; Stage 0's `SourceClassification` holds it instead. **This moves into
-  1B5**, because the record has no reader until then. Kind was implemented and reverted: the field
-  and its accessor were dead in the library build, and the honest first consumer is
-  `PreparedSourceInput`, whose variants encode kind today and which 1B5 replaces with `SourceId`
-  sets. No `SourceDatabase` reaches header binding or the AST layer, so the other kind re-derivers
-  — `binding_environment/builder.rs:1287-1305`, `paths/path_resolution.rs:440`,
-  `headers/dependency_target.rs:166` — cannot read a record until slice groups 1E and 1F thread it
-  there.
+- `SourceRecord` must own its `kind` (design doc, "Source records"), which Stage 0's
+  `SourceClassification` used to hold alone. **Delivered in 1B5-c**, recorded below. An earlier
+  attempt was reverted for landing the field with no reader; the honest first consumer was
+  discovery's prepared-input selection, which is what 1B5-a rebuilt. The other kind re-derivers —
+  `binding_environment/builder.rs:1287-1305`, `paths/path_resolution.rs:440`,
+  `headers/dependency_target.rs:166` — still cannot read a record, because no `SourceDatabase`
+  reaches header binding or the AST layer until slice groups 1E and 1F thread it there.
 - Recognition, not support, is the record's kind: `SourceFileKind::from_extension` recognises
   `.moth`, `.mtf` and `.md`, while `SourceFileKindRegistry` answers whether the *active builder*
   supports a recognised kind and deliberately stores no `.moth` entry. The registry is therefore
   not the kind authority, and threading it into the source database would have created a second
   one. Recorded in the design document with the reserved root's absent kind.
-- "Reject conflicting kind" has no enforceable content once kind derives from the canonical path,
-  because that path is the deduplication key: one key cannot yield two kinds. The clause is
-  satisfied structurally rather than by a runtime check, and 1B5 must not add one.
+- "Reject conflicting kind" has no enforceable content, because the canonical path is the
+  deduplication key: one path yields one record, and a repeated registration returns that
+  identity rather than adding a second kind for the same key. The clause is satisfied
+  structurally, and neither 1B5 nor a later slice should add a runtime check for it. Note that the
+  reason is the key, not the derivation — the kind is supplied by its producer, so it does *not*
+  follow from the canonical extension.
 - The design record's `text: Box<str>` is unconditional, so a registered-but-unloaded candidate is
   not a record at all — it is the compact slot/index this clause asks for, and an unreadable source
   keeps its failure at the candidate layer rather than inside a record. `SourceRecordState` is a
@@ -772,17 +773,34 @@ are `ErrorType::File`, so the lane is unchanged; only which of two real problems
 moved. Failing on an identity that cannot be represented before performing IO for it is the better
 order, and the load counters correctly do not fire for a source that was never read.
 
+**Delivered as 1B5-c.** `SourceRecord` owns `kind: Option<SourceKind>`, absent only for the
+reserved compilation root. The kind is the *authored* one: Stage 0 classifies the lexical file name
+and only then canonicalizes, so a `page.mtf` symlinked onto `payload.bin` is a template and must
+register as one. Every producer therefore supplies the kind it compiles the source as — the
+registration index maps each row's `SourceClassification` onto a `SourceKind`, discovery passes the
+reachable file's kind, and `insert` takes it from its caller. Deriving from a canonical extension
+survives in `SourceDatabase::build`, which is now `#[cfg(test)]` because a fixture holding nothing
+but canonical paths has no authored spelling to lose, and in the one production lane recorded
+below. Its first reader is discovery's prepared-input selection, which replaced a duplicate kind
+field on the discovery cache.
+
+One authored spelling is still lost, and it predates this slice: the nested content insert in
+`projects/html_project/moth_template/bundle.rs` receives only a resolved canonical path, so it
+derives the kind the same way its queue dispatch already does. That lane classifies and compiles
+consistently, so no record contradicts its own compilation; recovering the authored name there
+belongs with the file-reference resolution work, not here.
+
 **Root reservation, recorded against 1B1.** `SourceId(1)` is now the deterministic
-`CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance` and
-an optional `canonical_os_path`; it does not yet carry `text`, `line_starts`, `extended_spans` or
-`kind`, which arrive in 1B-gamma3 and 1C where they are first read. `SourceDatabase::get` and
-`iter` both exclude the root, so a physical-only consumer holding a root identity fails in its own
-lane instead of reading a pathless record as a file; `SourceId::physical_index` is the one place
-that knows the offset. The root is inert storage until a slice gives it text and a span — the
-reservation is what matters, because token identities already derive from this domain and shifting
-it later would invalidate them. Config tokenization passes `file_id: None` rather than the
-fabricated `SourceId::from_index(0)` it previously shared with the root; registering config into
-the project identity context is 1B-gamma1c.
+`CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance`, an
+optional `canonical_os_path`, its `kind` and its retained text inside `SourceRecordState`; it does
+not yet carry `line_starts` or `extended_spans`, which arrive in 1C where they are first read.
+`SourceDatabase::get` and `iter` both exclude the root, so a physical-only consumer holding a root
+identity fails in its own lane instead of reading a pathless record as a file;
+`SourceId::physical_index` is the one place that knows the offset. The root is inert storage until a
+slice gives it text and a span — the reservation is what matters, because token identities already
+derive from this domain and shifting it later would invalidate them. Config tokenization passes
+`file_id: None` rather than the fabricated `SourceId::from_index(0)` it previously shared with the
+root; registering config into the project identity context is 1B-gamma1c.
 
 **Single ID domain, recorded against 1B1.** Stage 0 and the compiler previously ran two independent
 zero-based `SourceId` domains, reconciled by canonical path in `resolve_boundary_candidate_source_ids`.

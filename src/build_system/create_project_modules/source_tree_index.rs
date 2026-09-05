@@ -27,7 +27,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
 };
-use crate::compiler_frontend::source::SourceRegistrationIndex;
+use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
@@ -277,6 +277,17 @@ pub(crate) enum SourceClassification {
     /// An explicit provider-owned input whose extension is registered with an external import
     /// provider but is not a compiler `SourceFileKind`.
     ProviderOwned(ExternalFileExtension),
+}
+
+/// Map Stage 0's authored classification onto the compiler source-record kind.
+///
+/// The lexical file name is classified before canonicalize, so this mapping preserves that
+/// authority rather than re-deriving kind from the canonical extension.
+fn source_kind_from_classification(classification: &SourceClassification) -> SourceKind {
+    match classification {
+        SourceClassification::CompilerSemantic(kind) => SourceKind::Compiler(*kind),
+        SourceClassification::ProviderOwned(_) => SourceKind::ProviderOwned,
+    }
 }
 
 /// One recognized compiler source or provider-owned file stored exactly once in the Stage 0
@@ -1015,11 +1026,16 @@ impl SourceTreeIndex {
     /// Build the compact compiler-facing registration rows in this index's deterministic order.
     ///
     /// Rows are already sorted by [`SourceLogicalIdentity`]. The boundary source database consumes
-    /// this order unchanged when assigning compiler identities.
+    /// this order unchanged when assigning compiler identities. Each row carries the authored
+    /// kind classified from the lexical file name, not a kind re-derived from the canonical
+    /// extension.
     pub(crate) fn source_registration_index(&self) -> SourceRegistrationIndex<'_> {
-        SourceRegistrationIndex::from_ordered_paths(
-            self.sources.iter().map(|record| record.canonical_path()),
-        )
+        SourceRegistrationIndex::from_ordered_rows(self.sources.iter().map(|record| {
+            (
+                record.canonical_path(),
+                source_kind_from_classification(record.classification()),
+            )
+        }))
     }
 
     /// One source record addressed by its zero-based tree row.

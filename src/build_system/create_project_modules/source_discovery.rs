@@ -36,7 +36,7 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{
@@ -479,8 +479,13 @@ fn finalize_reachable_files(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), SourceDiscoveryError> {
-    let mut source_files = SourceDatabase::build(
-        files.iter().map(|source_file| source_file.path.as_path()),
+    let mut source_files = SourceDatabase::build_classified(
+        files.iter().map(|source_file| {
+            (
+                source_file.path.clone(),
+                SourceKind::Compiler(source_file.kind),
+            )
+        }),
         entry_file_path,
         Some(project_path_resolver),
         string_table,
@@ -528,12 +533,17 @@ fn finalize_reachable_files(
                 ))
             })?;
         let final_source_id = final_record.id;
+        let source_kind = final_record.kind.ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "final source identity {} has no lexical kind",
+                final_source_id.index()
+            ))
+        })?;
 
         if let Some(scanned_source) = source_cache.remove(&source_file.path) {
             let PreparedDiscoverySource {
                 mut prepared_output,
                 source_code,
-                source_kind,
                 ..
             } = scanned_source;
             let canonical_os_path = final_record.canonical_os_path.clone().ok_or_else(|| {
@@ -552,17 +562,27 @@ fn finalize_reachable_files(
             source_files.retain_text(final_source_id, source_code)?;
 
             input_files.push(match source_kind {
-                SourceFileKind::Moth => PreparedSourceInput::MothPrepared {
+                SourceKind::Compiler(SourceFileKind::Moth) => PreparedSourceInput::MothPrepared {
                     source_id: final_source_id,
                     output: Box::new(prepared_output),
                 },
-                SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplatePrepared {
-                    source_id: final_source_id,
-                    output: Box::new(prepared_output),
-                },
-                SourceFileKind::PlainMarkdown => {
+                SourceKind::Compiler(SourceFileKind::MothTemplate) => {
+                    PreparedSourceInput::MothTemplatePrepared {
+                        source_id: final_source_id,
+                        output: Box::new(prepared_output),
+                    }
+                }
+                SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
                     return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
                         "plain Markdown cannot enter the prepared source cache",
+                    )));
+                }
+                SourceKind::ProviderOwned => {
+                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                        format!(
+                            "final source identity {} is provider-owned and cannot be compiled",
+                            final_source_id.index()
+                        ),
                     )));
                 }
             });
@@ -579,14 +599,28 @@ fn finalize_reachable_files(
             );
             source_files.retain_text(final_source_id, loaded.source_code)?;
 
-            input_files.push(match source_file.kind {
-                SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
-                    source_id: final_source_id,
-                },
-                SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
-                    source_id: final_source_id,
-                },
-                SourceFileKind::Moth => unreachable!("Moth sources were handled above"),
+            input_files.push(match source_kind {
+                SourceKind::Compiler(SourceFileKind::MothTemplate) => {
+                    PreparedSourceInput::MothTemplate {
+                        source_id: final_source_id,
+                    }
+                }
+                SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
+                    PreparedSourceInput::PlainMarkdown {
+                        source_id: final_source_id,
+                    }
+                }
+                SourceKind::Compiler(SourceFileKind::Moth) => {
+                    unreachable!("Moth sources were handled above")
+                }
+                SourceKind::ProviderOwned => {
+                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                        format!(
+                            "final source identity {} is provider-owned and cannot be compiled",
+                            final_source_id.index()
+                        ),
+                    )));
+                }
             });
         }
     }
@@ -1383,8 +1417,10 @@ pub(super) fn load_missing_source_paths_for_test(
             string_table,
         )
     })?;
-    let mut source_files = SourceDatabase::build(
-        canonical_paths.iter().map(PathBuf::as_path),
+    let mut source_files = SourceDatabase::build_classified(
+        canonical_paths
+            .iter()
+            .map(|path| (path.clone(), SourceKind::Compiler(source_kind))),
         entry_path,
         None,
         string_table,

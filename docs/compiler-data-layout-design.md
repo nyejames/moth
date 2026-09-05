@@ -300,12 +300,18 @@ are fixed:
 - `text` is the exact UTF-8 source snapshot compiled.
 - `line_starts` contains byte offsets into `text`; the first entry is always `0`.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
-- `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind. It is
-  absent only for the reserved compilation root, which is not a file and has no lexical kind; an
-  adapted or synthetic source that does carry content keeps its real kind here.
-- a record's kind states what the compiler recognizes, not what the active builder supports. Stage 0
-  diagnoses a recognized-but-unsupported kind before registration; the identity record still
-  identifies the source.
+- `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind, or
+  marks the record as provider-owned. It is absent only for the reserved compilation root, which is
+  not a file and has no lexical kind; an adapted or synthetic source that does carry content keeps
+  its real kind here.
+- `SourceKind` needs a provider-owned variant because the database is registered from Stage 0's
+  whole sorted canonical inventory, which includes provider-owned physical files such as an
+  external `.js` module. Those records exist to hold an identity, not to be compiled, so they
+  carry no compiler source kind and their extension stays in `canonical_os_path`.
+- a record's kind states what the compiler recognizes, not what the active builder supports, and it
+  is the kind of the authored spelling rather than of whatever the path resolves to. Registration is
+  unconditional: an unsupported kind still gets an identity, and support is diagnosed where the
+  source is referenced.
 - `provenance` distinguishes authored physical source from synthetic or adapted source and points to
   its owning source where needed.
 
