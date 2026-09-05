@@ -599,7 +599,7 @@ depths only; the child map lives and dies with the builder.
 
 ### Slice group 1B — Replace per-module source tables with build-lifetime registration
 
-- [ ] **1B1 — registration index and ID domain:** add the `compiler_frontend/source/` owner; keep `SourceTreeIndex`, source-package inventories and path resolution as the only filesystem discovery path; have those owners produce/move compact candidate rows into one sorted compiler-facing `SourceRegistrationIndex` rather than duplicating their tree/root metadata; implement `SourceId(NonZeroU32)` and the deterministic `CompilationRoot` record at ID 1
+- [x] **1B1 — registration index and ID domain:** add the `compiler_frontend/source/` owner; keep `SourceTreeIndex`, source-package inventories and path resolution as the only filesystem discovery path; have those owners produce/move compact candidate rows into one sorted compiler-facing `SourceRegistrationIndex` rather than duplicating their tree/root metadata; implement `SourceId(NonZeroU32)` and the deterministic `CompilationRoot` record at ID 1
 - [x] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
@@ -795,8 +795,8 @@ direct-template lane).
 
 **Delivered as 1B2-b.** The direct-template lane now separates the two concerns its walk fused.
 The BFS collects the complete candidate closure with each source's authored kind and loads its
-text, assigning no identities; `SourceDatabase::build_classified` then sorts that closure by
-canonical logical path once and assigns every `SourceId`. `zeta.mtf` referring to `gamma` then
+text, assigning no identities; the compiler then sorts that closure by canonical logical path once
+and assigns every `SourceId`. `zeta.mtf` referring to `gamma` then
 `alpha` now yields alpha, gamma, zeta.
 
 Preparing each source twice to reach that order would have been the obvious implementation and is
@@ -816,6 +816,28 @@ The `moth_template.rs` `None` arm was kept and its comment corrected: it compile
 source through the same canonical-order constructor, but only `single_source_compilation`'s own
 tests reach it, because the sole production caller always supplies a bundle. Removing that arm
 belongs to **7C**, not here.
+
+**Delivered as 1B1-b.** `SourceRegistrationIndex` is now the single compiler-facing handoff for
+every source lane, and `SourceDatabase::build_classified` is gone. Two ordering authorities remain,
+and both are named at that one boundary rather than being two independent constructors:
+`from_ordered_registration_index`/`append_ordered_registration_index` preserve Stage 0's
+`SourceLogicalIdentity` order, and `from_registration_index_sorted_by_logical_path` orders lanes
+that discover sources by traversal. Sorting exists in exactly one place.
+
+Two keys are correct here, and collapsing them would be the wrong simplification. Stage 0's key
+groups by module origin and places rooted identities before unrooted ones; a flat path string
+cannot express either, and the tree order is load-bearing for module scoping
+(`compile_project_frontend_tests.rs:3286-3348`). Traversal lanes own no per-source ownership
+inventory, so they cannot produce that key at all. What was wrong before was not that two keys
+existed but that the second one bypassed the registration type, so no boundary recorded which
+authority applied.
+
+That consolidation was unguarded: inserting the portable-key sort into
+`append_ordered_registration_index` - the exact "two sorts into one" simplification a later reader
+would try - passed all 4877 lib tests. Nothing asserted identity order past the tree index.
+`stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees` closes that with
+sibling modules `a` and `a-b`, whose module-origin order the flat key inverts because `-` precedes
+`/`; it fails under that mutation.
 
 **Delivered as 1B7-b.** `every_preparation_strategy_stamps_the_registered_source_identity`
 asserts that every prepared output's `file_id` is the identity its input already carried, under

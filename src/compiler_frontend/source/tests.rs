@@ -74,14 +74,16 @@ fn registered_provider_owned_physical_sources_keep_their_identity() {
 }
 
 #[test]
-fn classified_registration_keeps_authored_kind_when_canonical_extension_disagrees() {
+fn registration_index_sorted_by_logical_path_keeps_authored_kind_when_canonical_extension_disagrees()
+ {
     let path = PathBuf::from("/project/payload.bin");
     let mut string_table = StringTable::new();
-    let database = SourceDatabase::build_classified(
-        std::iter::once((
-            path.clone(),
-            SourceKind::Compiler(SourceFileKind::MothTemplate),
-        )),
+    let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
+        path.as_path(),
+        SourceKind::Compiler(SourceFileKind::MothTemplate),
+    )));
+    let database = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
         &path,
         None,
         &mut string_table,
@@ -89,7 +91,7 @@ fn classified_registration_keeps_authored_kind_when_canonical_extension_disagree
     .expect("authored-kind registration should succeed");
     let record = database
         .get_by_canonical_path(&path)
-        .expect("classified source should retain its identity");
+        .expect("registered source should retain its identity");
 
     assert_eq!(
         record.kind,
@@ -102,7 +104,7 @@ fn classified_registration_keeps_authored_kind_when_canonical_extension_disagree
 fn append_ordered_registration_index_keeps_authored_kind_when_canonical_extension_disagrees() {
     let path = PathBuf::from("/project/payload.bin");
     let mut string_table = StringTable::new();
-    let registration_index = SourceRegistrationIndex::from_ordered_rows(std::iter::once((
+    let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
         path.as_path(),
         SourceKind::Compiler(SourceFileKind::MothTemplate),
     )));

@@ -62,37 +62,35 @@ impl SourceDatabase {
         I::IntoIter: ExactSizeIterator,
         I::Item: AsRef<Path>,
     {
-        Self::build_classified(
-            canonical_files.into_iter().map(|path| {
-                let path = path.as_ref().to_path_buf();
-                let kind = physical_source_kind(&path);
-                (path, kind)
-            }),
+        let owned_items = canonical_files.into_iter().collect::<Vec<_>>();
+        let registration_index =
+            SourceRegistrationIndex::from_rows(owned_items.iter().map(|item| {
+                let path = item.as_ref();
+                (path, physical_source_kind(path))
+            }));
+        Self::from_registration_index_sorted_by_logical_path(
+            &registration_index,
             entry_file_path,
             project_path_resolver,
             string_table,
         )
     }
 
-    /// Build deterministic source identities from canonical paths that already carry a kind.
+    /// Build source identities from candidates discovered by traversal.
     ///
-    /// WHAT: sorts the same way as [`Self::build`], then registers each row with the supplied
-    ///       kind rather than re-deriving it from the canonical extension.
-    /// WHY: Stage 0 classifies the lexical file name before canonicalize. A `page.mtf` symlink
-    ///      to `payload.bin` must remain a template even though the canonical extension is
-    ///      unrecognized.
-    pub(crate) fn build_classified<I>(
-        rows: I,
+    /// WHAT: orders the candidates by portable canonical logical path, then assigns identities in
+    ///       that order.
+    /// WHY: traversal owns no per-source ownership inventory, so it cannot produce Stage 0's
+    ///      logical-identity order. Ordering here keeps identity assignment the compiler's
+    ///      decision rather than a property of how a producer happened to walk the filesystem.
+    pub(crate) fn from_registration_index_sorted_by_logical_path(
+        registration_index: &SourceRegistrationIndex<'_>,
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError>
-    where
-        I: IntoIterator<Item = (PathBuf, SourceKind)>,
-        I::IntoIter: ExactSizeIterator,
-    {
-        let mut rows = logical_rows_for_classified_files(
-            rows,
+    ) -> Result<Self, CompilerError> {
+        let mut rows = logical_rows_for_registration_index(
+            registration_index,
             entry_file_path,
             project_path_resolver,
             string_table,
@@ -105,9 +103,11 @@ impl SourceDatabase {
 
     /// Build source identities from the ordered candidates produced by Stage 0.
     ///
-    /// The registration index already carries the canonical logical-identity order. This method
-    /// computes each record's compiler-facing logical path but preserves row order, so the
-    /// compiler assigns IDs deterministically.
+    /// WHAT: preserves the registration index's already-sorted Stage 0 logical-identity order
+    ///       while computing each record's compiler-facing logical path.
+    /// WHY: Stage 0 owns module origin and rootedness, so it is the authority that can order by
+    ///      `SourceLogicalIdentity`. The compiler must not re-sort those rows by display logical
+    ///      path.
     pub(crate) fn from_ordered_registration_index(
         registration_index: &SourceRegistrationIndex<'_>,
         entry_file_path: &Path,
@@ -126,9 +126,9 @@ impl SourceDatabase {
 
     /// Append the ordered Stage 0 candidates to this boundary's source identity table.
     ///
-    /// A caller may already have registered a bootstrap source, such as `config.moth`, before
-    /// discovery supplies the remaining rows. Appending here preserves those earlier identities
-    /// and assigns every candidate the next deterministic ID.
+    /// WHAT: assigns each candidate the next deterministic ID in the index's existing order.
+    /// WHY: Stage 0 already sorted by logical identity. A caller may already have registered a
+    ///      bootstrap source, such as `config.moth`, before discovery supplies the remaining rows.
     pub(crate) fn append_ordered_registration_index(
         &mut self,
         registration_index: &SourceRegistrationIndex<'_>,
@@ -136,10 +136,8 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerError> {
-        let rows = logical_rows_for_classified_files(
-            registration_index
-                .rows()
-                .map(|(canonical_path, kind)| (canonical_path.to_path_buf(), kind)),
+        let rows = logical_rows_for_registration_index(
+            registration_index,
             entry_file_path,
             project_path_resolver,
             string_table,
@@ -364,8 +362,8 @@ fn compilation_root_record() -> SourceRecord {
 
 /// Derive a physical source kind from a canonical path extension, for [`SourceDatabase::build`].
 ///
-/// Every production lane supplies an authored kind to [`SourceDatabase::build_classified`],
-/// [`SourceDatabase::insert`] or the Stage 0 registration index instead, so this derivation only
+/// Every production lane supplies an authored kind through the registration index,
+/// [`SourceDatabase::insert`] or a Stage 0 constructor instead, so this derivation only
 /// serves test fixtures. Recognized extensions become compiler kinds; every other physical path is
 /// provider-owned, so `None` on a record can only mean the reserved compilation root.
 #[cfg(test)]
@@ -387,27 +385,23 @@ struct LogicalSourcePath {
     portable_sort_key: String,
 }
 
-fn logical_rows_for_classified_files<I>(
-    classified: I,
+fn logical_rows_for_registration_index(
+    registration_index: &SourceRegistrationIndex<'_>,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
-) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError>
-where
-    I: IntoIterator<Item = (PathBuf, SourceKind)>,
-    I::IntoIter: ExactSizeIterator,
-{
-    let classified = classified.into_iter();
-    let mut rows = Vec::with_capacity(classified.len());
+) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError> {
+    let rows_iter = registration_index.rows();
+    let mut rows = Vec::with_capacity(rows_iter.len());
 
-    for (canonical, kind) in classified {
+    for (canonical, kind) in rows_iter {
         let logical = interned_logical_path(
-            &canonical,
+            canonical,
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
-        rows.push((canonical, kind, logical));
+        rows.push((canonical.to_path_buf(), kind, logical));
     }
 
     Ok(rows)

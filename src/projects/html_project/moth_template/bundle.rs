@@ -32,7 +32,9 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -198,17 +200,26 @@ pub(super) fn prepare_file_value_bundle(
     // 2. Assign identities from the complete candidate set in canonical logical order, rebind
     //    each discovery-prepared output onto those finished SourceIds, and join physical
     //    outcomes onto the classified table.
-    let classified_rows = candidates
-        .into_iter()
-        .map(|(path, kind)| (path, SourceKind::Compiler(kind)))
-        .collect::<Vec<_>>();
-    let mut source_files = SourceDatabase::build_classified(
-        classified_rows,
-        &unit.source_path,
-        Some(&path_resolver),
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let mut source_files = {
+        let classified_rows = candidates
+            .into_iter()
+            .map(|(path, kind)| (path, SourceKind::Compiler(kind)))
+            .collect::<Vec<_>>();
+        let registration_index = SourceRegistrationIndex::from_rows(
+            classified_rows
+                .iter()
+                .map(|(path, kind)| (path.as_path(), *kind)),
+        );
+        // The database copies each canonical path into its record, so the classified rows and the
+        // index they back are dead once registration returns.
+        SourceDatabase::from_registration_index_sorted_by_logical_path(
+            &registration_index,
+            &unit.source_path,
+            Some(&path_resolver),
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+    };
 
     for (path, snapshot) in loaded {
         let source_id = source_id_for_path(

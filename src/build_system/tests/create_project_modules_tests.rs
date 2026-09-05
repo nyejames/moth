@@ -881,6 +881,67 @@ fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
 }
 
 #[test]
+fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees() {
+    // WHY: a flat portable key sorts `a-b/@b.moth` before `a/@a.moth` because '-' precedes '/'.
+    // Assigned SourceIds must follow module-origin order instead: module `a` before module `a-b`.
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(source_root.join("a")).expect("should create module a");
+    fs::create_dir_all(source_root.join("a-b")).expect("should create module a-b");
+    fs::write(source_root.join("a/@a.moth"), "value #= 1\n").expect("should write module a root");
+    fs::write(source_root.join("a-b/@b.moth"), "value #= 1\n")
+        .expect("should write module a-b root");
+
+    let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
+    let resolver = configured_resolver(&config);
+    let mut string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should discover sibling modules");
+
+    let registration_index = source_tree_index.source_registration_index();
+    let source_files = SourceDatabase::from_ordered_registration_index(
+        &registration_index,
+        resolver.entry_root(),
+        Some(&resolver),
+        &mut string_table,
+    )
+    .expect("indexed inventory should register");
+
+    let assigned_logical_paths = source_files
+        .iter()
+        .map(|record| record.logical_path.to_portable_string(&string_table))
+        .collect::<Vec<_>>();
+    let mut flat_portable_order = assigned_logical_paths.clone();
+    flat_portable_order.sort();
+
+    assert_eq!(
+        assigned_logical_paths,
+        vec!["a/@a.moth", "a-b/@b.moth"],
+        "indexed registration must assign SourceIds in Stage 0 module-origin order"
+    );
+    assert_ne!(
+        assigned_logical_paths, flat_portable_order,
+        "fixture must disagree with flat portable-key order"
+    );
+}
+
+#[test]
 fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let _test_guard = lock_source_read_counter_tests();
     let _temp = tempfile::tempdir().expect("should create temp dir");

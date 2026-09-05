@@ -36,7 +36,7 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{
@@ -479,13 +479,14 @@ fn finalize_reachable_files(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), SourceDiscoveryError> {
-    let mut source_files = SourceDatabase::build_classified(
-        files.iter().map(|source_file| {
-            (
-                source_file.path.clone(),
-                SourceKind::Compiler(source_file.kind),
-            )
-        }),
+    let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
+        (
+            source_file.path.as_path(),
+            SourceKind::Compiler(source_file.kind),
+        )
+    }));
+    let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
         entry_file_path,
         Some(project_path_resolver),
         string_table,
@@ -1417,10 +1418,13 @@ pub(super) fn load_missing_source_paths_for_test(
             string_table,
         )
     })?;
-    let mut source_files = SourceDatabase::build_classified(
+    let registration_index = SourceRegistrationIndex::from_rows(
         canonical_paths
             .iter()
-            .map(|path| (path.clone(), SourceKind::Compiler(source_kind))),
+            .map(|path| (path.as_path(), SourceKind::Compiler(source_kind))),
+    );
+    let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
         entry_path,
         None,
         string_table,

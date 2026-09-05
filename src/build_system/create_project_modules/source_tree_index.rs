@@ -1030,7 +1030,7 @@ impl SourceTreeIndex {
     /// kind classified from the lexical file name, not a kind re-derived from the canonical
     /// extension.
     pub(crate) fn source_registration_index(&self) -> SourceRegistrationIndex<'_> {
-        SourceRegistrationIndex::from_ordered_rows(self.sources.iter().map(|record| {
+        SourceRegistrationIndex::from_rows(self.sources.iter().map(|record| {
             (
                 record.canonical_path(),
                 source_kind_from_classification(record.classification()),
