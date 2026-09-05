@@ -4,6 +4,7 @@
 //! used for compilation. Source line indexes and spans remain outside this slice and are
 //! deliberately not stored here.
 
+use super::record::SourceRecordState;
 use super::{SourceId, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -143,25 +144,18 @@ impl SourceDatabase {
     /// The reserved compilation root is excluded by [`Self::get`], so it cannot accidentally
     /// become a physical source frame.
     pub fn retained_text(&self, id: SourceId) -> Option<&str> {
-        self.get(id)?.text.as_deref()
+        self.get(id)?.state.retained_text()
     }
 
     /// Return the structured error recorded when loading a source snapshot failed.
     pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
-        self.get(id)?.load_error.as_deref()
+        self.get(id)?.state.source_load_error()
     }
 
     /// Move one loaded source snapshot into its preassigned record.
     pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
         let record = self.source_record_mut(id)?;
-        if record.text.is_some() || record.load_error.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "source text for source identity {} was retained more than once",
-                id.index()
-            )));
-        }
-        record.text = Some(text.into_boxed_str());
-        Ok(())
+        record.state.retain_text(id, text)
     }
 
     /// Record a source-read failure in its preassigned slot without aborting the whole build.
@@ -171,14 +165,7 @@ impl SourceDatabase {
         error: CompilerError,
     ) -> Result<(), CompilerError> {
         let record = self.source_record_mut(id)?;
-        if record.text.is_some() || record.load_error.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "source load status for source identity {} was recorded more than once",
-                id.index()
-            )));
-        }
-        record.load_error = Some(Box::new(error));
-        Ok(())
+        record.state.record_load_error(id, error)
     }
 
     fn source_record_mut(&mut self, id: SourceId) -> Result<&mut SourceRecord, CompilerError> {
@@ -198,8 +185,9 @@ impl SourceDatabase {
 
     /// Register one canonical source file and return its source identity.
     ///
-    /// A repeated canonical path returns the existing identity. New records append after the
-    /// existing records, matching the traversal-time registration behavior.
+    /// A repeated canonical path returns the existing identity only when its logical path matches.
+    /// A conflicting logical spelling is rejected. New records append after the existing records,
+    /// matching the traversal-time registration behavior.
     pub fn insert(
         &mut self,
         canonical_path: PathBuf,
@@ -207,16 +195,25 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<SourceId, CompilerError> {
-        if let Some(record) = self.get_by_canonical_path(&canonical_path) {
-            return Ok(record.id);
-        }
-
         let logical = interned_logical_path(
             &canonical_path,
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
+
+        if let Some(record) = self.get_by_canonical_path(&canonical_path) {
+            if record.logical_path != logical.interned {
+                return Err(CompilerError::compiler_error(format!(
+                    "Source identity inventory registered canonical source path {} under \
+                     conflicting logical paths {} and {}",
+                    canonical_path.display(),
+                    record.logical_path.to_portable_string(string_table),
+                    logical.interned.to_portable_string(string_table),
+                )));
+            }
+            return Ok(record.id);
+        }
 
         Ok(self.push_record(canonical_path, logical.interned))
     }
@@ -229,8 +226,7 @@ impl SourceDatabase {
             id,
             canonical_os_path: Some(canonical_path),
             logical_path,
-            text: None,
-            load_error: None,
+            state: SourceRecordState::Registered,
             provenance: SourceProvenance::AuthoredPhysical,
         });
         id
@@ -254,6 +250,7 @@ impl SourceDatabase {
         );
         self.files[1..].iter()
     }
+
     /// Resolve a retained source snapshot by logical path.
     ///
     /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
@@ -275,7 +272,7 @@ impl SourceDatabase {
         if matches.next().is_some() {
             return None;
         }
-        record.text.as_deref()
+        record.state.retained_text()
     }
 }
 
@@ -284,8 +281,7 @@ fn compilation_root_record() -> SourceRecord {
         id: SourceId::from_index(0),
         canonical_os_path: None,
         logical_path: InternedPath::new(),
-        text: None,
-        load_error: None,
+        state: SourceRecordState::Registered,
         provenance: SourceProvenance::CompilationRoot,
     }
 }

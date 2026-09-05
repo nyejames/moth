@@ -1,6 +1,6 @@
 use super::{SourceDatabase, SourceId, SourceProvenance};
 use crate::builder_surface::SourceFileKindRegistry;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
@@ -210,6 +210,50 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
 }
 
 #[test]
+fn conflicting_logical_identity_for_canonical_source_is_rejected() {
+    let canonical_path = PathBuf::from("/project/src/shared.moth");
+    let first_entry_path = PathBuf::from("/project/entry.moth");
+    let conflicting_entry_path = PathBuf::from("/project/src/entry.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+
+    database
+        .insert(
+            canonical_path.clone(),
+            &first_entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the first source registration should succeed");
+    let error = database
+        .insert(
+            canonical_path,
+            &conflicting_entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect_err("a canonical source cannot change logical identity");
+
+    // Both spellings are suffixes of the canonical path, so a substring test cannot tell them
+    // apart; the occurrence count proves the message names the stored and requested identities
+    // as well as the file it is rejecting.
+    assert!(
+        error.msg.contains("/project/src/shared.moth")
+            && error.msg.matches("shared.moth").count() >= 3,
+        "the conflict should name the canonical path and both logical spellings: {}",
+        error.msg
+    );
+    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(
+        database
+            .get_by_canonical_path(&PathBuf::from("/project/src/shared.moth"))
+            .map(|record| record.id),
+        Some(SourceId::from_index(1)),
+        "the rejected registration must leave the first identity in place"
+    );
+}
+
+#[test]
 fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
     let empty_path = PathBuf::from("/project/empty.moth");
     let failed_path = PathBuf::from("/project/failed.moth");
@@ -247,6 +291,43 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .expect("source load error should be retained");
     assert!(database.retained_text(failed_id).is_none());
     assert!(database.source_load_error(failed_id).is_some());
+
+    // Every further write is refused and leaves the recorded state untouched, so a stage can
+    // never observe a snapshot the compiler did not compile.
+    let repeated_snapshot_error = database
+        .retain_text(empty_id, "second snapshot".to_owned())
+        .expect_err("a source snapshot can only be retained once");
+    assert_eq!(repeated_snapshot_error.error_type, ErrorType::Compiler);
+    assert_eq!(database.retained_text(empty_id), Some(""));
+
+    database
+        .retain_text(failed_id, "unreadable snapshot".to_owned())
+        .expect_err("a failed source cannot later receive a snapshot");
+    assert!(database.retained_text(failed_id).is_none());
+    assert!(database.source_load_error(failed_id).is_some());
+
+    let repeated_failure =
+        CompilerError::file_error(&failed_path, "source read failed again", &mut string_table);
+    database
+        .record_source_load_error(failed_id, repeated_failure)
+        .expect_err("an unreadable source cannot record a second failure");
+    assert!(database.source_load_error(failed_id).is_some());
+
+    // The reserved compilation root is addressable but never writable.
+    database
+        .retain_text(SourceId::from_index(0), "root snapshot".to_owned())
+        .expect_err("the compilation root cannot retain source text");
+
+    let load_after_snapshot = CompilerError::file_error(
+        &empty_path,
+        "source read failed after snapshot",
+        &mut string_table,
+    );
+    database
+        .record_source_load_error(empty_id, load_after_snapshot)
+        .expect_err("a loaded source cannot receive a second load status");
+    assert_eq!(database.retained_text(empty_id), Some(""));
+    assert!(database.source_load_error(empty_id).is_none());
 }
 
 #[test]
@@ -339,6 +420,13 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
     database
         .retain_text(root_id, "root config snapshot\n".to_owned())
         .expect("root config snapshot should be retained");
+
+    // Ambiguity is a property of the identities, not of how many happen to be loaded: one loaded
+    // candidate among colliding records must not become the answer by default.
+    assert_eq!(
+        database.retained_text_for_logical_path(&root_logical_path),
+        None
+    );
     database
         .retain_text(entry_id, "entry source snapshot\n".to_owned())
         .expect("entry source snapshot should be retained");

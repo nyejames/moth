@@ -653,11 +653,50 @@ no user-facing command reaches, so nothing a user runs loses a frame. Attaching 
 splitting that function around the point its database exists, which is not worth the regression
 risk here: slice group 1F gives every report a frozen context and should absorb this lane.
 
-The rest of 1B4 is the registered/loaded/finalized lifecycle, canonical deduplication and the
-compact unloaded representation. A retained `BuildResult` keeps the project database alive along
-with the package databases that produced warnings, and a failure's message set keeps every
-database its diagnostics came from. That is retained memory slice 7A accounts for and slice group
-1F's frozen render context is meant to replace.
+A retained `BuildResult` keeps the project database alive along with the package databases that
+produced warnings, and a failure's message set keeps every database its diagnostics came from.
+That is retained memory slice 7A accounts for and slice group 1F's frozen render context is meant
+to replace.
+
+**Lifecycle made a type, recorded against 1B4.** A record's loading status is one
+`SourceRecordState` of `Registered`, `Loaded(Box<str>)` or `Unreadable(Box<CompilerError>)`,
+replacing the `Option` pair whose fourth combination — a snapshot and a read failure at once — was
+prevented only by a hand-written check in each writer. Transitions are accepted only from
+`Registered`, so the lifecycle is monotonic by construction and a refused write leaves the
+recorded state untouched. There is no finalized flag, and none is wanted: a write needs `&mut`,
+so exclusive ownership is the barrier. That is weaker than the word "finalized" suggests —
+`Arc::get_mut` still admits mutation whenever every other handle has been dropped, which is how
+the directory boundary appends its registration index after config sharing — so the guarantee is
+an ownership convention, not an irreversible state.
+
+Registration now rejects one canonical path re-registered under a different logical identity
+instead of silently binding the caller to the first spelling. A repeated registration whose
+logical path matches still returns the existing identity, because that deduplication is
+load-bearing for the direct-template bundle and the discovery scan. No production caller
+re-registers one canonical path under two spellings today, so this is a guard on the invariant
+rather than a fix for a live defect.
+
+**Two distinct canonical paths interning to one logical path stays legal.** It is reachable in
+production — a project-root `config.moth` collides with an ordinary `src/config.moth`, and the
+synthetic single-file database holds project and source-package sources together — so rejecting
+it would fail real projects. A diagnostic is addressed by logical path within a database it is
+associated with by identity, and a logical lookup matching more than one record in that database
+omits the frame rather than guessing. The 1B4 clause is read as covering one canonical source
+claiming two identities, which is what the new rejection enforces.
+
+**Two 1B4 clauses remain outstanding after this slice.** Both are locked architecture in
+`docs/compiler-data-layout-design.md`, so neither is declined:
+
+- `SourceRecord` must own `kind: SourceKind` (design doc, "Source records"), which the compiler
+  record does not have today; Stage 0's `SourceClassification` holds it instead. Registration rows
+  must carry kind into the record before "reject conflicting kind" can mean anything. That is
+  slice 1B-gamma3b-ii.
+- The design record's `text: Box<str>` is unconditional, so a registered-but-unloaded candidate is
+  not a record at all — it is the compact slot/index this clause asks for, and an unreadable source
+  keeps its failure at the candidate layer rather than inside a record. `SourceRecordState` is a
+  stepping stone to that shape, not its end state. Converting the dense array to
+  registration-slot-plus-loaded-record is slice 1B-gamma3b-iii, which also removes the
+  `Unreadable` variant from the record.
 
 **Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
 rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
