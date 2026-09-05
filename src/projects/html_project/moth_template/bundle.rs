@@ -61,27 +61,6 @@ enum QueuedSource {
     Content { path: PathBuf, kind: SourceFileKind },
 }
 
-impl QueuedSource {
-    fn pop_parts(
-        self,
-        unit: &MothTemplateSourceUnit,
-        string_table: &mut StringTable,
-    ) -> Result<(PathBuf, SourceFileKind, String), CompilerMessages> {
-        match self {
-            Self::Entry => Ok((
-                unit.source_path.clone(),
-                SourceFileKind::MothTemplate,
-                unit.source_text.clone(),
-            )),
-            Self::Content { path, kind } => {
-                let source_code = extract_source_code(&path, string_table)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                Ok((path, kind, source_code))
-            }
-        }
-    }
-}
-
 /// Prepare one direct template's file-value bundle and register its physical facts.
 ///
 /// The template's own directory is the entry root: references resolve module-root-relative to it
@@ -89,7 +68,7 @@ impl QueuedSource {
 /// resource sources and their origin attachments outlive this one document; this lane never
 /// creates a private one for it to be dropped from.
 pub(super) fn prepare_file_value_bundle(
-    unit: &MothTemplateSourceUnit,
+    unit: &mut MothTemplateSourceUnit,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     resource_inputs: &mut ResourceInputRegistry,
@@ -174,7 +153,66 @@ pub(super) fn prepare_file_value_bundle(
         if !visited.insert(visit_path) {
             continue;
         }
-        let (path, kind, source_code) = pending.pop_parts(unit, string_table)?;
+        let (path, kind, source_code, owner_source_file) = match pending {
+            QueuedSource::Entry => {
+                let path = unit.source_path.clone();
+                let source_id = source_files
+                    .get_by_canonical_path(&path)
+                    .map(|identity| identity.id)
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "entry source {path:?} has no identity before source-text retention"
+                            )),
+                            string_table,
+                        )
+                    })?;
+                source_files
+                    .retain_text(source_id, std::mem::take(&mut unit.source_text))
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let source_code = source_files.retained_text(source_id).ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "entry source {path:?} lost its retained source text"
+                        )),
+                        string_table,
+                    )
+                })?;
+                (path, SourceFileKind::MothTemplate, source_code, source_id)
+            }
+            QueuedSource::Content { path, kind } => {
+                let source_id = source_files
+                    .get_by_canonical_path(&path)
+                    .map(|identity| identity.id)
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "content source {path:?} has no identity before preparation"
+                            )),
+                            string_table,
+                        )
+                    })?;
+                let source_code = match source_files.retained_text(source_id) {
+                    Some(source_code) => source_code,
+                    // Loading moved earlier than preparation, so a recorded read failure is
+                    // reported here instead: this is the point at which the read failed before.
+                    None => {
+                        return Err(match source_files.source_load_error(source_id) {
+                            Some(error) => {
+                                CompilerMessages::from_error_ref(error.clone(), string_table)
+                            }
+                            None => CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(format!(
+                                    "content source {path:?} has no retained source text"
+                                )),
+                                string_table,
+                            ),
+                        });
+                    }
+                };
+                (path, kind, source_code, source_id)
+            }
+        };
 
         // 3. Prepare one file against the settled identity table.
         let prepared = prepare_one_source(
@@ -186,18 +224,6 @@ pub(super) fn prepare_file_value_bundle(
             style_directives,
             string_table,
         )?;
-        let owner_source_file = source_files
-            .get_by_canonical_path(&path)
-            .map(|identity| identity.id)
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "prepared Moth template source {path:?} has no file identity before \
-                         reference resolution"
-                    )),
-                    string_table,
-                )
-            })?;
         let path_syntax_table = prepared.path_syntax.table();
         let structural_references = prepared.structural_file_references.references();
 
@@ -282,7 +308,8 @@ fn settle_reference_outcome(
             }
 
             // A nested content source is never re-prepared: the identity table dedupes, and the
-            // caller's visited set skips a file already reached.
+            // caller's visited set skips a file already reached. Loading happens here, before that
+            // visited check, so it must dedupe on the slot rather than on the queue.
             let extension = canonical
                 .extension()
                 .and_then(|extension| extension.to_str())
@@ -303,6 +330,18 @@ fn settle_reference_outcome(
                     string_table,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            if source_files.retained_text(target_file).is_none()
+                && source_files.source_load_error(target_file).is_none()
+            {
+                // A read failure is recorded against the slot rather than returned here. The
+                // reference is still queued so the failure surfaces when this source is popped
+                // for preparation, which is where it surfaced before loading moved earlier.
+                let outcome = match extract_source_code(&canonical, string_table) {
+                    Ok(source_code) => source_files.retain_text(target_file, source_code),
+                    Err(error) => source_files.record_source_load_error(target_file, error),
+                };
+                outcome.map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            }
             queue.push_back(QueuedSource::Content {
                 path: canonical,
                 kind,
@@ -321,7 +360,7 @@ fn prepare_one_source(
     source_files: &SourceDatabase,
     source_path: &Path,
     kind: SourceFileKind,
-    source_code: String,
+    source_code: &str,
     options: &HeaderParseOptions,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,

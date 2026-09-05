@@ -52,6 +52,7 @@ use super::project_roots;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
+use super::source_loading::load_registered_source_texts;
 
 mod canonical;
 mod deferred_check_only;
@@ -524,15 +525,15 @@ pub(crate) fn compile_directory_frontend(
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
     let project_source_files =
         project_source_files.get_or_insert_with(|| Arc::new(SourceDatabase::empty()));
-    Arc::get_mut(project_source_files)
-        .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "project source database was shared before Stage 0 registration completed",
-                ),
-                string_table,
-            )
-        })?
+    let project_source_files_mut = Arc::get_mut(project_source_files).ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "project source database was shared before Stage 0 registration completed",
+            ),
+            string_table,
+        )
+    })?;
+    project_source_files_mut
         .append_ordered_registration_index(
             &project_registration_index,
             project_path_resolver.entry_root(),
@@ -540,6 +541,12 @@ pub(crate) fn compile_directory_frontend(
             string_table,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    load_registered_source_texts(
+        project_source_files_mut,
+        &project_registration_index,
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let project_source_files = Arc::clone(project_source_files);
     let config_globals = builder_surface.config_globals().clone();
 
@@ -579,14 +586,20 @@ pub(crate) fn compile_directory_frontend(
             package_index,
         );
         let package_registration_index = package_index.source_registration_index();
-        let package_source_files = SourceDatabase::from_ordered_registration_index(
+        let mut package_source_files = SourceDatabase::from_ordered_registration_index(
             &package_registration_index,
             package_path_resolver.entry_root(),
             Some(&package_path_resolver),
             string_table,
         )
-        .map(Arc::new)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        load_registered_source_texts(
+            &mut package_source_files,
+            &package_registration_index,
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let package_source_files = Arc::new(package_source_files);
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_2,
             crate::timing::TimingMetric::BoundaryInventory,

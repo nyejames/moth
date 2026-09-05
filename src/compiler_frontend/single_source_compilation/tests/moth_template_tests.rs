@@ -45,7 +45,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
     let folded = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: Path::new("/templates/intro.mtf"),
-            source_code: String::from("# Intro"),
+            source_code: Some(String::from("# Intro")),
             style_directives: &style_directives,
             file_value_resolution: None,
         },
@@ -81,15 +81,30 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 
     let template_path = Path::new(TEMPLATE_PATH);
     let markdown_path = Path::new(MARKDOWN_PATH);
-    let source_files = Arc::new(
-        SourceDatabase::build(
-            [template_path, markdown_path],
-            template_path,
-            None,
-            &mut string_table,
-        )
-        .expect("bundle source identities should build"),
-    );
+    // The template names a nested Markdown content source, a resource file and the site root.
+    let template_source = "# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]";
+    let mut source_files = SourceDatabase::build(
+        [template_path, markdown_path],
+        template_path,
+        None,
+        &mut string_table,
+    )
+    .expect("bundle source identities should build");
+    let template_id = source_files
+        .get_by_canonical_path(template_path)
+        .expect("template source should have a source identity")
+        .id;
+    source_files
+        .retain_text(template_id, template_source.to_owned())
+        .expect("template source should retain its text");
+    let markdown_id = source_files
+        .get_by_canonical_path(markdown_path)
+        .expect("markdown source should have a source identity")
+        .id;
+    source_files
+        .retain_text(markdown_id, "Nested intro body.".to_owned())
+        .expect("markdown source should retain its text");
+    let source_files = Arc::new(source_files);
     let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
@@ -97,8 +112,6 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
             .id
     };
 
-    // The template names a nested Markdown content source, a resource file and the site root.
-    let template_source = "# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]";
     let prepared_template = prepare_bundle_source(
         &source_files,
         template_path,
@@ -162,7 +175,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     } = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: template_path,
-            source_code: template_source.to_owned(),
+            source_code: None,
             style_directives: &style_directives,
             file_value_resolution: Some(bundle),
         },
@@ -218,11 +231,11 @@ fn prepare_bundle_source(
 ) -> FileFrontendPrepareOutput {
     let source = match source_path.extension() {
         Some(extension) if extension == "md" => FrontendFilePrepareSource::PlainMarkdown {
-            source_code: source_code.to_owned(),
+            source_code,
             source_path: source_path.to_path_buf(),
         },
         _ => FrontendFilePrepareSource::MothTemplate {
-            source_code: source_code.to_owned(),
+            source_code,
             source_path: source_path.to_path_buf(),
         },
     };

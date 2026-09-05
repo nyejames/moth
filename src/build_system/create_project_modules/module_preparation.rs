@@ -182,6 +182,37 @@ pub(super) struct ModulePreparationContext<'a> {
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
 }
 
+/// Borrow the exact source snapshot retained by the compilation boundary.
+///
+/// A failed preload is returned at the same preparation boundary that previously performed the
+/// filesystem read, preserving the selected-source error lane. Unselected source failures remain
+/// inert because this helper is only called for a source that is being prepared.
+fn retained_source_text<'a>(
+    source_files: &'a SourceDatabase,
+    source_path: &Path,
+) -> Result<&'a str, CompilerError> {
+    let source_id = source_files
+        .get_by_canonical_path(source_path)
+        .map(|record| record.id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source path {} has no registered source identity",
+                source_path.display()
+            ))
+        })?;
+    source_files.retained_text(source_id).ok_or_else(|| {
+        source_files
+            .source_load_error(source_id)
+            .cloned()
+            .unwrap_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "registered source path {} has no retained source text",
+                    source_path.display()
+                ))
+            })
+    })
+}
+
 /// Incremental provider-independent syntax preparation for one indexed directory module.
 ///
 /// Stage 0 prepares each selected source once, reads its retained dependency shells from the same
@@ -784,49 +815,53 @@ impl ModulePreparationContext<'_> {
                     (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
                 }
                 file => {
-                    let source = match file {
-                        PreparedSourceInput::Moth {
-                            source_path,
-                            tokens,
-                            ..
-                        } => FrontendFilePrepareSource::Moth {
-                            source_path,
-                            tokens,
-                        },
-                        PreparedSourceInput::MothTemplate {
-                            source_code,
-                            source_path,
-                        } => FrontendFilePrepareSource::MothTemplate {
-                            source_code,
-                            source_path,
-                        },
-                        PreparedSourceInput::PlainMarkdown {
-                            source_code,
-                            source_path,
-                        } => FrontendFilePrepareSource::PlainMarkdown {
-                            source_code,
-                            source_path,
-                        },
-                        PreparedSourceInput::MothPrepared { .. }
-                        | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                            unreachable!(
-                                "prepared Moth output was handled before source conversion"
+                    let source =
+                        match file {
+                            PreparedSourceInput::Moth {
+                                source_path,
+                                tokens,
+                                ..
+                            } => Ok(FrontendFilePrepareSource::Moth {
+                                source_path,
+                                tokens,
+                            }),
+                            PreparedSourceInput::MothTemplate { source_path, .. } => {
+                                retained_source_text(prepare_context.source_files, &source_path)
+                                    .map(|source_code| FrontendFilePrepareSource::MothTemplate {
+                                        source_code,
+                                        source_path,
+                                    })
+                            }
+                            PreparedSourceInput::PlainMarkdown { source_path, .. } => {
+                                retained_source_text(prepare_context.source_files, &source_path)
+                                    .map(|source_code| FrontendFilePrepareSource::PlainMarkdown {
+                                        source_code,
+                                        source_path,
+                                    })
+                            }
+                            PreparedSourceInput::MothPrepared { .. }
+                            | PreparedSourceInput::MothTemplatePrepared { .. } => {
+                                unreachable!(
+                                    "prepared Moth output was handled before source conversion"
+                                )
+                            }
+                        };
+                    let result = match source {
+                        Ok(source) => {
+                            let input = FrontendFilePrepareInput {
+                                source,
+                                const_template_offset,
+                                runtime_fragment_offset,
+                            };
+                            CompilerFrontend::prepare_file_frontend_local(
+                                prepare_context,
+                                input,
+                                &mut local_string_table,
                             )
                         }
+                        Err(error) => Err(FileFrontendPrepareFailure::Infrastructure(error)),
                     };
-                    let input = FrontendFilePrepareInput {
-                        source,
-                        const_template_offset,
-                        runtime_fragment_offset,
-                    };
-                    (
-                        PreparedFileStringDomain::ChunkLocal,
-                        CompilerFrontend::prepare_file_frontend_local(
-                            prepare_context,
-                            input,
-                            &mut local_string_table,
-                        ),
-                    )
+                    (PreparedFileStringDomain::ChunkLocal, result)
                 }
             };
             results.push(PreparedFileResult {
@@ -928,20 +963,38 @@ impl ModuleSyntaxDiscovery<'_> {
                 source_path,
                 tokens,
             },
-            PreparedSourceInput::MothTemplate {
-                source_code,
-                source_path,
-            } => FrontendFilePrepareSource::MothTemplate {
-                source_code,
-                source_path,
-            },
-            PreparedSourceInput::PlainMarkdown {
-                source_code,
-                source_path,
-            } => FrontendFilePrepareSource::PlainMarkdown {
-                source_code,
-                source_path,
-            },
+            PreparedSourceInput::MothTemplate { source_path, .. } => {
+                let source_code =
+                    match retained_source_text(self.context.source_files, &source_path) {
+                        Ok(source_code) => source_code,
+                        Err(error) => {
+                            return Err(CompilerMessages::from_error_ref(
+                                error,
+                                &self.string_table,
+                            ));
+                        }
+                    };
+                FrontendFilePrepareSource::MothTemplate {
+                    source_code,
+                    source_path,
+                }
+            }
+            PreparedSourceInput::PlainMarkdown { source_path, .. } => {
+                let source_code =
+                    match retained_source_text(self.context.source_files, &source_path) {
+                        Ok(source_code) => source_code,
+                        Err(error) => {
+                            return Err(CompilerMessages::from_error_ref(
+                                error,
+                                &self.string_table,
+                            ));
+                        }
+                    };
+                FrontendFilePrepareSource::PlainMarkdown {
+                    source_code,
+                    source_path,
+                }
+            }
             PreparedSourceInput::MothPrepared { .. }
             | PreparedSourceInput::MothTemplatePrepared { .. } => {
                 unreachable!("already-prepared synthetic source was rejected above")

@@ -8,7 +8,7 @@
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidConfigReason,
 };
@@ -501,6 +501,65 @@ fn files_input_markdown_content_value_is_inlined() {
         output.documents[0].content,
         "<p>About</p><p><p>Plain legal text.</p>\n</p>"
     );
+}
+
+#[test]
+fn files_input_repeated_markdown_content_value_is_inlined_twice() {
+    let temp_dir = temp_project(&[
+        ("page.mtf", "About\n\n[@docs/legal.md]\n\n[@docs/legal.md]"),
+        ("docs/legal.md", "Plain legal text."),
+    ]);
+
+    let output = compile_ok(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]));
+
+    // Both references resolve to one source identity, so the source is registered and loaded
+    // once and its retained snapshot is reused. Loading it a second time fails the slot's
+    // single-write guard and aborts a valid compile.
+    assert_eq!(output.documents.len(), 1);
+    assert_eq!(
+        output.documents[0]
+            .content
+            .matches("Plain legal text.")
+            .count(),
+        2,
+        "a source referenced twice should inline twice: {}",
+        output.documents[0].content
+    );
+}
+
+#[test]
+fn unreadable_content_value_surfaces_its_own_read_failure() {
+    let temp_dir = temp_project(&[("page.mtf", "About\n\n[@docs/legal.md]")]);
+    let unreadable = temp_dir.path().join("docs/legal.md");
+    fs::create_dir_all(unreadable.parent().expect("content parent should exist"))
+        .expect("content parent should be created");
+    fs::write(&unreadable, [b'o', b'k', 0xff, b'\n']).expect("invalid UTF-8 should be written");
+    let mut string_table = StringTable::new();
+
+    let messages = compile_moth_template(
+        request(MothTemplateInput::Files(vec![
+            temp_dir.path().join("page.mtf"),
+        ])),
+        &mut string_table,
+    )
+    .expect_err("an unreadable content source should fail the compile");
+
+    // The read now happens before preparation, so the recorded failure must be replayed at the
+    // preparation boundary. Reporting the slot's own "no retained text" state instead would
+    // replace the user-facing read failure with an internal compiler error.
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("the read failure should be reported");
+    let DiagnosticPayload::InfrastructureError { error_type, .. } = &diagnostic.payload else {
+        panic!(
+            "a read failure is an infrastructure error: {:?}",
+            diagnostic.payload
+        );
+    };
+    assert_eq!(*error_type, ErrorType::File);
 }
 
 #[test]

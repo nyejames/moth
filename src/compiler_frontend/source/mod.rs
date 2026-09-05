@@ -1,13 +1,13 @@
-//! Frontend source identity and path metadata.
+//! Frontend source identity, retained snapshots and path metadata.
 //!
 //! [`SourceDatabase`] owns the ordered source-record inventory used by frontend preparation, while
 //! [`SourceId`] provides the compact non-zero identity carried by tokens, headers and references.
-//! Source text, line indexes, spans and the full source-slot/loading lifecycle are introduced by
-//! later slices.
+//! Physical source records own the exact UTF-8 snapshots used during compilation; line indexes and
+//! spans remain outside this slice.
 //!
 //! - [`id`] defines the four-byte source identity.
-//! - [`record`] defines one source identity, its provenance and its canonical/logical paths.
-//! - [`database`] owns deterministic lookup and traversal-time insertion.
+//! - [`record`] defines one source identity, its retained text, loading status and paths.
+//! - [`database`] owns deterministic lookup, snapshot retention and traversal-time insertion.
 
 mod database;
 mod id;

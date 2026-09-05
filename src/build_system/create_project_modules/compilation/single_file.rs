@@ -64,6 +64,36 @@ use super::super::source_package_discovery::build_source_package_boundary_indexe
 use super::super::source_tree_index::SourceTreeIndex;
 use super::{ModuleBoundaryPublication, publish_module_and_generated};
 
+/// Move source snapshots carried by synthetic discovery into their registered database slots.
+///
+/// This runs while the database is still uniquely owned. Once preparation starts, every module
+/// borrows the immutable database and no later `Arc::get_mut` handoff is possible.
+fn retain_single_file_source_texts(
+    input_files: &mut [PreparedSourceInput],
+    source_files: &mut SourceDatabase,
+) -> Result<(), CompilerError> {
+    for input in input_files {
+        let source_path = input.source_path().to_owned();
+        let source_id = source_files
+            .get_by_canonical_path(&source_path)
+            .map(|record| record.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "single-file source path {} has no registered source identity",
+                    source_path.display()
+                ))
+            })?;
+        let source_code = input.take_source_code().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "single-file source path {} has no loaded source text",
+                source_path.display()
+            ))
+        })?;
+        source_files.retain_text(source_id, source_code)?;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_single_file_frontend_with_inputs(
     config: &Config,
@@ -316,7 +346,7 @@ fn compile_single_file_frontend_with_target(
             return Err(messages);
         }
     };
-    let input_files = collected.input_files;
+    let mut input_files = collected.input_files;
     let resolved_file_references = collected.resolved_file_references;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
@@ -375,14 +405,16 @@ fn compile_single_file_frontend_with_target(
     // Preparation retains the existing synthetic temporary-table lifecycle: register the complete
     // reachable candidate set before rebinding prepared outputs, then discard this table with the
     // single-file compilation boundary.
-    let source_files = SourceDatabase::build(
+    let mut source_files = SourceDatabase::build(
         input_files.iter().map(PreparedSourceInput::source_path),
         &entry_path,
         Some(&project_path_resolver),
         string_table,
     )
-    .map(Arc::new)
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    retain_single_file_source_texts(&mut input_files, &mut source_files)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_files = Arc::new(source_files);
     let preparation_context = ModulePreparationContext {
         source_files: &source_files,
         style_directives,

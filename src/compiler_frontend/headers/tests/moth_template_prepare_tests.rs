@@ -138,7 +138,7 @@ fn prepare_via_pipeline(
     let input_path = PathBuf::from("src/intro.mtf");
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source.to_owned(),
+            source_code: source,
             source_path: input_path,
         },
         const_template_offset: 0,
@@ -177,7 +177,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let input_path = PathBuf::from("src/intro.mtf");
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source.to_owned(),
+            source_code: source,
             source_path: input_path,
         },
         const_template_offset: 0,
@@ -588,11 +588,11 @@ impl MothTemplateScopeFixture {
                     }
                 }
                 SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-                    source_code,
+                    source_code: source_code.as_str(),
                     source_path,
                 },
                 SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-                    source_code,
+                    source_code: source_code.as_str(),
                     source_path,
                 },
             };

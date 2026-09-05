@@ -224,23 +224,26 @@ struct ReachableQueue<'a> {
 /// Build a `PreparedSourceInput` from a cache-miss load.
 ///
 /// WHAT: selects the Moth template or PlainMarkdown variant from the resolved source kind. Cache
-///       misses are never Moth — every reachable `.moth` is scanned and cached during
-///       traversal — so no Moth variant carries a raw load here.
+///       misses are never Moth — every reachable `.moth` is scanned and cached during traversal —
+///       so no Moth variant carries a raw load here.
 /// WHY: keeps the strict source-kind/token relationship: a loaded file has no retained tokens
 ///      and cannot become a Moth `PreparedSourceInput`.
 fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSourceInput {
     let LoadedMissingSourceFile {
+        input_index: _,
         source_file,
         source_code,
-        ..
     } = loaded;
+    let source_byte_len = source_code.len();
     match source_file.kind {
         SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
-            source_code,
+            source_byte_len,
+            source_code: Some(source_code),
             source_path: source_file.path,
         },
         SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
-            source_code,
+            source_byte_len,
+            source_code: Some(source_code),
             source_path: source_file.path,
         },
         SourceFileKind::Moth => {
@@ -302,17 +305,17 @@ pub(super) fn collect_reachable_input_files(
 
 /// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
-/// WHAT: reads and tokenizes the selected source exactly once, producing the owned input consumed
-///       by this module's header preparation queue. The caller's queued set is the ownership
-///       proof: a canonical source row is handed to this function at most once for its owning
-///       module.
-/// WHY: `SourceTreeIndex` owns source identity and ownership; retaining a second project-wide
-///      payload store would duplicate complete source strings and token buffers without a second
-///      compiler consumer. The returned input is moved into the module job after its header
-///      references have been resolved.
+/// WHAT: borrows the snapshot loaded into the source database and tokenizes selected Moth sources
+///       exactly once, producing the owned input consumed by this module's header preparation
+///       queue. The caller's queued set is the ownership proof: a canonical source row is handed
+///       to this function at most once for its owning module.
+/// WHY: `SourceTreeIndex` owns source identity and `SourceDatabase` owns source text; borrowing
+///      both avoids a second full source-string allocation while preserving the existing
+///      provider-independent preparation lane.
 pub(super) fn prepare_owned_source_input(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
+    source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
@@ -325,7 +328,30 @@ pub(super) fn prepare_owned_source_input(
             ),
         )));
     };
-    let source_code = extract_source_code(record.canonical_path(), string_table)?;
+    let source_id = source_files
+        .get_by_canonical_path(record.canonical_path())
+        .map(|identity| identity.id)
+        .ok_or_else(|| {
+            SourceDiscoveryError::from(CompilerError::compiler_error(format!(
+                "Project source row {} has no registered source identity",
+                source_index.index(),
+            )))
+        })?;
+    let source_code = match source_files.retained_text(source_id) {
+        Some(source_code) => source_code,
+        None => {
+            let error = source_files
+                .source_load_error(source_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "Registered source row {} has no retained source text",
+                        source_index.index(),
+                    ))
+                });
+            return Err(SourceDiscoveryError::from(error));
+        }
+    };
     let source_byte_len = source_code.len();
     let tokens = if *source_kind == SourceFileKind::Moth {
         let interned_path = InternedPath::try_from_filesystem_path(
@@ -343,7 +369,7 @@ pub(super) fn prepare_owned_source_input(
         })?;
         Some(Box::new(
             tokenize(
-                &source_code,
+                source_code,
                 &interned_path,
                 TokenizerEntryMode::SourceFile,
                 style_directives,
@@ -370,11 +396,13 @@ pub(super) fn prepare_owned_source_input(
             }
         }
         SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
-            source_code,
+            source_byte_len,
+            source_code: None,
             source_path: record.canonical_path().to_path_buf(),
         },
         SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
-            source_code,
+            source_byte_len,
+            source_code: None,
             source_path: record.canonical_path().to_path_buf(),
         },
     })
@@ -404,6 +432,7 @@ pub(super) struct PreparedOwnedSource {
 pub(super) fn prepare_owned_source_inputs(
     source_indices: &[SourceRecordIndex],
     source_tree_index: &SourceTreeIndex,
+    source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     fork_source: &StringTableForkSource,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
@@ -417,6 +446,7 @@ pub(super) fn prepare_owned_source_inputs(
             prepare_owned_source_input(
                 source_index,
                 source_tree_index,
+                source_files,
                 style_directives,
                 &mut string_table,
             ),
@@ -536,17 +566,20 @@ fn fill_input_slot(
         let PreparedDiscoverySource {
             prepared_output,
             source_byte_len,
+            source_code,
             source_kind,
         } = scanned_source;
 
         input_slots[input_index] = Some(match source_kind {
             SourceFileKind::Moth => PreparedSourceInput::MothPrepared {
                 source_byte_len,
+                source_code: Some(source_code),
                 source_path: canonical_path.to_path_buf(),
                 output: Box::new(prepared_output),
             },
             SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplatePrepared {
                 source_byte_len,
+                source_code: Some(source_code),
                 source_path: canonical_path.to_path_buf(),
                 output: Box::new(prepared_output),
             },

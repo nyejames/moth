@@ -1,7 +1,8 @@
-//! Database of source identities retained for one frontend compilation lifetime.
+//! Database of source identities and retained snapshots for one frontend compilation lifetime.
 //!
-//! The database owns source-record identity and path metadata only. Source text, line indexes and
-//! spans remain outside this slice and are deliberately not stored here.
+//! The database owns source-record identity, path metadata and the exact UTF-8 source snapshot
+//! used for compilation. Source line indexes and spans remain outside this slice and are
+//! deliberately not stored here.
 
 use super::{SourceId, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -137,6 +138,64 @@ impl SourceDatabase {
         self.get(*id)
     }
 
+    /// Look up the exact source snapshot retained for a physical source identity.
+    ///
+    /// The reserved compilation root is excluded by [`Self::get`], so it cannot accidentally
+    /// become a physical source frame.
+    pub fn retained_text(&self, id: SourceId) -> Option<&str> {
+        self.get(id)?.text.as_deref()
+    }
+
+    /// Return the structured error recorded when loading a source snapshot failed.
+    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
+        self.get(id)?.load_error.as_deref()
+    }
+
+    /// Move one loaded source snapshot into its preassigned record.
+    pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
+        let record = self.source_record_mut(id)?;
+        if record.text.is_some() || record.load_error.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source text for source identity {} was retained more than once",
+                id.index()
+            )));
+        }
+        record.text = Some(text.into_boxed_str());
+        Ok(())
+    }
+
+    /// Record a source-read failure in its preassigned slot without aborting the whole build.
+    pub(crate) fn record_source_load_error(
+        &mut self,
+        id: SourceId,
+        error: CompilerError,
+    ) -> Result<(), CompilerError> {
+        let record = self.source_record_mut(id)?;
+        if record.text.is_some() || record.load_error.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source load status for source identity {} was recorded more than once",
+                id.index()
+            )));
+        }
+        record.load_error = Some(Box::new(error));
+        Ok(())
+    }
+
+    fn source_record_mut(&mut self, id: SourceId) -> Result<&mut SourceRecord, CompilerError> {
+        let record = self.files.get_mut(id.index()).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} is absent from the source database",
+                id.index()
+            ))
+        })?;
+        if record.provenance == SourceProvenance::CompilationRoot {
+            return Err(CompilerError::compiler_error(
+                "source snapshots cannot be retained on the compilation root",
+            ));
+        }
+        Ok(record)
+    }
+
     /// Register one canonical source file and return its source identity.
     ///
     /// A repeated canonical path returns the existing identity. New records append after the
@@ -170,6 +229,8 @@ impl SourceDatabase {
             id,
             canonical_os_path: Some(canonical_path),
             logical_path,
+            text: None,
+            load_error: None,
             provenance: SourceProvenance::AuthoredPhysical,
         });
         id
@@ -200,6 +261,8 @@ fn compilation_root_record() -> SourceRecord {
         id: SourceId::from_index(0),
         canonical_os_path: None,
         logical_path: InternedPath::new(),
+        text: None,
+        load_error: None,
         provenance: SourceProvenance::CompilationRoot,
     }
 }

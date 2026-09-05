@@ -71,7 +71,7 @@ static FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST: LazyLock<Mutex<HashMap<PathBuf, us
 static FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 #[cfg(test)]
-fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource) {
+fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource<'_>) {
     let source_path = match source {
         FrontendFilePrepareSource::Moth { source_path, .. }
         | FrontendFilePrepareSource::MothTemplate { source_path, .. }
@@ -137,27 +137,28 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
     pub(crate) options: &'a HeaderParseOptions,
 }
 
-/// Owned per-file source payload for frontend preparation.
+/// Borrowed per-file source payload for frontend preparation.
 ///
 /// WHAT: one variant per source kind. Moth carries the retained `FileTokens` from the
-///       single Stage 0 lexical pass; Moth template and PlainMarkdown carry only raw source text.
+///       single Stage 0 lexical pass; Moth template and PlainMarkdown borrow the exact source
+///       snapshot retained by the compilation boundary.
 /// WHY: the variant makes the source-kind/token relationship unrepresentable as an invalid
 ///      state. The Moth preparation arm receives `FileTokens` by type, so it cannot panic
 ///      on absent tokens, and Moth template/PlainMarkdown cannot carry Moth tokens.
 ///
-/// The build system moves its source-kind handoff into this value; the frontend does not depend on
-/// build-system types and owns each payload for the duration of header preparation.
-pub(crate) enum FrontendFilePrepareSource {
+/// The build system borrows source text from the immutable source database for the duration of
+/// preparation. Direct single-source APIs can borrow their caller-owned request text as well.
+pub(crate) enum FrontendFilePrepareSource<'a> {
     Moth {
         source_path: PathBuf,
         tokens: Box<FileTokens>,
     },
     MothTemplate {
-        source_code: String,
+        source_code: &'a str,
         source_path: PathBuf,
     },
     PlainMarkdown {
-        source_code: String,
+        source_code: &'a str,
         source_path: PathBuf,
     },
 }
@@ -167,8 +168,8 @@ pub(crate) enum FrontendFilePrepareSource {
 /// WHAT: keeps the state-safe source variant and synthetic-fragment offsets together for one
 ///       worker item.
 /// WHY: grouping these inputs keeps the preparation API explicit without a broad argument list.
-pub(crate) struct FrontendFilePrepareInput {
-    pub(crate) source: FrontendFilePrepareSource,
+pub(crate) struct FrontendFilePrepareInput<'a> {
+    pub(crate) source: FrontendFilePrepareSource<'a>,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
 }
@@ -304,10 +305,9 @@ impl CompilerFrontend {
     ///       Markdown without merge/remap so callers can run file work in parallel.
     /// WHY: parallel frontend preparation needs each worker to own its local table without shared
     ///      mutable access to the module-global table, while Stage 0 remains the sole tokenizer
-    ///      owner for discovered Moth source.
     pub(crate) fn prepare_file_frontend_local(
         context: &FrontendFilePrepareContext<'_>,
-        input: FrontendFilePrepareInput,
+        input: FrontendFilePrepareInput<'_>,
         local_string_table: &mut StringTable,
     ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
@@ -324,7 +324,7 @@ impl CompilerFrontend {
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
-                        source_code: &source_code,
+                        source_code,
                         source_file: identity.logical_path,
                         file_id: identity.file_id,
                         canonical_os_path: identity.canonical_os_path,
@@ -374,7 +374,7 @@ impl CompilerFrontend {
                 let file_tokens = Self::tokenize_source(
                     context.source_files,
                     context.style_directives,
-                    &source_code,
+                    source_code,
                     &source_path,
                     tokenizer_entry_mode,
                     local_string_table,

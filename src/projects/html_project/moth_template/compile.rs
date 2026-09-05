@@ -26,9 +26,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::bundle::{
     DIRECT_TEMPLATE_PROJECT_NAME, prepare_file_value_bundle,
 };
-use crate::projects::html_project::moth_template::input::{
-    MothTemplateCompileRequest, MothTemplateSourceUnit,
-};
+use crate::projects::html_project::moth_template::input::MothTemplateCompileRequest;
 use crate::projects::html_project::moth_template::output::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput,
 };
@@ -83,12 +81,9 @@ pub(crate) fn compile_moth_template_with_registry(
     let mut warnings = Vec::new();
     let mut resource_plan = HtmlResourceOutputPlan::new(DIRECT_TEMPLATE_PROJECT_NAME);
 
-    for unit in sources {
-        let MothTemplateSourceUnit {
-            source_path,
-            relative_path,
-            source_text,
-        } = &unit;
+    for mut unit in sources {
+        let source_path = unit.source_path.clone();
+        let relative_path = unit.relative_path.clone();
 
         // Every warning gathered so far belongs to the report in source order: earlier documents
         // first, then this one's.
@@ -97,7 +92,7 @@ pub(crate) fn compile_moth_template_with_registry(
         // Physical file-reference resolution and the content closure are build policy; the
         // compiler service folds the prepared bundle without touching the filesystem.
         let file_value_bundle = report_with_prior_warnings(
-            prepare_file_value_bundle(&unit, &style_directives, string_table, resource_inputs),
+            prepare_file_value_bundle(&mut unit, &style_directives, string_table, resource_inputs),
             &step_warnings,
         )?;
 
@@ -105,7 +100,7 @@ pub(crate) fn compile_moth_template_with_registry(
             compile_moth_template_source(
                 MothTemplateCompilationRequest {
                     source_path: source_path.as_path(),
-                    source_code: source_text.clone(),
+                    source_code: None,
                     style_directives: &style_directives,
                     file_value_resolution: Some(file_value_bundle),
                 },
@@ -127,7 +122,7 @@ pub(crate) fn compile_moth_template_with_registry(
         )?;
 
         let document_path = report_with_prior_warnings(
-            document_url_context(relative_path.as_deref(), source_path, string_table),
+            document_url_context(relative_path.as_deref(), &source_path, string_table),
             &documents_step_warnings(&step_warnings, &folded_warnings),
         )?;
         let content = report_with_prior_warnings(

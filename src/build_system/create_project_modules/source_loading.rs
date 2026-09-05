@@ -3,6 +3,7 @@
 //! Reads source file content from disk with structured error diagnostics.
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerErrorMetadataKey};
+use crate::compiler_frontend::source::{SourceDatabase, SourceRegistrationIndex};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::collections::HashMap;
@@ -92,6 +93,40 @@ pub fn extract_source_code(
 
         Err(error) => Err(source_read_error(file_path, error, string_table)),
     }
+}
+
+/// Load every source already assigned a slot by the registration boundary.
+///
+/// Successful reads move their `String` directly into the corresponding source record. Read and
+/// UTF-8 failures are retained as per-source errors so callers can surface them in the same lane
+/// as the old on-demand read without aborting unrelated source preparation.
+pub(crate) fn load_registered_source_texts(
+    source_files: &mut SourceDatabase,
+    registration_index: &SourceRegistrationIndex<'_>,
+    string_table: &mut StringTable,
+) -> Result<(), CompilerError> {
+    for canonical_path in registration_index.canonical_paths() {
+        let source_id = source_files
+            .get_by_canonical_path(canonical_path)
+            .map(|record| record.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "registered source path {} has no source database slot",
+                    canonical_path.display()
+                ))
+            })?;
+
+        match read_source_code(canonical_path) {
+            Ok(source) => source_files.retain_text(source_id, source)?,
+            Err(error) => {
+                source_files.record_source_load_error(
+                    source_id,
+                    source_read_error(canonical_path, error, string_table),
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Converts raw source-read failures into the existing structured compiler error shape.

@@ -152,13 +152,20 @@ fn source_database_for_test(
     string_table: &mut StringTable,
 ) -> SourceDatabase {
     let registration_index = source_tree_index.source_registration_index();
-    SourceDatabase::from_ordered_registration_index(
+    let mut source_files = SourceDatabase::from_ordered_registration_index(
         &registration_index,
         resolver.entry_root(),
         Some(resolver),
         string_table,
     )
-    .expect("test source database should build from the indexed canonical inventory")
+    .expect("test source database should build from the indexed canonical inventory");
+    super::source_loading::load_registered_source_texts(
+        &mut source_files,
+        &registration_index,
+        string_table,
+    )
+    .expect("test source database should preload indexed source text");
+    source_files
 }
 
 fn prepared_entry_file_path(
@@ -5676,7 +5683,8 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     for (index, input_file) in input_files.iter().enumerate() {
         match input_file {
             PreparedSourceInput::PlainMarkdown { source_code, .. } => {
-                assert_eq!(source_code, &format!("# Asset {index}\n"));
+                let expected_source = format!("# Asset {index}\n");
+                assert_eq!(source_code.as_deref(), Some(expected_source.as_str()));
             }
             _ => panic!("missing-source loading should produce PlainMarkdown inputs"),
         }

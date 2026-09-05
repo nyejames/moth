@@ -29,13 +29,15 @@ use super::source_loading::extract_source_code;
 
 /// Source scan output retained by synthetic discovery.
 ///
-/// WHAT: pairs the complete provider-independent file output with its source byte length.
+/// WHAT: pairs the complete provider-independent file output with its source byte length and
+///       loaded source text.
 /// WHY: reachable-file discovery consumes dependency clauses from the same output that later
 ///      module aggregation owns, so synthetic preparation has one tokenization and one header
-///      parse rather than retaining a second raw token stream.
+///      parse; the loaded text then moves into the final source record without another read.
 pub(super) struct PreparedDiscoverySource {
     pub(super) prepared_output: FileFrontendPrepareOutput,
     pub(super) source_byte_len: usize,
+    pub(super) source_code: String,
     pub(super) source_kind: SourceFileKind,
 }
 
@@ -114,10 +116,10 @@ pub(super) fn prepare_discovery_source_text(
         source_files,
         string_table,
     )?;
-
     Ok(PreparedDiscoverySource {
         prepared_output,
         source_byte_len: source.len(),
+        source_code: source,
         source_kind: SourceFileKind::Moth,
     })
 }
@@ -143,7 +145,7 @@ pub(super) fn prepare_discovery_template_source(
     )?;
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareSource::MothTemplate {
-            source_code: source,
+            source_code: source.as_str(),
             source_path: file_path.to_path_buf(),
         },
         style_directives,
@@ -152,10 +154,10 @@ pub(super) fn prepare_discovery_template_source(
         source_files,
         string_table,
     )?;
-
     Ok(PreparedDiscoverySource {
         prepared_output,
         source_byte_len,
+        source_code: source,
         source_kind: SourceFileKind::MothTemplate,
     })
 }
@@ -189,7 +191,7 @@ fn prepare_discovery_file(
 }
 
 fn prepare_discovery_output(
-    source: FrontendFilePrepareSource,
+    source: FrontendFilePrepareSource<'_>,
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,

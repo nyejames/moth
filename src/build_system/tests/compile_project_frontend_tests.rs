@@ -154,6 +154,168 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
 }
 
 #[test]
+fn registered_source_database_retains_exact_text_for_multiple_compiled_sources() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"snapshot\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    let root_source = "title String = \"home\"\n";
+    let nested_source = "title String = \"about\"\n";
+    fs::write(dir.join("src/@page.moth"), root_source).expect("should write root source");
+    fs::write(dir.join("src/about/@page.moth"), nested_source).expect("should write nested source");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut builder_surface = BuilderSurface::with_mandatory_core();
+    let mut project_source_files = None;
+    let build_config_inputs = BuildConfigInputSet::new();
+    compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut builder_surface,
+        &mut string_table,
+        &mut project_source_files,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("multiple source modules should compile");
+
+    let source_files =
+        project_source_files.expect("compiled project should retain source database");
+    for (relative_path, expected_text) in [
+        ("src/@page.moth", root_source),
+        ("src/about/@page.moth", nested_source),
+    ] {
+        let path =
+            fs::canonicalize(dir.join(relative_path)).expect("source path should canonicalize");
+        let record = source_files
+            .get_by_canonical_path(&path)
+            .expect("compiled source should have a registered record");
+        assert_eq!(
+            source_files.retained_text(record.id),
+            Some(expected_text),
+            "retained text should equal the complete source file for {relative_path}"
+        );
+    }
+}
+
+#[test]
+fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"selected_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    let selected_path = dir.join("src/@page.moth");
+    fs::write(&selected_path, [b'o', b'k', 0xff, b'\n'])
+        .expect("should write invalid UTF-8 source");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut builder_surface = BuilderSurface::with_mandatory_core();
+    let error = match compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut builder_surface,
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("selected unreadable source should fail its existing preparation lane"),
+        Err(error) => error,
+    };
+    let (error_type, message, location) = error
+        .first_infrastructure_error_for_tests()
+        .expect("selected preload failure should remain an infrastructure file error");
+    assert_eq!(error_type, &ErrorType::File);
+    assert!(
+        message.contains("Error reading file when adding new moth files to parse"),
+        "selected source should preserve the existing read failure message: {message}"
+    );
+    let canonical_selected_path =
+        fs::canonicalize(selected_path).expect("selected source path should canonicalize");
+    assert_eq!(
+        location.scope.to_path_buf(&error.string_table),
+        canonical_selected_path
+    );
+}
+
+#[test]
+fn unselected_preload_read_failure_stays_inert() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"unselected_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("src/@page.moth"), "title String = \"home\"\n")
+        .expect("should write selected source");
+    let unselected_path = dir.join("src/unreachable.moth");
+    fs::write(&unselected_path, [b'o', b'k', 0xff, b'\n'])
+        .expect("should write invalid UTF-8 source");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut builder_surface = BuilderSurface::with_mandatory_core();
+    let mut project_source_files = None;
+    let build_config_inputs = BuildConfigInputSet::new();
+    let frontend = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut builder_surface,
+        &mut string_table,
+        &mut project_source_files,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("unselected unreadable source should not abort the build");
+
+    // `Ok` alone proves nothing: a diagnosed outcome still returns `Ok` and carries its
+    // diagnostics in the payload, so an invented failure for the unselected file would pass an
+    // expect-only assertion. Inert means the build reports nothing at all about it.
+    assert!(
+        frontend.transient_messages.is_empty(),
+        "preloading an unreadable unselected source must not report anything: {:?}",
+        frontend.transient_messages
+    );
+    assert_eq!(
+        frontend.successful_module_views().count(),
+        1,
+        "the one selected module must still compile successfully"
+    );
+
+    let source_files =
+        project_source_files.expect("successful build should retain source database");
+    let unselected_path =
+        fs::canonicalize(unselected_path).expect("unselected source path should canonicalize");
+    let unselected_id = source_files
+        .get_by_canonical_path(&unselected_path)
+        .expect("unselected source should still have a registered slot")
+        .id;
+    assert!(source_files.retained_text(unselected_id).is_none());
+    assert!(
+        source_files.source_load_error(unselected_id).is_some(),
+        "unselected preload failure should remain recorded on its slot"
+    );
+}
+
+#[test]
 fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");

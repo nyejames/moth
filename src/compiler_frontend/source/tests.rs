@@ -1,4 +1,5 @@
 use super::{SourceDatabase, SourceId, SourceProvenance};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::mem::{align_of, size_of};
 use std::path::{Path, PathBuf};
@@ -198,4 +199,44 @@ fn one_canonical_source_reachable_from_two_modules_has_one_record() {
 
     assert_eq!(module_a_view, module_b_view);
     assert_eq!(shared_record_count, 1);
+}
+
+#[test]
+fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
+    let empty_path = PathBuf::from("/project/empty.moth");
+    let failed_path = PathBuf::from("/project/failed.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        [&empty_path, &failed_path],
+        &empty_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+    let empty_id = database
+        .get_by_canonical_path(&empty_path)
+        .expect("empty source should be registered")
+        .id;
+    let failed_id = database
+        .get_by_canonical_path(&failed_path)
+        .expect("failed source should be registered")
+        .id;
+
+    assert!(database.retained_text(SourceId::from_index(0)).is_none());
+    assert!(database.retained_text(empty_id).is_none());
+    assert!(database.source_load_error(empty_id).is_none());
+
+    database
+        .retain_text(empty_id, String::new())
+        .expect("empty source text should be retained");
+    assert_eq!(database.retained_text(empty_id), Some(""));
+    assert!(database.source_load_error(empty_id).is_none());
+
+    let load_error =
+        CompilerError::file_error(&failed_path, "source read failed", &mut string_table);
+    database
+        .record_source_load_error(failed_id, load_error)
+        .expect("source load error should be retained");
+    assert!(database.retained_text(failed_id).is_none());
+    assert!(database.source_load_error(failed_id).is_some());
 }

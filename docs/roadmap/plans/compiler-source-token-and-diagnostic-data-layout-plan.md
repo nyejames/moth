@@ -615,6 +615,26 @@ and `1c`, and 1B3 was found already satisfied against it. The remaining registra
 slots and text loading, `SourceId`-set module inputs and the traversal-local database that
 synthetic rebinding still needs — is 1B4 and 1B5.
 
+**Source text moved into its slot, recorded against 1B4.** `SourceRecord` now owns the exact
+`Option<Box<str>>` snapshot plus the boxed `Option<Box<CompilerError>>` read failure, written once
+through `SourceDatabase::retain_text`. Boxing the error took the record from 264 to 80 bytes: 192 of
+those bytes were a `CompilerError` that is `None` for every source in a successful build. Every
+registered candidate is loaded at its barrier, so the text a stage compiles is the snapshot in its
+slot rather than a fresh read. Loading moves ahead of the BFS `visited` check in the
+direct-template bundle, so that lane dedupes on the slot and replays a recorded read failure at
+preparation rather than aborting during reference resolution. No fixture could be constructed where
+that deferral changes which diagnostic a user sees — every candidate aborts at the same point
+either way — so it carries no ordering test; the replay's error identity is tested.
+
+The renderers still call `fs::read_to_string` at render time
+(`render/terminal.rs`, `render/dev_server.rs`, `display_messages.rs`), so a diagnostic excerpt can
+still come from a newer file than the one compiled, and a frame still vanishes when the
+reconstructed path is unreadable from the working directory. Reproduction: a project whose entry is
+`src/@page.moth` renders `--> @page.moth:1:10` with no frame, because that logical path does not
+resolve from the invoking directory. Consuming the retained snapshot there is 1B-gamma3a-ii. The
+rest of 1B4 is the registered/loaded/finalized lifecycle, canonical deduplication and the compact
+unloaded representation.
+
 **Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
 rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
 `Arc<Stage0ResolutionFacts>` inside a lifetime-free `ScopeShared`, so giving it a `'build` borrow

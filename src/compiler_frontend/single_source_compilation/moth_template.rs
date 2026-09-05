@@ -61,7 +61,8 @@ use std::sync::Arc;
 pub(crate) struct MothTemplateCompilationRequest<'a> {
     /// The canonical path of the template source, used for its file identity.
     pub(crate) source_path: &'a Path,
-    pub(crate) source_code: String,
+    /// Optional direct-request text. Bundle-bearing requests borrow their retained database text.
+    pub(crate) source_code: Option<String>,
     /// The calling project's style directives, already merged.
     ///
     /// WHY: which directives a template may use is project vocabulary, so the caller owns the
@@ -134,6 +135,7 @@ pub(crate) fn compile_moth_template_source(
     // A prepared bundle carries the module's Stage 0 identity facts; a plain request keeps one
     // self-contained in-memory source whose folds can never carry file values.
     let mut request = request;
+    let mut direct_source_code = request.source_code.take();
     let file_value_resolution = request.file_value_resolution.take();
     let (mut prepared_content_sources, resolved_references, source_files, module_origin) =
         match file_value_resolution {
@@ -143,6 +145,14 @@ pub(crate) fn compile_moth_template_source(
                 source_files,
                 module_origin,
             }) => {
+                if direct_source_code.is_some() {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Moth template file-value bundle must own the retained source text",
+                        ),
+                        string_table,
+                    ));
+                }
                 if source_files
                     .get_by_canonical_path(request.source_path)
                     .is_none()
@@ -161,19 +171,32 @@ pub(crate) fn compile_moth_template_source(
                     module_origin,
                 )
             }
-            None => (
-                Vec::new(),
-                None,
-                SourceDatabase::build(
+            None => {
+                let mut source_files = SourceDatabase::build(
                     [request.source_path],
                     request.source_path,
                     Some(&path_resolver),
                     string_table,
                 )
-                .map(Arc::new)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                None,
-            ),
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let source_id = source_files
+                    .get_by_canonical_path(request.source_path)
+                    .map(|identity| identity.id)
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "standalone Moth template source identity was not registered",
+                            ),
+                            string_table,
+                        )
+                    })?;
+                if let Some(source_code) = direct_source_code.take() {
+                    source_files
+                        .retain_text(source_id, source_code)
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                }
+                (Vec::new(), None, Arc::new(source_files), None)
+            }
         };
     let Some(source_identity) = source_files.get_by_canonical_path(request.source_path) else {
         return Err(CompilerMessages::from_error_ref(
@@ -183,6 +206,14 @@ pub(crate) fn compile_moth_template_source(
             string_table,
         ));
     };
+    let source_code = source_files
+        .retained_text(source_identity.id)
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error("Moth template source has no retained source text"),
+                string_table,
+            )
+        })?;
     let entry_file_id = Some(source_identity.id);
     let entry_scope = source_identity.logical_path.clone();
 
@@ -191,6 +222,7 @@ pub(crate) fn compile_moth_template_source(
         &source_files,
         &path_resolver,
         &request,
+        source_code,
         entry_file_id,
         string_table,
     )?;
@@ -291,6 +323,7 @@ fn prepare_template_source(
     source_files: &SourceDatabase,
     path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
+    source_code: &str,
     entry_file_id: Option<SourceId>,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
@@ -308,7 +341,7 @@ fn prepare_template_source(
     };
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: request.source_code.clone(),
+            source_code,
             source_path: request.source_path.to_path_buf(),
         },
         const_template_offset: 0,

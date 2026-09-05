@@ -696,6 +696,7 @@ fn prepare_check_only_module(
         let input = prepare_owned_source_input(
             current_source_index,
             source_tree_index,
+            preparation_context.source_files,
             style_directives,
             syntax.string_table_mut(),
         )
@@ -866,6 +867,7 @@ fn prepare_check_only_module(
         let target_input = prepare_owned_source_input(
             target_source_index,
             source_tree_index,
+            preparation_context.source_files,
             style_directives,
             syntax.string_table_mut(),
         )
@@ -1167,6 +1169,7 @@ fn discover_modules_serial_provider_capable(
             prepare_owned_source_inputs(
                 &candidate_source_indices,
                 source_tree_index,
+                source_files,
                 style_directives,
                 &fork_source,
                 #[cfg(feature = "timers")]
@@ -1231,6 +1234,7 @@ fn discover_modules_serial_provider_capable(
                     prepare_owned_source_input(
                         source_index,
                         source_tree_index,
+                        source_files,
                         style_directives,
                         syntax.string_table_mut(),
                     ),
