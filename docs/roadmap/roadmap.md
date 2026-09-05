@@ -12,7 +12,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 # Plans
 
 - [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Active in parallel with diagnostics. Phase 0 package foundations correction is next.
+- [Const eval and native slots restructure - before package hardening](./plans/native-result-slots-and-core-const-eval.md): Will be completed after phase 3 completion of the diagnostics optimisation plan. Diagnostics optimisation plan will pause phase 4 until this is completed.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Phase completed on packages-and-builder-progress-plan branch. Requires native slots plan completion before resuming in parallel with phase 4 onwards of the diagnostics optimisation plan.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
