@@ -603,7 +603,7 @@ depths only; the child map lives and dies with the builder.
 - [ ] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
-- [ ] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
+- [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
 - [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
@@ -789,6 +789,43 @@ One authored spelling is still lost, and it predates this slice: the nested cont
 derives the kind the same way its queue dispatch already does. That lane classifies and compiles
 consistently, so no record contradicts its own compilation; recovering the authored name there
 belongs with the file-reference resolution work, not here.
+
+**Delivered as 1B5-d.** Both canonical merges of prepared source outputs now place each output
+into a preassigned slot instead of pushing into a vector and restoring order afterwards, so
+exactly-once is structural: an unfilled slot means a selected source was never prepared, and an
+occupied slot means one was prepared twice. `merge_file_preparation_chunks` fills a
+`module_file_count`-sized slot vector by each record's `file_index` and requires full coverage
+before header aggregation, which the diagnosed-file path never reaches because it returns first.
+`ModuleSyntaxDiscovery` sizes its slots from `candidate_source_ids` and `retain_prepared_output`
+became fallible; unfilled slots stay legal there because that lane only prepares the candidates
+header discovery reaches.
+
+That replaced six checks that proved coverage indirectly from chunk range arithmetic — start
+continuity, reversed range, range past tail, result-count mismatch, internal-index mismatch and
+total coverage — plus the `FilePreparationChunk.file_range` field they read. Four guards remain,
+each failing exactly one test when disabled: an out-of-range `file_index`, an occupied slot, an
+unfilled slot and two chunks claiming one `chunk_index`. A chunk carrying an in-range permutation
+of its own file indexes is now accepted rather than rejected, because slot placement puts each
+output where its index says regardless of traversal order.
+
+`preparation_chunks.sort_by_key(chunk_index)` was briefly removed at implementation and replaced
+with a rejection of out-of-order chunks. That reverses the original decision — completion order is
+a scheduler detail and the merge normalises it — so the sort was restored, and only the case a
+stable sort cannot normalise, two chunks sharing an index, is rejected. No test can distinguish
+the sort in the chunked fixture: tokenization interns into the shared base before chunking, so the
+chunk-local deltas are identity and merge order is unobservable there. Rayon's `collect` also
+preserves plan order, so production never delivers a shuffled vector.
+
+**The last 1B5 clause is satisfied in substance, not by its name.** "Own per-source
+`SourcePreparationDelta`" is what `PreparedOwnedSource` already is — a per-source value owning its
+string-table fork, its base length and its result — with `PreparedFileResult` playing the same
+role under a chunk-owned table and `PreparedDiscoverySource` carrying an already-merged result.
+Unifying the three under one name would either force a table onto results that do not need one or
+strip it from the one that does, so the name is not adopted. On the borrowing half, directory
+preparation borrows `retained_text` and the synthetic lanes move their `String` into the record
+rather than copying it. The identity copies that remain — `FrontendSourceFileIdentity`,
+`FileTokens.canonical_os_path`, `ModuleSymbols.canonical_os_path_by_source` — are 1B6 and slice
+group 2C property by the plan's own assignment, not unfinished 1B5 work.
 
 **Root reservation, recorded against 1B1.** `SourceId(1)` is now the deterministic
 `CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance`, an

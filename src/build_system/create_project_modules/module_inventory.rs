@@ -813,7 +813,9 @@ fn prepare_check_only_module(
                 pending_content_sources.insert(target_source_index);
             }
         }
-        syntax.retain_prepared_output(current_order, prepared_output);
+        syntax
+            .retain_prepared_output(current_order, prepared_output)
+            .map_err(|error| CompilerMessages::from_error_ref(error, syntax.string_table_mut()))?;
     }
 
     // A `.mtf` or `.md` file-value target contributes its synthetic `content` declaration to this
@@ -899,7 +901,9 @@ fn prepare_check_only_module(
                 pending_content_sources.insert(nested_source_index);
             }
         }
-        syntax.retain_prepared_output(target_order, target_output);
+        syntax
+            .retain_prepared_output(target_order, target_output)
+            .map_err(|error| CompilerMessages::from_error_ref(error, syntax.string_table_mut()))?;
     }
 
     let prepared = syntax.finish()?;
@@ -1348,7 +1352,11 @@ fn discover_modules_serial_provider_capable(
                 }
             }
 
-            syntax.retain_prepared_output(order, prepared_output);
+            syntax
+                .retain_prepared_output(order, prepared_output)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
+                })?;
         }
         let check_only_source_indices = if include_check_only {
             classify_check_only_source_indices(

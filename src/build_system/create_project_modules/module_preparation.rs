@@ -84,7 +84,6 @@ const FILE_PREPARATION_MIN_CHUNK_SIZE: usize = 4;
 
 struct FilePreparationChunk {
     chunk_index: usize,
-    file_range: Range<usize>,
     local_string_table: StringTable,
     results: Vec<PreparedFileResult>,
 }
@@ -272,7 +271,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     /// boundary. Cloning this handle does not duplicate the boundary-wide rows.
     source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: StringTable,
-    prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
+    prepared_outputs: Vec<Option<FileFrontendPrepareOutput>>,
     resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
@@ -309,16 +308,20 @@ impl ModulePreparationContext<'_> {
         string_table: StringTable,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
+        let candidate_source_ids = registered_sources.candidate_source_ids;
+        let mut prepared_outputs = Vec::new();
+        prepared_outputs.resize_with(candidate_source_ids.len(), || None);
+
         Ok(ModuleSyntaxDiscovery {
             context: self,
             entry_file_path: entry_file_path.to_path_buf(),
             entry_file_role,
             active_root_role: stable_origin.role(),
             expected_active_origin: stable_origin,
-            candidate_source_ids: registered_sources.candidate_source_ids,
+            candidate_source_ids,
             source_module_origins: registered_sources.source_module_origins,
             string_table,
-            prepared_outputs: Vec::new(),
+            prepared_outputs,
             resolved_file_references: ResolvedFileReferenceTable::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
@@ -560,11 +563,13 @@ impl ModulePreparationContext<'_> {
         )
     }
 
-    /// Merge chunk-local string tables and aggregate prepared file outputs.
+    /// Merge chunk-local string tables and place prepared file outputs into source-order slots.
     ///
-    /// WHAT: all scheduling strategies converge here after producing ordered chunk records.
-    /// WHY: chunk-local workers may finish in any order, but the frontend's source identity,
-    /// warning, diagnostic, and header order must follow the original module input order.
+    /// WHAT: all scheduling strategies converge here after producing chunk records. String-table
+    ///       deltas, warnings and diagnostics follow deterministic chunk order; prepared outputs
+    ///       are placed by `file_index` so header order follows the original module input.
+    /// WHY: chunk-local workers may finish in any order, but an unfilled slot means a selected
+    ///      source was never prepared and an occupied slot means one was prepared twice.
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
         mut preparation_chunks: Vec<FilePreparationChunk>,
@@ -572,26 +577,18 @@ impl ModulePreparationContext<'_> {
         base_len: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
         // Completion order is a scheduler detail. Merge order is the module input order encoded
-        // by deterministic chunk indexes.
+        // by deterministic chunk indexes; prepared outputs are then placed by `file_index`, so
+        // header order never depends on which worker finished first.
         preparation_chunks.sort_by_key(|chunk| chunk.chunk_index);
-
-        // Release-safe validation replaces the previous ordering debug_asserts so release
-        // builds reject malformed scheduler payloads with a CompilerError instead of silently
-        // dropping, reordering or truncating prepared files.
-        validate_preparation_chunk_order(&preparation_chunks, module_file_count)
+        validate_distinct_chunk_indexes(&preparation_chunks)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-        let mut prepared_outputs = Vec::new();
+        let mut prepared_outputs = Vec::with_capacity(module_file_count);
+        prepared_outputs.resize_with(module_file_count, || None);
         let mut warnings = Vec::new();
         let mut diagnostics = Vec::new();
         let mut const_fragment_source_count = 0usize;
         let mut runtime_fragment_source_count = 0usize;
-
-        let prepared_file_capacity = preparation_chunks
-            .iter()
-            .map(|chunk| chunk.results.len())
-            .sum();
-        prepared_outputs.reserve(prepared_file_capacity);
 
         for chunk in preparation_chunks {
             let remap = string_table.merge_delta_from(&chunk.local_string_table, base_len);
@@ -606,6 +603,27 @@ impl ModulePreparationContext<'_> {
             for prepared_file in chunk.results {
                 match prepared_file.result {
                     Ok(mut output) => {
+                        if prepared_file.file_index >= module_file_count {
+                            return Err(CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(format!(
+                                    "file preparation record carries file index {} but the module \
+                                     has only {module_file_count} files",
+                                    prepared_file.file_index,
+                                )),
+                                string_table,
+                            ));
+                        }
+
+                        if prepared_outputs[prepared_file.file_index].is_some() {
+                            return Err(CompilerMessages::from_error_ref(
+                                CompilerError::compiler_error(format!(
+                                    "file preparation record occupies file index {} more than once",
+                                    prepared_file.file_index,
+                                )),
+                                string_table,
+                            ));
+                        }
+
                         if output.const_template_count > 0 {
                             const_fragment_source_count += 1;
                         }
@@ -645,7 +663,7 @@ impl ModulePreparationContext<'_> {
                             }
                         }
                         warnings.append(&mut output.warnings);
-                        prepared_outputs.push(output);
+                        prepared_outputs[prepared_file.file_index] = Some(output);
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
                         if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal
@@ -685,8 +703,24 @@ impl ModulePreparationContext<'_> {
             return Err(messages);
         }
 
-        record_successful_prepared_outputs(&prepared_outputs);
-        let prepared = prepare_header_syntax(prepared_outputs, string_table).map_err(|bag| {
+        let mut filled_outputs = Vec::with_capacity(module_file_count);
+        for (file_index, slot) in prepared_outputs.into_iter().enumerate() {
+            match slot {
+                Some(output) => filled_outputs.push(output),
+                None => {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "file preparation left file index {file_index} unfilled; every \
+                             selected source must be prepared exactly once"
+                        )),
+                        string_table,
+                    ));
+                }
+            }
+        }
+
+        record_successful_prepared_outputs(&filled_outputs);
+        let prepared = prepare_header_syntax(filled_outputs, string_table).map_err(|bag| {
             let mut messages =
                 CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
             messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
@@ -852,7 +886,6 @@ impl ModulePreparationContext<'_> {
 
         FilePreparationChunk {
             chunk_index: plan.chunk_index,
-            file_range: plan.file_range,
             local_string_table,
             results,
         }
@@ -1027,25 +1060,40 @@ impl ModuleSyntaxDiscovery<'_> {
 
     /// Retain one completed source output after Stage 0 has consumed its dependency facts.
     ///
-    /// WHAT: commits the already prepared file output to the module's deterministic source-order
-    ///      collection.
+    /// WHAT: commits the already prepared file output into the candidate-order slot assigned at
+    ///      construction.
     /// WHY: Stage 0 must consume the retained clause and flat-selection facts before the output is
-    ///      frozen, while source preparation itself remains exactly once.
+    ///      frozen, while source preparation itself remains exactly once. An occupied slot is a
+    ///      second preparation of the same candidate; an order past the slot count is outside the
+    ///      candidate domain.
     pub(super) fn retain_prepared_output(
         &mut self,
         source_order: usize,
         output: FileFrontendPrepareOutput,
-    ) {
-        self.prepared_outputs.push((source_order, output));
+    ) -> Result<(), CompilerError> {
+        if source_order >= self.prepared_outputs.len() {
+            return Err(CompilerError::compiler_error(format!(
+                "prepared output order {source_order} is outside the candidate source slot count {}",
+                self.prepared_outputs.len(),
+            )));
+        }
+
+        if self.prepared_outputs[source_order].is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "prepared output occupies candidate source order {source_order} more than once"
+            )));
+        }
+
+        self.prepared_outputs[source_order] = Some(output);
+        Ok(())
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
     pub(super) fn finish(mut self) -> Result<PreparedModule, CompilerMessages> {
-        self.prepared_outputs.sort_by_key(|(order, _)| *order);
         let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
-            .map(|(_, output)| output)
+            .flatten()
             .collect::<Vec<_>>();
         for output in &mut prepared_outputs {
             output
@@ -1139,72 +1187,24 @@ fn plan_file_preparation_chunks(
     plans
 }
 
-/// Validate that sorted file-preparation chunks cover the module input exactly, in order, with
-/// no gaps, overlaps, mismatched record counts or wrong internal file indexes.
+/// Validate that no two file-preparation chunks claim the same `chunk_index`.
 ///
-/// WHAT: release-safe replacement for the ordering `debug_assert`s that previously guarded the
-///      merge loop. Malformed scheduler payloads produce a `CompilerError` instead of silently
-///      dropping, reordering or truncating prepared files.
-/// WHY:  release builds must reject corrupted chunk payloads with the same invariant checks as
-///      debug builds, and the merge path must not silently heal a broken scheduler result.
-fn validate_preparation_chunk_order(
+/// WHAT: release-safe check that sorting the chunk vector yields one deterministic merge order.
+///      Slot placement, not this check, proves each selected file is prepared exactly once.
+/// WHY: sorting normalises worker completion order, but a stable sort leaves two chunks sharing
+///      an index in completion order, which would merge their local string tables
+///      nondeterministically.
+fn validate_distinct_chunk_indexes(
     preparation_chunks: &[FilePreparationChunk],
-    module_file_count: usize,
 ) -> Result<(), CompilerError> {
-    let mut expected_file_index = 0usize;
-
-    for chunk in preparation_chunks {
-        if chunk.file_range.start != expected_file_index {
+    for pair in preparation_chunks.windows(2) {
+        if pair[0].chunk_index == pair[1].chunk_index {
             return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} starts at file index {} but expected \
-                 {expected_file_index}; chunks must be ordered, non-overlapping and gap-free",
-                chunk.chunk_index, chunk.file_range.start,
+                "two file preparation chunks claim chunk index {}; chunk indexes must be unique \
+                 for the merge order to be deterministic",
+                pair[0].chunk_index,
             )));
         }
-
-        if chunk.file_range.end < chunk.file_range.start {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} has reversed range {:?}",
-                chunk.chunk_index, chunk.file_range,
-            )));
-        }
-
-        if chunk.file_range.end > module_file_count {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} ends at file index {} but the module has only \
-                 {module_file_count} files",
-                chunk.chunk_index, chunk.file_range.end,
-            )));
-        }
-
-        if chunk.results.len() != chunk.file_range.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} declares range {:?} ({} files) but carries {} results",
-                chunk.chunk_index,
-                chunk.file_range,
-                chunk.file_range.len(),
-                chunk.results.len(),
-            )));
-        }
-
-        for (expected_index, prepared_file) in (chunk.file_range.start..).zip(&chunk.results) {
-            if prepared_file.file_index != expected_index {
-                return Err(CompilerError::compiler_error(format!(
-                    "file preparation chunk {} record carries file index {} but expected \
-                     {expected_index}",
-                    chunk.chunk_index, prepared_file.file_index,
-                )));
-            }
-        }
-
-        expected_file_index = chunk.file_range.end;
-    }
-
-    if expected_file_index != module_file_count {
-        return Err(CompilerError::compiler_error(format!(
-            "file preparation chunks cover {expected_file_index} files but the module has \
-             {module_file_count} files",
-        )));
     }
 
     Ok(())

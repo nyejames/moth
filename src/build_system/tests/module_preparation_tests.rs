@@ -13,12 +13,11 @@ use super::super::prepared_source::PreparedSourceInput;
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticPayload};
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
-    PreparedHeaderSyntax, parse_file_headers_with_table, prepare_header_syntax,
+    FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
+    parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
@@ -1401,25 +1400,6 @@ fn chunked_file_preparation_preserves_warning_source_order() {
 //  Malformed file-preparation payload rejection
 //  ----------------------------------------------------------------------
 
-/// Build a `PreparedFileResult` carrying a dummy error so the validation path can inspect
-/// `file_index` without needing a full prepared output.
-fn dummy_prepared_file_result(file_index: usize) -> super::PreparedFileResult {
-    super::PreparedFileResult {
-        file_index,
-        string_domain: super::PreparedFileStringDomain::ChunkLocal,
-        result: Err(
-            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
-                FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic: Box::new(CompilerDiagnostic::unreachable_match_arm(
-                        SourceLocation::default(),
-                    )),
-                },
-            ),
-        ),
-    }
-}
-
 fn parsed_prepared_output(
     source_name: &str,
     source_code: &str,
@@ -1454,22 +1434,29 @@ fn parsed_prepared_output(
     .expect("test source should prepare")
 }
 
-/// Build a chunk with the given file range and one result per supplied file index.
-///
-/// Pass explicit `file_indexes` to create a wrong-index malformation or a length mismatch.
+/// Build a chunk with one successful result per supplied file index.
 fn dummy_preparation_chunk(
     chunk_index: usize,
-    file_range: std::ops::Range<usize>,
     file_indexes: Vec<usize>,
 ) -> super::FilePreparationChunk {
+    let mut local_string_table = StringTable::new();
+    let results = file_indexes
+        .into_iter()
+        .map(|file_index| super::PreparedFileResult {
+            file_index,
+            string_domain: super::PreparedFileStringDomain::ChunkLocal,
+            result: Ok(parsed_prepared_output(
+                &format!("file_{file_index}.moth"),
+                "x #= 1\n",
+                &mut local_string_table,
+            )),
+        })
+        .collect();
+
     super::FilePreparationChunk {
         chunk_index,
-        file_range,
-        local_string_table: StringTable::new(),
-        results: file_indexes
-            .into_iter()
-            .map(dummy_prepared_file_result)
-            .collect(),
+        local_string_table,
+        results,
     }
 }
 
@@ -1480,14 +1467,13 @@ fn assert_malformed_chunks_rejected(
     module_file_count: usize,
     expected_fragment: &str,
 ) {
-    let mut fixture = frontend_preparation_fixture(&[("a.moth", "x #= 1\n")]);
-    let base_len = fixture.frontend.string_table.fork_source().base_len();
+    let mut string_table = StringTable::new();
 
     let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
-        &mut fixture.frontend.string_table,
+        &mut string_table,
         chunks,
         module_file_count,
-        base_len,
+        0,
     ) {
         Err(messages) => messages,
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
@@ -1519,48 +1505,36 @@ fn assert_malformed_chunks_rejected(
 }
 
 #[test]
-fn merge_rejects_chunk_gap_in_file_indexes() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let chunk_one = dummy_preparation_chunk(1, 5..8, (5..8).collect::<Vec<_>>());
+fn merge_rejects_unfilled_file_slot() {
+    let chunk = dummy_preparation_chunk(0, vec![0, 1, 2]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero, chunk_one], 8, "but expected 4");
+    assert_malformed_chunks_rejected(vec![chunk], 4, "left file index 3 unfilled");
 }
 
 #[test]
-fn merge_rejects_chunk_overlap_in_file_indexes() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let chunk_one = dummy_preparation_chunk(1, 3..8, (3..8).collect::<Vec<_>>());
+fn merge_rejects_occupied_file_slot() {
+    let chunk = dummy_preparation_chunk(0, vec![0, 0]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero, chunk_one], 8, "but expected 4");
+    assert_malformed_chunks_rejected(vec![chunk], 1, "occupies file index 0 more than once");
 }
 
 #[test]
-fn merge_rejects_wrong_internal_file_index_in_chunk() {
-    let chunk = dummy_preparation_chunk(0, 0..4, vec![0, 1, 2, 7]);
+fn merge_rejects_out_of_range_file_index() {
+    let chunk = dummy_preparation_chunk(0, vec![4]);
 
-    assert_malformed_chunks_rejected(vec![chunk], 4, "but expected 3");
+    assert_malformed_chunks_rejected(vec![chunk], 4, "has only 4 files");
 }
 
 #[test]
-fn merge_rejects_missing_tail_coverage() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
+fn merge_rejects_duplicate_chunk_indexes() {
+    let chunk_zero = dummy_preparation_chunk(0, vec![0]);
+    let duplicate_zero = dummy_preparation_chunk(0, vec![1]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero], 8, "cover 4 files but the module has 8");
-}
-
-#[test]
-fn merge_rejects_chunk_range_past_module_tail() {
-    let chunk = dummy_preparation_chunk(0, 0..5, (0..5).collect::<Vec<_>>());
-
-    assert_malformed_chunks_rejected(vec![chunk], 4, "module has only 4 files");
-}
-
-#[test]
-fn merge_rejects_reversed_chunk_range() {
-    let chunk = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let reversed = dummy_preparation_chunk(1, std::ops::Range { start: 4, end: 3 }, Vec::new());
-
-    assert_malformed_chunks_rejected(vec![chunk, reversed], 4, "has reversed range");
+    assert_malformed_chunks_rejected(
+        vec![chunk_zero, duplicate_zero],
+        2,
+        "two file preparation chunks claim chunk index 0",
+    );
 }
 
 #[test]
@@ -1603,7 +1577,6 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
 
     let first_chunk = super::FilePreparationChunk {
         chunk_index: 0,
-        file_range: 0..1,
         local_string_table: first_local_table,
         results: vec![super::PreparedFileResult {
             file_index: 0,
@@ -1613,7 +1586,6 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     };
     let second_chunk = super::FilePreparationChunk {
         chunk_index: 1,
-        file_range: 1..3,
         local_string_table: second_local_table,
         results: vec![
             super::PreparedFileResult {
