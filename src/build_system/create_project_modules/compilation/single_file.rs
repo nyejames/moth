@@ -55,7 +55,6 @@ use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
 use super::super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 use super::super::prepared_module::PreparedModule;
-use super::super::prepared_source::PreparedSourceInput;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::non_utf8_filesystem_name_error;
 use super::super::resource_inputs::ResourceInputRegistry;
@@ -63,36 +62,6 @@ use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
 use super::super::source_tree_index::SourceTreeIndex;
 use super::{ModuleBoundaryPublication, publish_module_and_generated};
-
-/// Move source snapshots carried by synthetic discovery into their registered database slots.
-///
-/// This runs while the database is still uniquely owned. Once preparation starts, every module
-/// borrows the immutable database and no later `Arc::get_mut` handoff is possible.
-fn retain_single_file_source_texts(
-    input_files: &mut [PreparedSourceInput],
-    source_files: &mut SourceDatabase,
-) -> Result<(), CompilerError> {
-    for input in input_files {
-        let source_path = input.source_path().to_owned();
-        let source_id = source_files
-            .get_by_canonical_path(&source_path)
-            .map(|record| record.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "single-file source path {} has no registered source identity",
-                    source_path.display()
-                ))
-            })?;
-        let source_code = input.take_source_code().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "single-file source path {} has no loaded source text",
-                source_path.display()
-            ))
-        })?;
-        source_files.retain_text(source_id, source_code)?;
-    }
-    Ok(())
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_single_file_frontend_with_inputs(
@@ -370,7 +339,9 @@ fn compile_single_file_frontend_with_target(
             return Err(messages);
         }
     };
-    let mut input_files = collected.input_files;
+    let source_files = Arc::new(collected.source_files);
+    *project_source_files = Some(Arc::clone(&source_files));
+    let input_files = collected.input_files;
     let resolved_file_references = collected.resolved_file_references;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
@@ -390,9 +361,15 @@ fn compile_single_file_frontend_with_target(
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
     );
 
-    // Record module-input counters before preparation so the frontend module
-    // total can be attributed even when preparation fails.
-    let source_byte_count = record_module_input_counters(&input_files);
+    // Record module-input counters before preparation so the frontend module total can be
+    // attributed even when preparation fails. A source-load failure is replayed here from the
+    // final database rather than being replaced with a fabricated zero byte length.
+    let source_byte_count = match record_module_input_counters(&input_files, &source_files) {
+        Ok(source_byte_count) => source_byte_count,
+        Err(error) => {
+            return Err(CompilerMessages::from_error_ref(error, string_table));
+        }
+    };
 
     // Register the single synthetic module with its portable logical identity and source facts.
     // The empty path is this mode's fixed entry-root logical spelling, matching the origin
@@ -425,21 +402,6 @@ fn compile_single_file_frontend_with_target(
             return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     };
-
-    // Preparation retains the existing synthetic temporary-table lifecycle: register the complete
-    // reachable candidate set before rebinding prepared outputs, then discard this table with the
-    // single-file compilation boundary.
-    let mut source_files = SourceDatabase::build(
-        input_files.iter().map(PreparedSourceInput::source_path),
-        &entry_path,
-        Some(&project_path_resolver),
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    retain_single_file_source_texts(&mut input_files, &mut source_files)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let source_files = Arc::new(source_files);
-    *project_source_files = Some(Arc::clone(&source_files));
     let preparation_context = ModulePreparationContext {
         source_files: &source_files,
         style_directives,
@@ -670,11 +632,11 @@ fn compile_single_file_frontend_with_target(
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
-/// Rebind synthetic Stage 0 file-reference rows to the boundary's temporary source identities.
+/// Rebind synthetic Stage 0 file-reference rows to the boundary's source identities.
 ///
 /// Synthetic discovery resolves paths before the complete source closure is known, so it retains
-/// canonical target paths until the enclosing single-file boundary builds its authoritative
-/// `SourceDatabase`. This helper performs that one identity join and publishes the same resolved
+/// canonical target paths and joins them here against the database discovery finalized once that
+/// closure was known. This helper performs that one identity join and publishes the same resolved
 /// table consumed by directory modules; it does not probe the filesystem or reinterpret path
 /// syntax.
 fn attach_single_file_resolved_references(

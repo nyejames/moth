@@ -99,7 +99,8 @@ pub(super) fn prepare_discovery_source_text(
     .map_err(SourceDiscoveryError::Diagnostic)?;
 
     // Register this file in the traversal-local identity table so header preparation can stamp
-    // real shells; the table is discarded after discovery and `prepare_module` rebinds identity.
+    // real shells. Discovery rebinds every prepared output to the final sorted database once the
+    // closure is complete, and this table dies with the traversal.
     source_files.insert(
         file_path.to_path_buf(),
         entry_file_path,

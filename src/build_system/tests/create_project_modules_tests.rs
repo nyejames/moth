@@ -533,16 +533,17 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
     }
 }
 
-/// Collect synthetic inputs through the production Stage 0 path while retaining the merged table
-/// needed to inspect the rebased syntax identities.
+/// Collect synthetic inputs through the production Stage 0 path while retaining the finished
+/// source database needed to inspect the final syntax identities.
 fn collect_synthetic_inputs_for_test(
     entry_file_path: &Path,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> (Vec<PreparedSourceInput>, StringTable) {
+) -> (SourceDatabase, Vec<PreparedSourceInput>, StringTable) {
     let mut string_table = StringTable::new();
     let mut external_packages = ExternalPackageRegistry::new();
-    let external_import_providers = crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
+    let external_import_providers =
+        crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
     let mut external_import_cache =
         crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
         );
@@ -568,7 +569,7 @@ fn collect_synthetic_inputs_for_test(
     )
     .expect("synthetic source discovery should succeed");
 
-    (collected.input_files, string_table)
+    (collected.source_files, collected.input_files, string_table)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -692,20 +693,17 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (input_files, mut string_table) =
+    let (source_files, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
-    let source_files = Arc::new(
-        SourceDatabase::build(
-            input_files.iter().map(PreparedSourceInput::source_path),
-            &entry_file_path,
-            Some(&resolver),
-            &mut string_table,
-        )
-        .expect("synthetic source database should build"),
-    );
+    let source_files = Arc::new(source_files);
     let source_byte_count = input_files
         .iter()
-        .map(PreparedSourceInput::source_byte_len)
+        .map(|input| {
+            source_files
+                .retained_text(input.source_id())
+                .expect("synthetic source should retain its snapshot")
+                .len()
+        })
         .sum();
     let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
     let preparation_context = super::module_preparation::ModulePreparationContext {
@@ -808,17 +806,10 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (input_files, mut string_table) =
+    let (source_files, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
-    let source_files = Arc::new(
-        SourceDatabase::build(
-            input_files.iter().map(PreparedSourceInput::source_path),
-            &entry_file_path,
-            Some(&resolver),
-            &mut string_table,
-        )
-        .expect("synthetic source database should build"),
-    );
+    let source_files = Arc::new(source_files);
+    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     assert!(
         input_files
@@ -849,9 +840,13 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
 
     let source_byte_count = input_files
         .iter()
-        .map(PreparedSourceInput::source_byte_len)
+        .map(|input| {
+            source_files
+                .retained_text(input.source_id())
+                .expect("synthetic source should retain its snapshot")
+                .len()
+        })
         .sum();
-    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
     let preparation_context = super::module_preparation::ModulePreparationContext {
         source_files: &source_files,
         style_directives: &style_directives,
@@ -2949,7 +2944,13 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
     let discovered_paths: HashSet<_> = collected
         .input_files
         .iter()
-        .map(|input| input.source_path().to_path_buf())
+        .map(|input| {
+            collected
+                .source_files
+                .get(input.source_id())
+                .and_then(|identity| identity.canonical_os_path.clone())
+                .expect("discovered source should have a canonical path")
+        })
         .collect();
     let entry_namesake =
         fs::canonicalize(src.join("helpers.moth")).expect("canonical entry namesake");
@@ -3548,10 +3549,12 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         .input_files
         .iter()
         .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
+            collected
+                .source_files
+                .get(input.source_id())
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
                 .unwrap_or_default()
                 .to_owned()
         })
@@ -3561,6 +3564,26 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
     assert!(input_paths.contains("second.mtf"));
     assert!(input_paths.contains("notes.md"));
     assert!(!input_paths.contains("helper.moth"));
+
+    // The Markdown target is never tokenized, so it reaches discovery's cache-miss branch. Its
+    // snapshot must arrive in the final slot: nothing reads this source again from disk.
+    let markdown_source_id = collected
+        .input_files
+        .iter()
+        .map(PreparedSourceInput::source_id)
+        .find(|source_id| {
+            collected
+                .source_files
+                .get(*source_id)
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::file_name)
+                == Some(OsStr::new("notes.md"))
+        })
+        .expect("the Markdown content target should be a prepared input");
+    assert_eq!(
+        collected.source_files.retained_text(markdown_source_id),
+        Some("# notes\n")
+    );
 
     let references = collected.resolved_file_references;
     assert_eq!(references.len(), 6);
@@ -5657,7 +5680,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
         .collect::<Vec<_>>();
     let mut string_table = StringTable::new();
 
-    let input_files = super::source_discovery::load_missing_source_paths_for_test(
+    let (source_files, input_files) = super::source_discovery::load_missing_source_paths_for_test(
         source_paths,
         crate::builder_surface::SourceFileKind::PlainMarkdown,
         &mut string_table,
@@ -5667,9 +5690,11 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     let loaded_names = input_files
         .iter()
         .map(|input| {
-            input
-                .source_path()
-                .file_name()
+            source_files
+                .get(input.source_id())
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::to_str)
+                .and_then(|path| Path::new(path).file_name())
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
                 .to_owned()
@@ -5681,13 +5706,15 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
 
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
-        match input_file {
-            PreparedSourceInput::PlainMarkdown { source_code, .. } => {
-                let expected_source = format!("# Asset {index}\n");
-                assert_eq!(source_code.as_deref(), Some(expected_source.as_str()));
-            }
-            _ => panic!("missing-source loading should produce PlainMarkdown inputs"),
-        }
+        assert!(
+            matches!(input_file, PreparedSourceInput::PlainMarkdown { .. }),
+            "missing-source loading should produce PlainMarkdown inputs"
+        );
+        let source_code = source_files
+            .retained_text(input_file.source_id())
+            .expect("loaded source should retain its snapshot");
+        let expected_source = format!("# Asset {index}\n");
+        assert_eq!(source_code, expected_source);
     }
 }
 

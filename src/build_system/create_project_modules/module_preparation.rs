@@ -182,35 +182,73 @@ pub(super) struct ModulePreparationContext<'a> {
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
 }
 
+/// Resolve the canonical filesystem path for a final source identity.
+fn source_path_for_id(
+    source_files: &SourceDatabase,
+    source_id: SourceId,
+) -> Result<PathBuf, CompilerError> {
+    let record = source_files.get(source_id).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "source identity {} is absent from the source database",
+            source_id.index()
+        ))
+    })?;
+    record.canonical_os_path.clone().ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "source identity {} has no canonical filesystem path",
+            source_id.index()
+        ))
+    })
+}
+
+/// Resolve the identity the boundary already assigned to a canonical path.
+///
+/// WHY: the active root arrives as a path from module discovery, and preparation validates it
+/// against the identity domain rather than trusting that argument. The database's canonical index
+/// answers this directly; a scan over records would reimplement it.
+fn source_id_for_canonical_path(
+    source_files: &SourceDatabase,
+    canonical_path: &Path,
+) -> Option<SourceId> {
+    source_files
+        .get_by_canonical_path(canonical_path)
+        .map(|record| record.id)
+}
+
 /// Borrow the exact source snapshot retained by the compilation boundary.
 ///
 /// A failed preload is returned at the same preparation boundary that previously performed the
 /// filesystem read, preserving the selected-source error lane. Unselected source failures remain
 /// inert because this helper is only called for a source that is being prepared.
-fn retained_source_text<'a>(
-    source_files: &'a SourceDatabase,
-    source_path: &Path,
-) -> Result<&'a str, CompilerError> {
-    let source_id = source_files
-        .get_by_canonical_path(source_path)
-        .map(|record| record.id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "source path {} has no registered source identity",
-                source_path.display()
-            ))
-        })?;
+fn retained_source_text(
+    source_files: &SourceDatabase,
+    source_id: SourceId,
+) -> Result<&str, CompilerError> {
+    if source_files.get(source_id).is_none() {
+        return Err(CompilerError::compiler_error(format!(
+            "source identity {} is absent from the source database",
+            source_id.index()
+        )));
+    }
+
     source_files.retained_text(source_id).ok_or_else(|| {
         source_files
             .source_load_error(source_id)
             .cloned()
             .unwrap_or_else(|| {
                 CompilerError::compiler_error(format!(
-                    "registered source path {} has no retained source text",
-                    source_path.display()
+                    "registered source identity {} has no retained source text",
+                    source_id.index()
                 ))
             })
     })
+}
+
+fn source_byte_len(
+    source_files: &SourceDatabase,
+    source_id: SourceId,
+) -> Result<usize, CompilerError> {
+    retained_source_text(source_files, source_id).map(str::len)
 }
 
 /// Incremental provider-independent syntax preparation for one indexed directory module.
@@ -318,9 +356,9 @@ impl ModulePreparationContext<'_> {
     ) -> Result<PreparedModule, CompilerMessages> {
         let mut warnings = Vec::new();
 
-        // Single-file preparation uses its own temporary source identity domain. Its candidate
-        // order is the source database's deterministic logical-path order, matching the
-        // pre-slice module-local table built from these same input paths.
+        // Discovery owns the final source identity domain and supplies this database in
+        // deterministic logical-path order. Prepared inputs carry only these final IDs, so the
+        // preparation phase does not construct or rebind a traversal-local identity table.
         let candidate_source_ids = self
             .source_files
             .iter()
@@ -353,9 +391,9 @@ impl ModulePreparationContext<'_> {
         )?;
         warnings.extend(file_warnings);
 
-        // 2. Single-file compilation has a separate synthetic source-origin table because its
-        //    source IDs belong to a temporary identity domain. Directory discovery supplies the
-        //    shared boundary table through `begin_syntax_discovery` instead.
+        // The final source IDs are mapped to the stable module origin used by this compilation.
+        // Directory discovery supplies the same boundary table through `begin_syntax_discovery`;
+        // single-file discovery has already finalized it before calling this phase.
         let source_module_origins = Arc::new(SourceModuleOriginTable::from_synthetic_origin(
             self.source_files,
             &stable_origin,
@@ -409,10 +447,8 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         string_table: &StringTable,
     ) -> Result<SourceId, CompilerMessages> {
-        let active_root_file_id = source_files
-            .get_by_canonical_path(entry_file_path)
-            .map(|identity| identity.id)
-            .ok_or_else(|| {
+        let active_root_file_id =
+            source_id_for_canonical_path(source_files, entry_file_path).ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
                         "module preparation: the entry file path {:?} is not in the source file table",
@@ -460,17 +496,12 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
-        mut module: Vec<PreparedSourceInput>,
+        module: Vec<PreparedSourceInput>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
-        Self::rebind_synthetic_prepared_inputs(self.source_files, &mut module, string_table)?;
-
-        let entry_file_id = self
-            .source_files
-            .get_by_canonical_path(entry_file_path)
-            .map(|identity| identity.id);
+        let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
         let options = HeaderParseOptions {
             entry_file_id,
@@ -527,68 +558,6 @@ impl ModulePreparationContext<'_> {
             module_file_count,
             base_len,
         )
-    }
-
-    /// Rebind complete synthetic discovery outputs against the boundary-owned source database.
-    ///
-    /// WHAT: moves every provisional synthetic `SourceId` and source scope onto the exact
-    ///       database that later semantic stages borrow.
-    /// WHY: synthetic discovery still prepares before its complete closure is known, but directory
-    ///       modules now consume identities registered once by the enclosing boundary.
-    fn rebind_synthetic_prepared_inputs(
-        source_files: &SourceDatabase,
-        module: &mut [PreparedSourceInput],
-        string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
-        for input in module {
-            let (source_path, output) = match input {
-                PreparedSourceInput::MothPrepared {
-                    source_path,
-                    output,
-                    ..
-                }
-                | PreparedSourceInput::MothTemplatePrepared {
-                    source_path,
-                    output,
-                    ..
-                } => (source_path, output),
-                _ => continue,
-            };
-
-            let identity = source_files
-                .get_by_canonical_path(source_path)
-                .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "module source identity table is missing retained synthetic file {:?}",
-                            source_path
-                        )),
-                        string_table,
-                    )
-                })?;
-
-            let canonical_os_path = identity.canonical_os_path.clone().ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "module source identity table has no canonical path for retained synthetic file {:?}",
-                        source_path
-                    )),
-                    string_table,
-                )
-            })?;
-            output
-                .rebind_source_identity(
-                    identity.id,
-                    identity.logical_path.clone(),
-                    canonical_os_path,
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            output
-                .freeze_path_syntax(string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        }
-
-        Ok(())
     }
 
     /// Merge chunk-local string tables and aggregate prepared file outputs.
@@ -815,37 +784,47 @@ impl ModulePreparationContext<'_> {
                     (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
                 }
                 file => {
-                    let source =
-                        match file {
-                            PreparedSourceInput::Moth {
-                                source_path,
-                                tokens,
-                                ..
-                            } => Ok(FrontendFilePrepareSource::Moth {
-                                source_path,
-                                tokens,
-                            }),
-                            PreparedSourceInput::MothTemplate { source_path, .. } => {
-                                retained_source_text(prepare_context.source_files, &source_path)
-                                    .map(|source_code| FrontendFilePrepareSource::MothTemplate {
-                                        source_code,
-                                        source_path,
-                                    })
-                            }
-                            PreparedSourceInput::PlainMarkdown { source_path, .. } => {
-                                retained_source_text(prepare_context.source_files, &source_path)
-                                    .map(|source_code| FrontendFilePrepareSource::PlainMarkdown {
-                                        source_code,
-                                        source_path,
-                                    })
-                            }
-                            PreparedSourceInput::MothPrepared { .. }
-                            | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                                unreachable!(
-                                    "prepared Moth output was handled before source conversion"
-                                )
-                            }
-                        };
+                    let source_id = file.source_id();
+                    let source = match file {
+                        PreparedSourceInput::Moth { tokens, .. } => {
+                            source_path_for_id(prepare_context.source_files, source_id).map(
+                                |source_path| FrontendFilePrepareSource::Moth {
+                                    source_path,
+                                    tokens,
+                                },
+                            )
+                        }
+                        PreparedSourceInput::MothTemplate { .. } => source_path_for_id(
+                            prepare_context.source_files,
+                            source_id,
+                        )
+                        .and_then(|source_path| {
+                            retained_source_text(prepare_context.source_files, source_id).map(
+                                |source_code| FrontendFilePrepareSource::MothTemplate {
+                                    source_code,
+                                    source_path,
+                                },
+                            )
+                        }),
+                        PreparedSourceInput::PlainMarkdown { .. } => source_path_for_id(
+                            prepare_context.source_files,
+                            source_id,
+                        )
+                        .and_then(|source_path| {
+                            retained_source_text(prepare_context.source_files, source_id).map(
+                                |source_code| FrontendFilePrepareSource::PlainMarkdown {
+                                    source_code,
+                                    source_path,
+                                },
+                            )
+                        }),
+                        PreparedSourceInput::MothPrepared { .. }
+                        | PreparedSourceInput::MothTemplatePrepared { .. } => {
+                            unreachable!(
+                                "prepared Moth output was handled before source conversion"
+                            )
+                        }
+                    };
                     let result = match source {
                         Ok(source) => {
                             let input = FrontendFilePrepareInput {
@@ -935,13 +914,17 @@ impl ModuleSyntaxDiscovery<'_> {
                 &self.string_table,
             ));
         }
-        let source_byte_len = source.source_byte_len();
+
+        let source_id = source.source_id();
+        let source_byte_len = match source_byte_len(self.context.source_files, source_id) {
+            Ok(source_byte_len) => source_byte_len,
+            Err(error) => {
+                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+            }
+        };
         self.contains_moth_template |= source.is_moth_template();
-        let entry_file_id = self
-            .context
-            .source_files
-            .get_by_canonical_path(&self.entry_file_path)
-            .map(|identity| identity.id);
+        let entry_file_id =
+            source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
         let options = HeaderParseOptions {
             entry_file_id,
             project_path_resolver: self.context.project_path_resolver.clone(),
@@ -955,41 +938,49 @@ impl ModuleSyntaxDiscovery<'_> {
             options: &options,
         };
         let frontend_source = match source {
-            PreparedSourceInput::Moth {
-                source_path,
-                tokens,
-                ..
-            } => FrontendFilePrepareSource::Moth {
-                source_path,
-                tokens,
-            },
-            PreparedSourceInput::MothTemplate { source_path, .. } => {
-                let source_code =
-                    match retained_source_text(self.context.source_files, &source_path) {
-                        Ok(source_code) => source_code,
-                        Err(error) => {
-                            return Err(CompilerMessages::from_error_ref(
-                                error,
-                                &self.string_table,
-                            ));
-                        }
-                    };
+            PreparedSourceInput::Moth { tokens, .. } => {
+                let source_path = match source_path_for_id(self.context.source_files, source_id) {
+                    Ok(source_path) => source_path,
+                    Err(error) => {
+                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                    }
+                };
+                FrontendFilePrepareSource::Moth {
+                    source_path,
+                    tokens,
+                }
+            }
+            PreparedSourceInput::MothTemplate { .. } => {
+                let source_path = match source_path_for_id(self.context.source_files, source_id) {
+                    Ok(source_path) => source_path,
+                    Err(error) => {
+                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                    }
+                };
+                let source_code = match retained_source_text(self.context.source_files, source_id) {
+                    Ok(source_code) => source_code,
+                    Err(error) => {
+                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                    }
+                };
                 FrontendFilePrepareSource::MothTemplate {
                     source_code,
                     source_path,
                 }
             }
-            PreparedSourceInput::PlainMarkdown { source_path, .. } => {
-                let source_code =
-                    match retained_source_text(self.context.source_files, &source_path) {
-                        Ok(source_code) => source_code,
-                        Err(error) => {
-                            return Err(CompilerMessages::from_error_ref(
-                                error,
-                                &self.string_table,
-                            ));
-                        }
-                    };
+            PreparedSourceInput::PlainMarkdown { .. } => {
+                let source_path = match source_path_for_id(self.context.source_files, source_id) {
+                    Ok(source_path) => source_path,
+                    Err(error) => {
+                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                    }
+                };
+                let source_code = match retained_source_text(self.context.source_files, source_id) {
+                    Ok(source_code) => source_code,
+                    Err(error) => {
+                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                    }
+                };
                 FrontendFilePrepareSource::PlainMarkdown {
                     source_code,
                     source_path,
@@ -1219,16 +1210,18 @@ fn validate_preparation_chunk_order(
     Ok(())
 }
 
-pub(super) fn record_module_input_counters(module: &[PreparedSourceInput]) -> usize {
+pub(super) fn record_module_input_counters(
+    module: &[PreparedSourceInput],
+    source_files: &SourceDatabase,
+) -> Result<usize, CompilerError> {
+    let source_byte_count = module.iter().try_fold(0usize, |count, input| {
+        source_byte_len(source_files, input.source_id()).map(|length| count + length)
+    })?;
+
     add_frontend_counter(FrontendCounter::ModuleCount, 1);
     add_frontend_counter(FrontendCounter::SourceFileCount, module.len());
-
-    let source_byte_count = module
-        .iter()
-        .map(PreparedSourceInput::source_byte_len)
-        .sum();
     add_frontend_counter(FrontendCounter::SourceByteCount, source_byte_count);
-    source_byte_count
+    Ok(source_byte_count)
 }
 
 fn record_file_preparation_strategy(

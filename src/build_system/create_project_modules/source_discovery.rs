@@ -61,7 +61,8 @@ use super::module_namespace::DirectoryDependencyResolution;
 use super::prepared_source::PreparedSourceInput;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
-use super::source_loading::{extract_source_code, read_source_code, source_read_error};
+use super::source_loading::extract_source_code;
+use super::source_loading::{read_source_code, source_read_error};
 use super::source_preparation::{
     PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
 };
@@ -145,25 +146,36 @@ pub(super) struct ReachableSourceFile {
 /// WHAT: owns the deterministic source closure and the complete retained file output for each
 ///       reachable tokenized source when no directory-project `SourceTreeIndex` ownership
 ///       inventory is used.
-/// WHY: synthetic discovery prepares each Moth file before resolving its dependencies, then moves that
-///      complete output into the module input lane after final identities are known. Directory
-///      projects prepare their owned `SourceId`s directly in the module-inventory queue instead.
+/// WHY: the traversal must keep provisional identities private until the complete closure can be
+///      registered in final logical order. This inventory is consumed by that one remap before
+///      any prepared input leaves discovery.
 pub(super) struct ReachableSourceInventory {
     pub(super) files: Vec<ReachableSourceFile>,
     local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
 
+/// Collected reachable inputs for one entry plus the finished source identity database.
+///
+/// WHAT: discovery owns the provisional traversal table, builds the final canonically ordered
+///       table, moves every retained snapshot into its final slot and returns only final-domain
+///       `SourceId` inputs.
+/// WHY: no later stage should need to join a prepared input or retained source text by path.
+pub(super) struct CollectedReachableInputs {
+    pub(super) source_files: SourceDatabase,
+    pub(super) input_files: Vec<PreparedSourceInput>,
+    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
+}
 /// One resolved dependency edge ready for direct insertion into the project module graph.
 ///
 /// WHAT: records that an authored structural provider reference resolved through the
 ///       boundary-aware namespace from a consumer project module to a provider project
 ///       module, carrying both `ModuleId` values and the exact authored dependency-clause
 ///       `SourceLocation`.
-/// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts
-///      a provider-before-consumer edge without a path-to-ID mapping step. The authored
-///      source location is retained in the graph side table so a later diagnostic owner can
-///      attribute the edge to the exact dependency clause without reparsing.
+/// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts a
+///      provider-before-consumer edge without a path-to-ID mapping step. The authored source
+///      location is retained in the graph side table so a later diagnostic owner can attribute
+///      the edge to the exact dependency clause without reparsing.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
@@ -180,30 +192,11 @@ pub(crate) struct ResolvedSourcePackageDependency {
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
 }
 
-/// Reachable discovery output pairing the file inventory with direct dependency edges.
-///
-/// WHAT: the complete retained inventory plus the project-local `ModuleId` edges observed during
-///       one traversal. Both the provider-capable serial path and the provider-free
-///       worker path return this so the inventory merge has one shape.
-/// WHY: dependency edges are collected at the same local-dependency resolution join as the file
-///      inventory, so they share the traversal owner and stay deterministic regardless of which
-///      discovery path produced them.
-pub(super) struct ReachableDiscoveryResult {
-    pub(super) inventory: ReachableSourceInventory,
+/// Mutable traversal outputs shared by the source-dependency queue helpers.
+struct ReachableQueue<'a> {
+    reachable: &'a BTreeSet<ReachableSourceFile>,
+    queue: &'a mut VecDeque<ReachableSourceFile>,
 }
-
-/// Collected reachable inputs for one entry plus the retained dependency edges.
-///
-/// WHAT: inventory assembly turns the inventory into `PreparedSourceInput`
-///       values; direct edges travel alongside so the directory-project graph can record them
-///       after discovery.
-/// WHY: the single-file flow produces no edges because it has no project module graph, while the
-///      directory-project flow retains them for graph insertion.
-pub(super) struct CollectedReachableInputs {
-    pub(super) input_files: Vec<PreparedSourceInput>,
-    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
-}
-
 struct MissingSourceFile {
     input_index: usize,
     source_file: ReachableSourceFile,
@@ -211,48 +204,7 @@ struct MissingSourceFile {
 
 struct LoadedMissingSourceFile {
     input_index: usize,
-    source_file: ReachableSourceFile,
     source_code: String,
-}
-
-/// Mutable traversal outputs shared by the source-dependency queue helpers.
-struct ReachableQueue<'a> {
-    reachable: &'a BTreeSet<ReachableSourceFile>,
-    queue: &'a mut VecDeque<ReachableSourceFile>,
-}
-
-/// Build a `PreparedSourceInput` from a cache-miss load.
-///
-/// WHAT: selects the Moth template or PlainMarkdown variant from the resolved source kind. Cache
-///       misses are never Moth — every reachable `.moth` is scanned and cached during traversal —
-///       so no Moth variant carries a raw load here.
-/// WHY: keeps the strict source-kind/token relationship: a loaded file has no retained tokens
-///      and cannot become a Moth `PreparedSourceInput`.
-fn prepared_input_from_loaded(loaded: LoadedMissingSourceFile) -> PreparedSourceInput {
-    let LoadedMissingSourceFile {
-        input_index: _,
-        source_file,
-        source_code,
-    } = loaded;
-    let source_byte_len = source_code.len();
-    match source_file.kind {
-        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
-            source_byte_len,
-            source_code: Some(source_code),
-            source_path: source_file.path,
-        },
-        SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
-            source_byte_len,
-            source_code: Some(source_code),
-            source_path: source_file.path,
-        },
-        SourceFileKind::Moth => {
-            // Every reachable Moth file is scanned and cached during traversal, so a cache
-            // miss can only be Moth template or PlainMarkdown. Reaching this arm is a proven
-            // invariant violation rather than a user-facing failure.
-            unreachable!("Stage 0 cache-miss load produced a Moth file without retained tokens")
-        }
-    }
 }
 
 struct SourceReadFailure {
@@ -275,7 +227,6 @@ pub(super) fn collect_reachable_input_files(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CompilerMessages> {
-    // 1. Traverse the dependency graph to find all paths and retained resolved edges.
     let discovery = match discover_reachable_source_files(
         entry_path,
         project_path_resolver,
@@ -291,13 +242,13 @@ pub(super) fn collect_reachable_input_files(
         }
     };
 
-    let ReachableSourceInventory {
-        files,
-        local_source_cache,
+    let ReachableTraversalOutcome {
+        source_files,
+        input_files,
         resolved_file_references,
-    } = discovery.inventory;
-    let input_files = assemble_reachable_files(files, local_source_cache, string_table)?;
+    } = discovery;
     Ok(CollectedReachableInputs {
+        source_files,
         input_files,
         resolved_file_references,
     })
@@ -352,7 +303,6 @@ pub(super) fn prepare_owned_source_input(
             return Err(SourceDiscoveryError::from(error));
         }
     };
-    let source_byte_len = source_code.len();
     let tokens = if *source_kind == SourceFileKind::Moth {
         let interned_path = InternedPath::try_from_filesystem_path(
             record.canonical_path(),
@@ -389,22 +339,10 @@ pub(super) fn prepare_owned_source_input(
                     "Moth source preparation completed without a token stream",
                 )));
             };
-            PreparedSourceInput::Moth {
-                source_byte_len,
-                source_path: record.canonical_path().to_path_buf(),
-                tokens,
-            }
+            PreparedSourceInput::Moth { source_id, tokens }
         }
-        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
-            source_byte_len,
-            source_code: None,
-            source_path: record.canonical_path().to_path_buf(),
-        },
-        SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
-            source_byte_len,
-            source_code: None,
-            source_path: record.canonical_path().to_path_buf(),
-        },
+        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate { source_id },
+        SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown { source_id },
     })
 }
 
@@ -528,116 +466,138 @@ fn remap_source_discovery_error(
     }
 }
 
-/// Assemble `PreparedSourceInput` values without a semantic set (single-file synthetic path).
-fn assemble_reachable_files(
+/// Build the final source database and remap every synthetic prepared output before returning it.
+///
+/// WHAT: registers the complete reachable closure in canonical logical order, moves retained
+///       snapshots into those final slots and rebinds traversal-prepared outputs to final IDs.
+/// WHY: header preparation needs traversal identities before the closure is complete, but no
+///      traversal-domain identity may cross this discovery boundary.
+fn finalize_reachable_files(
     files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
+    entry_file_path: &Path,
+    project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
-    let input_file_count = files.len();
-    let mut input_slots: Vec<Option<PreparedSourceInput>> =
-        (0..input_file_count).map(|_| None).collect();
-    let mut missing_sources = Vec::new();
-    for (input_index, source_file) in files.into_iter().enumerate() {
-        fill_input_slot(
-            &mut source_cache,
-            &source_file.path,
-            source_file.kind,
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), SourceDiscoveryError> {
+    let mut source_files = SourceDatabase::build(
+        files.iter().map(|source_file| source_file.path.as_path()),
+        entry_file_path,
+        Some(project_path_resolver),
+        string_table,
+    )?;
+
+    let missing_sources = files
+        .iter()
+        .enumerate()
+        .filter(|(_, source_file)| !source_cache.contains_key(&source_file.path))
+        .map(|(input_index, source_file)| MissingSourceFile {
             input_index,
-            &mut input_slots,
-            &mut missing_sources,
-        );
-    }
-
-    load_and_join_input_slots(input_slots, missing_sources, string_table)
-}
-
-/// Fill one input slot from the retained cache or queue it for disk loading.
-fn fill_input_slot(
-    source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
-    canonical_path: &Path,
-    source_kind: SourceFileKind,
-    input_index: usize,
-    input_slots: &mut [Option<PreparedSourceInput>],
-    missing_sources: &mut Vec<MissingSourceFile>,
-) {
-    if let Some(scanned_source) = source_cache.remove(canonical_path) {
-        add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
-        let PreparedDiscoverySource {
-            prepared_output,
-            source_byte_len,
-            source_code,
-            source_kind,
-        } = scanned_source;
-
-        input_slots[input_index] = Some(match source_kind {
-            SourceFileKind::Moth => PreparedSourceInput::MothPrepared {
-                source_byte_len,
-                source_code: Some(source_code),
-                source_path: canonical_path.to_path_buf(),
-                output: Box::new(prepared_output),
-            },
-            SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplatePrepared {
-                source_byte_len,
-                source_code: Some(source_code),
-                source_path: canonical_path.to_path_buf(),
-                output: Box::new(prepared_output),
-            },
-            SourceFileKind::PlainMarkdown => {
-                unreachable!("plain Markdown cannot enter the prepared source cache")
-            }
-        });
-    } else {
+            source_file: source_file.clone(),
+        })
+        .collect::<Vec<_>>();
+    for source_file in &missing_sources {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
-
-        missing_sources.push(MissingSourceFile {
-            input_index,
-            source_file: ReachableSourceFile {
-                path: canonical_path.to_path_buf(),
-                kind: source_kind,
-            },
-        });
-    }
-}
-
-/// Load missing sources from disk and join all slots into the final ordered `Vec`.
-fn load_and_join_input_slots(
-    input_slots: Vec<Option<PreparedSourceInput>>,
-    missing_sources: Vec<MissingSourceFile>,
-    string_table: &mut StringTable,
-) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
-    let input_file_count = input_slots.len();
-    let mut input_slots = input_slots;
-
-    let loaded_missing_sources = match load_missing_sources(missing_sources, string_table) {
-        Ok(loaded_missing_sources) => loaded_missing_sources,
-        Err(messages) => {
-            return Err(messages);
+        if source_file.source_file.kind == SourceFileKind::Moth {
+            return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                format!(
+                    "reachable Moth source {} has no prepared traversal output",
+                    source_file.source_file.path.display()
+                ),
+            )));
         }
-    };
-    for loaded in loaded_missing_sources {
-        add_frontend_counter(
-            FrontendCounter::Stage0SourceBytesLoaded,
-            loaded.source_code.len(),
-        );
-
+    }
+    let mut loaded_missing_sources = (0..files.len()).map(|_| None).collect::<Vec<_>>();
+    for source_file in &files {
+        if source_cache.contains_key(&source_file.path) {
+            add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
+        }
+    }
+    for loaded in load_missing_sources(missing_sources, string_table)? {
         let input_index = loaded.input_index;
-        input_slots[input_index] = Some(prepared_input_from_loaded(loaded));
+        loaded_missing_sources[input_index] = Some(loaded);
     }
 
-    let mut input_files = Vec::with_capacity(input_file_count);
-    for slot in input_slots {
-        let Some(input_file) = slot else {
-            let error = CompilerError::compiler_error(
-                "Stage 0 source inventory slot was empty after successful loading",
+    let mut input_files = Vec::with_capacity(files.len());
+    for (input_index, source_file) in files.into_iter().enumerate() {
+        let final_record = source_files
+            .get_by_canonical_path(&source_file.path)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "final source database is missing reachable source {}",
+                    source_file.path.display()
+                ))
+            })?;
+        let final_source_id = final_record.id;
+
+        if let Some(scanned_source) = source_cache.remove(&source_file.path) {
+            let PreparedDiscoverySource {
+                mut prepared_output,
+                source_code,
+                source_kind,
+                ..
+            } = scanned_source;
+            let canonical_os_path = final_record.canonical_os_path.clone().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "final source identity {} has no canonical path",
+                    final_source_id.index()
+                ))
+            })?;
+
+            prepared_output.rebind_source_identity(
+                final_source_id,
+                final_record.logical_path.clone(),
+                canonical_os_path,
+            )?;
+            prepared_output.freeze_path_syntax(string_table)?;
+            source_files.retain_text(final_source_id, source_code)?;
+
+            input_files.push(match source_kind {
+                SourceFileKind::Moth => PreparedSourceInput::MothPrepared {
+                    source_id: final_source_id,
+                    output: Box::new(prepared_output),
+                },
+                SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplatePrepared {
+                    source_id: final_source_id,
+                    output: Box::new(prepared_output),
+                },
+                SourceFileKind::PlainMarkdown => {
+                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+                        "plain Markdown cannot enter the prepared source cache",
+                    )));
+                }
+            });
+        } else {
+            let loaded = loaded_missing_sources[input_index].take().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "source inventory slot {} was not loaded",
+                    input_index
+                ))
+            })?;
+            add_frontend_counter(
+                FrontendCounter::Stage0SourceBytesLoaded,
+                loaded.source_code.len(),
             );
-            return Err(CompilerMessages::from_error_ref(error, string_table));
-        };
+            source_files.retain_text(final_source_id, loaded.source_code)?;
 
-        input_files.push(input_file);
+            input_files.push(match source_file.kind {
+                SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate {
+                    source_id: final_source_id,
+                },
+                SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown {
+                    source_id: final_source_id,
+                },
+                SourceFileKind::Moth => unreachable!("Moth sources were handled above"),
+            });
+        }
     }
 
-    Ok(input_files)
+    if !source_cache.is_empty() {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            "synthetic source cache contains an unreachable prepared source",
+        )));
+    }
+
+    Ok((source_files, input_files))
 }
 
 // -------------------------
@@ -771,12 +731,16 @@ fn scan_and_cache_local_moth_template_source(
 /// BFS over the synthetic single-file compilation's dependency clauses.
 ///
 /// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
-///       files, and returns the full ordered set of files reachable from the entry points.
+///       files and finalizes the complete source closure before returning its prepared inputs.
 /// WHY: directory projects use indexed header-owned discovery; this filesystem traversal exists
 ///      only for a file invoked directly as one synthetic module.
-/// Outcome of the synthetic single-file traversal.
-struct ReachableTraversalOutcome {
-    inventory: ReachableSourceInventory,
+///
+/// The traversal-local source database is consumed before this value is constructed. Every source
+/// ID in the returned inputs and database therefore belongs to the final logical-order domain.
+pub(super) struct ReachableTraversalOutcome {
+    pub(super) source_files: SourceDatabase,
+    pub(super) input_files: Vec<PreparedSourceInput>,
+    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -792,9 +756,9 @@ fn traverse_reachable_source_files(
     let mut reachable = BTreeSet::new();
     let mut queue = VecDeque::new();
     let mut local_source_cache = FxHashMap::default();
-    // Traversal-local source identities: header preparation stamps retained shells from real
-    // source IDs, but the full inventory is unknown during the BFS. `prepare_module` later
-    // rebuilds the deterministic sorted table and rebinds every token to it.
+    // Traversal-local source identities are needed while header preparation stamps retained
+    // shells. The table is consumed by `finalize_reachable_files` once the closure is complete;
+    // only the final database and final-domain inputs leave this function.
     let mut traversal_source_files = SourceDatabase::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let mut dependency_clauses_scanned: usize = 0;
@@ -1003,21 +967,37 @@ fn traverse_reachable_source_files(
         dependency_clauses_scanned as f64,
     );
 
+    let inventory = ReachableSourceInventory {
+        files: reachable.into_iter().collect(),
+        local_source_cache,
+        resolved_file_references,
+    };
+    let ReachableSourceInventory {
+        files,
+        local_source_cache,
+        resolved_file_references,
+    } = inventory;
+    let (source_files, input_files) = finalize_reachable_files(
+        files,
+        local_source_cache,
+        &canonical_entry_path,
+        project_path_resolver,
+        string_table,
+    )?;
+
     Ok(ReachableTraversalOutcome {
-        inventory: ReachableSourceInventory {
-            files: reachable.into_iter().collect(),
-            local_source_cache,
-            resolved_file_references,
-        },
+        source_files,
+        input_files,
+        resolved_file_references,
     })
 }
 
 /// BFS over dependency clauses starting from `entry_point`, preserving source kind.
 ///
 /// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
-/// files, and returns the full ordered set of files reachable from the entry point.
+/// files and returns the completed final source identity domain with prepared inputs.
 /// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
-///      loaded and carried forward without being treated as Moth module roots.
+/// loaded and carried forward without being treated as Moth module roots.
 pub(super) fn discover_reachable_source_files(
     entry_point: &Path,
     project_path_resolver: &ProjectPathResolver,
@@ -1026,10 +1006,10 @@ pub(super) fn discover_reachable_source_files(
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<ReachableDiscoveryResult, SourceDiscoveryError> {
+) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let mut policy = DependencyPolicy::Capable { external_imports };
 
-    let outcome = traverse_reachable_source_files(
+    traverse_reachable_source_files(
         &[entry_point.to_path_buf()],
         project_path_resolver,
         style_directives,
@@ -1037,11 +1017,7 @@ pub(super) fn discover_reachable_source_files(
         source_file_kinds,
         resource_inputs,
         string_table,
-    )?;
-
-    Ok(ReachableDiscoveryResult {
-        inventory: outcome.inventory,
-    })
+    )
 }
 
 /// Resolve a compiler-semantic Moth dependency and enqueue its indexed or synthetic-file target.
@@ -1302,7 +1278,6 @@ fn load_missing_sources(
     );
     load_missing_sources_parallel(missing_sources, string_table)
 }
-
 fn load_missing_sources_serial(
     missing_sources: Vec<MissingSourceFile>,
     string_table: &mut StringTable,
@@ -1317,7 +1292,6 @@ fn load_missing_sources_serial(
 
         loaded_sources.push(LoadedMissingSourceFile {
             input_index: missing.input_index,
-            source_file: missing.source_file,
             source_code,
         });
     }
@@ -1335,7 +1309,6 @@ fn load_missing_sources_parallel(
             |missing| match read_source_code(&missing.source_file.path) {
                 Ok(source_code) => Ok(LoadedMissingSourceFile {
                     input_index: missing.input_index,
-                    source_file: missing.source_file,
                     source_code,
                 }),
                 Err(error) => Err(SourceReadFailure {
@@ -1388,25 +1361,93 @@ pub(super) fn load_missing_source_paths_for_test(
     source_paths: Vec<PathBuf>,
     source_kind: SourceFileKind,
     string_table: &mut StringTable,
-) -> Result<Vec<PreparedSourceInput>, CompilerMessages> {
-    let missing_sources = source_paths
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+    let canonical_paths = source_paths
         .into_iter()
+        .map(|path| {
+            fs::canonicalize(&path).map_err(|error| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::file_error(
+                        &path,
+                        format!("failed to canonicalize test source path: {error}"),
+                        string_table,
+                    ),
+                    string_table,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let entry_path = canonical_paths.first().ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("test source loading requires at least one path"),
+            string_table,
+        )
+    })?;
+    let mut source_files = SourceDatabase::build(
+        canonical_paths.iter().map(PathBuf::as_path),
+        entry_path,
+        None,
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let missing_sources = canonical_paths
+        .iter()
+        .cloned()
         .enumerate()
-        .map(|(input_index, source_path)| MissingSourceFile {
+        .map(|(input_index, path)| MissingSourceFile {
             input_index,
             source_file: ReachableSourceFile {
-                path: source_path,
+                path,
                 kind: source_kind,
             },
         })
         .collect();
+    let loaded_sources = load_missing_sources(missing_sources, string_table)?;
+    let mut input_slots = (0..canonical_paths.len())
+        .map(|_| None)
+        .collect::<Vec<Option<PreparedSourceInput>>>();
+    for loaded in loaded_sources {
+        let source_id = source_files
+            .get_by_canonical_path(&canonical_paths[loaded.input_index])
+            .map(|record| record.id)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error("test source has no registered source identity"),
+                    string_table,
+                )
+            })?;
+        source_files
+            .retain_text(source_id, loaded.source_code)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        input_slots[loaded.input_index] = Some(match source_kind {
+            SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate { source_id },
+            SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown { source_id },
+            SourceFileKind::Moth => {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "test missing-source helper cannot create an unprepared Moth input",
+                    ),
+                    string_table,
+                ));
+            }
+        });
+    }
+    let input_files = input_slots
+        .into_iter()
+        .enumerate()
+        .map(|(input_index, input)| {
+            input.ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(format!(
+                        "test source loading left input slot {input_index} empty"
+                    )),
+                    string_table,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    load_missing_sources(missing_sources, string_table).map(|loaded_sources| {
-        loaded_sources
-            .into_iter()
-            .map(prepared_input_from_loaded)
-            .collect()
-    })
+    Ok((source_files, input_files))
 }
 
 fn resolved_source_file(path: &Path, kind: SourceFileKind) -> ReachableSourceFile {

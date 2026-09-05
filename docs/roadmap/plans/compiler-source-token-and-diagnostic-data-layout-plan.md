@@ -737,6 +737,41 @@ continue to. `directory_module_external_import_candidates_are_scoped_to_owned_so
 regression guard; it fails if that derivation widens again. This vector is the ID-set module input
 1B5 asks for, arriving early because the widening required it.
 
+**Remap ownership, decided against 1B5.** The synthetic lane cannot assign final `SourceId`s
+during its breadth-first walk: header preparation needs an identity to stamp retained shells, but
+final IDs follow canonical logical order, which 1B2 requires over reachability order, and that
+order is unknown until the closure is complete. The traversal-local database is therefore the
+sanctioned late-source mechanism 1B3 permits, not a defect to delete.
+
+What moves is *who* remaps. Today discovery returns path-bearing inputs, `single_file.rs:432`
+builds the final sorted database afterwards, `retain_single_file_source_texts` joins each carried
+`String` to a slot by canonical path, and `rebind_synthetic_prepared_inputs` joins prepared outputs
+by canonical path again. Discovery already holds the complete closure and both tables at the end
+of its walk, so it owns the one remap: it returns the final sorted database with text already in
+its slots, and inputs keyed by final `SourceId`. That deletes the late build, both path joins and
+the enum's `source_path`, `source_byte_len` and `source_code` fields, and it satisfies the
+architecture's rule that worker-owned records are remapped once before a later consumer observes
+them — today the remap happens after the inputs have already escaped discovery.
+
+The traversal identity domain must not leave discovery. Two domains existing at one instant is
+acceptable only inside that owner.
+
+**Delivered as 1B5-a.** `PreparedSourceInput` now carries a final `SourceId` plus the one work
+product that cannot be recomputed — retained tokens or a complete prepared output — and nothing
+else. Paths and snapshots resolve from the database, so `source_path`, `source_byte_len` and
+`source_code` are gone along with `take_source_code`, `retain_single_file_source_texts` and the
+late `SourceDatabase::build`. `finalize_reachable_files` performs the single remap. The traversal
+table is no longer returned from the traversal, so "no traversal identity escapes" holds by
+construction rather than by a check; an attempt to assert it with a traversal-to-final map was
+rejected as a tautology, because both sides were keyed by the canonical path the join already had.
+
+**Failure precedence changed for one input, accepted.** Registration now happens before the
+cache-miss reads, so a reachable source whose logical path is not valid UTF-8 reports the path
+failure instead of the read failure it used to report when its contents were also unreadable. Both
+are `ErrorType::File`, so the lane is unchanged; only which of two real problems is named first
+moved. Failing on an identity that cannot be represented before performing IO for it is the better
+order, and the load counters correctly do not fire for a source that was never read.
+
 **Root reservation, recorded against 1B1.** `SourceId(1)` is now the deterministic
 `CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance` and
 an optional `canonical_os_path`; it does not yet carry `text`, `line_starts`, `extended_spans` or
