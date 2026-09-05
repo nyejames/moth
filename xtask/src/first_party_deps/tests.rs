@@ -362,6 +362,16 @@ fn division_does_not_hide_a_later_dynamic_import() {
 }
 
 #[test]
+fn regex_after_return_does_not_hide_a_later_import() {
+    let source = "function f() { return /\"/; } import(\"lodash\");\n";
+    let findings = audit_javascript_source("fixture.js", source);
+    assert!(
+        !findings.is_empty(),
+        "a regex after return must not swallow a later import: {findings:?}"
+    );
+}
+
+#[test]
 fn regex_literals_with_quotes_do_not_hide_later_imports() {
     let source =
         "const q = text.replace(/\"/g, \"&quot;\");\nimport { thing } from \"left-pad\";\n";
