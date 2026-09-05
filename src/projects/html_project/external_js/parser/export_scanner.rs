@@ -439,32 +439,65 @@ impl<'a> ExportScanner<'a> {
     }
 
     fn slash_starts_regular_expression(&self) -> bool {
-        match self.source[..self.pos]
-            .chars()
-            .rev()
-            .find(|character| !character.is_whitespace())
-        {
-            None => true,
-            Some(character) => matches!(
-                character,
-                '(' | '['
-                    | '{'
-                    | ','
-                    | ';'
-                    | '='
-                    | '!'
-                    | '?'
-                    | ':'
-                    | '&'
-                    | '|'
-                    | '~'
-                    | '^'
-                    | '%'
-                    | '*'
-                    | '<'
-                    | '>'
-            ),
+        let prefix = self.source[..self.pos].trim_end();
+        let Some(previous) = prefix.chars().next_back() else {
+            return true;
+        };
+
+        if matches!(
+            previous,
+            '(' | '['
+                | '{'
+                | ','
+                | ';'
+                | '='
+                | '!'
+                | '?'
+                | ':'
+                | '&'
+                | '|'
+                | '~'
+                | '^'
+                | '%'
+                | '*'
+                | '<'
+                | '>'
+        ) {
+            return true;
         }
+
+        if !previous.is_alphanumeric() && previous != '_' && previous != '$' {
+            return false;
+        }
+
+        let word_start = prefix
+            .char_indices()
+            .rev()
+            .find(|(_, character)| {
+                !character.is_alphanumeric() && *character != '_' && *character != '$'
+            })
+            .map(|(index, character)| index + character.len_utf8())
+            .unwrap_or(0);
+
+        if word_start > 0 && prefix[..word_start].ends_with('.') {
+            return false;
+        }
+        matches!(
+            &prefix[word_start..],
+            "return"
+                | "throw"
+                | "case"
+                | "else"
+                | "do"
+                | "in"
+                | "of"
+                | "typeof"
+                | "void"
+                | "delete"
+                | "new"
+                | "await"
+                | "yield"
+        )
     }
 
     fn skip_regular_expression(&mut self) {
