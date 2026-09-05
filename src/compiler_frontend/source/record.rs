@@ -1,9 +1,10 @@
 //! Retained identity metadata for one frontend source record.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Describes how a source record entered the compiler's identity context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +54,16 @@ impl SourceRecordState {
             Self::Loaded(text) => Some(text),
             Self::Registered | Self::Unreadable(_) => None,
         }
+    }
+
+    /// Report whether this record is still awaiting its snapshot.
+    ///
+    /// WHY: the source-size policy applies to a snapshot this record is about to accept. A
+    /// record that already holds one is a lifecycle violation the caller must report as a
+    /// compiler bug, so an oversized second snapshot must not preempt it with a user-facing
+    /// source-size failure.
+    pub(super) fn is_registered(&self) -> bool {
+        matches!(self, Self::Registered)
     }
 
     pub(super) fn source_load_error(&self) -> Option<&CompilerError> {
@@ -114,4 +125,42 @@ pub struct SourceRecord {
     ///      identifies the reserved compilation root, which is not a file.
     pub kind: Option<SourceKind>,
     pub provenance: SourceProvenance,
+}
+
+/// Reject a snapshot that `u32` byte offsets cannot address.
+///
+/// WHY: a physical source too large to address is the user's file, so it fails in the file lane
+/// carrying that source's own identity, exactly as an unreadable source does. Every other
+/// provenance is compiler-produced, so its own oversized snapshot is a compiler bug.
+pub(super) fn ensure_source_snapshot_fits(
+    byte_length: usize,
+    provenance: SourceProvenance,
+    logical_path: &InternedPath,
+    canonical_os_path: Option<&Path>,
+) -> Result<(), CompilerError> {
+    let limit = u32::MAX as usize;
+    if byte_length < limit {
+        return Ok(());
+    }
+
+    match provenance {
+        SourceProvenance::AuthoredPhysical => {
+            let mut error = CompilerError::compiler_error(format!(
+                "source file {} is {byte_length} bytes; a source must be shorter than {limit} bytes",
+                canonical_os_path.unwrap_or(Path::new("<unknown>")).display(),
+            ))
+            .with_error_type(ErrorType::File);
+            // The record's own interned identity is the location, so no path is reinterned here.
+            error.location = SourceLocation::new(
+                logical_path.clone(),
+                CharPosition::default(),
+                CharPosition::default(),
+            );
+            Err(error)
+        }
+        SourceProvenance::CompilationRoot => Err(CompilerError::compiler_error(format!(
+            "compiler-produced source snapshot is {byte_length} bytes; \
+             a source must be shorter than {limit} bytes",
+        ))),
+    }
 }

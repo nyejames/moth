@@ -134,7 +134,7 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
     pub(crate) source_files: &'a SourceDatabase,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_file_path: &'a Path,
-    pub(crate) options: &'a HeaderParseOptions,
+    pub(crate) options: &'a HeaderParseOptions<'a>,
 }
 
 /// Borrowed per-file source payload for frontend preparation.
@@ -192,53 +192,51 @@ pub(crate) struct AstBuildRequest<'a> {
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
 
-/// Stable identity facts for one source file as seen by the frontend.
+/// Intern a filesystem path that is not in the source database.
 ///
-/// WHAT: bundles the interned logical path, explicit file ID, and canonical OS path that
-///       tokenization and non-tokenized preparation both need.
-/// WHY: keeps source-identity lookup in one place so Markdown preparation can reuse the same
-///      identity path as tokenized files without duplicating the `SourceDatabase` fallback logic.
-struct FrontendSourceFileIdentity {
-    logical_path: InternedPath,
-    file_id: Option<SourceId>,
-    canonical_os_path: Option<PathBuf>,
+/// Tokenized Moth/Moth template files and non-tokenized Markdown files share this
+/// fallback so unregistered test and direct-compilation paths still produce UTF-8
+/// identity or the same file-error lane.
+fn intern_unregistered_source_path(
+    source_path: &Path,
+    string_table: &mut StringTable,
+) -> Result<InternedPath, CompilerError> {
+    InternedPath::try_from_filesystem_path(source_path, string_table).map_err(
+        |NonUtf8PathComponent { path }| {
+            CompilerError::file_error(
+                &path,
+                format!(
+                    "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                ),
+                string_table,
+            )
+        },
+    )
 }
 
-/// Look up frontend identity for a source path.
+/// Resolve the identity facts one prepared source stamps onto its token stream.
 ///
-/// WHAT: returns the logical interned path, stable file ID, and canonical OS path for one file.
-/// WHY: tokenized Moth/Moth template files and non-tokenized Markdown files must share the same
-///      source identity so downstream stages treat them as ordinary module members.
-fn source_file_identity(
+/// WHAT: returns the logical path, source identity and canonical OS path for one source path.
+/// WHY: a source registered by Stage 0 supplies all three from its own record, so nothing here
+///      derives identity a second time; a test or direct-compilation path that never entered the
+///      database interns its logical path here and carries no source identity. Keeping the
+///      fallback in one place stops each consumer from repeating it.
+fn source_identity_facts(
     source_files: &SourceDatabase,
     source_path: &Path,
     string_table: &mut StringTable,
-) -> Result<FrontendSourceFileIdentity, CompilerError> {
+) -> Result<(InternedPath, Option<SourceId>, Option<PathBuf>), CompilerError> {
     match source_files.get_by_canonical_path(source_path) {
-        Some(identity) => Ok(FrontendSourceFileIdentity {
-            logical_path: identity.logical_path.clone(),
-            file_id: Some(identity.id),
-            canonical_os_path: identity.canonical_os_path.clone(),
-        }),
-        None => {
-            let logical_path =
-                InternedPath::try_from_filesystem_path(source_path, string_table).map_err(
-                    |NonUtf8PathComponent { path }| {
-                        CompilerError::file_error(
-                            &path,
-                            format!(
-                                "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                            ),
-                            string_table,
-                        )
-                    },
-                )?;
-            Ok(FrontendSourceFileIdentity {
-                logical_path,
-                file_id: None,
-                canonical_os_path: Some(source_path.to_owned()),
-            })
-        }
+        Some(record) => Ok((
+            record.logical_path.clone(),
+            Some(record.id),
+            record.canonical_os_path.clone(),
+        )),
+        None => Ok((
+            intern_unregistered_source_path(source_path, string_table)?,
+            None,
+            Some(source_path.to_owned()),
+        )),
     }
 }
 
@@ -278,24 +276,27 @@ impl CompilerFrontend {
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
     ) -> Result<FileTokens, FileFrontendPrepareFailure> {
-        let identity = source_file_identity(source_files, module_path, string_table)
-            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
-        let mut tokens = tokenize(
-            source_code,
-            &identity.logical_path,
-            tokenizer_entry_mode,
-            style_directives,
-            string_table,
-            identity.file_id,
-        )
-        .map_err(|diagnostic| {
+        let map_tokenize_error = |diagnostic| {
             FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                 warnings: Vec::new(),
                 diagnostic,
             })
-        })?;
-        tokens.canonical_os_path = identity.canonical_os_path;
+        };
+
+        let (logical_path, source_id, canonical_os_path) =
+            source_identity_facts(source_files, module_path, string_table)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+
+        let mut tokens = tokenize(
+            source_code,
+            &logical_path,
+            tokenizer_entry_mode,
+            style_directives,
+            string_table,
+            source_id,
+        )
+        .map_err(map_tokenize_error)?;
+        tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }
 
@@ -319,15 +320,15 @@ impl CompilerFrontend {
                 source_code,
                 source_path,
             } => {
-                let identity =
-                    source_file_identity(context.source_files, &source_path, local_string_table)
+                let (logical_path, source_id, canonical_os_path) =
+                    source_identity_facts(context.source_files, &source_path, local_string_table)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code,
-                        source_file: identity.logical_path,
-                        file_id: identity.file_id,
-                        canonical_os_path: identity.canonical_os_path,
+                        source_file: logical_path,
+                        file_id: source_id,
+                        canonical_os_path,
                     },
                     local_string_table,
                 ))
@@ -339,16 +340,11 @@ impl CompilerFrontend {
                 // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
-                let identity =
-                    source_file_identity(context.source_files, &source_path, local_string_table)
+                let (logical_path, source_id, canonical_os_path) =
+                    source_identity_facts(context.source_files, &source_path, local_string_table)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
                 tokens
-                    .rebind_source_identity(
-                        identity.logical_path,
-                        identity.file_id,
-                        identity.canonical_os_path,
-                    )
+                    .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
 
                 parse_file_headers_with_table(

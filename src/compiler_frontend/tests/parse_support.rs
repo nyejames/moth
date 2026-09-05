@@ -116,10 +116,11 @@ pub(crate) fn parse_single_file_ast_build_result(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let file_path = std::path::PathBuf::from("@page.moth");
+    let project_path_resolver = test_project_path_resolver();
 
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: Some(test_project_path_resolver()),
+        project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
@@ -173,7 +174,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .map_err(|bag| {

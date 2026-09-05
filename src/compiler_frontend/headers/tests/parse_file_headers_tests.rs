@@ -51,7 +51,7 @@ struct HeaderTestDiagnostics {
 
 struct HeaderTestPrepareContext<'a> {
     entry_file_path: &'a Path,
-    options: &'a HeaderParseOptions,
+    options: &'a HeaderParseOptions<'a>,
     style_directives: &'a StyleDirectiveRegistry,
 }
 
@@ -421,7 +421,7 @@ fn parse_single_file_headers_with_entry(
         vec![output],
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .map_err(|bag| HeaderTestDiagnostics {
@@ -3083,7 +3083,7 @@ pub(crate) fn parse_multi_file_headers(
         prepared_outputs,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .expect("headers should parse")
@@ -3191,7 +3191,7 @@ fn parse_multi_file_headers_with_result(
         prepared_outputs,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     );
 

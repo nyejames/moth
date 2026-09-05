@@ -56,7 +56,7 @@ use std::path::Path;
 pub fn parse_file_headers_with_table(
     file_tokens: &mut FileTokens,
     entry_file_path: &Path,
-    options: &HeaderParseOptions,
+    options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
@@ -86,7 +86,6 @@ pub fn parse_file_headers_with_table(
         .is_some_and(file_name_is_config_file);
     let is_prepared_module_root = options
         .project_path_resolver
-        .as_ref()
         .is_some_and(|resolver| resolver.is_module_root_file(&source_path));
 
     let file_role = if is_entry_file {
@@ -125,7 +124,7 @@ pub fn parse_file_headers_with_table(
 pub fn prepare_file_from_tokens(
     mut file_tokens: FileTokens,
     entry_file_path: &Path,
-    options: &HeaderParseOptions,
+    options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,

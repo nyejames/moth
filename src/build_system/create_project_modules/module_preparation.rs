@@ -508,7 +508,7 @@ impl ModulePreparationContext<'_> {
 
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.project_path_resolver.clone(),
+            project_path_resolver: self.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role,
         };
@@ -960,7 +960,7 @@ impl ModuleSyntaxDiscovery<'_> {
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.context.project_path_resolver.clone(),
+            project_path_resolver: self.context.project_path_resolver.as_ref(),
             entry_file_role: self.entry_file_role,
             active_root_role: self.active_root_role,
         };

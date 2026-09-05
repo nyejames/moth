@@ -131,7 +131,7 @@ pub(super) fn prepare_file_value_bundle(
     //    prepared in BFS order, so no second scan or parse exists for this lane.
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
-        project_path_resolver: Some(path_resolver.clone()),
+        project_path_resolver: Some(&path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -363,7 +363,7 @@ fn prepare_one_source(
     source_path: &Path,
     kind: SourceFileKind,
     source_code: &str,
-    options: &HeaderParseOptions,
+    options: &HeaderParseOptions<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {

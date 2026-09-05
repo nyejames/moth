@@ -80,7 +80,7 @@ fn parse_module_headers(
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -383,7 +383,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     );
 
@@ -1077,7 +1077,7 @@ fn parse_module_headers_with_content_sources(
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .expect("header binding should succeed");

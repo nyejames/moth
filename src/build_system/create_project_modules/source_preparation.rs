@@ -208,7 +208,7 @@ fn prepare_discovery_output(
         .map(|identity| identity.id);
     let options = HeaderParseOptions {
         entry_file_id,
-        project_path_resolver: project_path_resolver.clone(),
+        project_path_resolver: project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

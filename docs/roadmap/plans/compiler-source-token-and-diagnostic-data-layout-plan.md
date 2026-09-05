@@ -604,8 +604,8 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
-- [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
-- [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
+- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
+- [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
 identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
@@ -699,12 +699,15 @@ locked architecture in `docs/compiler-data-layout-design.md`:
   supports a recognised kind and deliberately stores no `.moth` entry. The registry is therefore
   not the kind authority, and threading it into the source database would have created a second
   one. Recorded in the design document with the reserved root's absent kind.
-- "Reject conflicting kind" has no enforceable content, because the canonical path is the
-  deduplication key: one path yields one record, and a repeated registration returns that
-  identity rather than adding a second kind for the same key. The clause is satisfied
-  structurally, and neither 1B5 nor a later slice should add a runtime check for it. Note that the
-  reason is the key, not the derivation — the kind is supplied by its producer, so it does *not*
-  follow from the canonical extension.
+- "Reject conflicting kind" **is** enforceable, and 1B7 enforces it. An earlier note here argued
+  the opposite: that the canonical path is the deduplication key, so one path yields one record and
+  a repeated registration returns that identity rather than adding a second kind. That reasoning
+  refuted itself in its own last sentence — the kind is supplied by its producer and does *not*
+  follow from the canonical extension, so two producers reaching the same path can supply two
+  different kinds, and the deduplicating return silently kept the first. `insert` now rejects a
+  repeated canonical path whose supplied kind differs from the stored kind, in the same lane as the
+  existing conflicting-logical-path rejection. Delivered as 1B7-a; no production lane registers one
+  path under two kinds, so the check guards a producer mistake rather than a working build.
 - The design record's `text: Box<str>` is unconditional, so a registered-but-unloaded candidate is
   not a record at all — it is the compact slot/index this clause asks for, and an unreadable source
   keeps its failure at the candidate layer rather than inside a record. `SourceRecordState` is a
@@ -727,6 +730,37 @@ previously owned the table by value, which is the broad source-database `Clone` 
 document prohibits. `SourceDatabase` is no longer `Clone`, so a future deep copy is a compile
 error. Short-lived function contexts (`ModulePreparationContext`, `FrontendFilePrepareContext`)
 still take plain `&SourceDatabase`; only stored owners hold the `Arc`.
+
+**Delivered as 1B6-a.** `SourceFileTable`, `FileId` and `attach_source_files` were already gone;
+this slice removed the last carrier, `FrontendSourceFileIdentity`, whose three fields duplicated
+`SourceRecord::logical_path`, `::id` and `::canonical_os_path` and carried no fact the record did
+not. One `source_identity_facts` lookup in `pipeline.rs` now reads those facts from the record for
+all three consumers — tokenization, plain-Markdown preparation and retained-token rebinding. Header
+parse options borrow the path resolver instead of cloning one per module, which made
+`HeaderParseOptions` `Copy` and removed ten resolver clones. The clause's remaining sentence,
+"retain canonical OS paths only as cold source-record data", is not closed here: `FileTokens`
+`.canonical_os_path` and `ModuleSymbols::canonical_os_path_by_source` are this plan's own slice
+group 2C property. The `CompilerFrontend<'build>` borrow is the `Arc<SourceDatabase>` sharing
+decision recorded immediately above.
+
+**Delivered as 1B7-a.** The design authority's source-size bound ("Source size and complexity
+limits") is enforced at `SourceDatabase::retain_text`, the one point a snapshot becomes owned. The
+lane follows the record's `provenance`: an authored physical source too large for `u32` byte
+offsets fails as a user-facing file error carrying that record's own interned identity, so the
+terminal and dev-server renderers can locate it; a compiler-produced snapshot of that size is a
+compiler bug. The size policy applies only to a record that can still accept a snapshot, because a
+second retain is a lifecycle violation that must be reported as the compiler's mistake rather than
+preempted by a message about the user's file.
+
+**The serial/parallel ID test 1B7 named is vacuous, and that is the 1B2 barrier working.**
+`SourceId` is assigned at the registration barrier, before any `FilePreparationStrategy` exists:
+`module_preparation.rs` contains no `push_record`, `SourceId::from_index` or database construction,
+and `prepare_module_file_chunk` only reads an ID its input already carries. A cross-strategy
+equality test could therefore never fail, so none was written. The property that *can* fail —
+identities following canonical logical-path order rather than insertion order — is covered by
+`source_database_build_orders_records_by_portable_logical_path`
+(`src/compiler_frontend/source/tests.rs:215`), which fails if the sort is removed without running
+preparation at all.
 
 **Module scope decision, recorded against 1B5.** Widening the database to the boundary widened
 every module's external-import candidate set with it, because `run_semantic_stages` derived its

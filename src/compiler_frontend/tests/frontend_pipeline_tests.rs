@@ -177,7 +177,7 @@ impl FrontendProject {
 
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.frontend.project_path_resolver.clone(),
+            project_path_resolver: self.frontend.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
@@ -210,7 +210,7 @@ impl FrontendProject {
             &self.frontend.external_package_registry,
             &ExternalImportResolutionTable::default(),
             &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-            options.project_path_resolver.as_ref(),
+            options.project_path_resolver,
             &mut self.frontend.string_table,
         )
         .expect("header binding should succeed")

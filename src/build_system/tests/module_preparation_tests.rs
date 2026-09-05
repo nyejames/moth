@@ -250,7 +250,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .source_files
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.id),
-        project_path_resolver: frontend.project_path_resolver.clone(),
+        project_path_resolver: frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -1241,7 +1241,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
+        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

@@ -332,7 +332,7 @@ fn prepare_template_source(
 ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
     let options = HeaderParseOptions {
         entry_file_id,
-        project_path_resolver: Some(path_resolver.clone()),
+        project_path_resolver: Some(path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

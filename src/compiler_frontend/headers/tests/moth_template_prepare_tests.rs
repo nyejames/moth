@@ -164,7 +164,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let entry_file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: Some(project_path_resolver.clone()),
+        project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
@@ -542,7 +542,7 @@ impl MothTemplateScopeFixture {
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
         let options = HeaderParseOptions {
             entry_file_id: None,
-            project_path_resolver: Some(self.project_path_resolver.clone()),
+            project_path_resolver: Some(&self.project_path_resolver),
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };

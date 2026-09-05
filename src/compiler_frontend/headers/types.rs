@@ -137,12 +137,13 @@ pub struct TopLevelConstFragment {
 
 /// Optional settings that affect module header parsing.
 ///
-/// WHAT: bundles optional entry identity and path-resolution behavior for one parse invocation.
+/// WHAT: bundles optional entry identity and a borrowed path resolver for one parse invocation.
 /// WHY: the parser is called from both production and tests, and grouping these keeps the API concise.
-#[derive(Clone)]
-pub struct HeaderParseOptions {
+///      The resolver is build-lifetime immutable data, so options borrow it instead of cloning it.
+#[derive(Clone, Copy)]
+pub struct HeaderParseOptions<'a> {
     pub entry_file_id: Option<SourceId>,
-    pub project_path_resolver: Option<ProjectPathResolver>,
+    pub project_path_resolver: Option<&'a ProjectPathResolver>,
     /// An explicit role for the active entry file, when the caller is compiling a transient
     /// selection rather than a graph-owned module root.
     ///
@@ -157,7 +158,7 @@ pub struct HeaderParseOptions {
     pub active_root_role: ModuleRootRole,
 }
 
-impl Default for HeaderParseOptions {
+impl Default for HeaderParseOptions<'_> {
     fn default() -> Self {
         Self {
             entry_file_id: None,

@@ -1,5 +1,6 @@
 use super::{
     SourceDatabase, SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex,
+    record::ensure_source_snapshot_fits,
 };
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
@@ -9,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::render::dev_server::render_comp
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::mem::{align_of, size_of};
@@ -385,6 +387,115 @@ fn conflicting_logical_identity_for_canonical_source_is_rejected() {
             .map(|record| record.id),
         Some(SourceId::from_index(1)),
         "the rejected registration must leave the first identity in place"
+    );
+}
+
+#[test]
+fn conflicting_kind_for_canonical_source_is_rejected() {
+    let canonical_path = PathBuf::from("/project/src/shared.moth");
+    let entry_path = PathBuf::from("/project/entry.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+    let moth = SourceKind::Compiler(SourceFileKind::Moth);
+    let moth_template = SourceKind::Compiler(SourceFileKind::MothTemplate);
+
+    let first_id = database
+        .insert(
+            canonical_path.clone(),
+            moth,
+            &entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the first source registration should succeed");
+    let repeated_id = database
+        .insert(
+            canonical_path.clone(),
+            moth,
+            &entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the same canonical path and kind should reuse the existing identity");
+    let error = database
+        .insert(
+            canonical_path.clone(),
+            moth_template,
+            &entry_path,
+            None,
+            &mut string_table,
+        )
+        .expect_err("a canonical source cannot change authored kind");
+
+    assert_eq!(first_id, repeated_id);
+    assert!(
+        error.msg.contains("/project/src/shared.moth")
+            && error.msg.contains(&format!("{moth:?}"))
+            && error.msg.contains(&format!("{moth_template:?}")),
+        "the conflict should name the canonical path and both kinds: {}",
+        error.msg
+    );
+    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(
+        database
+            .get_by_canonical_path(&canonical_path)
+            .map(|record| (record.id, record.kind)),
+        Some((first_id, Some(moth))),
+        "the rejected registration must leave the first identity and kind in place"
+    );
+}
+
+#[test]
+fn source_snapshot_size_bound_rejects_u32_max_by_provenance() {
+    let limit = u32::MAX as usize;
+    let largest_accepted = limit - 1;
+    let source_path = PathBuf::from("/project/huge.moth");
+    let mut string_table = StringTable::new();
+    let logical_path = InternedPath::from_single_str("huge.moth", &mut string_table);
+    let root_path = InternedPath::from_single_str("<compilation root>", &mut string_table);
+
+    ensure_source_snapshot_fits(
+        largest_accepted,
+        SourceProvenance::AuthoredPhysical,
+        &logical_path,
+        Some(source_path.as_path()),
+    )
+    .expect("physical snapshot just under u32::MAX must be accepted");
+    ensure_source_snapshot_fits(
+        largest_accepted,
+        SourceProvenance::CompilationRoot,
+        &root_path,
+        None,
+    )
+    .expect("synthetic snapshot just under u32::MAX must be accepted");
+
+    let physical = ensure_source_snapshot_fits(
+        limit,
+        SourceProvenance::AuthoredPhysical,
+        &logical_path,
+        Some(source_path.as_path()),
+    )
+    .expect_err("physical snapshot of u32::MAX bytes must be rejected");
+    let synthetic =
+        ensure_source_snapshot_fits(limit, SourceProvenance::CompilationRoot, &root_path, None)
+            .expect_err("synthetic snapshot of u32::MAX bytes must be rejected");
+
+    assert_eq!(physical.error_type, ErrorType::File);
+    assert_eq!(synthetic.error_type, ErrorType::Compiler);
+    assert!(
+        physical.msg.contains("huge.moth") && physical.msg.contains(&limit.to_string()),
+        "the user-facing failure must name the oversized file and the limit: {}",
+        physical.msg
+    );
+    // A renderer resolves the frame from the location's scope, not from the message text.
+    assert_eq!(
+        physical.location.scope, logical_path,
+        "the user-facing failure must carry the source's own identity so it can be located"
+    );
+    assert!(
+        synthetic.msg.contains(&limit.to_string()),
+        "the compiler-bug failure must name the limit: {}",
+        synthetic.msg
     );
 }
 

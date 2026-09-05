@@ -4,7 +4,7 @@
 //! used for compilation. Source line indexes and spans remain outside this slice and are
 //! deliberately not stored here.
 
-use super::record::SourceRecordState;
+use super::record::{SourceRecordState, ensure_source_snapshot_fits};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
@@ -193,8 +193,20 @@ impl SourceDatabase {
     }
 
     /// Move one loaded source snapshot into its preassigned record.
+    ///
+    /// A record that already holds a snapshot or a load failure is a lifecycle violation, so the
+    /// size policy is applied only to a record that can still accept one. Otherwise an oversized
+    /// second snapshot would report the user's file instead of the compiler's own mistake.
     pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
         let record = self.source_record_mut(id)?;
+        if record.state.is_registered() {
+            ensure_source_snapshot_fits(
+                text.len(),
+                record.provenance,
+                &record.logical_path,
+                record.canonical_os_path.as_deref(),
+            )?;
+        }
         record.state.retain_text(id, text)
     }
 
@@ -225,14 +237,15 @@ impl SourceDatabase {
 
     /// Register one canonical source file and return its source identity.
     ///
-    /// A repeated canonical path returns the existing identity only when its logical path matches.
-    /// A conflicting logical spelling is rejected. New records append after the existing records,
-    /// matching the traversal-time registration behavior.
+    /// A repeated canonical path returns the existing identity only when its logical path and
+    /// authored kind match. A conflicting logical spelling or kind is rejected. New records
+    /// append after the existing records, matching the traversal-time registration behavior.
     ///
     /// Callers supply the authored kind their own lane compiles the source as. Kind is a property
-    /// of that unique record, not a second identity key: a repeated canonical path keeps the
-    /// stored kind because one canonical path cannot yield two records. Path-only registration
-    /// that holds no authored spelling uses [`Self::build`].
+    /// of that unique record: a second registration of the same canonical path with a different
+    /// kind is a compiler invariant failure, because producers supply the kind rather than
+    /// deriving it from the path. Path-only registration that holds no authored spelling uses
+    /// [`Self::build`].
     pub fn insert(
         &mut self,
         canonical_path: PathBuf,
@@ -256,6 +269,17 @@ impl SourceDatabase {
                     canonical_path.display(),
                     record.logical_path.to_portable_string(string_table),
                     logical.interned.to_portable_string(string_table),
+                )));
+            }
+            if let Some(stored_kind) = record.kind
+                && stored_kind != kind
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Source identity inventory registered canonical source path {} under \
+                     conflicting kinds {:?} and {:?}",
+                    canonical_path.display(),
+                    stored_kind,
+                    kind,
                 )));
             }
             return Ok(record.id);
