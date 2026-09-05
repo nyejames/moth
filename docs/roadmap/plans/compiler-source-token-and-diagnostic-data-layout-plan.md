@@ -601,7 +601,7 @@ depths only; the child map lives and dies with the builder.
 
 - [ ] **1B1 — registration index and ID domain:** add the `compiler_frontend/source/` owner; keep `SourceTreeIndex`, source-package inventories and path resolution as the only filesystem discovery path; have those owners produce/move compact candidate rows into one sorted compiler-facing `SourceRegistrationIndex` rather than duplicating their tree/root metadata; implement `SourceId(NonZeroU32)` and the deterministic `CompilationRoot` record at ID 1
 - [ ] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
-- [ ] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
+- [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [ ] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
@@ -609,10 +609,11 @@ depths only; the child map lives and dies with the builder.
 
 This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
 identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
-is assigned. **1B-beta** replaced the per-module tables with one boundary-lifetime database. The
-remaining registration-barrier work — the bounded single-file candidate inventory, source slots and
-text loading, `SourceId`-set module inputs and deletion of synthetic rebinding — is **1B-gamma**,
-and covers 1B3, 1B4, 1B5 and the config/bootstrap barrier in 1B2.
+is assigned. **1B-beta** replaced the per-module tables with one boundary-lifetime database.
+**1B-gamma1** delivered the 1B1 ID domain and the 1B2 config/bootstrap barrier across `1a`, `1b`
+and `1c`, and 1B3 was found already satisfied against it. The remaining registration work — source
+slots and text loading, `SourceId`-set module inputs and the traversal-local database that
+synthetic rebinding still needs — is 1B4 and 1B5.
 
 **Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
 rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
@@ -688,6 +689,42 @@ provider-backed module resolves its own candidate, which fails if row-to-identit
 to arithmetic. That covers the config-to-frontend handoff, not `bootstrap_project_build` itself;
 nothing yet fails if bootstrap stops supplying the database, because no consumer reads config's
 identity.
+
+**Single-file inventory, recorded against 1B3.** This item is satisfied by the fourth of its own
+clauses rather than the first. A single-file closure cannot be inventoried before the entry scan:
+the scan *is* the discovery, because a file's dependency clauses are only known once that file has
+been header-prepared. The lane therefore takes the deterministic-delta form the same item permits.
+Discovery prepares each file against a traversal-local `SourceDatabase`
+(`source_discovery.rs:759-765`), the complete inventory is then registered in canonical logical
+order (`compilation/single_file.rs:378-385`, sorted at `source/database.rs:56-63`), and
+`rebind_synthetic_prepared_inputs` (`module_preparation.rs:437, 507-561`) moves every prepared
+output onto that authoritative database before any consumer reads an identity from it.
+
+An independent read-only audit traced every identity-bearing field of `FileFrontendPrepareOutput`
+and found no provisional `SourceId` or `DependencyShellId` reaching a consumer: the rebind at
+`headers/types.rs:1335-1368` visits all nine identity-bearing fields transitively, all five
+`PreparedSourceInput` variants are accounted for, and the two side channels that bypass the rebind
+carry paths rather than identities — `SingleFileResolvedReference` stores `source_path` and a
+`PathSyntaxId` (`file_reference_resolution.rs:777-795`) and is joined to the authoritative database
+by canonical path (`single_file.rs:631-710`), while discovery-time diagnostics
+(`source_preparation.rs:231-241`) carry path-based locations stamped during preparation.
+`validate_source_rebinding` and `validate_file_invariants` (`headers/types.rs:1411-1441`) enforce
+this at the boundary, so a future rebind hole is a test failure rather than silent drift.
+
+The other three clauses were already met. Directory and source-package candidates are registered
+serially before any parallel region: `prepare_module_file_chunk` is the single per-file entry point
+for the serial and both parallel strategies (`module_preparation.rs:709-765`) and receives a shared
+`&SourceDatabase`, so allocation there is a type error, pinned by
+`serial_and_parallel_file_preparation_preserve_source_id_assignments`. Authored `SourceId`s are
+reused for adaptor provenance: the Moth-template service consumes the caller's bundle database and
+rejects a bundle that omits its own source (`moth_template.rs:146-156`), and the bundle-free path
+builds a one-element inventory that is canonically ordered by construction.
+
+**Deferred to 1B4/1B5:** the traversal-local database remains a second identity domain that is
+allocated, populated and discarded on every single-file build. That is an allocation cost, not a
+determinism defect, and removing it requires deferring shell stamping until after registration —
+which is exactly the `PreparedSourceInput`-to-`SourceId`-set change 1B5 owns. Deleting it here
+would either duplicate that work or re-tokenize every discovered file.
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
