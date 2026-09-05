@@ -3,7 +3,8 @@
 ## Purpose
 
 Build a useful batteries-included set of first-party Moth packages, starting with JavaScript
-implementations while the compiler diagnostics and data-layout work continues in parallel.
+implementations. Package expansion currently waits for the serial compiler-foundation checkpoint
+below. The merge-isolated parallel lane resumes after that checkpoint lands.
 
 The programme completes the common gaps in existing Core and Builder packages before adding broad new
 surface area. It also establishes package terminology, implementation boundaries, progress tracking
@@ -17,10 +18,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active parallel programme
-CURRENT_SLICE: Phase 0 - harden package foundations and first-party dependency policy
-BLOCKERS: package slices that require unstable shared frontend or diagnostic representations pause
-NEXT_ACTION: finish the first-party dependency guard corrections, then create core-text.md
+STATUS: package expansion paused for serial compiler-foundation work
+CURRENT_SLICE: Phase 0 baseline validation and merge handoff
+BLOCKERS: diagnostics Phase 3 merge, package baseline merge, then native result slots and Core const evaluation
+NEXT_ACTION: validate and merge the foundations baseline after diagnostics Phase 3, then wait for the compiler foundation
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -28,9 +29,24 @@ phase starts. Do not pin a moving programme to a baseline commit in this file.
 
 ## Roadmap position and lifecycle
 
-This programme runs in parallel with the active diagnostics and source-data-layout work. Diagnostics
-remain the primary compiler refactor. Package work may proceed only while the current slice stays
-inside the merge-isolation rules below.
+The main roadmap owns a serial checkpoint before further package activation:
+
+1. Finish diagnostics Phase 3 and merge the validated checkpoint into `main` before
+   `Compact diagnostics, type snapshots and frozen reports` starts.
+2. Reconcile and validate this programme's current package-foundations baseline, then merge it into
+   `main` without starting package expansion.
+3. Keep diagnostics continuation and package expansion paused while native AST/HIR result slots and
+   Core external const evaluation are implemented on a fresh worktree from the merged `main`.
+4. Resume this programme only after that compiler foundation lands. Adopt the new `main` and audit
+   the resulting package/evaluator surface before creating `core-text.md`.
+
+That foundation is separate compiler work, not a child package plan. Its initial Text slice enables
+constant evaluation of existing inspection functions, not broader Text API expansion. The roadmap
+links its ordinary implementation plan. This umbrella names the delivered capability so it remains
+useful after that plan is retired.
+
+After the checkpoint, package work may again run alongside diagnostics only inside the
+merge-isolation rules below. This scheduling section supersedes earlier parallel-work assumptions.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -183,6 +199,23 @@ Do not move Core APIs into annotated JavaScript merely because JavaScript is cur
 implementation. Do not introduce a common abstraction over both forms until real repeated code
 proves that it reduces complexity.
 
+### Compile-time evaluation readiness
+
+Use the compiler-owned result-slot and Core-evaluator contracts once the prerequisite foundation
+lands. A JS implementation alone does not establish compile-time support, and purity alone does
+not prove semantic parity.
+
+During each package activation, classify operations as implemented fold support, fold candidates,
+runtime-only, blocked on semantic parity or blocked on value representation. Record the reason and
+best next work in the living implementation notes and package progress row. Compiler metadata only
+advertises implemented evaluators, not aspirational candidates.
+
+The initial evaluator capability is Core-only, infallible and shared-input with fresh success
+returns. Multiple success slots and optionals are supported by the planned foundation. Fallible
+calls, mutable/aliasing results and opaque host constant values remain deferred. Backend-neutral
+semantics govern Rust evaluation and runtime lowering. User JavaScript is never executed by the
+compiler to infer constants. This section describes the prerequisite contract, not current support.
+
 ### Completion target
 
 A package slice aims for useful v1 completeness, not API exhaustiveness.
@@ -245,7 +278,9 @@ Phase 0 adds one focused validation owner to `just validate`. It must:
 
 ## Merge isolation and branch policy
 
-Use one dedicated long-lived worktree for this programme.
+Use one dedicated long-lived worktree for package implementation after the serial checkpoint.
+Merge the current foundations baseline and resume from the completed compiler foundation as
+specified above. Package work does not run concurrently with the native result-slot refactor.
 
 At the start of each package and after every major package phase:
 
@@ -291,7 +326,7 @@ Before package implementation starts:
 
 1. audit its current public API, implementation, tests and documentation
 2. list the common missing operations and known later extensions
-3. identify portability, fallibility, memory, ABI and target questions
+3. identify portability, fallibility, memory, ABI, const-evaluation parity and target questions
 4. settle the current v1 scope with the user
 5. create or refresh its living plan under this directory
 6. update this tracker and the packages and builders progress matrix with the accepted target
@@ -316,6 +351,9 @@ Each package plan uses this compact structure:
 8. **Previous blockers and rejected approaches**
 9. **Validation and integration coverage**
 10. **History**
+
+Implementation notes include per-operation compile-time evaluation status, parity constraints and
+value-shape blockers. Keep semantic contracts in canonical docs rather than duplicating them here.
 
 The history records major completed versions or refactors only. It is not a phase-by-phase changelog.
 
@@ -406,8 +444,8 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Active next | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | `core-text.md` | TODO: create when activated | Close common Unicode-aware inspection, search and transformation gaps without accepting temporary ABI-shaped APIs |
+| 0 | Package foundations | this plan | Baseline validation and merge handoff | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 1 | `@core/text` | `core-text.md` | Blocked on merged compiler foundation, then create when activated | Close common Unicode-aware inspection, search and transformation gaps without accepting temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | `core-time.md` | TODO: create when activated | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
@@ -531,7 +569,7 @@ Only then add a package row to the packages and builders progress matrix.
 The main roadmap:
 
 - links this umbrella programme once
-- records that it is active in parallel with diagnostics
+- records the serial compiler-foundation pause and the later merge-isolated parallel lane
 - does not list each child package plan
 - retains the later package dependency and manager foundations work as a separate item
 
@@ -589,12 +627,17 @@ In progress:
   and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
 
-Do not activate `@core/text` until this phase stays green.
+Validate this baseline after diagnostics Phase 3 lands, then merge it into `main`. Keep package
+activation paused until the separate native result-slot and Core const-eval foundation has also
+landed. Phase 0 validation alone no longer authorises `@core/text` expansion.
 
 ### Phase 1 - activate the living package workflow
 
+Prerequisite: native AST/HIR result slots and Core const evaluation are merged into `main`, this
+worktree has adopted them and the current validation baseline is green.
+
 - create `core-text.md` from the required living-plan structure
-- complete the `@core/text` API and implementation audit
+- complete the `@core/text` API and implementation audit, including the existing evaluator slice
 - settle its useful v1 scope with the user
 - update the tracker and package progress row
 - verify that package-plan links and lifecycle wording remain accurate

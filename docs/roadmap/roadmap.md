@@ -11,8 +11,9 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Active in parallel with diagnostics. Phase 0 package foundations correction is next.
+- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active through Phase 3. Pause and merge that checkpoint before starting Compact diagnostics, type snapshots and frozen reports. Resume only after the native result-slot and Core const-eval foundation lands.
+- [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval-plan.md): Queued serial compiler checkpoint after diagnostics Phase 3 and the validated package-foundations baseline are merged into main. Blocks diagnostics continuation and package expansion until completed.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md): Package expansion paused. Validate and merge the foundations baseline after diagnostics Phase 3, then resume package activation only after the native result-slot and Core const-eval foundation lands.
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
@@ -24,6 +25,19 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
+
+## Compiler-foundation scheduling checkpoint
+
+Finish diagnostics Phases 2 and 3, validate them and merge that progress into `main` before
+`Compact diagnostics, type snapshots and frozen reports` starts. Then reconcile, validate and merge
+the current package-foundations baseline. These are prerequisite checkpoints, not claims that either
+merge has happened.
+
+Run the native result-slot and Core const-eval implementation in a fresh worktree from that merged
+HEAD of `main`. Keep both diagnostics continuation and package expansion paused until it completes
+and merges. Rebase or merge the new `main` into both resumed worktrees before more implementation.
+The new plan requires an activation audit because source, token and diagnostic shapes will continue
+changing before these checkpoints are ready.
 
 ## Adding and maintaining plans
 
@@ -101,6 +115,23 @@ HTML escaping and add tests for aliases, comments, keywords and the rendered spa
 Stateful Moth template-body-aware highlighting remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
 performs semantic symbol resolution or syntax diagnostics.
+
+## Boracle per-result alias and lifetime investigation
+
+TODO for the next Boracle design pass after native result slots land: investigate per-success-slot
+result-to-parameter and result-to-result alias facts, including external return metadata,
+outcome-sensitive flow and different last uses of individual results. Distinct result locals do
+not prove distinct allocations.
+
+Use adversarial cases for shared inputs, independent copies, projections, partial result use,
+rebinding, loops, recursion, catch paths and cross-module/generated calls. Keep reference mode and
+the current production checker conservative while stronger rules run as named Boracle experiments
+with explicit deltas and operational-oracle comparisons. Findings should inform the later final
+borrow checker. Lifetime-topology decisions remain with their own authority.
+
+The native-result refactor adapts Boracle's current input path but does not implement this precision
+research. Retain the investigation in the Boracle documentation when those representation changes
+land, even after the ordinary implementation plan is deleted.
 
 ## Boracle real-source replay gaps
 
