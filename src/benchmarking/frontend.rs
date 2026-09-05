@@ -271,6 +271,7 @@ pub fn run_frontend_benchmark(
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
+        mut project_source_files,
         build_config_inputs,
     } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
         Ok(bootstrap) => bootstrap,
@@ -296,6 +297,7 @@ pub fn run_frontend_benchmark(
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {

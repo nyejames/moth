@@ -47,7 +47,9 @@ use super::source_discovery::{
     prepare_owned_source_inputs, resolve_structural_provider_reference,
     should_parallelize_owned_source_preparation,
 };
-use super::source_tree_index::{SourceClassification, SourceOwnership, SourceRecordIndex};
+use super::source_tree_index::{
+    SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
+};
 
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
@@ -533,19 +535,22 @@ fn classify_check_only_source_indices(
 }
 /// Convert the ordered Stage 0 source rows into compiler identities owned by this boundary.
 ///
-/// The source database receives the same registration rows in the same order, so this is a
-/// positional bridge rather than a canonical-path remap. The database accessor owns the reserved
-/// compilation-root offset and rejects rows that are outside its physical source table.
+/// Source rows are Stage 0 handles rather than compiler identities. Resolve each row's canonical
+/// path through the boundary database so a source registered ahead of the rows cannot shift their
+/// identities.
 fn compiler_source_ids_for_indices(
     source_indices: &[SourceRecordIndex],
+    source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
     string_table: &StringTable,
 ) -> Result<Vec<CompilerSourceId>, CompilerMessages> {
     source_indices
         .iter()
         .map(|source_index| {
+            let canonical_path = source_tree_index.source(*source_index).canonical_path();
             source_files
-                .source_id_at_physical_index(source_index.index())
+                .get_by_canonical_path(canonical_path)
+                .map(|source_record| source_record.id)
                 .ok_or_else(|| {
                     CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(format!(
@@ -584,6 +589,7 @@ fn prepare_check_only_module(
 ) -> Result<CheckOnlyModuleCompilationJob, CompilerMessages> {
     let candidate_source_ids = compiler_source_ids_for_indices(
         candidate_source_indices,
+        source_tree_index,
         preparation_context.source_files,
         string_table,
     )?;
@@ -1114,8 +1120,12 @@ fn discover_modules_serial_provider_capable(
                 )
             })
             .collect::<Vec<_>>();
-        let candidate_source_ids =
-            compiler_source_ids_for_indices(&candidate_source_indices, source_files, string_table)?;
+        let candidate_source_ids = compiler_source_ids_for_indices(
+            &candidate_source_indices,
+            source_tree_index,
+            source_files,
+            string_table,
+        )?;
         let source_order = candidate_source_indices
             .iter()
             .enumerate()

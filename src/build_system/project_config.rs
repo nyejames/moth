@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::single_source_compilation::{
     ConfigCompilationRequest, compile_config_source,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -57,6 +58,7 @@ pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
+    project_source_files: Option<&mut SourceDatabase>,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     let config_path = config.config_file_path();
 
@@ -80,7 +82,13 @@ pub fn load_project_config(
         return validate_directory_output_settings_if_needed(config, string_table);
     }
 
-    compile_project_config_file(config, &config_path, services, string_table)
+    compile_project_config_file(
+        config,
+        &config_path,
+        services,
+        project_source_files,
+        string_table,
+    )
 }
 
 // -------------------------
@@ -96,6 +104,7 @@ pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
+    project_source_files: Option<&mut SourceDatabase>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     // A failed reload must not leave prior project-global/config provenance visible to the next
@@ -114,12 +123,29 @@ pub(crate) fn compile_project_config_file(
             string_table.clone(),
         )
     })?;
+
+    // Register config before tokenization so its retained syntax and diagnostics share the
+    // project identity context with every source discovered later. Config sits outside the entry
+    // root, so its own directory roots the logical path and yields a bare `config.moth`.
+    let config_file_id = project_source_files
+        .map(|source_files| {
+            source_files.insert(
+                canonical_config_path.clone(),
+                &canonical_config_path,
+                None,
+                string_table,
+            )
+        })
+        .transpose()
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+
     let source_code = extract_source_code(&canonical_config_path, string_table)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let compiled_config = compile_config_source(
         ConfigCompilationRequest {
             authored_path: config_path,
             canonical_path: &canonical_config_path,
+            file_id: config_file_id,
             source_code: &source_code,
             style_directives: services.style_directives,
             binding_packages: &services.frontend_surface.binding_packages,

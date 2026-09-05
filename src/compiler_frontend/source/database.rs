@@ -1,8 +1,7 @@
 //! Database of source identities retained for one frontend compilation lifetime.
 //!
-//! The database owns source-record identity and path metadata only. Source text, line indexes,
-//! spans and build-lifetime registration remain outside this slice and are deliberately not stored
-//! here.
+//! The database owns source-record identity and path metadata only. Source text, line indexes and
+//! spans remain outside this slice and are deliberately not stored here.
 
 use super::{SourceId, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -68,51 +67,69 @@ impl SourceDatabase {
     ///
     /// The registration index already carries the canonical logical-identity order. This method
     /// computes each record's compiler-facing logical path but preserves row order, so the
-    /// compiler assigns the IDs that the source-tree owners and module candidates address.
+    /// compiler assigns IDs deterministically.
     pub(crate) fn from_ordered_registration_index(
         registration_index: &SourceRegistrationIndex<'_>,
         entry_file_path: &Path,
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerError> {
+        let mut database = Self::empty();
+        database.append_ordered_registration_index(
+            registration_index,
+            entry_file_path,
+            project_path_resolver,
+            string_table,
+        )?;
+        Ok(database)
+    }
+
+    /// Append the ordered Stage 0 candidates to this boundary's source identity table.
+    ///
+    /// A caller may already have registered a bootstrap source, such as `config.moth`, before
+    /// discovery supplies the remaining rows. Appending here preserves those earlier identities
+    /// and assigns every candidate the next deterministic ID.
+    pub(crate) fn append_ordered_registration_index(
+        &mut self,
+        registration_index: &SourceRegistrationIndex<'_>,
+        entry_file_path: &Path,
+        project_path_resolver: Option<&ProjectPathResolver>,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerError> {
         let rows = logical_rows_for_canonical_files(
             registration_index.canonical_paths(),
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
-        Self::from_ordered_logical_rows(rows)
+        self.append_ordered_logical_rows(rows)
     }
 
-    fn from_ordered_logical_rows<I>(rows: I) -> Result<Self, CompilerError>
+    fn append_ordered_logical_rows<I>(&mut self, rows: I) -> Result<(), CompilerError>
     where
         I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
     {
-        let mut files = vec![compilation_root_record()];
-        let mut canonical_to_id = FxHashMap::default();
-
         for (canonical, logical) in rows {
-            if canonical_to_id.contains_key(&canonical) {
+            if self.canonical_to_id.contains_key(&canonical) {
                 return Err(CompilerError::compiler_error(format!(
                     "Source identity inventory registered canonical source path {} more than once",
                     canonical.display(),
                 )));
             }
 
-            let id = SourceId::from_index(files.len());
-            canonical_to_id.insert(canonical.clone(), id);
-            files.push(SourceRecord {
-                id,
-                canonical_os_path: Some(canonical),
-                logical_path: logical.interned,
-                provenance: SourceProvenance::AuthoredPhysical,
-            });
+            self.push_record(canonical, logical.interned);
         }
 
-        Ok(Self {
-            files,
-            canonical_to_id,
-        })
+        Ok(())
+    }
+
+    fn from_ordered_logical_rows<I>(rows: I) -> Result<Self, CompilerError>
+    where
+        I: IntoIterator<Item = (PathBuf, LogicalSourcePath)>,
+    {
+        let mut database = Self::empty();
+        database.append_ordered_logical_rows(rows)?;
+        Ok(database)
     }
 
     pub fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceRecord> {
@@ -141,8 +158,12 @@ impl SourceDatabase {
             project_path_resolver,
             string_table,
         )?;
-        let logical_path = logical.interned;
 
+        Ok(self.push_record(canonical_path, logical.interned))
+    }
+
+    /// Append one record and return the identity its position assigns.
+    fn push_record(&mut self, canonical_path: PathBuf, logical_path: InternedPath) -> SourceId {
         let id = SourceId::from_index(self.files.len());
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.files.push(SourceRecord {
@@ -151,7 +172,7 @@ impl SourceDatabase {
             logical_path,
             provenance: SourceProvenance::AuthoredPhysical,
         });
-        Ok(id)
+        id
     }
 
     /// Resolve one physical source record.
@@ -171,19 +192,6 @@ impl SourceDatabase {
             Some(SourceProvenance::CompilationRoot)
         );
         self.files[1..].iter()
-    }
-
-    /// Resolve the compiler identity for a zero-based physical row in a registration index.
-    ///
-    /// The database owns the reserved compilation-root slot, so callers never reproduce that
-    /// offset when carrying a Stage 0 row into compiler-facing preparation.
-    ///
-    /// This holds only while the registration index supplies every physical row. Registering any
-    /// source ahead of it - config being the next one to arrive - shifts each row past its
-    /// identity, so that change must carry the assigned `SourceId` rather than the row ordinal.
-    pub(crate) fn source_id_at_physical_index(&self, physical_index: usize) -> Option<SourceId> {
-        let source_id = SourceId::from_physical_index(physical_index)?;
-        self.get(source_id).map(|_| source_id)
     }
 }
 

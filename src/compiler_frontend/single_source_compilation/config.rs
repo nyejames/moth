@@ -50,6 +50,7 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -69,6 +70,9 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) authored_path: &'a Path,
     /// The canonical filesystem path the authored config resolved to.
     pub(crate) canonical_path: &'a Path,
+    /// The source identity registered for this config in the owning project boundary, when one
+    /// exists. Standalone compiler tests may intentionally compile without a boundary identity.
+    pub(crate) file_id: Option<SourceId>,
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) binding_packages: &'a ExternalPackageRegistry,
@@ -504,16 +508,15 @@ fn prepare_config_file(
     errors: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> Result<Option<FileFrontendPrepareOutput>, CompilerMessages> {
-    // Config is one self-contained file and is not registered in a source database. It therefore
-    // passes no `SourceId`; config diagnostics retain their authored scope and canonical path
-    // instead of borrowing a fabricated source identity.
+    // Config uses the identity registered by its owning project boundary. Standalone config
+    // service callers may omit that boundary identity.
     let mut token_stream = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
-        None,
+        request.file_id,
     ) {
         Ok(tokens) => tokens,
         Err(error) => {

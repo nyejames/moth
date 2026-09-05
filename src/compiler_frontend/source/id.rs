@@ -1,7 +1,7 @@
 //! Compact identities for retained frontend source records.
 //!
-//! `SourceId` is a non-zero table handle. The zero-based index used by source databases remains
-//! available at the boundary, while the stored representation reserves zero for `Option`'s niche.
+//! `SourceId` is a non-zero table handle. Its storage index remains zero-based internally, while
+//! the stored representation reserves zero for `Option`'s niche.
 
 use std::num::NonZeroU32;
 
@@ -19,16 +19,6 @@ impl SourceId {
             .checked_add(1)
             .expect("source database index must leave room for the non-zero identity");
         Self(NonZeroU32::new(raw).expect("source identities are always non-zero"))
-    }
-    /// Convert a zero-based physical-source row into its compiler identity.
-    ///
-    /// The compilation-root row occupies the preceding storage slot. Keeping this conversion here
-    /// prevents Stage 0 callers from encoding the root offset themselves.
-    pub(crate) fn from_physical_index(physical_index: usize) -> Option<Self> {
-        let record_index = physical_index.checked_add(1)?;
-        let record_index = u32::try_from(record_index).ok()?;
-        let raw = record_index.checked_add(1)?;
-        Some(Self(NonZeroU32::new(raw)?))
     }
 
     /// Return the zero-based source-record index addressed by this identity.

@@ -744,6 +744,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
+    let mut project_source_files = None;
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "config_input",
@@ -758,6 +759,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     );
@@ -2881,10 +2883,12 @@ fn directory_project_rejects_missing_entry_root() {
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
+    let mut source_files = crate::compiler_frontend::source::SourceDatabase::empty();
     let parse_result = crate::build_system::project_config::compile_project_config_file(
         &mut config,
         &config_path,
         &services,
+        Some(&mut source_files),
         &mut string_table,
     );
     assert!(parse_result.is_ok(), "config parse should succeed");

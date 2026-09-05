@@ -2,8 +2,8 @@
 //!
 //! [`SourceDatabase`] owns the ordered source-record inventory used by frontend preparation, while
 //! [`SourceId`] provides the compact non-zero identity carried by tokens, headers and references.
-//! This module intentionally excludes source text, line indexes, spans, path-ID migration and the
-//! build-lifetime registration barrier; those belong to later slices.
+//! Source text, line indexes, spans and the full source-slot/loading lifecycle are introduced by
+//! later slices.
 //!
 //! - [`id`] defines the four-byte source identity.
 //! - [`record`] defines one source identity, its provenance and its canonical/logical paths.

@@ -494,6 +494,7 @@ pub(crate) fn compile_directory_frontend(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
@@ -521,14 +522,25 @@ pub(crate) fn compile_directory_frontend(
     };
     let project_path_resolver = project_setup.resolver;
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
-    let project_source_files = SourceDatabase::from_ordered_registration_index(
-        &project_registration_index,
-        project_path_resolver.entry_root(),
-        Some(&project_path_resolver),
-        string_table,
-    )
-    .map(Arc::new)
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let project_source_files =
+        project_source_files.get_or_insert_with(|| Arc::new(SourceDatabase::empty()));
+    Arc::get_mut(project_source_files)
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "project source database was shared before Stage 0 registration completed",
+                ),
+                string_table,
+            )
+        })?
+        .append_ordered_registration_index(
+            &project_registration_index,
+            project_path_resolver.entry_root(),
+            Some(&project_path_resolver),
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let project_source_files = Arc::clone(project_source_files);
     let config_globals = builder_surface.config_globals().clone();
 
     // 2. Build every source-package inventory and the project inventory before semantic

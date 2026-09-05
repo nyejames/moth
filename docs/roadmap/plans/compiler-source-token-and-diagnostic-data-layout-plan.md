@@ -663,10 +663,31 @@ provider into a module's external-import candidate scope;
 `directory_module_external_import_candidates_are_scoped_to_owned_sources_when_display_order_differs`
 is the regression guard and fails on exactly that leak.
 
-`SourceDatabase::source_id_at_physical_index` is the one positional bridge from a Stage 0 row to an
-identity. It is correct only while the registration index supplies every physical row. Registering
-config ahead of it shifts each row past its identity, so 1B-gamma1c must carry the assigned
-`SourceId` rather than the row ordinal; the accessor documents this precondition at its definition.
+**Config barrier, recorded against 1B2 and delivered as 1B-gamma1c.** `config.moth` is registered
+into the project source database before it is tokenized and compiles with that real `SourceId`
+rather than none. A directory project numbers the compilation root 1, config 2 and tree rows from 3.
+Config is registered while no path resolver exists, so its own canonical directory roots the
+logical path and yields a bare `config.moth`; `entry_root` is validated as strictly below the
+project root, so config is never also discovered by traversal and cannot register twice.
+
+No positional bridge survives. `SourceId::from_physical_index` and
+`SourceDatabase::source_id_at_physical_index` mapped a Stage 0 row ordinal to an identity by
+arithmetic, which config's preceding row invalidates. Rather than re-offset them, both are deleted:
+a tree row resolves to its identity through the database's canonical-path lookup, which no prefix
+can shift. `SourceId::physical_index` remains for the dense origin table, which is built over the
+same records and therefore stays aligned.
+
+Config's `SourceId` has no consumer yet. Every ordinary `config.moth` dependency form is rejected
+before the shell-stamping path reads a file identity — private clauses as `DependencyClauseNotAllowed`,
+`export:` blocks as `ExportOutsideModuleRoot`, and the legacy form as `LegacyDependencyClause` — so
+no config diagnostic currently observes the identity. The barrier is what 1B2 asks for; consumption
+arrives when tokens and diagnostics migrate to `SourceId` in 1D and 1E. The registration is instead
+pinned through the identities it shifts: `loads_canonical_config_file_from_project_root` runs
+`load_project_config` and hands its database to directory compilation, then asserts a
+provider-backed module resolves its own candidate, which fails if row-to-identity mapping returns
+to arithmetic. That covers the config-to-frontend handoff, not `bootstrap_project_build` itself;
+nothing yet fails if bootstrap stops supplying the database, because no consumer reads config's
+identity.
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 

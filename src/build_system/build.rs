@@ -52,6 +52,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1503,6 +1504,11 @@ pub(crate) struct BuildBootstrap {
     pub(crate) string_table: StringTable,
     pub(crate) frontend_surface: BuilderSurface,
     pub(crate) validated_directory_output_settings: Option<ValidatedDirectoryOutputSettings>,
+    /// The project boundary's source identities, with config registered before Stage 0 discovery.
+    ///
+    /// Single-file and config-free callers leave this absent so their own frontend database stays
+    /// the sole identity context for source compilation.
+    pub(crate) project_source_files: Option<Arc<SourceDatabase>>,
     /// The typed explicit build inputs this bootstrap was started with.
     ///
     /// WHAT: the `BuildConfigInputSet` the command layer parsed or the programmatic caller
@@ -1622,6 +1628,7 @@ pub fn build_project(
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
+        mut project_source_files,
         build_config_inputs,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
@@ -1637,6 +1644,7 @@ pub fn build_project(
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
@@ -1734,6 +1742,8 @@ pub(crate) fn bootstrap_project_build(
 
     let mut config = Config::new(entry_path);
 
+    let mut project_source_files = config.entry_dir.is_dir().then(SourceDatabase::empty);
+
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
     // also need as a stable prefix once file preparation becomes independent.
     let preseeded = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
@@ -1760,13 +1770,17 @@ pub(crate) fn bootstrap_project_build(
         frontend_surface: &frontend_surface,
         build_config_inputs,
     };
-    let validated_directory_output_settings =
-        match load_project_config(&mut config, &config_services, &mut string_table) {
-            Ok(settings) => settings,
-            Err(messages) => {
-                return Err(messages);
-            }
-        };
+    let validated_directory_output_settings = match load_project_config(
+        &mut config,
+        &config_services,
+        &mut string_table,
+        project_source_files.as_mut(),
+    ) {
+        Ok(settings) => settings,
+        Err(messages) => {
+            return Err(messages);
+        }
+    };
     // WHAT: Validate backend-specific config requirements before compilation.
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
     if let Err(error) = project_builder
@@ -1782,6 +1796,7 @@ pub(crate) fn bootstrap_project_build(
         string_table,
         frontend_surface,
         validated_directory_output_settings,
+        project_source_files: project_source_files.map(Arc::new),
         build_config_inputs: build_config_inputs.clone(),
     })
 }

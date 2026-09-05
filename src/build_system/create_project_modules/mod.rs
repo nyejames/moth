@@ -89,8 +89,10 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 use crate::timed_stage;
@@ -130,6 +132,7 @@ pub fn compile_project_frontend(
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    let mut project_source_files = None;
     compile_project_frontend_with_inputs(
         config,
         build_profile,
@@ -137,6 +140,7 @@ pub fn compile_project_frontend(
         style_directives,
         builder_surface,
         string_table,
+        &mut project_source_files,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
     )
@@ -151,6 +155,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
@@ -177,6 +182,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 style_directives,
                 builder_surface,
                 string_table,
+                project_source_files,
                 build_config_inputs,
                 mode,
             )

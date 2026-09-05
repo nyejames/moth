@@ -236,13 +236,21 @@ fn parse_project_config_for_test(
 ) -> Result<(), CompilerMessages> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        Some(&mut source_files),
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn parse_project_config_for_test_with_html_keys(
@@ -254,13 +262,21 @@ fn parse_project_config_for_test_with_html_keys(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        Some(&mut source_files),
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -270,13 +286,21 @@ fn parse_project_config_for_test_with_packages(
     frontend_surface: &crate::builder_surface::BuilderSurface,
 ) -> Result<(), CompilerMessages> {
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        Some(&mut source_files),
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn discover_modules_for_test(
@@ -1831,10 +1855,29 @@ fn loads_canonical_config_file_from_project_root() {
         "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
     )
     .expect("should write config");
+    fs::create_dir_all(root.join("src/alpha")).expect("should create first module directory");
+    fs::create_dir_all(root.join("src/beta")).expect("should create second module directory");
+    fs::write(
+        root.join("src/alpha/@alpha.moth"),
+        "@drawing.js as drawing\nvalue = 1\n",
+    )
+    .expect("should write first module root");
+    fs::write(
+        root.join("src/alpha/drawing.js"),
+        "export function draw() {}\n",
+    )
+    .expect("should write first module provider");
+    fs::write(root.join("src/beta/@beta.moth"), "").expect("should write second module root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    frontend_surface
+        .external_import_providers
+        .register(Arc::new(ResolvingCountingProvider::new(Arc::clone(
+            &provider_calls,
+        ))));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives: &style_directives,
@@ -1842,12 +1885,108 @@ fn loads_canonical_config_file_from_project_root() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
 
-    load_project_config(&mut config, &services, &mut string_table)
-        .expect("canonical config should load");
+    let validated_output_settings = load_project_config(
+        &mut config,
+        &services,
+        &mut string_table,
+        Some(&mut source_files),
+    )
+    .expect("canonical config should load");
 
     assert_eq!(config.config_file_path(), root.join("config.moth"));
     assert_eq!(config.entry_root, PathBuf::from("src"));
+
+    let mut project_source_files = Some(Arc::new(source_files));
+    let frontend = compile_project_frontend_with_inputs(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        validated_output_settings.as_ref(),
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+        &mut project_source_files,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("directory frontend should extend the config source database");
+
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "the provider-backed alpha source should resolve its physical provider once",
+    );
+    let alpha = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry_point
+                .ends_with(Path::new("alpha/@alpha.moth"))
+        })
+        .expect("expected alpha module artefact");
+    let alpha_provider_package_paths = alpha
+        .module
+        .link_facts
+        .external_import_candidates
+        .iter()
+        .filter_map(|candidate| {
+            alpha
+                .module
+                .link_facts
+                .external_package_registry
+                .get_package_by_id(candidate.package_id)
+                .map(|package| package.path.clone())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        alpha_provider_package_paths,
+        vec!["@test/resolving".to_owned()],
+        "alpha should retain the provider candidate resolved for its own source",
+    );
+
+    let project_source_files = project_source_files
+        .as_ref()
+        .expect("directory frontend should retain the project source database");
+    let canonical_config = fs::canonicalize(root.join(settings::CONFIG_FILE_NAME))
+        .expect("config should canonicalize");
+    let canonical_alpha =
+        fs::canonicalize(root.join("src/alpha/@alpha.moth")).expect("alpha should canonicalize");
+    let canonical_beta =
+        fs::canonicalize(root.join("src/beta/@beta.moth")).expect("beta should canonicalize");
+    let canonical_alpha_provider =
+        fs::canonicalize(root.join("src/alpha/drawing.js")).expect("provider should canonicalize");
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_config)
+            .expect("config should have a source identity")
+            .id,
+        SourceId::from_index(1)
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_alpha)
+            .expect("alpha should have a source identity")
+            .id,
+        SourceId::from_index(2)
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_alpha_provider)
+            .expect("provider should have a source identity")
+            .id,
+        SourceId::from_index(3),
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_beta)
+            .expect("beta should have a source identity")
+            .id,
+        SourceId::from_index(4)
+    );
 }
 
 #[test]
@@ -1916,9 +2055,15 @@ fn directory_projects_require_config_moth() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
 
-    let messages = load_project_config(&mut config, &services, &mut string_table)
-        .expect_err("a directory project without config.moth must fail");
+    let messages = load_project_config(
+        &mut config,
+        &services,
+        &mut string_table,
+        Some(&mut source_files),
+    )
+    .expect_err("a directory project without config.moth must fail");
     assert!(
         messages.diagnostics().any(|diagnostic| matches!(
             diagnostic.payload,
