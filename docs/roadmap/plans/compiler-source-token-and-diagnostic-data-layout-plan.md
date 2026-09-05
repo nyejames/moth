@@ -603,7 +603,7 @@ depths only; the child map lives and dies with the builder.
 - [ ] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
-- [ ] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
+- [ ] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
 - [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
 - [ ] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
@@ -684,19 +684,38 @@ associated with by identity, and a logical lookup matching more than one record 
 omits the frame rather than guessing. The 1B4 clause is read as covering one canonical source
 claiming two identities, which is what the new rejection enforces.
 
-**Two 1B4 clauses remain outstanding after this slice.** Both are locked architecture in
-`docs/compiler-data-layout-design.md`, so neither is declined:
+**Two 1B4 clauses remain outstanding after this slice, both moved rather than declined.** Each is
+locked architecture in `docs/compiler-data-layout-design.md`:
 
 - `SourceRecord` must own `kind: SourceKind` (design doc, "Source records"), which the compiler
-  record does not have today; Stage 0's `SourceClassification` holds it instead. Registration rows
-  must carry kind into the record before "reject conflicting kind" can mean anything. That is
-  slice 1B-gamma3b-ii.
+  record does not have today; Stage 0's `SourceClassification` holds it instead. **This moves into
+  1B5**, because the record has no reader until then. Kind was implemented and reverted: the field
+  and its accessor were dead in the library build, and the honest first consumer is
+  `PreparedSourceInput`, whose variants encode kind today and which 1B5 replaces with `SourceId`
+  sets. No `SourceDatabase` reaches header binding or the AST layer, so the other kind re-derivers
+  — `binding_environment/builder.rs:1287-1305`, `paths/path_resolution.rs:440`,
+  `headers/dependency_target.rs:166` — cannot read a record until slice groups 1E and 1F thread it
+  there.
+- Recognition, not support, is the record's kind: `SourceFileKind::from_extension` recognises
+  `.moth`, `.mtf` and `.md`, while `SourceFileKindRegistry` answers whether the *active builder*
+  supports a recognised kind and deliberately stores no `.moth` entry. The registry is therefore
+  not the kind authority, and threading it into the source database would have created a second
+  one. Recorded in the design document with the reserved root's absent kind.
+- "Reject conflicting kind" has no enforceable content once kind derives from the canonical path,
+  because that path is the deduplication key: one key cannot yield two kinds. The clause is
+  satisfied structurally rather than by a runtime check, and 1B5 must not add one.
 - The design record's `text: Box<str>` is unconditional, so a registered-but-unloaded candidate is
   not a record at all — it is the compact slot/index this clause asks for, and an unreadable source
   keeps its failure at the candidate layer rather than inside a record. `SourceRecordState` is a
-  stepping stone to that shape, not its end state. Converting the dense array to
-  registration-slot-plus-loaded-record is slice 1B-gamma3b-iii, which also removes the
-  `Unreadable` variant from the record.
+  stepping stone to that shape, not its end state. **This moves into slice group 1C**, which is
+  where the record gains `line_starts` and `extended_spans`. Splitting the array now would save an
+  unloaded row only the few bytes a compact slot does not need — the canonical and logical paths
+  are required for lookup either way — and would then have to be re-split when the three loaded
+  boxes land. Persistent unloaded rows are real, not transient: unsupported recognized sources
+  (`source_tree_index.rs:658-703`), unrooted rows (`:1518-1554`) and unselected owned sources
+  (`module_inventory.rs:526-533`) stay registered without text, and each will carry 48 bytes of
+  unused boxes once the record owns text, line starts and extended spans. That is when the split
+  pays, and it removes the `Unreadable` variant from the record at the same time.
 
 **Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
 rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
@@ -820,6 +839,11 @@ throwaway offset tracker duplicating the line-index builder. The byte cursor now
 - [ ] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
 - [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
 - [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
+- [ ] **1C6 — registration slot and loaded record:** split the dense array into a compact
+  registration slot per candidate and a loaded record that owns text, line starts and extended
+  spans unconditionally; keep an unreadable source's failure at the slot layer and remove the
+  `Unreadable` variant from the record. Moved here from 1B4: the split pays once the three loaded
+  boxes exist, and doing it earlier would re-split the same array twice.
 
 ### Slice 1D — Migrate tokenization and source preparation
 

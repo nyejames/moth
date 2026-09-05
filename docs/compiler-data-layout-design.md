@@ -286,7 +286,7 @@ pub struct SourceRecord {
     text: Box<str>,
     line_starts: Box<[u32]>,
     extended_spans: Box<[ExtendedSpan]>,
-    kind: SourceKind,
+    kind: Option<SourceKind>,
     provenance: SourceProvenance,
 }
 ```
@@ -300,7 +300,12 @@ are fixed:
 - `text` is the exact UTF-8 source snapshot compiled.
 - `line_starts` contains byte offsets into `text`; the first entry is always `0`.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
-- `kind` identifies Moth, Moth template, Markdown, config or another registered source kind.
+- `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind. It is
+  absent only for the reserved compilation root, which is not a file and has no lexical kind; an
+  adapted or synthetic source that does carry content keeps its real kind here.
+- a record's kind states what the compiler recognizes, not what the active builder supports. Stage 0
+  diagnoses a recognized-but-unsupported kind before registration; the identity record still
+  identifies the source.
 - `provenance` distinguishes authored physical source from synthetic or adapted source and points to
   its owning source where needed.
 
