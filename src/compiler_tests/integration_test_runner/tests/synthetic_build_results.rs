@@ -51,6 +51,8 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,

@@ -2,7 +2,11 @@ use super::{
     FrontendCompilationMode, compile_project_frontend, compile_project_frontend_with_inputs,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BackendBuilder, ProjectCompilation};
+use crate::build_system::build::{
+    BackendBuilder, Project, ProjectBuilder, ProjectCompilation, build_project,
+};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::build_system::output::CleanupPolicy;
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::{
@@ -15,7 +19,8 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidDependencyClauseReason,
@@ -39,7 +44,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
-use crate::projects::settings::Config;
+use crate::projects::settings::{Config, ProjectConfigError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -883,8 +888,8 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
-        "@config_input helper\nenabled #Config of Bool\nvalue = helper()\n",
+        src.join("@mod.moth"),
+        "@config_input helper\nproject_snapshot = 1\nenabled #Config of Bool\nvalue = helper()\n",
     )
     .expect("should write project source contract");
     fs::write(
@@ -925,9 +930,14 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     );
-    let Err(messages) = result else {
+    let Err(mut messages) = result else {
         panic!("source-package config contract must not consume the project input");
     };
+    messages.set_source_database(Arc::clone(
+        project_source_files
+            .as_ref()
+            .expect("directory frontend should retain the project source database"),
+    ));
     let observed_identities = messages
         .error_diagnostics()
         .map(|diagnostic| diagnostic.identity())
@@ -967,6 +977,15 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         location,
         PathBuf::from("@mod.moth"),
         "missing-input diagnostic should point to the dependency contract"
+    );
+    let rendered = render_compiler_messages_html(&messages, &dir);
+    assert!(
+        rendered.contains("enabled #Config of Bool"),
+        "the missing-input frame should use the package snapshot: {rendered}"
+    );
+    assert!(
+        !rendered.contains("project_snapshot = 1"),
+        "the package diagnostic must not use the colliding project snapshot: {rendered}"
     );
 }
 
@@ -2576,7 +2595,7 @@ fn single_file_rejects_wrong_extension() {
         .expect("expected at least one error");
     let error_text = terse::format_terse_diagnostic_with_context(
         diagnostic,
-        DiagnosticRenderContext::new(&messages.string_table),
+        messages.diagnostic_render_context(0),
     );
     assert!(
         error_text.contains(".moth"),
@@ -3822,5 +3841,178 @@ fn source_package_warning_retained_by_frontend_outcome() {
     assert!(
         messages.warning_count() >= 1,
         "render boundary should retain the source-package warning"
+    );
+}
+
+struct SuccessfulPackageWarningBuilder {
+    package_root: PathBuf,
+}
+
+impl BackendBuilder for SuccessfulPackageWarningBuilder {
+    fn build_backend(
+        &self,
+        _project_compilation: ProjectCompilation,
+        _config: &Config,
+        _build_profile: BuildProfile,
+        _flags: &[crate::compiler_frontend::Flag],
+        _string_table: &mut StringTable,
+    ) -> Result<Project, CompilerMessages> {
+        Ok(Project {
+            output_files: Vec::new(),
+            entry_page_rel: None,
+            cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
+            warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
+        })
+    }
+
+    fn validate_project_config(
+        &self,
+        _config: &Config,
+        _string_table: &mut StringTable,
+    ) -> Result<(), ProjectConfigError> {
+        Ok(())
+    }
+
+    fn frontend_style_directives(
+        &self,
+    ) -> Vec<crate::compiler_frontend::style_directives::StyleDirectiveSpec> {
+        Vec::new()
+    }
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface.source_packages.register_filesystem_root(
+            "pkg",
+            self.package_root.clone(),
+            PackageOrigin::Builder,
+        );
+        surface
+    }
+}
+
+#[test]
+fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let project_root = temporary_directory.path().to_path_buf();
+    let project_source_root = project_root.join("src");
+    let package_root = project_root.join("packages/pkg");
+    fs::create_dir_all(&project_source_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create source package root");
+    fs::write(
+        project_root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n";
+    fs::write(project_source_root.join("@mod.moth"), project_text)
+        .expect("should write project module");
+    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+
+    let builder = ProjectBuilder::new(Box::new(SuccessfulPackageWarningBuilder { package_root }));
+    let build_result = build_project(
+        &builder,
+        project_root
+            .to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("successful build should retain the package warning");
+
+    assert!(
+        build_result
+            .warnings
+            .iter()
+            .any(|warning| warning.kind.code() == "MOTH-RULE-0022"),
+        "successful build should retain the source-package warning"
+    );
+
+    let mut messages = CompilerMessages::from_diagnostics(
+        build_result.warnings.clone(),
+        build_result.string_table.clone(),
+    );
+    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
+    if let Some(source_database) = build_result.source_database.as_ref() {
+        messages.set_source_database(Arc::clone(source_database));
+    }
+    let rendered = render_compiler_messages_html(&messages, &project_root);
+
+    assert!(
+        rendered.contains("&quot;one&quot; =&gt; result = &quot;one&quot;"),
+        "the package warning should render the package snapshot: {rendered}"
+    );
+    assert!(
+        !rendered.contains(project_text.trim_end()),
+        "the package warning must not render the colliding project snapshot: {rendered}"
+    );
+}
+
+#[test]
+fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let project_root = temporary_directory.path().to_path_buf();
+    let project_source_root = project_root.join("src");
+    let package_root = project_root.join("packages/pkg");
+    fs::create_dir_all(&project_source_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create source package root");
+    fs::write(
+        project_root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "package_snapshot Int = undefined_thing\n";
+    fs::write(project_source_root.join("@mod.moth"), project_text)
+        .expect("should write project module");
+    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+
+    let mut config = Config::new(project_root.clone());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "pkg",
+        package_root,
+        PackageOrigin::Builder,
+    );
+
+    let mut project_source_files = None;
+    let frontend = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+        &mut project_source_files,
+        &BuildConfigInputSet::new(),
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("the package diagnostic should remain a retained frontend outcome");
+    let mut messages = frontend.into_render_messages(&mut string_table);
+    // Mirror the build/check boundary: the project database is a fallback for diagnostics that
+    // have no more specific association, never the owner of package diagnostics.
+    messages.set_source_database(Arc::clone(
+        project_source_files
+            .as_ref()
+            .expect("directory frontend should retain the project source database"),
+    ));
+    let rendered = render_compiler_messages_html(&messages, &project_root);
+
+    assert!(
+        rendered.contains(package_text.trim_end()),
+        "the package diagnostic should render the package snapshot: {rendered}"
+    );
+    assert!(
+        !rendered.contains(project_text.trim_end()),
+        "the package diagnostic must not render the colliding project snapshot: {rendered}"
     );
 }

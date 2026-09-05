@@ -109,6 +109,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
 
         let mut build_result =
             build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)?;
+        let source_database = build_result.source_database.clone();
         let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
@@ -138,7 +139,12 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             )
         });
         if let Err(mut messages) = output_result {
+            let warning_offset = messages.diagnostic_slice().len();
             messages.extend_diagnostics(build_result.warnings);
+            messages.install_source_contexts(build_result.warning_source_contexts, warning_offset);
+            if let Some(source_database) = source_database.as_ref() {
+                messages.set_source_database(source_database.clone());
+            }
             return Err(messages);
         }
         Ok(build_result)
@@ -393,6 +399,7 @@ fn build_once(
             };
         }
     };
+    let source_database = build_result.source_database.clone();
     let output_dir = build_result
         .directory_output_plan
         .as_ref()
@@ -416,7 +423,10 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
-                let messages = error.into_messages(build_result.string_table.clone());
+                let mut messages = error.into_messages(build_result.string_table.clone());
+                if let Some(source_database) = source_database.as_ref() {
+                    messages.set_source_database(source_database.clone());
+                }
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -448,10 +458,15 @@ fn build_once(
         let success_messages = if build_result.warnings.is_empty() {
             None
         } else {
-            Some(CompilerMessages::from_diagnostics(
+            let mut messages = CompilerMessages::from_diagnostics(
                 build_result.warnings,
                 build_result.string_table,
-            ))
+            );
+            messages.install_source_contexts(build_result.warning_source_contexts, 0);
+            if let Some(source_database) = source_database.as_ref() {
+                messages.set_source_database(source_database.clone());
+            }
+            Some(messages)
         };
 
         BuildOutcome {

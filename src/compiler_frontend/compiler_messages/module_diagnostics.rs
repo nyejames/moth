@@ -1,7 +1,7 @@
 //! Diagnosed-module owner for the retained-module semantic boundary.
 //!
 //! WHAT: owns one diagnosed module's user-facing diagnostics, the module-local string table and
-//!       the render type contexts produced alongside them.
+//!       render contexts produced alongside them.
 //! WHY: the semantic module boundary separates a diagnosed source failure (user diagnostics the
 //!      renderer surfaces) from an infrastructure `CompilerError` that aborts the build. This
 //!      owner is the single place that classifies a deeper stage's mixed `CompilerMessages` into
@@ -9,15 +9,17 @@
 //!      diagnostic: the constructor routes any `DiagnosticPayload::InfrastructureError` back out
 //!      as a typed `CompilerError` instead of storing it as a normal diagnosed result.
 
-use super::compiler_errors::{CompilerError, CompilerMessages, RenderTypeContext};
+use super::compiler_errors::{
+    CompilerError, CompilerMessages, RenderSourceContext, RenderTypeContext,
+};
 use super::{CompilerDiagnostic, DiagnosticPayload, DiagnosticSeverity};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// One diagnosed module's user-facing diagnostic set at the retained-module semantic boundary.
 ///
-/// WHAT: carries the ordered user-facing diagnostics, the module-local `StringTable` and the
-///       render type contexts produced for one module, plus enough render identity to surface the
-///       diagnostics after the local compilation call has finished.
+/// WHAT: carries the ordered user-facing diagnostics, the module-local `StringTable` and render
+///       contexts produced for one module, plus enough render identity to surface the diagnostics
+///       after the local compilation call has finished.
 /// WHY: a diagnosed module must expose no `Module` and no infrastructure diagnostic. The
 ///      constructor rejects any `DiagnosticPayload::InfrastructureError` and routes it back as a
 ///      `CompilerError`, so a successful `ModuleDiagnostics` only ever carries user-facing
@@ -26,6 +28,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) struct ModuleDiagnostics {
     diagnostics: Vec<CompilerDiagnostic>,
     string_table: StringTable,
+    render_source_contexts: Vec<RenderSourceContext>,
     render_type_contexts: Vec<RenderTypeContext>,
 }
 
@@ -58,6 +61,7 @@ impl ModuleDiagnostics {
     pub(crate) fn from_messages(messages: CompilerMessages) -> Result<Self, CompilerError> {
         let diagnostics = messages.diagnostics;
         let string_table = messages.string_table;
+        let render_source_contexts = messages.render_source_contexts;
         let render_type_contexts = messages.render_type_contexts;
 
         // One explicit classification pass over the diagnostic stream. The boundary reads only
@@ -98,6 +102,7 @@ impl ModuleDiagnostics {
                 Ok(ModuleDiagnostics {
                     diagnostics,
                     string_table,
+                    render_source_contexts,
                     render_type_contexts,
                 })
             }
@@ -177,6 +182,7 @@ impl ModuleDiagnostics {
         CompilerMessages {
             diagnostics: self.diagnostics,
             string_table: self.string_table,
+            render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,
         }
     }

@@ -93,6 +93,8 @@ fn minimal_build_result() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: Vec::new(),
         string_table,
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,
@@ -195,6 +197,8 @@ fn build_result_with_warning(
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,

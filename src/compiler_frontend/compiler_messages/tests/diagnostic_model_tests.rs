@@ -1085,7 +1085,10 @@ fn immutable_binding_diagnostic_carries_secondary_declaration_label() {
         location(source_path.clone()),
     );
 
-    let labels = terminal::format_label_messages(&diagnostic, &string_table);
+    let labels = terminal::format_label_messages_with_context(
+        &diagnostic,
+        DiagnosticRenderContext::new(&string_table),
+    );
 
     assert!(
         labels

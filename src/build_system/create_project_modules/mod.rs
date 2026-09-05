@@ -194,6 +194,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 builder_surface,
                 extension,
                 string_table,
+                project_source_files,
                 build_config_inputs,
                 mode,
             )

@@ -67,9 +67,14 @@ pub(super) fn validate_diagnostics(
             })
             .collect();
 
-        rendered_messages.extend(error_diagnostics.iter().flat_map(|(_, diagnostic)| {
-            terminal::format_label_messages(diagnostic, &messages.string_table)
-        }));
+        rendered_messages.extend(error_diagnostics.iter().flat_map(
+            |(diagnostic_index, diagnostic)| {
+                terminal::format_label_messages_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(*diagnostic_index),
+                )
+            },
+        ));
 
         rendered_messages.extend(
             error_diagnostics

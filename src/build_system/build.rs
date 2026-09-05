@@ -32,7 +32,9 @@ use crate::build_system::resource_unions::{
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, RenderSourceContext,
+};
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -67,6 +69,38 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const FILE_MIN_UNIQUE_SYMBOLS_CAPACITY: usize = 32;
+
+fn attach_source_database(
+    messages: &mut CompilerMessages,
+    source_database: Option<&Arc<SourceDatabase>>,
+) {
+    let Some(source_database) = source_database else {
+        return;
+    };
+
+    // A frontend aggregate can already contain package-specific ranges. Attach the project
+    // database only as a fallback for diagnostics that have no retained source owner. The guard
+    // avoids a redundant whole-set association when every diagnostic already has an owner;
+    // source_database_for_diagnostic takes the first matching association, so earlier package
+    // ranges still win whenever this fallback is attached.
+    if messages
+        .diagnostics()
+        .enumerate()
+        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
+    {
+        messages.set_source_database(Arc::clone(source_database));
+    }
+}
+
+fn attach_owned_source_database(
+    messages: &mut CompilerMessages,
+    source_database: &mut Option<SourceDatabase>,
+) {
+    if let Some(source_database) = source_database.take() {
+        let source_database = Arc::new(source_database);
+        attach_source_database(messages, Some(&source_database));
+    }
+}
 
 // -------------------------
 //  Project Aggregation
@@ -1590,8 +1624,36 @@ pub struct BuildResult {
     pub config: Config,
     pub warnings: Vec<CompilerDiagnostic>,
     pub string_table: StringTable,
+    /// Per-warning source snapshot associations, indexed against `warnings`.
+    ///
+    /// Package ranges are collected before backend warnings are appended, so the final append
+    /// leaves their indexes unchanged. Project-owned warnings intentionally have no association
+    /// and resolve through the project database fallback at each render boundary.
+    pub(crate) warning_source_contexts: Vec<RenderSourceContext>,
+    /// The retained source snapshots used by this build's diagnostics and warning renderers.
+    ///
+    /// This keeps the build-lifetime source database alive for as long as its result is retained;
+    /// the eventual frozen render context owns that lifetime more narrowly.
+    pub(crate) source_database: Option<Arc<SourceDatabase>>,
     pub output_owner: OutputOwner,
     pub directory_output_plan: Option<ValidatedOutputPlan>,
+}
+
+impl BuildResult {
+    /// Resolve the source snapshot database that produced one successful warning.
+    ///
+    /// WHAT: returns the first recorded association covering `warning_index`, falling back to the
+    ///       project database.
+    /// WHY: a project source and a source-package source can share one logical path, so a
+    ///      renderer that resolves a package warning against the project database shows a
+    ///      different file's text. First match wins, mirroring `CompilerMessages`.
+    pub(crate) fn warning_source_database(&self, warning_index: usize) -> Option<&SourceDatabase> {
+        self.warning_source_contexts
+            .iter()
+            .find(|source_context| source_context.diagnostic_range.contains(&warning_index))
+            .map(|source_context| source_context.source_database.as_ref())
+            .or(self.source_database.as_deref())
+    }
 }
 
 // -------------------------
@@ -1649,19 +1711,25 @@ pub fn build_project(
         FrontendCompilationMode::Canonical,
     ) {
         Ok(frontend_compilation) => frontend_compilation,
-        Err(messages) => {
+        Err(mut messages) => {
+            attach_source_database(&mut messages, project_source_files.as_ref());
             return Err(messages);
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
-        return Err(frontend_compilation.into_render_messages(&mut string_table));
+        let mut messages = frontend_compilation.into_render_messages(&mut string_table);
+        attach_source_database(&mut messages, project_source_files.as_ref());
+        return Err(messages);
     }
-    let project_compilation = ProjectCompilation::from_frontend(frontend_compilation)
-        .map_err(|error| error.into_messages(&mut string_table))?;
-    let mut warnings: Vec<CompilerDiagnostic> = project_compilation
-        .modules()
-        .flat_map(collect_module_warnings)
-        .collect();
+    let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
+        Ok(project_compilation) => project_compilation,
+        Err(error) => {
+            let mut messages = error.into_messages(&mut string_table);
+            attach_source_database(&mut messages, project_source_files.as_ref());
+            return Err(messages);
+        }
+    };
+    let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
@@ -1681,10 +1749,13 @@ pub fn build_project(
         Ok(project) => project,
         Err(mut compiler_messages) => {
             compiler_messages.string_table = string_table;
+            attach_source_database(&mut compiler_messages, project_source_files.as_ref());
             return Err(compiler_messages);
         }
     };
 
+    // Backend warnings are project-owned and appended after all frontend/package warnings; this
+    // does not shift the already-recorded package ranges.
     warnings.extend(project.warnings.iter().cloned());
 
     let output_owner = OutputOwner {
@@ -1696,7 +1767,9 @@ pub fn build_project(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            return Err(CompilerMessages::from_error(error, string_table));
+            let mut messages = CompilerMessages::from_error(error, string_table);
+            attach_source_database(&mut messages, project_source_files.as_ref());
+            return Err(messages);
         };
 
         Some(validated_output_settings.select(
@@ -1717,6 +1790,8 @@ pub fn build_project(
         config,
         warnings,
         string_table,
+        warning_source_contexts,
+        source_database: project_source_files,
         output_owner,
         directory_output_plan,
     })
@@ -1760,7 +1835,9 @@ pub(crate) fn bootstrap_project_build(
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+            let mut messages = CompilerMessages::from_error(error, string_table.clone());
+            attach_owned_source_database(&mut messages, &mut project_source_files);
+            return Err(messages);
         }
     };
     // WHAT: Load and validate project config before compilation begins (Stage 0).
@@ -1777,7 +1854,8 @@ pub(crate) fn bootstrap_project_build(
         project_source_files.as_mut(),
     ) {
         Ok(settings) => settings,
-        Err(messages) => {
+        Err(mut messages) => {
+            attach_owned_source_database(&mut messages, &mut project_source_files);
             return Err(messages);
         }
     };
@@ -1787,7 +1865,9 @@ pub(crate) fn bootstrap_project_build(
         .backend
         .validate_project_config(&config, &mut string_table)
     {
-        return Err(error.into_messages(string_table.clone()));
+        let mut messages = error.into_messages(string_table.clone());
+        attach_owned_source_database(&mut messages, &mut project_source_files);
+        return Err(messages);
     }
 
     Ok(BuildBootstrap {
@@ -1803,6 +1883,44 @@ pub(crate) fn bootstrap_project_build(
 
 fn collect_module_warnings(module: &Module) -> Vec<CompilerDiagnostic> {
     module.metadata.warnings.clone()
+}
+
+fn collect_success_warnings(
+    project_compilation: &ProjectCompilation,
+) -> (Vec<CompilerDiagnostic>, Vec<RenderSourceContext>) {
+    let mut warnings = project_compilation
+        .project
+        .successful_module_views()
+        .flat_map(collect_module_warnings)
+        .collect::<Vec<_>>();
+    let mut warning_source_contexts = Vec::new();
+
+    for (package_index, package) in project_compilation.source_packages.iter().enumerate() {
+        let warning_start = warnings.len();
+        warnings.extend(
+            package
+                .boundary
+                .successful_module_views()
+                .flat_map(collect_module_warnings),
+        );
+        let warning_end = warnings.len();
+
+        if warning_start == warning_end {
+            continue;
+        }
+
+        if let Some(source_database) = project_compilation
+            .source_packages
+            .source_database(PackageBoundaryId::from_index(package_index))
+        {
+            warning_source_contexts.push(RenderSourceContext {
+                diagnostic_range: warning_start..warning_end,
+                source_database: Arc::clone(source_database),
+            });
+        }
+    }
+
+    (warnings, warning_source_contexts)
 }
 
 #[cfg(test)]

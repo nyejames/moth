@@ -10,7 +10,7 @@
 //! Frontend/compiler stages
 //!   -> CompilerDiagnostic { kind, severity, primary_location, labels, payload }
 //!   -> DiagnosticBag accumulates one or many diagnostics locally
-//!   -> CompilerMessages owns ordered diagnostics + StringTable + range-bound render type contexts
+//!   -> CompilerMessages owns ordered diagnostics + StringTable + range-bound render contexts
 //!      at stage/build boundaries
 //!   -> renderers produce terminal/dev-server/terse output
 //!
@@ -83,11 +83,13 @@ use crate::compiler_frontend::compiler_messages::{
     InfrastructureDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
+use std::sync::Arc;
 
 // -------------------------
 //  Compiler Message Set
@@ -103,6 +105,13 @@ pub struct CompilerMessages {
     pub(crate) diagnostics: Vec<CompilerDiagnostic>,
 
     pub string_table: StringTable,
+
+    /// Per-diagnostic source snapshots used by diagnostic renderers.
+    ///
+    /// A message set may aggregate diagnostics from several independently retained source
+    /// databases, so this association is range-bound rather than one flat database for the whole
+    /// set. Each range is shifted alongside its diagnostics during aggregation.
+    pub(crate) render_source_contexts: Vec<RenderSourceContext>,
 
     /// Module-local type tables used only by diagnostic renderers.
     ///
@@ -121,12 +130,18 @@ pub(crate) struct RenderTypeContext {
     pub(crate) diagnostic_range: Range<usize>,
     pub(crate) type_environment: TypeEnvironment,
 }
+#[derive(Debug, Clone)]
+pub(crate) struct RenderSourceContext {
+    pub(crate) diagnostic_range: Range<usize>,
+    pub(crate) source_database: Arc<SourceDatabase>,
+}
 
 impl CompilerMessages {
     pub fn empty(string_table: StringTable) -> Self {
         Self {
             diagnostics: Vec::new(),
             string_table,
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -138,6 +153,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table,
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -295,6 +311,7 @@ impl CompilerMessages {
         Self {
             diagnostics: vec![diagnostic],
             string_table,
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -325,6 +342,7 @@ impl CompilerMessages {
         Self {
             diagnostics: vec![diagnostic],
             string_table,
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -363,6 +381,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table: merged_table,
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -384,6 +403,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table: string_table.clone(),
+            render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
     }
@@ -398,6 +418,37 @@ impl CompilerMessages {
         let mut error_string_table = string_table.clone();
         let error = CompilerError::file_error(path, msg, &mut error_string_table);
         Self::from_error(error, error_string_table)
+    }
+
+    /// Associate the current diagnostics with the source snapshot database that produced them.
+    ///
+    /// The range is deliberately captured at the time of attachment: a single message set may
+    /// later aggregate diagnostics from several independent project/package databases.
+    pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
+        if !self.diagnostics.is_empty() {
+            self.render_source_contexts.push(RenderSourceContext {
+                diagnostic_range: 0..self.diagnostics.len(),
+                source_database,
+            });
+        }
+    }
+
+    /// Install precomputed source contexts for diagnostics appended at `diagnostic_offset`.
+    ///
+    /// Successful-build warnings are collected before the final project-owned warnings are
+    /// appended, while output failures may prepend their own diagnostics. Shifting each retained
+    /// range at installation keeps the context indices tied to the warning vector in either case.
+    pub(crate) fn install_source_contexts(
+        &mut self,
+        source_contexts: impl IntoIterator<Item = RenderSourceContext>,
+        diagnostic_offset: usize,
+    ) {
+        self.render_source_contexts
+            .extend(source_contexts.into_iter().map(|mut source_context| {
+                source_context.diagnostic_range.start += diagnostic_offset;
+                source_context.diagnostic_range.end += diagnostic_offset;
+                source_context
+            }));
     }
 
     pub(crate) fn with_type_context_for_all_diagnostics(
@@ -415,10 +466,10 @@ impl CompilerMessages {
 
     /// Prepend diagnostics that were produced before this message set.
     ///
-    /// WHAT: shifts every stored type-context range forward by the prepended length.
+    /// WHAT: shifts every stored source/type-context range forward by the prepended length.
     /// WHY: frontend/build aggregation often carries warnings from earlier stages into a later
-    /// failure. Those warnings must stay before the failure without disconnecting the failure's
-    /// diagnostics from their render type table.
+    /// failure. Those warnings must stay before the failure without disconnecting diagnostics from
+    /// their retained source snapshot or render type table.
     pub(crate) fn prepend_diagnostics_preserving_context(
         &mut self,
         prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
@@ -433,27 +484,53 @@ impl CompilerMessages {
         prior_diagnostics.append(&mut self.diagnostics);
         self.diagnostics = prior_diagnostics;
 
+        for source_context in &mut self.render_source_contexts {
+            source_context.diagnostic_range.start += shift;
+            source_context.diagnostic_range.end += shift;
+        }
+
         for type_context in &mut self.render_type_contexts {
             type_context.diagnostic_range.start += shift;
             type_context.diagnostic_range.end += shift;
         }
     }
-
-    /// Append another boundary message set while preserving its diagnostic type-context ranges.
+    /// Append another boundary message set while preserving its diagnostic render contexts.
     ///
-    /// WHAT: moves diagnostics and render contexts from `messages` into this set and offsets the
-    /// appended ranges by the current diagnostic count.
-    /// WHY: directory builds aggregate failed modules into one ordered build failure. Each module
-    /// may have its own `TypeEnvironment`, so the render boundary must preserve all of them.
+    /// WHAT: moves diagnostics and both render-context ranges from `messages` into this set and
+    ///       offsets the appended ranges by the current diagnostic count.
+    /// WHY: directory builds aggregate failed modules and independent source-package boundaries;
+    ///      each diagnostic must continue using the snapshot database that produced it.
     pub(crate) fn append_messages_preserving_context(&mut self, mut messages: CompilerMessages) {
         let shift = self.diagnostics.len();
         self.diagnostics.append(&mut messages.diagnostics);
+
+        for mut source_context in messages.render_source_contexts {
+            source_context.diagnostic_range.start += shift;
+            source_context.diagnostic_range.end += shift;
+            self.render_source_contexts.push(source_context);
+        }
 
         for mut type_context in messages.render_type_contexts {
             type_context.diagnostic_range.start += shift;
             type_context.diagnostic_range.end += shift;
             self.render_type_contexts.push(type_context);
         }
+    }
+
+    /// Resolve the source database that produced one diagnostic.
+    ///
+    /// The first matching association wins, and that ordering is load-bearing: build and check
+    /// attach the project database over the whole message set as a fallback, so a package's own
+    /// association must already be present to take precedence. Rendering a colliding logical path
+    /// against the wrong database shows a different file's text.
+    pub(crate) fn source_database_for_diagnostic(
+        &self,
+        diagnostic_index: usize,
+    ) -> Option<&SourceDatabase> {
+        self.render_source_contexts
+            .iter()
+            .find(|source_context| source_context.diagnostic_range.contains(&diagnostic_index))
+            .map(|source_context| source_context.source_database.as_ref())
     }
 
     pub(crate) fn type_environment_for_diagnostic(
@@ -474,6 +551,7 @@ impl CompilerMessages {
             &self.string_table,
         )
         .with_optional_type_environment(self.type_environment_for_diagnostic(diagnostic_index))
+        .with_optional_source_database(self.source_database_for_diagnostic(diagnostic_index))
     }
 
     #[cfg(test)]

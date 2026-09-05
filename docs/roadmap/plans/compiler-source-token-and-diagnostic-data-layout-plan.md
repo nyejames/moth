@@ -626,14 +626,38 @@ preparation rather than aborting during reference resolution. No fixture could b
 that deferral changes which diagnostic a user sees — every candidate aborts at the same point
 either way — so it carries no ordering test; the replay's error identity is tested.
 
-The renderers still call `fs::read_to_string` at render time
-(`render/terminal.rs`, `render/dev_server.rs`, `display_messages.rs`), so a diagnostic excerpt can
-still come from a newer file than the one compiled, and a frame still vanishes when the
-reconstructed path is unreadable from the working directory. Reproduction: a project whose entry is
-`src/@page.moth` renders `--> @page.moth:1:10` with no frame, because that logical path does not
-resolve from the invoking directory. Consuming the retained snapshot there is 1B-gamma3a-ii. The
-rest of 1B4 is the registered/loaded/finalized lifecycle, canonical deduplication and the compact
-unloaded representation.
+**Rendering from the snapshot, recorded against 1B4.** The renderers no longer reopen source
+files: `render/terminal.rs` and `render/dev_server.rs` resolve excerpts from retained text, and
+`display_messages::print_formatted_error` renders standalone output-plan `CompilerError`s that
+carry no source location at all, so its excerpt block is gone rather than fed an empty line. A
+diagnostic excerpt can no longer come from a newer file than the one compiled, and frames that
+vanished when the logical path was unreadable from the invoking directory now render: a project
+whose entry is `src/@page.moth` previously printed `--> @page.moth:1:10` with no frame under both
+`build` and `check`, and now prints the offending line with carets.
+
+A diagnostic addresses its source by logical path, and that path is not unique. A project source
+and a source-package source both strip their own root, so `app/src/@mod.moth` and `pkg/@mod.moth`
+both intern to `@mod.moth`; within one database, a root `config.moth` and an ordinary
+`src/config.moth` also collide, which is reachable today. Resolving against the wrong record shows
+a different file's text, so two rules hold the lookup honest. Each diagnostic carries the database
+that produced it, as a per-range `RenderSourceContext` mirroring the existing `RenderTypeContext`;
+the project database is attached only as a whole-set fallback, and the first matching association
+wins so a package's own association takes precedence. Where a logical path still matches more than
+one record in the searched database, the frame is omitted rather than guessed.
+
+One lane is deliberately left unattached. `compile_moth_template_source` builds or receives its
+own `Arc<SourceDatabase>` part-way through a long function and then returns through nine separate
+exit sites, none of which attach it, so direct-template diagnostics render without a frame. Its
+only caller is the direct-template API in `projects/html_project/moth_template/compile.rs`, which
+no user-facing command reaches, so nothing a user runs loses a frame. Attaching it properly means
+splitting that function around the point its database exists, which is not worth the regression
+risk here: slice group 1F gives every report a frozen context and should absorb this lane.
+
+The rest of 1B4 is the registered/loaded/finalized lifecycle, canonical deduplication and the
+compact unloaded representation. A retained `BuildResult` keeps the project database alive along
+with the package databases that produced warnings, and a failure's message set keeps every
+database its diagnostics came from. That is retained memory slice 7A accounts for and slice group
+1F's frozen render context is meant to replace.
 
 **Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
 rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as

@@ -7,9 +7,7 @@ use crate::backends::error_types::BackendErrorType;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
-use crate::compiler_frontend::compiler_messages::render::{
-    resolve_source_file_path, resolved_display_path,
-};
+use crate::compiler_frontend::compiler_messages::render::resolved_display_path;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use saying::say;
 
@@ -43,19 +41,10 @@ pub fn print_formatted_error(e: CompilerError, string_table: &StringTable) {
     let display_line = display_line_number(e.location.start_pos.line_number);
     let display_column = display_column_number(e.location.start_pos.char_column);
 
-    // Read the file and get the actual line as a string from the code
-    // Strip the actual header at the end of the path (.header extension)
-    let actual_file = resolve_source_file_path(&e.location.scope, string_table);
-
-    let source_line_index = e.location.start_pos.line_number.max(0) as usize;
-    let line = match std::fs::read_to_string(&actual_file) {
-        Ok(file) => file
-            .lines()
-            .nth(source_line_index)
-            .unwrap_or_default()
-            .to_string(),
-        Err(_) => String::new(),
-    };
+    // This renders a standalone `CompilerError` from the output-plan lane, which reaches the
+    // terminal without a `CompilerMessages` and therefore without the retained source database.
+    // Source excerpts belong to the diagnostic renderers that have one; this lane prints the
+    // location and guidance only rather than reopening the filesystem.
 
     say!(
         "\n",
@@ -84,25 +73,11 @@ pub fn print_formatted_error(e: CompilerError, string_table: &StringTable) {
         );
     }
 
-    if !line.is_empty() {
-        say!(Blue "    |");
-        let line_label = display_line.to_string();
-        let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-        say!(Blue line_padding, Bold Blue line_label, " | ", Reset line.as_str());
-        print!("{}", " ".repeat(display_line.to_string().len() + 4));
-
-        let underline_start = e.location.start_pos.char_column.max(0) as usize;
-        print!("{}", " ".repeat(underline_start));
-        let underline_length =
-            (e.location.end_pos.char_column - e.location.start_pos.char_column + 1).max(1) as usize;
-        say!(Red "^".repeat(underline_length));
-    }
-
     for guidance_line in format_error_guidance_lines(&e) {
         say!(Bright Blue "  ", guidance_line);
     }
 
-    if line.is_empty() && e.location.scope.as_components().is_empty() {
+    if e.location.scope.as_components().is_empty() {
         say!(Dark "     No source location available.");
     }
 }

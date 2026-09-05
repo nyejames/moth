@@ -11,14 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
     DiagnosticSeverity,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use saying::say;
-use std::fs;
-
-pub(crate) fn print_diagnostic(diagnostic: &CompilerDiagnostic, string_table: &StringTable) {
-    let context = DiagnosticRenderContext::new(string_table);
-    print_diagnostic_with_context(diagnostic, context);
-}
 
 pub(crate) fn print_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
@@ -69,22 +62,18 @@ pub(crate) fn print_diagnostic_with_context(
         );
     }
 
-    let actual_file = resolve_source_file_path(&diagnostic.primary_location.scope, string_table);
-    let source_line_index = diagnostic.primary_location.start_pos.line_number.max(0) as usize;
-    let line = match fs::read_to_string(&actual_file) {
-        Ok(file) => file
-            .lines()
-            .nth(source_line_index)
-            .unwrap_or_default()
-            .to_string(),
-        Err(_) => String::new(),
-    };
+    let line = context
+        .retained_source_line(
+            &diagnostic.primary_location.scope,
+            diagnostic.primary_location.start_pos.line_number,
+        )
+        .unwrap_or_default();
 
     if !line.is_empty() {
         say!(Blue "    |");
         let line_label = display_line.to_string();
         let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-        say!(Blue line_padding, Bold Blue line_label, " | ", Reset line.as_str());
+        say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
         print!("{}", " ".repeat(display_line.to_string().len() + 4));
 
         let underline_start = diagnostic.primary_location.start_pos.char_column.max(0) as usize;
@@ -107,13 +96,6 @@ pub(crate) fn print_diagnostic_with_context(
     if line.is_empty() && diagnostic.primary_location.scope.as_components().is_empty() {
         say!(Dark "     No source location available.");
     }
-}
-
-pub(crate) fn format_label_messages(
-    diagnostic: &CompilerDiagnostic,
-    string_table: &StringTable,
-) -> Vec<String> {
-    format_label_messages_with_context(diagnostic, DiagnosticRenderContext::new(string_table))
 }
 
 pub(crate) fn format_label_messages_with_context(

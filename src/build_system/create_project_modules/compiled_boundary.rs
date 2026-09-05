@@ -19,9 +19,11 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
@@ -446,6 +448,8 @@ pub(crate) struct CompletedSourcePackageRegistry {
     consumer_packages: Vec<Vec<PackageBoundaryId>>,
     declarations_by_identity:
         FxHashMap<GeneratedDeclarationIdentity, PackageMaterialisationLocation>,
+    /// Retained source databases aligned with `packages`, used for package warning rendering.
+    source_databases: Vec<Option<Arc<SourceDatabase>>>,
     /// Every published package materialisation row in deterministic publication order.
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
@@ -458,6 +462,12 @@ pub(crate) struct SourcePackagePublication {
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
 
+impl SourcePackagePublication {
+    pub(crate) fn package_id(&self) -> PackageBoundaryId {
+        self.package_id
+    }
+}
+
 impl CompletedSourcePackageRegistry {
     pub(crate) fn new() -> Self {
         Self {
@@ -465,6 +475,7 @@ impl CompletedSourcePackageRegistry {
             by_prefix: FxHashMap::default(),
             provider_packages: Vec::new(),
             consumer_packages: Vec::new(),
+            source_databases: Vec::new(),
             declarations_by_identity: FxHashMap::default(),
             materialisation_rows: Vec::new(),
         }
@@ -570,6 +581,7 @@ impl CompletedSourcePackageRegistry {
         } = publication;
 
         self.packages.push(package);
+        self.source_databases.push(None);
         // The provider vector was allocated while preflighting. Move it into the retained lane
         // so commit performs no capacity-bearing allocation after the first mutation.
         self.provider_packages.push(resolved_providers);
@@ -587,8 +599,51 @@ impl CompletedSourcePackageRegistry {
         }
     }
 
+    /// Associate one published package with the source database that produced its diagnostics.
+    ///
+    /// Package results already live in this registry when this handoff occurs; keeping the Arc in
+    /// the same owner lets render aggregation attach package warning ranges without reconstructing
+    /// ownership from logical paths.
+    pub(crate) fn set_source_database(
+        &mut self,
+        package_id: PackageBoundaryId,
+        source_database: Arc<SourceDatabase>,
+    ) -> Result<(), CompilerError> {
+        let slot = self
+            .source_databases
+            .get_mut(package_id.index())
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "completed source package registry has no source database slot for boundary id {}",
+                    package_id.index()
+                ))
+            })?;
+        if slot.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source package @{} source database was attached more than once",
+                self.package(package_id)?.package_prefix()
+            )));
+        }
+        *slot = Some(source_database);
+        Ok(())
+    }
+
+    /// Borrow the retained source database for one package boundary.
+    ///
+    /// Package IDs are dense publication indexes, so this lookup stays aligned with the package
+    /// row and never reconstructs ownership from a diagnostic's logical path.
+    pub(crate) fn source_database(
+        &self,
+        package_id: PackageBoundaryId,
+    ) -> Option<&Arc<SourceDatabase>> {
+        self.source_databases
+            .get(package_id.index())
+            .and_then(Option::as_ref)
+    }
+
     pub(crate) fn reserve_commit(&mut self, publication: &SourcePackagePublication) {
         self.packages.reserve(1);
+        self.source_databases.reserve(1);
         self.by_prefix.reserve(1);
         self.provider_packages.reserve(1);
         self.consumer_packages.reserve(1);
@@ -726,8 +781,10 @@ impl CompletedSourcePackageRegistry {
     }
 
     /// Consume the registry, returning the completed packages in publication order.
-    pub(crate) fn into_packages(self) -> Vec<CompiledSourcePackage> {
-        self.packages
+    pub(crate) fn into_packages_with_source_databases(
+        self,
+    ) -> (Vec<CompiledSourcePackage>, Vec<Option<Arc<SourceDatabase>>>) {
+        (self.packages, self.source_databases)
     }
 }
 
@@ -902,6 +959,7 @@ impl ProjectFrontendCompilation {
 
     /// Iterate every successful module view (base artefacts and generated sidecars) across all
     /// boundaries in deterministic order.
+    #[cfg(test)]
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.project.successful_module_views().chain(
             self.source_packages
@@ -916,23 +974,46 @@ impl ProjectFrontendCompilation {
     /// messages in deterministic `ModuleId` order. Blocked modules produce no cascade
     /// diagnostics and are not rendered.
     pub(crate) fn into_render_messages(self, string_table: &mut StringTable) -> CompilerMessages {
-        let warnings = self
+        let Self {
+            project,
+            source_packages,
+            transient_messages,
+            ..
+        } = self;
+        let project_warnings = project
             .successful_module_views()
             .flat_map(|module| module.metadata.warnings.iter().cloned())
             .collect::<Vec<_>>();
-        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table.clone());
+        let (source_packages, source_databases) =
+            source_packages.into_packages_with_source_databases();
+        let mut messages =
+            CompilerMessages::from_diagnostics(project_warnings, string_table.clone());
 
-        for diagnosed in self.project.diagnosed {
+        for (package_index, package) in source_packages.iter().enumerate() {
+            let package_warnings = package
+                .boundary
+                .successful_module_views()
+                .flat_map(|module| module.metadata.warnings.iter().cloned())
+                .collect::<Vec<_>>();
+            if !package_warnings.is_empty() {
+                let mut package_messages =
+                    CompilerMessages::from_diagnostics(package_warnings, string_table.clone());
+                if let Some(Some(source_database)) = source_databases.get(package_index) {
+                    package_messages.set_source_database(Arc::clone(source_database));
+                }
+                messages.append_messages_preserving_context(package_messages);
+            }
+        }
+        for diagnosed in project.diagnosed {
             messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
         }
-        let source_packages = self.source_packages.into_packages();
         for package in source_packages {
             for diagnosed in package.boundary.diagnosed {
                 messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
             }
         }
 
-        for transient in self.transient_messages {
+        for transient in transient_messages {
             messages.append_messages_preserving_context(transient);
         }
 

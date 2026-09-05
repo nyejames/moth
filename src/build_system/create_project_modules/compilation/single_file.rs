@@ -102,20 +102,32 @@ pub(super) fn compile_single_file_frontend_with_inputs(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    match compile_single_file_frontend_with_target(
+    let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
         style_directives,
         builder_surface,
         extension,
         string_table,
+        project_source_files,
         build_config_inputs,
         mode,
         SingleFileFrontendTarget::Normal,
-    )? {
+    ) {
+        Ok(result) => result,
+        Err(mut messages) => {
+            if let Some(source_database) = project_source_files.as_ref() {
+                messages.set_source_database(Arc::clone(source_database));
+            }
+            return Err(messages);
+        }
+    };
+
+    match result {
         SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
         #[cfg(feature = "boracle")]
         SingleFileFrontendResult::Boracle(_) => Err(CompilerMessages::from_error_ref(
@@ -126,7 +138,6 @@ pub(super) fn compile_single_file_frontend_with_inputs(
         )),
     }
 }
-
 #[cfg(feature = "boracle")]
 pub(super) fn compile_single_file_boracle_frontend(
     config: &Config,
@@ -136,17 +147,29 @@ pub(super) fn compile_single_file_boracle_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<BoracleModuleInput, CompilerMessages> {
-    match compile_single_file_frontend_with_target(
+    let mut project_source_files = None;
+    let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
         style_directives,
         builder_surface,
         extension,
         string_table,
+        &mut project_source_files,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
         SingleFileFrontendTarget::Boracle,
-    )? {
+    ) {
+        Ok(result) => result,
+        Err(mut messages) => {
+            if let Some(source_database) = project_source_files.as_ref() {
+                messages.set_source_database(Arc::clone(source_database));
+            }
+            return Err(messages);
+        }
+    };
+
+    match result {
         SingleFileFrontendResult::Boracle(input) => Ok(*input),
         SingleFileFrontendResult::Project(_) => Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error(
@@ -177,6 +200,7 @@ fn compile_single_file_frontend_with_target(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     _mode: FrontendCompilationMode,
     target: SingleFileFrontendTarget,
@@ -415,6 +439,7 @@ fn compile_single_file_frontend_with_target(
     retain_single_file_source_texts(&mut input_files, &mut source_files)
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let source_files = Arc::new(source_files);
+    *project_source_files = Some(Arc::clone(&source_files));
     let preparation_context = ModulePreparationContext {
         source_files: &source_files,
         style_directives,
@@ -538,6 +563,7 @@ fn compile_single_file_frontend_with_target(
         Ok(ModuleCompilationOutcome::Success(compiled)) => *compiled,
         Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
             let mut messages = diagnostics.into_messages();
+            messages.set_source_database(Arc::clone(&source_files));
             let remap = string_table.merge_delta_from(&messages.string_table, base_len);
             if !remap.is_identity() {
                 messages.remap_string_ids(&remap);

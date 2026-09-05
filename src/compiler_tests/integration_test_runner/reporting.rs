@@ -717,11 +717,10 @@ pub(crate) fn render_case_result(
     } else if let Some(build_result) = &result.build_result
         && show_warnings
     {
-        for warning in &build_result.warnings {
-            crate::compiler_frontend::compiler_messages::render::terminal::print_diagnostic(
-                warning,
-                &build_result.string_table,
-            );
+        for (warning_index, warning) in build_result.warnings.iter().enumerate() {
+            let render_context = DiagnosticRenderContext::new(&build_result.string_table)
+                .with_optional_source_database(build_result.warning_source_database(warning_index));
+            terminal::print_diagnostic_with_context(warning, render_context);
         }
     }
 }
@@ -967,7 +966,8 @@ fn format_terse_failure_lines(
     }
 
     if show_warnings && let Some(build_result) = &result.build_result {
-        let render_context = DiagnosticRenderContext::new(&build_result.string_table);
+        let render_context = DiagnosticRenderContext::new(&build_result.string_table)
+            .with_optional_source_database(build_result.source_database.as_deref());
         for warning in &build_result.warnings {
             lines.push(terse::format_terse_diagnostic_with_context(
                 warning,

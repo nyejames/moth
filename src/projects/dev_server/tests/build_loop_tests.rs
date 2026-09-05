@@ -67,6 +67,8 @@ fn html_build_result() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -105,6 +107,8 @@ fn multi_page_html_build_result() -> BuildResult {
         config: Config::new(PathBuf::from("project")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -126,6 +130,8 @@ fn html_build_result_without_entry_page() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -153,6 +159,8 @@ fn html_build_result_with_warning() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -175,6 +183,8 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
         config: Config::new(project_root.to_path_buf()),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: owner,
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),

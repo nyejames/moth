@@ -6,6 +6,7 @@
 //! kinds become user-facing prose.
 
 use super::*;
+use crate::compiler_frontend::source::SourceDatabase;
 
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
 ///
@@ -16,6 +17,7 @@ use super::*;
 pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) string_table: &'a StringTable,
     pub(crate) type_environment: Option<&'a TypeEnvironment>,
+    pub(crate) source_database: Option<&'a SourceDatabase>,
 }
 
 impl<'a> DiagnosticRenderContext<'a> {
@@ -23,6 +25,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         Self {
             string_table,
             type_environment: None,
+            source_database: None,
         }
     }
 
@@ -32,6 +35,24 @@ impl<'a> DiagnosticRenderContext<'a> {
     ) -> Self {
         self.type_environment = type_environment;
         self
+    }
+
+    pub(crate) fn with_optional_source_database(
+        mut self,
+        source_database: Option<&'a SourceDatabase>,
+    ) -> Self {
+        self.source_database = source_database;
+        self
+    }
+
+    pub(crate) fn retained_source_line(
+        self,
+        scope: &InternedPath,
+        line_number: i32,
+    ) -> Option<&'a str> {
+        let source_database = self.source_database?;
+        let source_text = source_database.retained_text_for_logical_path(scope)?;
+        source_text.lines().nth(line_number.max(0) as usize)
     }
 }
 

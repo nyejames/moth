@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, resolve_source_file_path, terse,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticPayload, InvalidConfigReason,
+    DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };
 use crate::compiler_frontend::utilities::basic::normalize_path;
 use crate::compiler_tests::test_diagnostics::{
@@ -33,10 +33,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
-    let context = DiagnosticRenderContext::new(&messages.string_table);
     messages
-        .error_diagnostics()
-        .map(|diagnostic| terse::format_terse_diagnostic_with_context(diagnostic, context))
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|(diagnostic_index, diagnostic)| {
+            terse::format_terse_diagnostic_with_context(
+                diagnostic,
+                messages.diagnostic_render_context(diagnostic_index),
+            )
+        })
         .collect()
 }
 

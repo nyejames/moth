@@ -27,6 +27,7 @@ use crate::projects::command_status::{
 };
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use saying::say;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -39,6 +40,21 @@ pub struct CheckOptions {
 struct CheckOutcome {
     messages: CompilerMessages,
     status: CommandStatus,
+}
+fn attach_source_database_if_missing(
+    messages: &mut CompilerMessages,
+    source_database: Option<&Arc<crate::compiler_frontend::source::SourceDatabase>>,
+) {
+    let Some(source_database) = source_database else {
+        return;
+    };
+    if messages
+        .diagnostics()
+        .enumerate()
+        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
+    {
+        messages.set_source_database(Arc::clone(source_database));
+    }
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
@@ -174,9 +190,13 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
                 messages.string_table = string_table.clone();
                 messages.append_messages_preserving_context(facade_messages);
             }
+            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
             messages
         }
-        Err(messages) => messages,
+        Err(mut messages) => {
+            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
+            messages
+        }
     };
 
     let status = if messages.error_count() > 0 {

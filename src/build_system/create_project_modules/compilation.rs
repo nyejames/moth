@@ -174,6 +174,7 @@ pub(crate) fn compile_single_file_frontend(
     extension: &OsStr,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    let mut project_source_files = None;
     compile_single_file_frontend_with_inputs(
         config,
         build_profile,
@@ -181,6 +182,7 @@ pub(crate) fn compile_single_file_frontend(
         builder_surface,
         extension,
         string_table,
+        &mut project_source_files,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
     )
@@ -195,6 +197,7 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
@@ -205,6 +208,7 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
         builder_surface,
         extension,
         string_table,
+        project_source_files,
         build_config_inputs,
         mode,
     )
@@ -593,12 +597,15 @@ pub(crate) fn compile_directory_frontend(
             string_table,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        load_registered_source_texts(
+        if let Err(error) = load_registered_source_texts(
             &mut package_source_files,
             &package_registration_index,
             string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        ) {
+            let mut messages = CompilerMessages::from_error_ref(error, string_table);
+            messages.set_source_database(Arc::new(package_source_files));
+            return Err(messages);
+        }
         let package_source_files = Arc::new(package_source_files);
         timing_scope_attributed!(
             timing_guard_build_boundary_inventory_2,
@@ -620,7 +627,8 @@ pub(crate) fn compile_directory_frontend(
             timing_boundary,
         ) {
             Ok(module_waves) => module_waves,
-            Err(messages) => {
+            Err(mut messages) => {
+                messages.set_source_database(Arc::clone(&package_source_files));
                 return Err(messages);
             }
         };
@@ -640,6 +648,10 @@ pub(crate) fn compile_directory_frontend(
                     )),
                     string_table,
                 )
+            })
+            .map_err(|mut messages| {
+                messages.set_source_database(Arc::clone(&package_source_files));
+                messages
             })?;
         source_package_inventories.push(SourcePackageModuleInventory {
             dependency_prefix: dependency_prefix.to_owned(),
@@ -847,7 +859,11 @@ pub(crate) fn compile_directory_frontend(
             &config_globals,
             package_fallback,
             string_table,
-        )?;
+        )
+        .map_err(|mut messages| {
+            messages.set_source_database(Arc::clone(&source_files));
+            messages
+        })?;
         let deferred_path_resolver = path_resolver.clone();
         let deferred_build_config_values = build_config_values.clone();
         timing_scope_attributed!(
@@ -883,7 +899,11 @@ pub(crate) fn compile_directory_frontend(
             &source_package_dependencies,
             &mut resource_inputs,
             string_table,
-        )?;
+        )
+        .map_err(|mut messages| {
+            messages.set_source_database(Arc::clone(&source_files));
+            messages
+        })?;
         transient_messages.append(&mut package_transient_messages);
         let mut dependency_prefixes = Vec::new();
         let mut seen_dependency_prefixes = FxHashSet::default();
@@ -901,9 +921,21 @@ pub(crate) fn compile_directory_frontend(
         };
         let publication = completed_source_packages
             .preflight(&package, &dependency_prefixes)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(|error| {
+                let mut messages = CompilerMessages::from_error_ref(error, string_table);
+                messages.set_source_database(Arc::clone(&source_files));
+                messages
+            })?;
+        let package_id = publication.package_id();
         completed_source_packages.reserve_commit(&publication);
         completed_source_packages.commit(publication, package);
+        completed_source_packages
+            .set_source_database(package_id, Arc::clone(&source_files))
+            .map_err(|error| {
+                let mut messages = CompilerMessages::from_error_ref(error, string_table);
+                messages.set_source_database(Arc::clone(&source_files));
+                messages
+            })?;
         if mode.includes_check_only() && !check_only_jobs.is_empty() {
             source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
                 dependency_prefix,
@@ -945,10 +977,18 @@ pub(crate) fn compile_directory_frontend(
                     )),
                     string_table,
                 )
+            })
+            .map_err(|mut messages| {
+                messages.set_source_database(Arc::clone(&source_files));
+                messages
             })?;
         let package = completed_source_packages
             .package(package_id)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(|error| {
+                let mut messages = CompilerMessages::from_error_ref(error, string_table);
+                messages.set_source_database(Arc::clone(&source_files));
+                messages
+            })?;
         let package_transient_messages =
             deferred_check_only::compile_check_only_jobs_after_canonical(
                 canonical::BoundaryCompilationContext::new(
@@ -974,7 +1014,11 @@ pub(crate) fn compile_directory_frontend(
                 &provider_bindings,
                 &source_package_dependencies,
                 string_table,
-            )?;
+            )
+            .map_err(|mut messages| {
+                messages.set_source_database(Arc::clone(&source_files));
+                messages
+            })?;
         transient_messages.extend(package_transient_messages);
     }
 

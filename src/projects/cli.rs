@@ -339,6 +339,7 @@ fn build_command_outcome(
 ) -> BuildCommandOutcome {
     match build::build_project(project_builder, path, flags, build_config_inputs) {
         Ok(mut build_result) => {
+            let source_database = build_result.source_database.clone();
             // Output planning and filesystem emission form one build-pipeline
             // segment. Terminal diagnostics and success rendering remain part
             // of the command presentation, after duration capture.
@@ -365,10 +366,15 @@ fn build_command_outcome(
                     let warnings = if build_result.warnings.is_empty() {
                         None
                     } else {
-                        Some(CompilerMessages::from_diagnostics(
+                        let mut messages = CompilerMessages::from_diagnostics(
                             build_result.warnings,
                             build_result.string_table,
-                        ))
+                        );
+                        messages.install_source_contexts(build_result.warning_source_contexts, 0);
+                        if let Some(source_database) = source_database.as_ref() {
+                            messages.set_source_database(source_database.clone());
+                        }
+                        Some(messages)
                     };
                     BuildCommandOutcome::Success {
                         output_file_count,
@@ -377,7 +383,15 @@ fn build_command_outcome(
                     }
                 }
                 Err(BuildOutputStageError::Write(mut messages)) => {
+                    let warning_offset = messages.diagnostic_slice().len();
                     messages.extend_diagnostics(build_result.warnings);
+                    messages.install_source_contexts(
+                        build_result.warning_source_contexts,
+                        warning_offset,
+                    );
+                    if let Some(source_database) = source_database.as_ref() {
+                        messages.set_source_database(source_database.clone());
+                    }
                     BuildCommandOutcome::WriteError(messages)
                 }
                 Err(BuildOutputStageError::OutputPlan(error)) => {
@@ -1056,10 +1070,15 @@ fn build_warnings_messages(build_result: &BuildResult) -> Option<CompilerMessage
         return None;
     }
 
-    Some(CompilerMessages::from_diagnostics(
+    let mut messages = CompilerMessages::from_diagnostics(
         build_result.warnings.clone(),
         build_result.string_table.clone(),
-    ))
+    );
+    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
+    if let Some(source_database) = build_result.source_database.as_ref() {
+        messages.set_source_database(source_database.clone());
+    }
+    Some(messages)
 }
 
 #[cfg(test)]

@@ -48,20 +48,17 @@ fn render_source_frame(
         escape_html(&portable_path_text(&resolved_path))
     );
 
-    // Read the source line for the source frame. Missing files are handled gracefully.
-    let source_line_index = diagnostic.primary_location.start_pos.line_number.max(0) as usize;
-    let source_line = match std::fs::read_to_string(&resolved_path) {
-        Ok(file) => file
-            .lines()
-            .nth(source_line_index)
-            .unwrap_or("")
-            .to_string(),
-        Err(_) => String::new(),
-    };
+    // A missing retained snapshot omits the source excerpt without rereading the filesystem.
+    let source_line = context
+        .retained_source_line(
+            &diagnostic.primary_location.scope,
+            diagnostic.primary_location.start_pos.line_number,
+        )
+        .unwrap_or_default();
 
     let line_label = line.to_string();
     let gutter_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-    let escaped_line = escape_html(&source_line);
+    let escaped_line = escape_html(source_line);
 
     if source_line.is_empty() {
         return format!(

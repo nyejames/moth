@@ -583,10 +583,11 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     ) -> DirectoryModuleTaskResult {
         match facade_project_globals_dependency(&prepared) {
             Ok(Some(diagnostic)) => {
-                let messages = CompilerMessages::from_diagnostic(
+                let mut messages = CompilerMessages::from_diagnostic(
                     diagnostic,
                     prepared.semantic.string_table.clone(),
                 );
+                messages.set_source_database(Arc::clone(&self.boundary.source_files));
                 let outcome = match ModuleDiagnostics::from_messages(messages) {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
@@ -750,11 +751,12 @@ fn compile_check_only_job(
                 .contract_location()
                 .cloned()
                 .unwrap_or_else(SourceLocation::default);
-            let messages = config_boundary::build_config_resolution_messages(
+            let mut messages = config_boundary::build_config_resolution_messages(
                 error,
                 fallback_location,
                 &mut prepared.semantic.string_table,
             );
+            messages.set_source_database(Arc::clone(&compile_context.boundary.source_files));
             let outcome = match ModuleDiagnostics::from_messages(messages) {
                 Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
                 Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
@@ -856,6 +858,7 @@ pub(super) fn compile_check_only_jobs(
                 if !warnings.is_empty() {
                     let mut messages =
                         CompilerMessages::from_diagnostics(warnings, module_string_table);
+                    messages.set_source_database(Arc::clone(&context.source_files));
                     let remap = string_table
                         .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
                     if !remap.is_identity() {

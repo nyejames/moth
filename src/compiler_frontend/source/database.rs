@@ -254,6 +254,29 @@ impl SourceDatabase {
         );
         self.files[1..].iter()
     }
+    /// Resolve a retained source snapshot by logical path.
+    ///
+    /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
+    /// diagnostic frame, and keeping the source database's compact identity storage free of a
+    /// second logical-path index avoids another allocation and synchronization boundary.
+    ///
+    /// A logical path is safe to render only when it identifies exactly one record in this
+    /// database. Collisions can arise when independently rooted sources share a portable spelling;
+    /// returning no snapshot on ambiguity is safer than guessing and displaying another file's
+    /// text.
+    pub(crate) fn retained_text_for_logical_path(
+        &self,
+        logical_path: &InternedPath,
+    ) -> Option<&str> {
+        let mut matches = self
+            .iter()
+            .filter(|record| record.logical_path == *logical_path);
+        let record = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        record.text.as_deref()
+    }
 }
 
 fn compilation_root_record() -> SourceRecord {
