@@ -46,11 +46,10 @@ pub(super) fn build_module_symbols(
             .file_roles_by_source
             .insert(file_output.source_file.to_owned(), file_output.file_role);
 
-        if let Some(canonical_os_path) = &file_output.canonical_os_path {
-            module_symbols.canonical_os_path_by_source.insert(
-                file_output.source_file.to_owned(),
-                canonical_os_path.to_owned(),
-            );
+        if let Some(file_id) = file_output.file_id {
+            module_symbols
+                .source_ids_by_source
+                .insert(file_output.source_file.to_owned(), file_id);
         }
 
         for header in &file_output.headers {

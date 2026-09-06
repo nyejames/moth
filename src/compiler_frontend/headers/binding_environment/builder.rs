@@ -21,6 +21,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
@@ -138,6 +139,7 @@ pub(crate) struct BindingEnvironmentBuilder<'a> {
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) external_dependency_resolution_table: &'a ExternalImportResolutionTable,
     pub(super) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
+    pub(super) source_files: &'a SourceDatabase,
     pub(super) string_table: &'a mut StringTable,
     pub(super) environment: HeaderBindingEnvironment,
     pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
@@ -1215,8 +1217,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         {
             if let Some(canonical_path) = self
                 .module_symbols
-                .canonical_os_path_by_source
-                .get(source_file)
+                .source_record(source_file, self.source_files)
+                .and_then(|record| record.canonical_os_path.as_ref())
             {
                 return SourceLocation::from_path(canonical_path, self.string_table);
             }
@@ -1226,7 +1228,6 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ..SourceLocation::default()
             };
         }
-
         SourceLocation {
             scope: symbol_path.clone(),
             ..SourceLocation::default()
@@ -1273,35 +1274,24 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return true;
         }
 
-        let Some(canonical_source_path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        else {
-            return false;
-        };
-
-        origin.to_path_buf(self.string_table) == *canonical_source_path
+        // `canonical_source_by_symbol_path` stores `Header::canonical_source_file`, which interns
+        // the OS path when one exists. The module-file key is the logical interned path, so the
+        // first comparison fails and this join recovers same-file identity.
+        self.module_symbols
+            .source_record(source_file, self.source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+            .is_some_and(|canonical_path| origin.to_path_buf(self.string_table) == *canonical_path)
     }
 
     fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {
-        let Some(path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        else {
-            return source_file
-                .to_path_buf(self.string_table)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .and_then(SourceFileKind::from_extension)
-                == Some(SourceFileKind::MothTemplate);
-        };
-
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .and_then(SourceFileKind::from_extension)
-            == Some(SourceFileKind::MothTemplate)
+        // Kind is owned by `SourceRecord`. A missing identity is unregistered compilation
+        // (`file_id: None`, `SourceDatabase::empty()`), which is never a Moth template scope.
+        matches!(
+            self.module_symbols
+                .source_record(source_file, self.source_files)
+                .and_then(|record| record.kind),
+            Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
+        )
     }
 
     fn same_directory_root_file(&self, source_file: &InternedPath) -> Option<InternedPath> {
@@ -1324,18 +1314,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             })
     }
 
-    fn source_directory(&self, source_file: &InternedPath) -> Option<std::path::PathBuf> {
-        if let Some(path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        {
-            return path.parent().map(|parent| parent.to_path_buf());
-        }
-
-        source_file
-            .parent()
-            .map(|parent| parent.to_path_buf(self.string_table))
+    fn source_directory(&self, source_file: &InternedPath) -> Option<InternedPath> {
+        // Same-directory public-export visibility is a module-scope question. Canonical OS
+        // parents can disagree with logical parents under a symlink that places two logical
+        // siblings on different physical directories, or that collides two logical directories
+        // onto one physical directory. Visibility follows the logical interned path uniformly.
+        source_file.parent()
     }
 
     fn source_package_public_exports_for_file(

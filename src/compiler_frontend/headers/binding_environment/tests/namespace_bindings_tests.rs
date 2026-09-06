@@ -47,7 +47,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -216,6 +216,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
             external_package_registry: &registry,
             external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
             source_provider_dependencies: &Default::default(),
+            source_files: &SourceDatabase::empty(),
             string_table: &mut string_table,
         })
         .expect_err("namespace names that shadow config must be rejected");
@@ -256,6 +257,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
             external_package_registry: &registry,
             external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
             source_provider_dependencies: &Default::default(),
+            source_files: &SourceDatabase::empty(),
             string_table: &mut string_table,
         })
         .expect_err("namespace aliases that shadow config must be rejected");
@@ -310,6 +312,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
             external_package_registry: &registry,
             external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
             source_provider_dependencies: &Default::default(),
+            source_files: &SourceDatabase::empty(),
             string_table: &mut string_table,
         })
         .expect_err("selected names that shadow config must be rejected");
@@ -368,6 +371,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
             external_package_registry: &registry,
             external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
             source_provider_dependencies: &Default::default(),
+            source_files: &SourceDatabase::empty(),
             string_table: &mut string_table,
         })
         .expect_err("selected aliases that shadow config must be rejected");
@@ -428,6 +432,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
             external_package_registry: &ExternalPackageRegistry::new(),
             external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
             source_provider_dependencies: &Default::default(),
+            source_files: &SourceDatabase::empty(),
             string_table: &mut string_table,
         })
         .expect_err("source dependency names that shadow config must be rejected");
@@ -578,6 +583,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("namespace and selected-name clauses should bind");
@@ -675,6 +681,7 @@ fn external_nested_namespace_tree_builds_correctly() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("external namespace dependency should prepare");
@@ -865,6 +872,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -917,6 +925,7 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -963,6 +972,7 @@ fn prelude_symbol_visibility_has_no_authored_location() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("prelude symbol visibility should prepare");
@@ -1042,6 +1052,7 @@ fn explicit_external_symbol_binding_retains_authored_location() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("explicit external symbol visibility should prepare");
@@ -1097,6 +1108,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("header binding environment should build");
@@ -1152,6 +1164,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     });
 
@@ -1200,6 +1213,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("explicit dependency of same package should coexist with prelude alias");
@@ -1267,6 +1281,7 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &source_provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -1346,6 +1361,7 @@ fn provider_semantics_bind_once_across_many_shells() {
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect("provider dependencies should bind");
@@ -1604,6 +1620,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
     })
     .expect_err("differing evidence records with one identity must fail before AST projection");
@@ -1821,6 +1838,7 @@ fn bind_environment(
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
         source_provider_dependencies: provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table,
     })
 }
@@ -1848,6 +1866,7 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -1911,6 +1930,7 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -1969,6 +1989,7 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -2024,6 +2045,7 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -2073,6 +2095,7 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),
@@ -2128,6 +2151,7 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
         external_package_registry: &registry,
         external_dependency_resolution_table: &external_dependency_resolution_table,
         source_provider_dependencies: &provider_dependencies,
+        source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
         warnings: Vec::new(),

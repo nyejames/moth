@@ -470,6 +470,7 @@ fn compile_fixture(
         &ExternalImportResolutionTable::default(),
         &SourceProviderDependencySet::default(),
         None,
+        source_files.as_ref(),
         &mut string_table,
     )
     .expect("header binding should succeed");

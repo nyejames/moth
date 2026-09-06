@@ -264,6 +264,7 @@ pub(crate) fn compile_moth_template_source(
                 &ExternalImportResolutionTable::default(),
                 &SourceProviderDependencySet::default(),
                 Some(&path_resolver),
+                source_files.as_ref(),
                 string_table,
             )
         })

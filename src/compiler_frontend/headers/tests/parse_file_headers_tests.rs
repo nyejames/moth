@@ -311,6 +311,7 @@ fn prepare_and_bind_headers_result(
         external_dependency_resolution_table,
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         project_path_resolver,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         string_table,
     )
 }
@@ -556,6 +557,7 @@ fn bind_module_headers_consumes_prepared_syntax_and_produces_binding_environment
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         None,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
     .expect("header binding should succeed");

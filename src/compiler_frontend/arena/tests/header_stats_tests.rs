@@ -71,6 +71,7 @@ fn multi_file_declarations_are_aggregated() {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         None,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
     .expect("headers should bind");

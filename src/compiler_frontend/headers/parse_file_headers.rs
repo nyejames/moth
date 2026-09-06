@@ -41,6 +41,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
@@ -357,6 +358,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         '_,
     >,
     project_path_resolver: Option<&ProjectPathResolver>,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
     let PreparedHeaderSyntax {
@@ -378,6 +380,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
             &mut module_symbols,
             &headers,
             resolver,
+            source_files,
             external_package_registry,
             source_provider_dependencies,
             string_table,
@@ -394,6 +397,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         external_package_registry,
         external_dependency_resolution_table,
         source_provider_dependencies,
+        source_files,
         string_table,
     })
     .map_err(|messages| DiagnosticBag::from_diagnostics(messages.into_diagnostics()))?;

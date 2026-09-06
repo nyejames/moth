@@ -50,7 +50,7 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -158,6 +158,7 @@ pub(crate) fn compile_config_source(
                 &ExternalImportResolutionTable::default(),
                 &SourceProviderDependencySet::default(),
                 None,
+                &SourceDatabase::empty(),
                 string_table,
             )
         }) {

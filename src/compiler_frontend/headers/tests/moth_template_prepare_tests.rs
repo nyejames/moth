@@ -46,7 +46,9 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -150,20 +152,48 @@ fn prepare_via_pipeline(
 }
 
 fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
-    let source_files = SourceDatabase::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
-    let project_path = std::env::temp_dir();
+    let input_path = PathBuf::from("src/intro.mtf");
+    let source_root = input_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut source_file_kinds = SourceFileKindRegistry::new();
+    source_file_kinds.register(
+        SourceFileKind::MothTemplate.extension(),
+        SourceFileKind::MothTemplate,
+    );
     let project_path_resolver = ProjectPathResolver::new(
-        project_path.clone(),
-        project_path,
+        source_root.clone(),
+        source_root,
         crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
-        &SourceFileKindRegistry::default(),
+        &source_file_kinds,
     )
     .expect("test project path resolver should build");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = input_path.clone();
+    let mut string_table = StringTable::new();
+    // One-row inventory, same constructor as the standalone Moth template service: authored
+    // kind is registered here so preparation stamps `file_id` and binding applies template scope.
+    let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
+        input_path.as_path(),
+        SourceKind::Compiler(SourceFileKind::MothTemplate),
+    )));
+    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
+        &input_path,
+        Some(&project_path_resolver),
+        &mut string_table,
+    )
+    .expect("Moth template source identity should register");
+    let entry_file_id = Some(
+        source_files
+            .get_by_canonical_path(&input_path)
+            .map(|identity| identity.id)
+            .expect("standalone Moth template source identity was not registered"),
+    );
     let options = HeaderParseOptions {
-        entry_file_id: None,
+        entry_file_id,
         project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
@@ -174,7 +204,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         entry_file_path: entry_file_path.as_path(),
         options: &options,
     };
-    let input_path = PathBuf::from("src/intro.mtf");
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
             source_code: source,
@@ -183,10 +212,13 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
-    let mut string_table = StringTable::new();
     let mut prepared_file =
         CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
             .expect("Moth template source should prepare");
+    assert!(
+        prepared_file.file_id.is_some(),
+        "registered Moth template source should stamp a source identity"
+    );
     prepared_file
         .freeze_path_syntax(&string_table)
         .expect("single-file Moth template output should satisfy the prepared-file invariant gate");
@@ -199,6 +231,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
+        &source_files,
         &mut string_table,
     )
     .expect("Moth template headers should bind");
@@ -627,6 +660,7 @@ impl MothTemplateScopeFixture {
             &ExternalImportResolutionTable::default(),
             source_provider_dependencies,
             Some(&self.project_path_resolver),
+            &self.source_files,
             &mut string_table,
         )
         .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
@@ -1810,6 +1844,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
     .expect("authored md headers should bind");

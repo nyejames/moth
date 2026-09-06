@@ -38,6 +38,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceRecord};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -45,7 +46,6 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
 /// Resolved target of a module-root public export entry.
 ///
@@ -241,7 +241,7 @@ pub(crate) struct ModuleSymbols {
     // Per-file metadata is recorded for every prepared file, including dependency-only root files that
     // produce no declaration headers.
     pub(crate) file_roles_by_source: FxHashMap<InternedPath, FileRole>,
-    pub(crate) canonical_os_path_by_source: FxHashMap<InternedPath, PathBuf>,
+    pub(crate) source_ids_by_source: FxHashMap<InternedPath, SourceId>,
     pub(crate) file_dependency_clauses_by_source:
         FxHashMap<InternedPath, Vec<RetainedDependencyClause>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
@@ -317,6 +317,19 @@ impl ModuleSymbols {
         clause.selections(selections)
     }
 
+    /// Join a module source's logical path to its build-lifetime record.
+    ///
+    /// WHY: neighbouring tables stay keyed by `InternedPath`; canonical OS path and kind live
+    ///      only on `SourceRecord`. Callers with no registered identity observe `None`.
+    pub(crate) fn source_record<'a>(
+        &'a self,
+        source_file: &InternedPath,
+        source_files: &'a SourceDatabase,
+    ) -> Option<&'a SourceRecord> {
+        let source_id = *self.source_ids_by_source.get(source_file)?;
+        source_files.get(source_id)
+    }
+
     pub(crate) fn empty() -> Self {
         Self {
             ordered_semantic_declarations: Vec::new(),
@@ -326,7 +339,7 @@ impl ModuleSymbols {
             declaration_locations_by_symbol_path: FxHashMap::default(),
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
-            canonical_os_path_by_source: FxHashMap::default(),
+            source_ids_by_source: FxHashMap::default(),
             file_dependency_clauses_by_source: FxHashMap::default(),
             dependency_selections_by_source: FxHashMap::default(),
             dependency_bindable_source_symbol_paths: FxHashSet::default(),

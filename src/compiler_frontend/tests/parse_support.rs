@@ -175,6 +175,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
     .map_err(|bag| {

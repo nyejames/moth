@@ -81,6 +81,7 @@ fn parse_module_headers(
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -384,6 +385,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     );
 
@@ -1078,6 +1080,7 @@ fn parse_module_headers_with_content_sources(
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
+        &source_files,
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -1352,6 +1355,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         None,
+        &source_files,
         &mut string_table,
     )
     .expect("nested headers should bind");

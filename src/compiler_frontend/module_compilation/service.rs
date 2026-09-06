@@ -877,6 +877,7 @@ fn bind_retained_headers(
         external_dependency_resolution_table,
         source_provider_dependencies,
         compiler.project_path_resolver.as_ref(),
+        compiler.source_files.as_ref(),
         &mut compiler.string_table,
     )
     .map_err(|bag| {

@@ -170,7 +170,7 @@ fn source_database_for_test(
 
 fn prepared_entry_file_path(
     prepared: &crate::compiler_frontend::module_compilation::PreparedModuleInput,
-) -> Option<&Path> {
+) -> Option<PathBuf> {
     let module_symbols = &prepared.prepared_header_syntax.module_symbols;
     module_symbols
         .file_roles_by_source
@@ -180,14 +180,21 @@ fn prepared_entry_file_path(
                 *role,
                 FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
             ) {
-                module_symbols
-                    .canonical_os_path_by_source
-                    .get(source_file)
-                    .map(PathBuf::as_path)
+                Some(source_file.to_path_buf(&prepared.string_table))
             } else {
                 None
             }
         })
+}
+
+fn prepared_entry_canonical_file_path(
+    prepared: &crate::compiler_frontend::module_compilation::PreparedModuleInput,
+    source_files: &SourceDatabase,
+) -> Option<PathBuf> {
+    prepared
+        .entry_file_path(source_files)
+        .ok()
+        .map(Path::to_path_buf)
 }
 
 fn module_prepared_source_names(
@@ -218,7 +225,10 @@ fn module_prepared_source_names(
         .collect()
 }
 
-fn module_source_paths(module: &super::module_inventory::ModuleCompilationJob) -> HashSet<PathBuf> {
+fn module_source_paths(
+    module: &super::module_inventory::ModuleCompilationJob,
+    source_files: &SourceDatabase,
+) -> HashSet<PathBuf> {
     let module_symbols = &module
         .prepared
         .semantic
@@ -229,9 +239,8 @@ fn module_source_paths(module: &super::module_inventory::ModuleCompilationJob) -
         .iter()
         .filter_map(|source_file| {
             module_symbols
-                .canonical_os_path_by_source
-                .get(source_file)
-                .cloned()
+                .source_record(source_file, source_files)
+                .and_then(|record| record.canonical_os_path.clone())
         })
         .collect()
 }
@@ -316,14 +325,21 @@ fn discover_modules_for_test(
     style_directives: &StyleDirectiveRegistry,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
-        .map(|(schedule, _resource_inputs)| schedule)
+        .map(|(schedule, _resource_inputs, _source_files)| schedule)
 }
 
 fn discover_modules_for_test_with_resource_inputs(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(ModuleCompilationSchedule, ResourceInputRegistry), CompilerMessages> {
+) -> Result<
+    (
+        ModuleCompilationSchedule,
+        ResourceInputRegistry,
+        SourceDatabase,
+    ),
+    CompilerMessages,
+> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
@@ -383,7 +399,16 @@ fn discover_modules_for_test_with_resource_inputs(
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
     )?;
-    Ok((schedule, resource_inputs))
+    Ok((schedule, resource_inputs, source_files))
+}
+
+fn discover_modules_and_source_files_for_test(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+) -> Result<(ModuleCompilationSchedule, SourceDatabase), CompilerMessages> {
+    discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
+        .map(|(schedule, _resource_inputs, source_files)| (schedule, source_files))
 }
 
 fn discover_modules_for_test_with_providers(
@@ -1323,8 +1348,9 @@ fn direct_selection_resolves_source_package_facade() {
     );
 }
 
-/// Discover modules and return the populated project module graph plus the shared string table
-/// so focused Phase 5b invariant tests can inspect inserted edges and retained source locations.
+/// Discover modules and return the populated project module graph plus the shared source database
+/// and string table so focused Phase 5b invariant tests can inspect inserted edges and retained
+/// source locations.
 fn discover_modules_and_graph_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
@@ -1333,6 +1359,7 @@ fn discover_modules_and_graph_for_test(
     ModuleCompilationSchedule,
     super::project_module_graph::ProjectModuleGraph,
     super::source_tree_index::SourceTreeIndex,
+    SourceDatabase,
     StringTable,
 ) {
     let mut string_table = StringTable::new();
@@ -1403,6 +1430,7 @@ fn discover_modules_and_graph_for_test(
         modules,
         project_module_graph,
         source_tree_index,
+        source_files,
         string_table,
     )
 }
@@ -3030,16 +3058,16 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let (modules, source_files) =
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
+            .expect("module discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1, "expected exactly one entry module");
 
     let source_theme = fs::canonicalize(src.join("helpers/theme.moth")).expect("canonical source");
     let package_theme =
         fs::canonicalize(lib.join("helpers/theme.moth")).expect("canonical package file");
-    let discovered_paths = module_source_paths(modules[0]);
-
+    let discovered_paths = module_source_paths(modules[0], &source_files);
     assert!(
         discovered_paths.contains(&source_theme),
         "module-root-relative dependencies should resolve from the entry root"
@@ -3448,7 +3476,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs) =
+    let (modules, resource_inputs, _source_files) =
         discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
             .expect("child-boundary failures should remain retained outcomes");
     let module = modules
@@ -3537,7 +3565,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs) =
+    let (modules, resource_inputs, _source_files) =
         discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
             .expect("symlink-ancestor failures should remain retained outcomes");
     let module = modules
@@ -6909,8 +6937,9 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("header discovery should pass");
+    let (modules, source_files) =
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
+            .expect("header discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules[0].prepared.semantic.source_file_count, 3);
     assert_eq!(
@@ -6925,10 +6954,14 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
         .prepared_header_syntax
         .module_symbols;
     let entry_logical_path = module_symbols
-        .canonical_os_path_by_source
+        .source_ids_by_source
         .iter()
-        .find_map(|(logical_path, canonical_path)| {
-            (canonical_path == &entry_path).then_some(logical_path)
+        .find_map(|(logical_path, source_id)| {
+            source_files
+                .get(*source_id)
+                .and_then(|record| record.canonical_os_path.as_ref())
+                .filter(|canonical_path| *canonical_path == &entry_path)
+                .map(|_| logical_path)
         })
         .expect("entry should retain a source identity");
     assert_eq!(
@@ -7062,7 +7095,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, graph, source_tree_index, _string_table) =
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7155,7 +7188,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let entry_root = graph.entry_modules().to_vec();
@@ -7215,7 +7248,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     // No cross-module edges means a single ready wave containing both entries.
@@ -7303,7 +7336,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, source_tree_index, _string_table) =
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7376,7 +7409,7 @@ fn dependency_fact_retains_authored_source_location() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (_modules, graph, source_tree_index, string_table) =
+    let (_modules, graph, source_tree_index, _source_files, string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7416,7 +7449,7 @@ fn production_graph_completes_before_scheduling() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, mut graph, source_tree_index, _string_table) =
+    let (modules, mut graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7477,7 +7510,7 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     assert!(
@@ -7488,7 +7521,7 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     for module in modules.waves().iter().flatten() {
         let matching_node = graph.nodes().iter().find(|node| {
             node.root_file()
-                == prepared_entry_file_path(&module.prepared.semantic)
+                == prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                     .expect("prepared module retains its entry file identity")
         });
         let matching_node = matching_node.expect(
@@ -7498,14 +7531,14 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
             module.module_id,
             matching_node.module_id(),
             "discovered module ID must equal its graph-assigned dense identity (entry {:?})",
-            prepared_entry_file_path(&module.prepared.semantic)
+            prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                 .expect("prepared module retains its entry file identity"),
         );
         assert_eq!(
             module.stable_origin,
             *matching_node.stable_origin(),
             "discovered module stable origin must equal its graph-assigned origin (entry {:?})",
-            prepared_entry_file_path(&module.prepared.semantic)
+            prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                 .expect("prepared module retains its entry file identity"),
         );
     }
@@ -7521,7 +7554,7 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, _graph, _source_tree_index, _string_table) =
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
@@ -7552,7 +7585,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (_modules, graph, source_tree_index, _string_table) =
+    let (_modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let lookup = graph

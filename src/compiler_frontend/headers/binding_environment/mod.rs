@@ -49,6 +49,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// One binding-environment build failure.
@@ -84,6 +85,7 @@ pub(crate) struct BindingEnvironmentInput<'a> {
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) external_dependency_resolution_table: &'a ExternalImportResolutionTable,
     pub(crate) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
+    pub(crate) source_files: &'a SourceDatabase,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -109,6 +111,7 @@ pub(crate) fn prepare_binding_environment(
         external_package_registry: input.external_package_registry,
         external_dependency_resolution_table: input.external_dependency_resolution_table,
         source_provider_dependencies: input.source_provider_dependencies,
+        source_files: input.source_files,
         string_table: input.string_table,
         environment: HeaderBindingEnvironment::default(),
         warnings: Vec::new(),

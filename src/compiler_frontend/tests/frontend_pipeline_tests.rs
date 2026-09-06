@@ -211,6 +211,7 @@ impl FrontendProject {
             &ExternalImportResolutionTable::default(),
             &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
             options.project_path_resolver,
+            self.frontend.source_files.as_ref(),
             &mut self.frontend.string_table,
         )
         .expect("header binding should succeed")

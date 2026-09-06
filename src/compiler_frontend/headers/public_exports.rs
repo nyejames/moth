@@ -38,6 +38,7 @@ use crate::compiler_frontend::headers::types::{DependencySelection, Header, Head
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -110,6 +111,7 @@ pub(super) fn build_public_exports(
     module_symbols: &mut ModuleSymbols,
     headers: &[Header],
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
@@ -117,12 +119,17 @@ pub(super) fn build_public_exports(
     // Pass 1: collect public authored declarations for all root files.
     let source_package_locations =
         build_source_package_public_exports(module_symbols, headers, resolver, string_table)?;
-    let module_root_locations =
-        build_module_root_public_exports_pass1(module_symbols, headers, resolver, string_table)?;
+    let module_root_locations = build_module_root_public_exports_pass1(
+        module_symbols,
+        headers,
+        resolver,
+        source_files,
+        string_table,
+    )?;
 
     // Membership does not depend on dependency resolution.
-    build_source_package_membership(module_symbols, resolver, string_table)?;
-    build_module_root_membership(module_symbols, resolver, string_table)?;
+    build_source_package_membership(module_symbols, resolver, source_files, string_table)?;
+    build_module_root_membership(module_symbols, resolver, source_files, string_table)?;
 
     // Pass 2: resolve strict `export:` dependencies against the completed authored export maps.
     build_source_package_public_dependencies(
@@ -137,6 +144,7 @@ pub(super) fn build_public_exports(
         module_symbols,
         &module_root_locations,
         resolver,
+        source_files,
         external_package_registry,
         source_provider_dependencies,
         string_table,
@@ -299,6 +307,7 @@ fn build_module_root_public_exports_pass1(
     module_symbols: &mut ModuleSymbols,
     headers: &[Header],
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>> {
     let mut export_locations = FxHashMap::default();
@@ -309,7 +318,10 @@ fn build_module_root_public_exports_pass1(
     module_symbols.module_root_boundaries = module_root_boundaries;
 
     for header in headers {
-        let Some(canonical_path) = &header.tokens.canonical_os_path else {
+        let Some(canonical_path) = module_symbols
+            .source_record(&header.source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_deref())
+        else {
             continue;
         };
         let Some(module_root) = resolver.module_root_for_file(canonical_path) else {
@@ -318,6 +330,9 @@ fn build_module_root_public_exports_pass1(
 
         let module_root_interned =
             intern_public_surface_path(&module_root, "Module root path", string_table)?;
+        let is_module_root_file = resolver
+            .module_root_file_for_directory(&module_root)
+            .is_some_and(|root_file| canonical_path == root_file.as_path());
         let logical = header.source_file.clone();
         let canonical = header.canonical_source_file(string_table);
 
@@ -328,9 +343,7 @@ fn build_module_root_public_exports_pass1(
             .file_module_membership
             .insert(canonical, module_root_interned.clone());
 
-        if resolver
-            .module_root_file_for_directory(&module_root)
-            .is_some_and(|root_file| canonical_path.as_path() == root_file.as_path())
+        if is_module_root_file
             && is_authored_public_export(header)
             && let Some(export_name) = header.tokens.src_path.name()
         {
@@ -363,6 +376,7 @@ fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
     export_locations: &FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
@@ -399,8 +413,9 @@ fn build_module_root_public_dependencies(
             )));
         }
 
-        let Some(canonical_export_path) =
-            module_symbols.canonical_os_path_by_source.get(&root_source)
+        let Some(canonical_export_path) = module_symbols
+            .source_record(&root_source, source_files)
+            .and_then(|record| record.canonical_os_path.as_deref())
         else {
             continue;
         };
@@ -411,7 +426,7 @@ fn build_module_root_public_dependencies(
             continue;
         };
 
-        if module_root_path != *canonical_export_path {
+        if module_root_path != canonical_export_path {
             continue;
         }
 
@@ -804,15 +819,28 @@ impl PublicExportCollector {
 fn build_source_package_membership(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
-    for (source_file, canonical_path) in module_symbols.canonical_os_path_by_source.clone() {
-        let Some((membership_prefix, _)) = resolver.source_package_for_file(&canonical_path) else {
+    let membership_sources: Vec<_> = module_symbols
+        .source_ids_by_source
+        .keys()
+        .cloned()
+        .collect();
+
+    for source_file in membership_sources {
+        let Some(canonical_path) = module_symbols
+            .source_record(&source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+        else {
+            continue;
+        };
+        let Some((membership_prefix, _)) = resolver.source_package_for_file(canonical_path) else {
             continue;
         };
 
         let canonical_source =
-            intern_public_surface_path(&canonical_path, "Canonical source path", string_table)?;
+            intern_public_surface_path(canonical_path, "Canonical source path", string_table)?;
         module_symbols
             .file_package_membership
             .insert(source_file.clone(), membership_prefix.to_owned());
@@ -827,17 +855,30 @@ fn build_source_package_membership(
 fn build_module_root_membership(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
-    for (source_file, canonical_path) in module_symbols.canonical_os_path_by_source.clone() {
-        let Some(module_root) = resolver.module_root_for_file(&canonical_path) else {
+    let membership_sources: Vec<_> = module_symbols
+        .source_ids_by_source
+        .keys()
+        .cloned()
+        .collect();
+
+    for source_file in membership_sources {
+        let Some(canonical_path) = module_symbols
+            .source_record(&source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+        else {
+            continue;
+        };
+        let Some(module_root) = resolver.module_root_for_file(canonical_path) else {
             continue;
         };
 
         let module_root_interned =
             intern_public_surface_path(&module_root, "Module root path", string_table)?;
         let canonical_source =
-            intern_public_surface_path(&canonical_path, "Canonical source path", string_table)?;
+            intern_public_surface_path(canonical_path, "Canonical source path", string_table)?;
 
         module_symbols
             .file_module_membership

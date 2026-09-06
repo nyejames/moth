@@ -744,6 +744,41 @@ An earlier note here called those slice group 2C's property; that was wrong — 
 covers logical path owners and never names these fields. They belong to 1B6 and land in **1B6-b**.
 The `CompilerFrontend<'build>` borrow is the `Arc<SourceDatabase>` sharing decision recorded above.
 
+**Delivered as 1B6-b, in part.** `ModuleSymbols::canonical_os_path_by_source` is gone. It held a
+`PathBuf` per module file, cloned from each prepared output, duplicating `SourceRecord`. It is now
+`source_ids_by_source: FxHashMap<InternedPath, SourceId>` — four bytes instead of a path
+allocation — and `ModuleSymbols::source_record` joins that to the record. The `InternedPath` key
+stays because every neighbouring table uses it and binding joins on it. Public-export membership,
+module-root checks and the binding environment now borrow the `&SourceDatabase` the frontend
+already holds.
+
+Three consumers were re-derivations, not lookups, and each is now resolved against the record:
+
+- `is_moth_template_source_file` classified a source by parsing its path extension. 1B5-c put
+  `kind` on `SourceRecord` precisely so readers stop doing that; it reads the record.
+- `source_directory` returned the canonical OS parent, falling back to the logical parent. Its
+  only consumer decides same-directory public-export visibility, which is a module-scope question,
+  so it is logical-only. The two agree for every valid current module input; they can disagree
+  under a symlink placing logical siblings on different physical directories, and the logical
+  answer is the correct one there.
+- `symbol_origin_matches_source` compares a rendered logical path against a canonical OS path
+  after an `InternedPath` comparison fails. That looked vestigial and is not:
+  `canonical_source_by_symbol_path` stores `Header::canonical_source_file`, which interns the OS
+  path when one exists, while module tables are keyed by the logical path. Deleting the join fails
+  three tests.
+
+All three were mutation-checked against the full lib suite: killing the join fails 3 tests,
+misreading the kind fails 10, disabling the directory lookup fails 4.
+
+Reading the kind from the record rather than a path extension is stricter — an unregistered
+source is no longer a template. Production always registers, but three test fixtures did not, so
+they silently bound under a contract production never uses. They register now. No expectation was
+edited to accommodate this.
+
+**1B6 stays open** for `FileTokens.canonical_os_path`, `FileFrontendPrepareOutput.canonical_os_path`
+and the three helper-input copies in `moth_template_prepare.rs`, `plain_markdown_prepare.rs` and
+`synthetic_content_header.rs`. Those land in **1B6-c**.
+
 **Delivered as 1B7-a.** The design authority's source-size bound ("Source size and complexity
 limits") is enforced at `SourceDatabase::retain_text`, the one point a snapshot becomes owned. The
 lane follows the record's `provenance`: an authored physical source too large for `u32` byte
