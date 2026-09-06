@@ -1151,9 +1151,47 @@ is amended to match what was actually decided. `just span-census` is the instrum
 frozen in `docs/compiler-data-layout-design.md` and the evidence is in
 `benchmarks/frontend-optimization-results.md`.
 
+One audit finding is deferred rather than fixed. `run_span_census_command` writes a
+`completed: false` report before it walks, so an interrupted run cannot leave the previous
+successful report looking like fresh evidence; no test would catch that write being deleted, and
+covering it means passing the measurement into a seam built for the test. The reason for accepting
+that is narrow: the JSON is regenerated on demand by `just span-census`, and the constants this
+slice froze live in the two authority documents rather than in the report, so a stale report cannot
+corrupt the delivered decision.
+
+**Delivered as 1C3.** `src/compiler_frontend/source/span.rs` owns the exact span API and
+`span_encoding.rs` owns the frozen 22/10 packing; no caller outside the `source` module sees a
+shift or a mask. Inline words hold an exact start and length, the sentinel length code marks a row
+in that source's append-only table, and no legal range can produce the reserved all-ones word. A
+throwaway probe confirmed the production codec agrees with 1C2's measured prototype bit for bit at
+`LENGTH_BITS = 10`, including the packed word, so the frozen constants and the evidence cannot have
+drifted apart.
+
+One resolver serves both forms: `ExtendedSpanBuilder` and `ExtendedSpanTable` hand out the same
+borrowed view, so a consumer inspects an existing span without freezing or copying a table, and
+resolution works while the builder is still appending. There is one decode path and no trait,
+because there is nothing for a second implementation to be.
+
+Overlap is the non-emptiness of the intersection, decided during the phase audit. The first
+implementation compared endpoints pairwise, which made a zero-length insertion point overlap a
+range when it sat strictly inside and not when it sat on either edge. An empty span now overlaps
+nothing and `contains` answers the question consumers actually ask of an insertion point.
+
+**The frozen-record half of this clause is deferred to 1D.** `SourceRecord` and `SourceDatabase`
+deliberately do not gain an extended-span field: nothing produces a table until tokenization
+migrates, and an unpopulated field would be scaffolding. The frozen side of the resolver is
+therefore `ExtendedSpanTable`, and the authority's `LocalSpan::resolve(&SourceRecord)`,
+`SourceSpan::byte_range`, `SourceSpan::start` and `SourceSpan::end` — every signature taking
+`&SourceDatabase` — land in 1D with their first real consumer rather than as thin delegates now.
+The endpoints are already reachable through `ResolvedByteRange`.
+
+The module carries `allow(dead_code)` until 1D, which the style guide permits for clearly
+identified planned work. **1D must remove both suppressions and the `allow(unused_imports)` on the
+re-export**; if any survives, the slice that was supposed to consume this API did not.
+
 - [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
 - [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
-- [ ] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
+- [x] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations. **Frozen-record half deferred to 1D:** see the delivery note above.
 - [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
 - [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
 - [ ] **1C6 — registration slot and loaded record:** split the dense array into a compact
@@ -1167,6 +1205,9 @@ frozen in `docs/compiler-data-layout-design.md` and the evidence is in
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
 - [ ] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
+- [ ] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
+  `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
+  `allow(unused_imports)` suppressions that 1C3 landed for the interval before this consumer
 - [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
   retained prepared facts without rereading, cloning or owning a second source snapshot
 - [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final

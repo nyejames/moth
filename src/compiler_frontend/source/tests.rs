@@ -1,5 +1,6 @@
 use super::{
-    SourceDatabase, SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceKind, SourceProvenance,
+    SourceRecord, SourceRegistrationIndex, SourceSpan, SpanCapacityReason, SpanJoinError,
     record::ensure_source_snapshot_fits,
 };
 
@@ -808,4 +809,404 @@ fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {
         .retain_text(source_id, text.to_owned())
         .expect("source text should be retained");
     (database, source_id)
+}
+
+#[test]
+fn local_and_source_spans_use_the_non_zero_option_niche() {
+    assert_eq!(size_of::<LocalSpan>(), 4);
+    assert_eq!(size_of::<Option<LocalSpan>>(), 4);
+    assert_eq!(size_of::<SourceSpan>(), 8);
+    assert_eq!(size_of::<Option<SourceSpan>>(), 8);
+}
+
+#[test]
+fn largest_inline_length_encodes_inline_and_one_more_spills() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let inline_span = LocalSpan::exact(0, 1022, &mut builder).expect("max inline length");
+    let inline_range = inline_span.resolve(builder.resolver());
+
+    assert!(builder.is_empty());
+    assert_eq!(inline_range.start(), 0);
+    assert_eq!(inline_range.end(), 1022);
+
+    let extended_span =
+        LocalSpan::exact(0, 1023, &mut builder).expect("one past max inline length");
+    let extended_range = extended_span.resolve(builder.resolver());
+
+    assert_eq!(builder.len(), 1);
+    assert_eq!(extended_range.start(), 0);
+    assert_eq!(extended_range.end(), 1023);
+}
+
+#[test]
+fn largest_inline_start_encodes_inline_and_one_more_spills() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let inline_start = 4 * 1024 * 1024 - 1;
+    let inline_span = LocalSpan::exact(inline_start, 0, &mut builder).expect("max inline start");
+    let inline_range = inline_span.resolve(builder.resolver());
+
+    assert!(builder.is_empty());
+    assert_eq!(inline_range.start(), inline_start);
+    assert_eq!(inline_range.end(), inline_start);
+
+    let spilled_start = 4 * 1024 * 1024;
+    let extended_span =
+        LocalSpan::exact(spilled_start, 0, &mut builder).expect("one past max inline start");
+    let extended_range = extended_span.resolve(builder.resolver());
+
+    assert_eq!(builder.len(), 1);
+    assert_eq!(extended_range.start(), spilled_start);
+    assert_eq!(extended_range.end(), spilled_start);
+}
+
+#[test]
+fn largest_inline_start_and_length_encode_inline_without_spilling() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let start = 4 * 1024 * 1024 - 1;
+    let span = LocalSpan::exact(start, 1022, &mut builder)
+        .expect("max inline start packed with max inline length");
+    let range = span.resolve(builder.resolver());
+
+    assert!(builder.is_empty());
+    assert_eq!(range.start(), start);
+    assert_eq!(range.end(), start + 1022);
+}
+
+#[test]
+fn zero_length_span_at_offset_zero_round_trips() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let span = LocalSpan::insertion_point(0, &mut builder).expect("empty span at byte 0");
+    let range = span.resolve(builder.resolver());
+
+    assert!(builder.is_empty());
+    assert!(span.is_empty(builder.resolver()));
+    assert_eq!(range.start(), 0);
+    assert_eq!(range.end(), 0);
+}
+
+#[test]
+fn zero_length_span_past_inline_start_limit_round_trips() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let offset = 4 * 1024 * 1024;
+    let span =
+        LocalSpan::insertion_point(offset, &mut builder).expect("empty span past inline start");
+    let range = span.resolve(builder.resolver());
+
+    assert_eq!(builder.len(), 1);
+    assert!(span.is_empty(builder.resolver()));
+    assert_eq!(range.start(), offset);
+    assert_eq!(range.end(), offset);
+}
+
+#[test]
+fn live_builder_and_frozen_table_resolve_the_same_range() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
+    let extended = LocalSpan::exact(0, 1023, &mut builder).expect("extended span");
+
+    let live_inline = inline.resolve(builder.resolver());
+    let live_extended = extended.resolve(builder.resolver());
+    let table = builder.freeze();
+    let frozen_inline = inline.resolve(table.resolver());
+    let frozen_extended = extended.resolve(table.resolver());
+
+    assert_eq!(live_inline, frozen_inline);
+    assert_eq!(live_extended, frozen_extended);
+    assert_eq!(frozen_inline.start(), 12);
+    assert_eq!(frozen_inline.end(), 20);
+    assert_eq!(frozen_extended.start(), 0);
+    assert_eq!(frozen_extended.end(), 1023);
+}
+
+#[test]
+fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let last_usable_index = 4_194_302_u32;
+
+    for _ in 0..=last_usable_index {
+        LocalSpan::exact(0, 1023, &mut builder)
+            .expect("every index through the last usable extended slot must encode");
+    }
+
+    assert_eq!(builder.len(), last_usable_index as usize + 1);
+
+    let error = LocalSpan::exact(0, 1023, &mut builder)
+        .expect_err("one past the last usable extended index must fail");
+
+    assert_eq!(error.start(), 0);
+    assert_eq!(error.length(), 1023);
+    assert_eq!(error.reason(), SpanCapacityReason::ExtendedTableFull);
+}
+
+#[test]
+fn join_spills_to_extended_when_cover_exceeds_inline_length() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let left = LocalSpan::exact(0, 600, &mut builder).expect("left");
+    let right = LocalSpan::exact(500, 600, &mut builder).expect("right");
+    let joined = left.join(right, &mut builder).expect("extended join");
+    let range = joined.resolve(builder.resolver());
+
+    assert_eq!(builder.len(), 1);
+    assert_eq!(range.start(), 0);
+    assert_eq!(range.end(), 1100);
+}
+
+#[test]
+fn join_of_adjacent_spans_is_contiguous_cover() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let left = LocalSpan::exact(0, 5, &mut builder).expect("left");
+    let right = LocalSpan::exact(5, 5, &mut builder).expect("right");
+    let joined = left.join(right, &mut builder).expect("adjacent join");
+    let range = joined.resolve(builder.resolver());
+
+    assert_eq!(range.start(), 0);
+    assert_eq!(range.end(), 10);
+}
+
+#[test]
+fn join_of_overlapping_spans_is_smallest_cover() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let left = LocalSpan::exact(0, 8, &mut builder).expect("left");
+    let right = LocalSpan::exact(4, 8, &mut builder).expect("right");
+    let joined = left.join(right, &mut builder).expect("overlapping join");
+    let range = joined.resolve(builder.resolver());
+
+    assert_eq!(range.start(), 0);
+    assert_eq!(range.end(), 12);
+}
+
+#[test]
+fn cross_source_join_is_rejected() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let left_local = LocalSpan::exact(0, 4, &mut builder).expect("left");
+    let right_local = LocalSpan::exact(0, 4, &mut builder).expect("right");
+    let left = SourceSpan::new(SourceId::from_index(1), left_local);
+    let right = SourceSpan::new(SourceId::from_index(2), right_local);
+
+    match left.join(right, &mut builder) {
+        Err(SpanJoinError::DifferentSources {
+            left: left_source,
+            right: right_source,
+        }) => {
+            assert_eq!(left_source, SourceId::from_index(1));
+            assert_eq!(right_source, SourceId::from_index(2));
+        }
+        other => panic!("expected a different-sources join error, got {other:?}"),
+    }
+}
+
+/// A same-source join keeps the identity and covers both operands, extended rows included.
+#[test]
+fn same_source_join_keeps_the_identity_and_covers_an_extended_operand() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(3);
+    let inline = SourceSpan::new(
+        source,
+        LocalSpan::exact(10, 4, &mut builder).expect("inline"),
+    );
+    let extended = SourceSpan::new(
+        source,
+        LocalSpan::exact(9_000, 5_000, &mut builder).expect("extended"),
+    );
+
+    let joined = extended
+        .join(inline, &mut builder)
+        .expect("same-source join");
+    let resolver = builder.resolver();
+    let range = joined.resolve(resolver);
+
+    assert_eq!(joined.source(), source);
+    assert_eq!((range.start(), range.end()), (10, 14_000));
+    assert!(joined.contains(inline, resolver));
+    assert!(joined.contains(extended, resolver));
+}
+
+#[test]
+fn cross_source_overlap_and_containment_are_false_when_byte_ranges_coincide() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let local = LocalSpan::exact(0, 10, &mut builder).expect("shared byte range");
+    let left = SourceSpan::new(SourceId::from_index(1), local);
+    let right = SourceSpan::new(SourceId::from_index(2), local);
+    let resolver = builder.resolver();
+
+    assert!(!left.overlaps(right, resolver));
+    assert!(!left.contains(right, resolver));
+    assert!(!right.contains(left, resolver));
+}
+
+#[test]
+fn source_order_sorts_by_source_then_start_then_end() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let early_short = LocalSpan::exact(0, 5, &mut builder).expect("early short");
+    let early_long = LocalSpan::exact(0, 10, &mut builder).expect("early long");
+    let later = LocalSpan::exact(10, 10, &mut builder).expect("later");
+    let other_source = LocalSpan::exact(0, 1, &mut builder).expect("other source");
+
+    let mut spans = [
+        SourceSpan::new(SourceId::from_index(2), other_source),
+        SourceSpan::new(SourceId::from_index(1), later),
+        SourceSpan::new(SourceId::from_index(1), early_long),
+        SourceSpan::new(SourceId::from_index(1), early_short),
+    ];
+    let resolver = builder.resolver();
+    spans.sort_by(|left, right| left.source_order(*right, resolver));
+
+    assert_eq!(
+        spans.map(|span| (span.source(), span.resolve(resolver))),
+        [
+            (SourceId::from_index(1), early_short.resolve(resolver)),
+            (SourceId::from_index(1), early_long.resolve(resolver)),
+            (SourceId::from_index(1), later.resolve(resolver)),
+            (SourceId::from_index(2), other_source.resolve(resolver)),
+        ]
+    );
+}
+
+#[test]
+fn spans_in_one_source_overlap_only_where_they_share_a_byte() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(1);
+    let span = |start, length, builder: &mut ExtendedSpanBuilder| {
+        SourceSpan::new(
+            source,
+            LocalSpan::exact(start, length, builder).expect("test span"),
+        )
+    };
+
+    let first = span(0, 10, &mut builder);
+    let straddling = span(5, 10, &mut builder);
+    let adjacent = span(10, 5, &mut builder);
+    let nested = span(2, 3, &mut builder);
+    let resolver = builder.resolver();
+
+    assert!(first.overlaps(straddling, resolver));
+    assert!(straddling.overlaps(first, resolver));
+    assert!(first.overlaps(nested, resolver));
+    assert!(first.overlaps(first, resolver));
+    assert!(
+        !first.overlaps(adjacent, resolver),
+        "a range ending where the next begins shares no byte with it"
+    );
+}
+
+/// An insertion point sits inside a range without sharing a byte with it.
+///
+/// Overlap is the non-emptiness of the intersection, so an empty span overlaps nothing at all.
+/// Containment is the question consumers actually ask of an insertion point, and it answers yes.
+#[test]
+fn an_empty_span_is_contained_but_overlaps_nothing() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(1);
+    let range = SourceSpan::new(
+        source,
+        LocalSpan::exact(0, 10, &mut builder).expect("range"),
+    );
+    let interior = SourceSpan::new(
+        source,
+        LocalSpan::insertion_point(5, &mut builder).expect("interior insertion point"),
+    );
+    let on_start = SourceSpan::new(
+        source,
+        LocalSpan::insertion_point(0, &mut builder).expect("insertion point on the start"),
+    );
+    let on_end = SourceSpan::new(
+        source,
+        LocalSpan::insertion_point(10, &mut builder).expect("insertion point on the end"),
+    );
+    let resolver = builder.resolver();
+
+    for point in [interior, on_start, on_end] {
+        assert!(!range.overlaps(point, resolver));
+        assert!(!point.overlaps(range, resolver));
+        assert!(range.contains(point, resolver));
+    }
+
+    assert!(!interior.overlaps(interior, resolver));
+    assert!(!range.is_empty(resolver));
+    assert!(interior.is_empty(resolver));
+}
+
+#[test]
+fn containment_is_directional_and_reflexive_within_one_source() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(1);
+    let outer = SourceSpan::new(
+        source,
+        LocalSpan::exact(0, 10, &mut builder).expect("outer"),
+    );
+    let inner = SourceSpan::new(source, LocalSpan::exact(2, 3, &mut builder).expect("inner"));
+    let straddling = SourceSpan::new(
+        source,
+        LocalSpan::exact(5, 10, &mut builder).expect("straddling"),
+    );
+    let resolver = builder.resolver();
+
+    assert!(outer.contains(inner, resolver));
+    assert!(!inner.contains(outer, resolver));
+    assert!(outer.contains(outer, resolver));
+    assert!(!outer.contains(straddling, resolver));
+}
+
+/// The cover is the minimum start and the maximum end, whichever operand each comes from.
+///
+/// A cover that still fits inline must not consume an extended row.
+#[test]
+fn join_covers_both_operands_whatever_order_they_arrive_in() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let early = LocalSpan::exact(10, 5, &mut builder).expect("early");
+    let late = LocalSpan::exact(40, 6, &mut builder).expect("late");
+
+    let forward = early.join(late, &mut builder).expect("forward join");
+    let reversed = late.join(early, &mut builder).expect("reversed join");
+    let resolver = builder.resolver();
+
+    assert!(builder.is_empty());
+    assert_eq!(forward.resolve(resolver), reversed.resolve(resolver));
+    assert_eq!(
+        (
+            forward.resolve(resolver).start(),
+            forward.resolve(resolver).end()
+        ),
+        (10, 46)
+    );
+}
+
+/// Joining a nested span must not widen the outer one.
+#[test]
+fn join_of_a_nested_span_returns_the_outer_cover() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let outer = LocalSpan::exact(10, 20, &mut builder).expect("outer");
+    let inner = LocalSpan::exact(15, 2, &mut builder).expect("inner");
+
+    let joined = outer.join(inner, &mut builder).expect("nested join");
+    let range = joined.resolve(builder.resolver());
+
+    assert_eq!((range.start(), range.end()), (10, 30));
+}
+
+/// Each extended row must be reachable through its own span.
+///
+/// A codec that appended correctly but always encoded index zero would resolve every extended
+/// span to the first row, which no boundary or capacity test can see.
+#[test]
+fn distinct_extended_rows_resolve_through_their_own_spans() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let ranges = [(0_u32, 1023_u32), (7, 5000), (4_194_304, 0), (12, 1023)];
+    let spans = ranges.map(|(start, length)| {
+        LocalSpan::exact(start, length, &mut builder).expect("extended span")
+    });
+
+    assert_eq!(
+        builder.len(),
+        ranges.len(),
+        "every range must take its own row"
+    );
+
+    let resolver = builder.resolver();
+    let resolved = spans.map(|span| {
+        let range = span.resolve(resolver);
+        (range.start(), range.end() - range.start())
+    });
+
+    assert_eq!(resolved, ranges);
 }
