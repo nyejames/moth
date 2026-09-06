@@ -1065,26 +1065,6 @@ fn zero_length_span_past_inline_start_limit_round_trips() {
 }
 
 #[test]
-fn live_builder_and_frozen_table_resolve_the_same_range() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
-    let extended = LocalSpan::exact(0, 1023, &mut builder).expect("extended span");
-
-    let live_inline = inline.resolve(builder.resolver());
-    let live_extended = extended.resolve(builder.resolver());
-    let table = builder.freeze();
-    let frozen_inline = inline.resolve(table.resolver());
-    let frozen_extended = extended.resolve(table.resolver());
-
-    assert_eq!(live_inline, frozen_inline);
-    assert_eq!(live_extended, frozen_extended);
-    assert_eq!(frozen_inline.start(), 12);
-    assert_eq!(frozen_inline.end(), 20);
-    assert_eq!(frozen_extended.start(), 0);
-    assert_eq!(frozen_extended.end(), 1023);
-}
-
-#[test]
 fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     let mut builder = ExtendedSpanBuilder::new();
     let last_usable_index = 4_194_302_u32;
@@ -1375,4 +1355,328 @@ fn distinct_extended_rows_resolve_through_their_own_spans() {
     });
 
     assert_eq!(resolved, ranges);
+}
+
+fn next_generated_span_value(state: &mut u32) -> u32 {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    *state
+}
+
+#[test]
+fn generated_spans_round_trip_through_live_and_frozen_resolvers() {
+    use super::span_encoding::{
+        DecodedSpan, INLINE_MAX_LENGTH, INLINE_START_LIMIT, decode_logical,
+    };
+
+    let boundary_starts = [
+        0,
+        1,
+        INLINE_START_LIMIT - 1,
+        INLINE_START_LIMIT,
+        INLINE_START_LIMIT + 1,
+    ];
+    let boundary_lengths = [
+        0,
+        1,
+        INLINE_MAX_LENGTH - 1,
+        INLINE_MAX_LENGTH,
+        INLINE_MAX_LENGTH + 1,
+    ];
+    let mut ranges = Vec::new();
+
+    for start in boundary_starts {
+        for length in boundary_lengths {
+            ranges.push((start, length));
+        }
+    }
+    for start in [u32::MAX - 1, u32::MAX] {
+        ranges.push((start, 0));
+    }
+
+    let mut generator_state = 0x9e37_79b9;
+    let extended_start_width = u64::from(u32::MAX - INLINE_START_LIMIT) + 1;
+
+    for sample in 0..2_048 {
+        let raw_start = next_generated_span_value(&mut generator_state);
+        let start = match sample % 4 {
+            0 => raw_start % INLINE_START_LIMIT,
+            1 => {
+                (u64::from(INLINE_START_LIMIT) + u64::from(raw_start) % extended_start_width) as u32
+            }
+            2 => raw_start,
+            _ => u32::MAX - raw_start % 65_536,
+        };
+        let maximum_length = u64::from(u32::MAX - start);
+        let raw_length = next_generated_span_value(&mut generator_state);
+        let length = match sample % 8 {
+            0 => raw_length % (INLINE_MAX_LENGTH + 1),
+            1 if maximum_length >= u64::from(INLINE_MAX_LENGTH + 1) => {
+                let minimum_extended_length = u64::from(INLINE_MAX_LENGTH + 1);
+                (minimum_extended_length
+                    + u64::from(raw_length) % (maximum_length - minimum_extended_length + 1))
+                    as u32
+            }
+            _ => (u64::from(raw_length) % (maximum_length + 1)) as u32,
+        };
+        ranges.push((start, length));
+    }
+
+    let mut builder = ExtendedSpanBuilder::new();
+    let mut spans = Vec::with_capacity(ranges.len());
+    let mut inline_count = 0usize;
+    let mut extended_count = 0usize;
+
+    for &(start, length) in &ranges {
+        let span = LocalSpan::exact(start, length, &mut builder)
+            .expect("generated range must have a representable end");
+        let expected_inline = start < INLINE_START_LIMIT && length <= INLINE_MAX_LENGTH;
+        let actual_inline = matches!(
+            decode_logical(span.logical_word()),
+            DecodedSpan::Inline { .. }
+        );
+
+        assert_eq!(
+            actual_inline,
+            expected_inline,
+            "range {start}..{} selected the wrong encoding regime",
+            start + length
+        );
+        if actual_inline {
+            inline_count += 1;
+        } else {
+            extended_count += 1;
+        }
+        spans.push(span);
+    }
+
+    assert!(
+        inline_count >= 100 && extended_count >= 100,
+        "generated sweep must exercise both regimes (inline={inline_count}, extended={extended_count})"
+    );
+
+    let live_ranges: Vec<_> = spans
+        .iter()
+        .map(|&span| span.resolve(builder.resolver()))
+        .collect();
+    let frozen_table = builder.freeze();
+
+    for ((start, length), (span, live_range)) in ranges
+        .iter()
+        .copied()
+        .zip(spans.iter().copied().zip(live_ranges))
+    {
+        let frozen_range = span.resolve(frozen_table.resolver());
+        let expected_end = start + length;
+
+        assert_eq!(
+            (live_range.start(), live_range.end()),
+            (start, expected_end),
+            "live resolver changed generated range {start}..{expected_end}"
+        );
+        assert_eq!(
+            (frozen_range.start(), frozen_range.end()),
+            (start, expected_end),
+            "frozen resolver changed generated range {start}..{expected_end}"
+        );
+        assert_eq!(
+            live_range, frozen_range,
+            "live and frozen resolvers disagree for generated range {start}..{expected_end}"
+        );
+    }
+}
+
+/// The `Option<LocalSpan>` niche depends on the codec never producing the all-ones logical word.
+///
+/// Nothing at the `LocalSpan` level can observe that word: `store_logical` panics before a span
+/// exists, so the invariant lives in the codec's admissible domain. The inline extreme is a
+/// compile-time assertion in `span_encoding`; this pins the extended bound and the reason for it.
+#[test]
+fn the_first_rejected_extended_index_is_the_one_that_would_reserve_the_logical_word() {
+    use super::span_encoding::{
+        DecodedSpan, LENGTH_BITS, LENGTH_SENTINEL, MAX_EXTENDED_INDEX, decode_logical,
+        encode_extended_index,
+    };
+
+    let last_usable =
+        encode_extended_index(MAX_EXTENDED_INDEX).expect("the last usable index must encode");
+
+    assert!(last_usable < u32::MAX);
+    assert!(matches!(
+        decode_logical(last_usable),
+        DecodedSpan::Extended { index } if index == MAX_EXTENDED_INDEX
+    ));
+
+    assert_eq!(
+        encode_extended_index(MAX_EXTENDED_INDEX + 1),
+        None,
+        "the index past the last usable one must leave the codec's domain"
+    );
+    assert_eq!(
+        ((MAX_EXTENDED_INDEX + 1) << LENGTH_BITS) | LENGTH_SENTINEL,
+        u32::MAX,
+        "that index is rejected because its encoding would be the reserved word"
+    );
+}
+
+#[test]
+fn exact_reports_end_overflow_at_u32_boundary_without_wrapping() {
+    use super::span_encoding::{
+        DecodedSpan, INLINE_MAX_LENGTH, INLINE_START_LIMIT, decode_logical,
+    };
+
+    let mut builder = ExtendedSpanBuilder::new();
+    let inline = LocalSpan::exact(INLINE_START_LIMIT - 1, INLINE_MAX_LENGTH, &mut builder)
+        .expect("the largest inline range should be representable");
+    assert!(matches!(
+        decode_logical(inline.logical_word()),
+        DecodedSpan::Inline { .. }
+    ));
+
+    let extended = LocalSpan::exact(INLINE_START_LIMIT - 1, INLINE_MAX_LENGTH + 1, &mut builder)
+        .expect("one past the inline length limit should spill to an extended row");
+    assert!(matches!(
+        decode_logical(extended.logical_word()),
+        DecodedSpan::Extended { .. }
+    ));
+
+    // Inline starts and lengths are too small to overflow u32; the end boundary itself is
+    // therefore exercised by extended ranges, while the preceding cases prove both exact paths.
+    for start in [INLINE_START_LIMIT - 1, INLINE_START_LIMIT, u32::MAX - 1] {
+        let maximum_length = u32::MAX - start;
+        let span = LocalSpan::exact(start, maximum_length, &mut builder)
+            .expect("a range ending at u32::MAX should be representable");
+        let resolved = span.resolve(builder.resolver());
+        assert_eq!((resolved.start(), resolved.end()), (start, u32::MAX));
+
+        let error = LocalSpan::exact(start, maximum_length + 1, &mut builder)
+            .expect_err("a range ending past u32::MAX must be rejected");
+        assert_eq!(error.start(), start);
+        assert_eq!(error.length(), maximum_length + 1);
+        assert_eq!(error.reason(), SpanCapacityReason::EndUnrepresentable);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ReferenceLineRange {
+    start: usize,
+    visible_end: usize,
+    end: usize,
+}
+
+fn reference_line_ranges(source: &str) -> Vec<ReferenceLineRange> {
+    let mut ranges = Vec::new();
+    let mut line_start = 0usize;
+    let mut char_indices = source.char_indices().peekable();
+
+    while let Some((offset, scalar)) = char_indices.next() {
+        let Some(end) = (match scalar {
+            '\n' => Some(offset + 1),
+            '\r' => {
+                if let Some(&(next_offset, '\n')) = char_indices.peek() {
+                    char_indices.next();
+                    Some(next_offset + 1)
+                } else {
+                    Some(offset + 1)
+                }
+            }
+            _ => None,
+        }) else {
+            continue;
+        };
+
+        ranges.push(ReferenceLineRange {
+            start: line_start,
+            visible_end: offset,
+            end,
+        });
+        line_start = end;
+    }
+
+    if ranges.is_empty() || line_start < source.len() {
+        ranges.push(ReferenceLineRange {
+            start: line_start,
+            visible_end: source.len(),
+            end: source.len(),
+        });
+    }
+
+    ranges
+}
+
+fn reference_position<'a>(
+    source: &'a str,
+    ranges: &[ReferenceLineRange],
+    offset: usize,
+) -> (u32, u32, u32, &'a str) {
+    let (line_number, line_range) = ranges
+        .iter()
+        .enumerate()
+        .find(|(index, line_range)| {
+            offset < line_range.end || (*index + 1 == ranges.len() && offset == line_range.end)
+        })
+        .expect("every source boundary must belong to one authored line");
+    let line_text = &source[line_range.start..line_range.visible_end];
+    let authored_offset = offset.saturating_sub(line_range.start).min(line_text.len());
+    let mut scalar_column = 0u32;
+    let mut utf16_column = 0u32;
+
+    for (byte_offset, scalar) in line_text.char_indices() {
+        if byte_offset >= authored_offset {
+            break;
+        }
+        scalar_column += 1;
+        utf16_column += scalar.len_utf16() as u32;
+    }
+
+    (line_number as u32, scalar_column, utf16_column, line_text)
+}
+
+#[test]
+fn line_index_matches_an_independent_unicode_and_newline_oracle_at_every_boundary() {
+    let source = "ascii é€😀\n\r\n\r\n\nx\rfinal é€😀";
+    let reference_ranges = reference_line_ranges(source);
+    let line_starts = line_start_offsets(source);
+    let line_index = LineIndex::new(source, &line_starts);
+
+    assert_eq!(
+        reference_ranges.len(),
+        6,
+        "the authored fixture must retain its three empty terminator-only lines"
+    );
+    assert_eq!(line_index.line_count() as usize, reference_ranges.len());
+
+    let offsets = source
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(source.len()));
+    for offset in offsets {
+        let (line, scalar_column, utf16_column, line_text) =
+            reference_position(source, &reference_ranges, offset);
+
+        assert_eq!(
+            line_index.position(offset as u32),
+            Some(LinePosition {
+                line,
+                column: scalar_column,
+            }),
+            "scalar position disagreed at source byte {offset}"
+        );
+        assert_eq!(
+            line_index.line_of_offset(offset as u32),
+            Some(line),
+            "line lookup disagreed at source byte {offset}"
+        );
+        assert_eq!(
+            line_index.utf16_column(offset as u32),
+            Some(utf16_column),
+            "UTF-16 position disagreed at source byte {offset}"
+        );
+        assert_eq!(
+            line_index.line_text(line),
+            Some(line_text),
+            "visible line text disagreed at source byte {offset}"
+        );
+    }
 }

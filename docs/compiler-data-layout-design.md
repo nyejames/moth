@@ -1575,7 +1575,11 @@ must still demonstrate that the overall compiler actually retains less memory.
 
 ### Layout tests
 
-A dedicated layout test module asserts at least:
+Every width below is asserted beside the type it constrains, by the slice that introduces that
+type: a compile-time `const _: () = assert!(…)` in the module that owns the packing, or a size
+assertion in that module's own test file. A single shared layout module was rejected during
+implementation because it puts the assertion a file away from the layout it protects. The required
+set is:
 
 ```rust
 assert_eq!(size_of::<SourceId>(), 4);

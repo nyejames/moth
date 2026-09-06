@@ -1240,11 +1240,44 @@ Three obligations follow from this slice:
   byte-anchored line is the correct one, which a test now pins, and 1F4 removes the stale field
   rather than repairing it.
 
+**Delivered as 1C5.** The invariants the earlier slices left unproven are now tests with
+independent oracles rather than restatements of the code: a deterministic sweep constructs 2,075
+ranges across both regimes, asserts each one chose the regime the architecture's rule requires and
+resolves it through both the live builder and the frozen table; the `u32` end boundary proves
+`EndUnrepresentable` instead of wrapping; and a reference oracle written from the authored
+line-break rule is compared against `LineIndex` at every char boundary of a source mixing LF,
+CRLF, bare CR, empty lines, two-, three- and four-byte scalars and no final newline.
+
+The reserved all-ones word needed a different test than the one first written. A sweep that
+constructed spans and asserted their logical word was not the reserved value could never fail:
+`load_logical` subtracts one from a `NonZeroU32`, so that word is unrepresentable at the span
+level, and `store_logical` panics before a span exists. The invariant lives in the codec's
+admissible domain, so the test now pins that domain and its reason — the last usable extended
+index encodes and decodes back, the next index leaves the domain, and that index is exactly the
+one whose encoding would be the reserved word. The audit that caught this also caught that the
+discarded sweep duplicated an existing 4,194,303-row table fill; the source tests' peak memory
+fell from 85 MB to 51 MB when it went.
+
+Three things the slice settled beyond adding tests:
+
+- Layout widths are asserted beside the type they constrain, not in one shared module. The
+  architecture document said "a dedicated layout test module"; the assertions already lived next to
+  `LocalSpan`, `SourceId` and `PathId`, which is where a width belongs, so the authority was
+  corrected to describe that instead.
+- `LocalSpan` gained a `pub(super)` `logical_word()`, which the generated sweep and the overflow
+  test use to name the chosen regime without the packing becoming public.
+- `live_builder_and_frozen_table_resolve_the_same_range` was deleted: the generated sweep asserts
+  exactly its contract over 2,075 ranges instead of one.
+
+The malformed-source coverage runs through the lexer's own end-of-source path rather than a
+hand-built scanner, and records what that path actually reports: an unfinished `[$` names the `$`
+it could not complete, not a zero-width point at the end of the file.
+
 - [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
 - [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
 - [x] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations. **Frozen-record half deferred to 1D:** see the delivery note above.
 - [x] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion. **Widened at delivery:** the slice also had to decide the line-break set, chose the tokenizer's, and had to make `TokenStream::next` the single owner of the authored line counter before the two models could agree; see the delivery note above.
-- [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
+- [x] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests. **Narrowed at delivery:** join and ordering were already covered by 1C3's named operations tests, so the slice added the gaps rather than a second layer; see the delivery note above.
 - [ ] **1C6 — registration slot and loaded record:** split the dense array into a compact
   registration slot per candidate and a loaded record that owns text, line starts and extended
   spans unconditionally; keep an unreadable source's failure at the slot layer and remove the

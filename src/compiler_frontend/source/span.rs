@@ -139,6 +139,11 @@ impl LocalSpan {
         Ok(Self(store_logical(logical)))
     }
 
+    // The reserved-value test reads the packed logical word without exposing its representation.
+    pub(super) fn logical_word(self) -> u32 {
+        load_logical(self.0)
+    }
+
     /// Zero-length span at `offset`, used for insertion points, EOF and file-level failures.
     pub fn insertion_point(
         offset: u32,

@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
+
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
@@ -2390,4 +2391,52 @@ fn skipped_trivia_is_excluded_from_the_following_token_range() {
             "{source:?}: Eof is a zero-width insertion point at the end of the source"
         );
     }
+}
+
+#[test]
+fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
+    let string_source = "prefix = 1\r\nvalue = \"authored text";
+    let (string_diagnostic, _string_table) = tokenize_source_error(string_source);
+
+    assert_eq!(
+        string_diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
+    );
+    let string_start = string_diagnostic.primary_location.start_byte;
+    let string_end = string_diagnostic.primary_location.end_byte;
+    assert_eq!(
+        string_source.get(string_start as usize..string_end as usize),
+        Some("\"authored text"),
+        "unterminated-string diagnostics must retain the authored byte range"
+    );
+    let string_line_starts = line_start_offsets(string_source);
+    let string_line_index = LineIndex::new(string_source, &string_line_starts);
+
+    assert_eq!(string_line_index.line_of_offset(string_start), Some(1));
+    assert_eq!(string_line_index.line_of_offset(string_end), Some(1));
+
+    // The lexer's own end-of-source path: a style directive name that never arrives.
+    let template_source = "prefix = 1\r\nvalue = [$";
+    let (template_diagnostic, _template_string_table) = tokenize_source_error(template_source);
+
+    assert_eq!(
+        template_diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+    );
+    let template_start = template_diagnostic.primary_location.start_byte;
+    let template_end = template_diagnostic.primary_location.end_byte;
+    assert_eq!(
+        template_source.get(template_start as usize..template_end as usize),
+        Some("$"),
+        "an end-of-source diagnostic names the authored character it could not complete"
+    );
+
+    let template_line_starts = line_start_offsets(template_source);
+    let template_line_index = LineIndex::new(template_source, &template_line_starts);
+
+    assert_eq!(
+        template_line_index.line_of_offset(template_start),
+        Some(1),
+        "the reported range belongs to the line the author left unfinished"
+    );
 }
