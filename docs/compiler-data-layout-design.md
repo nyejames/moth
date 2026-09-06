@@ -452,6 +452,43 @@ Selection rules, in order:
 The initial design default is therefore 22 start/index bits and 10 length bits. Benchmark evidence
 may select another listed split, but it may not invent an unreviewed format.
 
+#### Selected split, frozen by measurement
+
+`LENGTH_BITS = 10`: **22 start/index bits, 10 length bits**, a 4 MiB inline start range and a
+1,022-byte inline maximum length. The measured corpus is 4,585 tokenized sources, 2,352,836 bytes
+and 286,779 exact token spans; the census is `just span-census` and its evidence is recorded in
+`benchmarks/frontend-optimization-results.md`.
+
+| `LENGTH_BITS` | Extended spans | Excess over the best | Share of all spans | Max entries in one source | Extended-table bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 808 | +763 | 0.266% | 49 | 6,464 |
+| 9 | 453 | +408 | 0.142% | 22 | 3,624 |
+| 10 | 249 | +204 | 0.071% | 16 | 1,992 |
+| 11 | 123 | +78 | 0.027% | 9 | 984 |
+| 12 | 45 | — | — | 5 | 360 |
+
+No candidate suffers a start overflow: the largest source is 92,557 bytes, well under the tightest
+candidate's 1 MiB start range. Rules 1 and 2 reject nothing. Every candidate can index four times
+its observed maximum per-source extended count with room to spare: usable capacities of
+16,777,215, 8,388,607, 4,194,303, 2,097,151 and 1,048,575 entries stand against required margins of
+196, 88, 64, 36 and 20, and even the smallest usable capacity exceeds its requirement by over
+5,000 times. The extended table can encode any range exactly, so no source is impossible to
+encode. Rule 3 prefers `LENGTH_BITS = 12`; rule 4 then admits every candidate within 0.1% of it —
+10, 11 and 12 — and selects the largest inline start range among them, which is
+`LENGTH_BITS = 10`. Rule 5 is not reached.
+
+Timing does not separate the candidates. Encoding all 286,779 spans takes roughly 9 ms and
+decoding them roughly 7 ms for every candidate, and the same candidate varies more between runs
+than the candidates vary from each other in one run, with the fastest-to-slowest ordering changing
+run to run. No candidate is timing-preferred on this evidence, so the decision rests on
+extended-span count and start range alone. The measurement establishes nothing further: it times an
+enum-tagged prototype, not the packed production codec, so it predicts neither `LocalSpan`'s speed
+nor that the selected split is free of a cost the prototype cannot express.
+
+Length overflow is one authored shape: a long `StringSliceLiteral`, almost always a template body
+in a documentation `.mtf`. The longest single span in the corpus is 31,475 bytes. Median span
+length is 1 byte and p99 is 52 bytes, so the inline case is overwhelmingly the common case.
+
 ### Extended-span insertion
 
 Each mutable source record owns its extended-span builder. A source tokenizer or parser can append to
@@ -486,6 +523,29 @@ It is accepted only if all of the following are true:
 Failure of any condition rejects the experiment. The result is recorded as a deliberately deferred
 or rejected optimisation in the roadmap. A durable span must never store an instruction that asks a
 renderer to reparse source.
+
+#### Result: deliberately deferred, not evaluated
+
+No terminator prototype was built at slice 1C2, and none of the eight acceptance gates was
+evaluated. This is a deliberate decision not to spend the investigation, recorded here as the
+authority requires, and it is not a measured failure of any gate.
+
+The census bounds what the investigation could win. At the selected split the exact overflow-table
+design retains **1,992 bytes** for the entire corpus: 249 extended spans at 8 bytes each, against
+2,352,836 bytes of source text. Eliminating that table outright — a saving no real design achieves
+— would recover 0.085% of the text those spans point into, and the memory gate's own bar is
+199 bytes. An optimisation whose entire ceiling is under 2 KB does not justify prototyping a second
+span encoding, so the work is declined on that ground alone.
+
+Two things are explicitly **not** claimed. The memory gate is not shown to be unreachable: the
+corpus's largest start and length both fit in 24 bits, so a packed pair of endpoints is a concrete
+6-byte match record, and 249 such records retain 1,494 bytes, which is 25% below the baseline.
+Nor is the auditability gate shown to fail, because no implementation exists to audit. A future
+reviewer should treat both gates as open questions, not as settled against the design.
+
+Reopening is legitimate when the premise changes: a corpus whose extended-span retention is large
+enough that a fraction of it is worth engineering. The absolute figure above, not this paragraph,
+is the thing to re-measure.
 
 ### Span API
 
@@ -1637,7 +1697,7 @@ phase's explicit stop/go gate accepts them:
 - process-isolated compiler workers
 - persistent serialization and remapping of `SourceId`, `PathId`, diagnostic IDs and type-display IDs
 - procedural-macro or build-script diagnostic schema generation
-- terminator-match span encoding when the required experiment does not beat exact overflow storage
+- terminator-match span encoding, deferred undone at slice 1C2 with its acceptance gates unevaluated
 - token records smaller than 8 bytes
 - global conversion of all `StringId`, `TypeId` and unrelated compiler IDs to non-zero or packed forms
 - memory mapping or compression of retained source snapshots

@@ -3050,3 +3050,116 @@ compile ~20ms as its top stages.
 
 This deferral does not block Phase 1; it is recorded on its owning slice in the plan, and the plan's
 Phase 1 slice order was changed in this phase so it is actually executable.
+
+## Data Layout Migration - Span Census and Encoding Selection - 2026-09-06
+
+Slice 1C2. Anchored at commit `14ab178d1`, which made token byte offsets exact. Command:
+`just span-census`; machine-readable report at `target/span-census.json`.
+
+### Corpus
+
+4,626 files walked under `benchmarks/`, `docs/src/` and `tests/`; 4,585 tokenized, 2,352,836 source
+bytes, 286,779 exact token spans, 896 ms wall time. The byte total counts only successfully
+tokenized `.moth` and `.mtf` sources.
+
+This is a later corpus snapshot than Phase 0's source-size census, with different inclusion
+criteria, and the two are not reconciled file by file. Phase 0 counted all 4,584 `.moth`, `.mtf`
+and `.js` files at 2,354,191 bytes; this run walks 4,626 and measures the 4,585 it tokenizes.
+An independent walk of the same three roots today finds 4,609 `.moth`/`.mtf` files at 2,353,813
+bytes plus 17 `.js`, which reconciles against this census both ways: 4,609 + 17 = 4,626 walked, and
+4,585 tokenized + 24 failed = 4,609, with the 977-byte difference being the failed fixtures. The
+corpus has grown since Phase 0; what both snapshots agree on is that no candidate suffers a start
+overflow.
+
+17 `.js` files (2,496 bytes) are excluded: the Moth tokenizer never produces spans for JavaScript,
+which is scanned by the HTML project's own byte-cursor parsers.
+
+24 files fail tokenization and are reported rather than dropped. Every one contains deliberately
+invalid syntax: 6 `InvalidPath`, 5 `InvalidNumberLiteral`, 5 `CommonSyntaxMistake`, 2
+`UnescapedImplicitTemplateClose`, 2 `InvalidStyleDirective`, 2 `InvalidCharacter`,
+1 `UnterminatedStringLiteral`, 1 `InvalidStringEscape`. Most are `tests/cases/*_rejected` or
+`*_failure` fixtures whose contract is to be rejected. Two are not: `diagnostic_quality_test`
+exists to produce a diagnostic worth reading, and `moth_template_unimported_entry_root_ignored`
+is a `mode = "success"` fixture whose `unused.mtf` carries an unmatched `]` precisely because the
+compiler must never import it. No source the compiler is expected to accept is missing from the
+census.
+
+The census tokenizes with the HTML project's style directives merged in, exactly as
+`moth_template::compile` does. An earlier run used built-ins alone and lost 276 documentation
+templates to `InvalidStyleDirective` - precisely the files that carry the longest spans. The
+selection below was not made on that run.
+
+### Span length distribution
+
+Min 0, median 1, p95 13, p99 52, max 31,475 bytes.
+
+| Length bucket | Spans |
+| --- | ---: |
+| 0-254 | 285,971 |
+| 255-510 | 355 |
+| 511-1,022 | 204 |
+| 1,023-2,046 | 126 |
+| 2,047-4,094 | 78 |
+| 4,095+ | 45 |
+
+### Candidate results
+
+| `LENGTH_BITS` | Total spans | Inline | Start overflow | Length overflow | Extended | Max in one source | Extended-table bytes | Construction | Resolution |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 286,779 | 285,971 | 0 | 808 | 808 | 49 | 6,464 | 9.82 ms | 7.05 ms |
+| 9 | 286,779 | 286,326 | 0 | 453 | 453 | 22 | 3,624 | 9.86 ms | 7.01 ms |
+| 10 | 286,779 | 286,530 | 0 | 249 | 249 | 16 | 1,992 | 9.68 ms | 6.95 ms |
+| 11 | 286,779 | 286,656 | 0 | 123 | 123 | 9 | 984 | 9.78 ms | 6.78 ms |
+| 12 | 286,779 | 286,734 | 0 | 45 | 45 | 5 | 360 | 9.74 ms | 6.85 ms |
+
+Each candidate's inline count equals the cumulative length buckets below its limit, and every one
+of the 286,779 spans round-trips through all five prototype codecs. The counts are exact and
+reproduce run to run; the two timing columns are one run's sample and do not. Repeating the census
+moves a single candidate's construction time by more than the whole spread across candidates, and
+changes which candidate is fastest, so no candidate is timing-preferred. The prototypes are
+enum-tagged rather than packed, so these figures bound nothing about production `LocalSpan` speed
+either.
+
+Start overflow is zero everywhere. The largest source is 92,557 bytes, an order of magnitude below
+the tightest candidate's 1 MiB start range, as Phase 0 predicted. Selection is decided by length
+overflow alone.
+
+### Selection
+
+**`LENGTH_BITS = 10`** - 22 start/index bits, 10 length bits, 4 MiB inline start range, 1,022-byte
+inline maximum length. Frozen in `docs/compiler-data-layout-design.md`.
+
+Applying the authority's rules in order: rules 1 and 2 reject nothing. The smallest usable index
+space is 1,048,575 entries at `LENGTH_BITS = 12`, against a largest observed per-source extended
+count of 49, so every candidate clears four times its own observed maximum by over 5,000 times,
+and the extended table encodes any range exactly. Rule 3 prefers `LENGTH_BITS = 12` with 45
+extended spans. Rule 4 then
+admits every candidate within 0.1% of the total span count (287 spans) of that best: 10 is 204
+behind (0.071%) and 11 is 78 behind (0.027%), while 9 is 408 behind (0.142%) and 8 is 763 behind
+(0.266%). Among the admitted three, the largest inline start range wins, which is
+`LENGTH_BITS = 10`. Rule 5 is not reached.
+
+The measured outcome agrees with the architecture's default 22/10 split. That default is now
+evidence, not an assumption.
+
+### Terminator-based encoding experiment: deferred, not evaluated
+
+No prototype was built and no acceptance gate was evaluated. The census bounds the prize instead,
+and the prize decides the priority: at the selected split the exact overflow-table design retains
+1,992 bytes for the entire corpus, so deleting it outright would recover 0.085% of the 2,352,836
+bytes of source those spans point into, and the memory gate's own bar is a 199-byte saving. That
+is not worth a second span encoding, so the investigation is declined.
+
+The gates remain open questions rather than settled failures. In particular the memory gate is not
+unreachable: every start and length in this corpus fits in 24 bits, so a packed endpoint pair is a
+concrete 6-byte match record, and 249 of them would retain 1,494 bytes - 25% below the 8-byte
+baseline, which clears the gate on arithmetic alone. The auditability condition is equally
+unassessed, there being no implementation to audit. Reopening is warranted if extended-span
+retention ever becomes large enough for a fraction of it to matter.
+
+### Deferral closed
+
+The Phase 0 deferral "Exact span start/length histograms with per-candidate boundary buckets" is
+discharged by this section. Its recorded owner was written as slice 1C3 consumed by 1C1, under the
+pre-activation numbering; the work landed as 1C1 (byte cursor and line index) followed by 1C2
+(this census), which is the same order under the corrected names.

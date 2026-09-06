@@ -6,6 +6,7 @@
 //! without subprocess overhead.
 
 pub mod frontend;
+pub mod span_census;
 
 /// Stable timing observation schema exposed by the in-process benchmark API.
 #[cfg(feature = "timers")]
@@ -68,6 +69,14 @@ pub use frontend::{
     FrontendBenchmarkOptions, FrontendBenchmarkOutcome, FrontendBenchmarkReport,
     FrontendBenchmarkStage, run_frontend_benchmark,
 };
+
+pub use span_census::{
+    CandidateSpanStats, ExcludedJsSources, LengthDistribution, LongSpan, SpanCensus,
+    SpanCensusError, StartDistribution, TokenizeFailure, run_span_census,
+};
+
+#[cfg(test)]
+mod span_census_tests;
 
 #[cfg(test)]
 mod tests;

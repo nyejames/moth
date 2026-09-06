@@ -287,8 +287,21 @@ fn parse_args_honesty_audit_rejects_anything_else() {
 }
 
 #[test]
+fn parse_args_span_census() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["span-census"]))),
+        BenchmarkMode::SpanCensus
+    );
+}
+
+#[test]
 fn top_level_usage_lists_every_audit_mode() {
-    for mode in ["honesty-audit", "source-audit", "feature-lane-check"] {
+    for mode in [
+        "honesty-audit",
+        "source-audit",
+        "feature-lane-check",
+        "span-census",
+    ] {
         assert!(
             TOP_LEVEL_USAGE.contains(mode),
             "usage does not mention '{mode}', so nobody running `xtask` learns it exists"

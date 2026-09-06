@@ -27,7 +27,8 @@ Modes:
   feature-lane-check   Check feature-lane coverage and write the coverage report
   source-audit         Apply the broad-source architecture bans and write their report
   honesty-audit        Classify the test-honesty findings and write the canonical inventory
-                       (use --update-evidence to refresh the tracked durable copy)";
+                       (use --update-evidence to refresh the tracked durable copy)
+  span-census          Measure LocalSpan bit-split candidates over the corpus";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -69,6 +70,8 @@ pub enum BenchmarkMode {
     FeatureLaneCheck,
     /// Apply the broad-source architecture bans across the workspace.
     SourceAudit,
+    /// Measure LocalSpan bit-split candidates over the representative corpus.
+    SpanCensus,
     /// Classify the test-honesty findings and write the canonical honesty inventory.
     ///
     /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
@@ -123,6 +126,7 @@ impl BenchmarkMode {
             "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
             "source-audit" => Some(BenchmarkMode::SourceAudit),
+            "span-census" => Some(BenchmarkMode::SpanCensus),
             _ => None,
         };
 

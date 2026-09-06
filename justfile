@@ -81,6 +81,10 @@ timers-erasure-check:
 source-audit:
     cargo run --quiet --package xtask --bin xtask -- source-audit
 
+# Measure LocalSpan start/length bit-split candidates over the representative corpus.
+span-census:
+    cargo run --quiet --package xtask --bin xtask -- span-census
+
 # Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
 # features across the resolve graph and always enables `timers` through xtask's dependency, so it
 # can never run the default configuration.

@@ -520,10 +520,10 @@ Inventory:
   probe deleted after recording. Durable layout assertions land with the replacement types in
   Phase 1, so no predecessor-only layout-report module was added.
 - [x] record the corpus source-size distribution, which decides the `LocalSpan` start-bit gates
-- [ ] **owned by Slice 1C2:** exact span start/length histograms with boundary buckets for every
-  candidate split. The current model stores line/column, not byte offsets, so the census cannot run
-  against today's spans. Slice group 1C was reordered at activation so the byte cursor and line
-  index land first and the census runs against real offsets where the selection decision lives.
+- [x] **owned by Slice 1C2, delivered there:** exact span start/length histograms with boundary
+  buckets for every candidate split. The Phase 0 model stored line/column, not byte offsets, so the
+  census could not run against those spans. Slice group 1C was reordered at activation so the byte
+  cursor and line index land first; 1C1 supplied the offsets and 1C2 ran the census against them.
 - [x] add the `data_layout` case group to `benchmarks/manifest.toml`, extend `BenchmarkExpectation`
   with expected warning and diagnosed outcomes, add `BenchmarkSuiteKind::DataLayout` and add the
   `just bench-data-layout-check` / `just bench-data-layout` recipes. Built in Phase 0 rather than
@@ -1141,8 +1141,18 @@ columns keep their off-by-one until 1D removes them. `Eof` is a zero-width inser
 `str::lines()` semantics, and the terminal/dev-server renderers read lines through it instead of
 rescanning the snapshot.
 
+**Delivered as 1C2.** `LENGTH_BITS = 10` — the 22/10 split — selected by measurement over 286,779
+exact token spans in 4,585 sources. Every candidate is start-overflow-free, so the rules decide on
+length overflow: rule 3 prefers 12, rule 4 admits 10, 11 and 12 as within 0.1% of it, and the
+largest inline start range among those wins. The terminator experiment was **not** run: the census
+bounds its entire prize at 1,992 bytes for the whole corpus, which does not justify the
+investigation, so it is recorded as a deliberate deferral with no gate evaluated — the clause below
+is amended to match what was actually decided. `just span-census` is the instrument; constants are
+frozen in `docs/compiler-data-layout-design.md` and the evidence is in
+`benchmarks/frontend-optimization-results.md`.
+
 - [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
-- [ ] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, run the bounded terminator experiment once, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone.
+- [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
 - [ ] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
 - [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
 - [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
