@@ -41,7 +41,8 @@ fn directive_tokens(source: &str, string_table: &mut StringTable) -> FileTokens 
         string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
 
     tokens.index = tokens
         .tokens

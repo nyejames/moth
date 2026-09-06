@@ -48,12 +48,12 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizeOutput, TokenizerEntryMode};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -152,6 +152,7 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
     Moth {
         source_path: PathBuf,
         tokens: Box<FileTokens>,
+        span_builder: ExtendedSpanBuilder,
     },
     MothTemplate {
         source_code: &'a str,
@@ -275,7 +276,7 @@ impl CompilerFrontend {
         module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
-    ) -> Result<FileTokens, FileFrontendPrepareFailure> {
+    ) -> Result<TokenizeOutput, FileFrontendPrepareFailure> {
         let map_tokenize_error = |diagnostic| {
             FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                 warnings: Vec::new(),
@@ -336,6 +337,7 @@ impl CompilerFrontend {
             FrontendFilePrepareSource::Moth {
                 source_path,
                 mut tokens,
+                span_builder,
             } => {
                 // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
@@ -346,9 +348,9 @@ impl CompilerFrontend {
                 tokens
                     .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
                 parse_file_headers_with_table(
                     &mut tokens,
+                    span_builder,
                     context.entry_file_path,
                     context.options,
                     local_string_table,
@@ -366,8 +368,7 @@ impl CompilerFrontend {
                         Some(mode) => mode,
                         None => unreachable!("Moth template has a tokenizer entry mode"),
                     };
-
-                let file_tokens = Self::tokenize_source(
+                let tokenization = Self::tokenize_source(
                     context.source_files,
                     context.style_directives,
                     source_code,
@@ -376,7 +377,7 @@ impl CompilerFrontend {
                     local_string_table,
                 )?;
 
-                prepare_moth_template_file(file_tokens, local_string_table)
+                prepare_moth_template_file(tokenization, local_string_table)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         }

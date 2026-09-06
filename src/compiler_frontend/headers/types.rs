@@ -27,7 +27,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -1078,10 +1078,16 @@ pub struct FileFrontendPrepareOutput {
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
     pub file_id: Option<SourceId>,
+    /// The one mutable source-local span table encoded by this file's token stream.
+    ///
+    /// The reader arrives with slice 1D4: the source preparation delta installs this table into
+    /// its record, and resolution begins there. It travels through file preparation now so the
+    /// tokenizer's rows are never separated from the spans that index them.
+    #[allow(dead_code)]
+    pub(crate) span_builder: ExtendedSpanBuilder,
     /// The sole file-owned table while source preparation remains mutable, then the immutable
     /// table shared by every retained header stream from this file.
     pub(crate) path_syntax: PreparedFilePathSyntax,
-    /// Number of tokens produced for this file before header parsing consumes the stream.
     ///
     /// WHY: benchmark instrumentation needs module-level token volume without retokenizing or
     /// walking source text after the Stage 2 preparation boundary.

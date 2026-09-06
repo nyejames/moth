@@ -678,11 +678,15 @@ fn parse_type_slice(
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeSlice> {
     let mut slice_tokens = tokens.to_vec();
-    let eof_location = tokens
+    let eof_anchor = tokens
         .last()
-        .map(|token| token.location.clone())
-        .unwrap_or_else(|| outer_stream.current_location());
-    slice_tokens.push(Token::new(TokenKind::Eof, eof_location));
+        .cloned()
+        .unwrap_or_else(|| outer_stream.current_token());
+    slice_tokens.push(Token::with_span(
+        TokenKind::Eof,
+        eof_anchor.location,
+        eof_anchor.span,
+    ));
 
     let mut stream = FileTokens::new_path_free_substream(
         outer_stream.src_path.clone(),

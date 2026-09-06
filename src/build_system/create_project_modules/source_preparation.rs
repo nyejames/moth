@@ -16,7 +16,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenizeOutput, TokenizerEntryMode};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -87,7 +87,7 @@ pub(super) fn prepare_discovery_source_text(
     // Tokenize the file once. Callers may supply source text that was read during an earlier
     // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
     // file before assembling `PreparedSourceInput` values.
-    let tokens = tokenize(
+    let tokenized = tokenize(
         &source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
@@ -110,7 +110,7 @@ pub(super) fn prepare_discovery_source_text(
 
     let prepared_output = prepare_discovery_file(
         file_path,
-        tokens,
+        tokenized,
         style_directives,
         project_path_resolver,
         entry_file_path,
@@ -170,17 +170,22 @@ pub(super) fn prepare_discovery_template_source(
 ///      complete headers, selection table and header-owned token substreams from that same pass.
 fn prepare_discovery_file(
     file_path: &Path,
-    tokens: FileTokens,
+    tokenized: TokenizeOutput,
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, SourceDiscoveryError> {
+    let TokenizeOutput {
+        file_tokens,
+        span_builder,
+    } = tokenized;
     prepare_discovery_output(
         FrontendFilePrepareSource::Moth {
             source_path: file_path.to_path_buf(),
-            tokens: Box::new(tokens),
+            tokens: Box::new(file_tokens),
+            span_builder,
         },
         style_directives,
         project_path_resolver,

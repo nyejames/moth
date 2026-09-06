@@ -29,7 +29,8 @@ fn tokenize_named_source(source: &str, file_name: &str) -> (FileTokens, StringTa
         &mut string_table,
         None,
     )
-    .expect("source should tokenize");
+    .expect("source should tokenize")
+    .file_tokens;
     (tokens, string_table)
 }
 

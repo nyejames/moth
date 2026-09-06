@@ -36,6 +36,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -57,6 +58,7 @@ fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
 // implicit start-function header for that file.
 pub(super) fn parse_headers_in_file(
     token_stream: &mut FileTokens,
+    span_builder: ExtendedSpanBuilder,
     context: &mut HeaderParseContext<'_>,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let mut state = HeaderFileParseState::new(token_stream.length);
@@ -64,7 +66,7 @@ pub(super) fn parse_headers_in_file(
     let result = parse_headers_in_file_inner(token_stream, context, &mut state);
 
     match result {
-        Ok(()) => finish_file_output(token_stream, context, state),
+        Ok(()) => finish_file_output(token_stream, span_builder, context, state),
         Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
             FileFrontendPrepareFailure::Diagnosed(state.into_error(*diagnostic)),
         ),
@@ -740,6 +742,7 @@ fn handle_runtime_template_item(
 
 fn finish_file_output(
     token_stream: &mut FileTokens,
+    span_builder: ExtendedSpanBuilder,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
@@ -792,11 +795,11 @@ fn finish_file_output(
 
     let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
-            .into_entry_output(token_stream, context.file_role)
+            .into_entry_output(token_stream, span_builder, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
-            .into_non_entry_output(token_stream, context.file_role)
+            .into_non_entry_output(token_stream, span_builder, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
     attach_structural_file_facts(&mut output, context.string_table)

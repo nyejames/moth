@@ -446,7 +446,8 @@ fn parse_ordinary_quoted_literal(
     )
     .map_err(|diagnostic| QuotedLiteralRejection {
         reason: diagnostic.kind.descriptor().title,
-    })?;
+    })?
+    .file_tokens;
 
     let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {
         return Err(QuotedLiteralRejection {

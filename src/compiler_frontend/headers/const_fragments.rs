@@ -80,12 +80,12 @@ pub(super) fn create_top_level_const_template(
         return Err(Box::new(compiler_error_to_diagnostic(&error)));
     }
 
-    // Add an EOF sentinel so downstream parsers can safely terminate even if
-    // expression parsing consumed to the end of this synthetic token stream.
-    body.push(Token {
-        kind: TokenKind::Eof,
-        location: token_stream.current_location(),
-    });
+    let eof_anchor = token_stream.current_token();
+    body.push(Token::with_span(
+        TokenKind::Eof,
+        eof_anchor.location,
+        eof_anchor.span,
+    ));
     let condition_references = collect_template_if_condition_references(&body);
 
     let full_name = scope.append(const_template_name);

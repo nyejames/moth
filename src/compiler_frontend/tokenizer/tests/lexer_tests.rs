@@ -17,6 +17,7 @@ use crate::compiler_frontend::style_directives::{
     TemplateHeadCompatibility,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 
@@ -65,7 +66,8 @@ fn tokenize_source_with_registry(
         &mut string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
     (file_tokens, string_table)
 }
 
@@ -85,7 +87,8 @@ fn tokenize_source_with_directives(
         &mut string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
     (file_tokens, string_table)
 }
 
@@ -102,7 +105,8 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
         &mut string_table,
         None,
     )
-    .expect("Moth template tokenization should succeed");
+    .expect("Moth template tokenization should succeed")
+    .file_tokens;
     (file_tokens, string_table)
 }
 
@@ -2438,5 +2442,175 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
         template_line_index.line_of_offset(template_start),
         Some(1),
         "the reported range belongs to the line the author left unfinished"
+    );
+}
+
+/// The interval bridge: a token's legacy byte range and its span agree, and the span names the
+/// authored text.
+///
+/// The legacy range is derived from the span at construction, so equality alone cannot catch a
+/// wrong span. The recovered slice is the independent oracle: every span is sliced out of the
+/// source and compared against the lexeme the author wrote. Token starts must not run backwards,
+/// but they may leave gaps, which is where the tokenizer skipped trivia or discarded a template
+/// body.
+#[test]
+fn every_token_legacy_byte_range_matches_its_encoded_span() {
+    let source = "name = \"café😀\"\r\nvalue = \"quoted\"\rbody = [$md:\nbody\r]\n[$note:\ndiscarded\r]\nlast = 2";
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("span-bridge.moth", &mut string_table);
+    let output = tokenize(
+        source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        None,
+    )
+    .expect("span bridge fixture should tokenize");
+    let resolver = output.span_builder.resolver();
+
+    assert!(
+        output
+            .file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::TemplateHead))
+    );
+    assert!(
+        output
+            .file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+    );
+
+    let mut previous_end = 0u32;
+    let authored: Vec<&str> = output
+        .file_tokens
+        .tokens
+        .iter()
+        .map(|token| {
+            let resolved = token.span.resolve_with(resolver);
+            assert_eq!(
+                (token.location.start_byte, token.location.end_byte),
+                (resolved.start(), resolved.end()),
+                "{:?} must derive its legacy byte range from its span",
+                token.kind
+            );
+            assert!(
+                resolved.start() >= previous_end,
+                "{:?} must not start before the previous token ended",
+                token.kind
+            );
+            previous_end = resolved.end();
+
+            source
+                .get(resolved.start() as usize..resolved.end() as usize)
+                .expect("a span must name a character-boundary range of its own source")
+        })
+        .collect();
+
+    assert_eq!(
+        authored,
+        vec![
+            "", // ModuleStart, before any authored byte
+            "name",
+            "=",
+            "\"café😀\"", // an astral scalar inside the quoted span
+            "\r\n",
+            "value",
+            "=",
+            "\"quoted\"",
+            "\r", // a bare carriage return ends the line on its own
+            "body",
+            "=",
+            "[",
+            "$md",
+            ":",
+            "\nbody\r", // template body text spanning a bare carriage return
+            "]",
+            "\n",
+            "[",
+            "$note",
+            ":",
+            "]", // the discarded body's closing bracket, anchored past the skipped run
+            "\n",
+            "last",
+            "=",
+            "2",
+            "", // Eof
+        ],
+        "resolved spans must slice the authored lexemes"
+    );
+}
+
+#[test]
+fn extended_token_span_resolves_exactly_through_live_builder() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("long-token.moth", &mut string_table);
+    let output = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        None,
+    )
+    .expect("long token should tokenize");
+    let resolver = output.span_builder.resolver();
+    let token = output
+        .file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("long string token");
+    let resolved = token.span.resolve_with(resolver);
+
+    assert_eq!(
+        output.span_builder.len(),
+        1,
+        "the long string is the only token past the inline length limit, so it owns the one row"
+    );
+    assert_eq!(resolved.start(), token.location.start_byte);
+    assert_eq!(resolved.end(), token.location.end_byte);
+    assert_eq!(
+        resolved.end() - resolved.start(),
+        u32::try_from(quoted.len() + 2).expect("fixture length fits in u32")
+    );
+}
+
+#[test]
+fn diagnostic_location_does_not_append_an_extended_span_row() {
+    let source = "x".repeat(3000);
+    let source_path = InternedPath::new();
+    let mut stream = TokenStream::new(&source, &source_path, TokenizerEntryMode::SourceFile);
+
+    for _ in 0..1500 {
+        stream.next();
+    }
+    stream.start_byte_offset = 0;
+    stream
+        .new_token(TokenKind::StringSliceLiteral(StringId::from_index(0)))
+        .expect("the long authored token should encode");
+    assert_eq!(
+        stream.extended_span_builder.len(),
+        1,
+        "the long authored token should require one extended row"
+    );
+
+    for _ in 0..1500 {
+        stream.next();
+    }
+    let diagnostic_location = stream.new_location();
+    assert_eq!(
+        (diagnostic_location.start_byte, diagnostic_location.end_byte),
+        (1500, 3000)
+    );
+    assert_eq!(
+        stream.extended_span_builder.len(),
+        1,
+        "a diagnostic location over another long range must not append an extended row"
     );
 }

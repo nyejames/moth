@@ -51,7 +51,8 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         &mut string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
 
     let name = string_table.intern("value");
     token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
@@ -244,7 +245,8 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
         &mut string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
 
     let name = string_table.intern("value");
     let assign_index = token_stream

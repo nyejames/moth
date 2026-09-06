@@ -35,7 +35,7 @@ use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageR
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeOutput, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -44,19 +44,20 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 fn moth_prepared_input(
     source_files: &SourceDatabase,
     source_path: &Path,
-    tokens: FileTokens,
+    tokenization: TokenizeOutput,
 ) -> PreparedSourceInput {
     let source_id = source_files
         .get_by_canonical_path(source_path)
         .expect("test source should have a registered identity")
         .id;
+    let (tokens, span_builder) = tokenization.into_parts();
     PreparedSourceInput::Moth {
         source_id,
         tokens: Box::new(tokens),
+        span_builder,
     }
 }
 
@@ -261,8 +262,10 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                                  source_path: &std::path::PathBuf,
                                  const_template_offset: usize,
                                  runtime_fragment_offset: usize| {
-        // Tokenize against the module string table before forking, mirroring Stage 0 retention.
-        let retained_tokens = CompilerFrontend::tokenize_source(
+        let TokenizeOutput {
+            file_tokens: retained_tokens,
+            span_builder,
+        } = CompilerFrontend::tokenize_source(
             &frontend.source_files,
             &frontend.style_directives,
             source_code,
@@ -286,6 +289,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 source: FrontendFilePrepareSource::Moth {
                     source_path: source_path.clone(),
                     tokens: Box::new(retained_tokens),
+                    span_builder,
                 },
                 const_template_offset,
                 runtime_fragment_offset,
@@ -1522,7 +1526,10 @@ fn parsed_prepared_output(
         )
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(
+    let TokenizeOutput {
+        file_tokens: mut tokens,
+        span_builder,
+    } = tokenize(
         source_code,
         &source_identity,
         TokenizerEntryMode::SourceFile,
@@ -1534,6 +1541,7 @@ fn parsed_prepared_output(
 
     parse_file_headers_with_table(
         &mut tokens,
+        span_builder,
         Path::new(source_name),
         &HeaderParseOptions::default(),
         string_table,

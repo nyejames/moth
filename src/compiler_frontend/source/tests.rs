@@ -1,9 +1,9 @@
 use super::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceKind, SourceProvenance,
-    SourceRecord, SourceRegistrationIndex, SourceSlot, SourceSpan, SpanCapacityReason,
-    SpanJoinError,
+    SourceRecord, SourceRegistrationIndex, SourceSlot, SpanCapacityReason,
     line_index::{LineIndex, LinePosition, line_start_offsets},
     record::ensure_source_snapshot_fits,
+    span::{SourceSpan, SpanJoinError},
 };
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};

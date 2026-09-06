@@ -36,7 +36,8 @@ fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTabl
         string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
 
     let open_index = token_stream
         .tokens

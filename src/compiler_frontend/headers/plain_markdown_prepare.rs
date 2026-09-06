@@ -75,6 +75,7 @@ pub(crate) fn prepare_plain_markdown_file(
         source_file: content_header.source_file.clone(),
         file_id: input.file_id,
         path_syntax: PreparedFilePathSyntax::empty(),
+        span_builder: crate::compiler_frontend::source::ExtendedSpanBuilder::new(),
         token_count: 0,
         token_stats: TokenStats::default(),
         file_role: FileRole::Normal,

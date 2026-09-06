@@ -53,7 +53,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeOutput, TokenizerEntryMode};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -599,7 +599,10 @@ impl MothTemplateScopeFixture {
 
             let source = match source_kind {
                 SourceFileKind::Moth => {
-                    let tokens = CompilerFrontend::tokenize_source(
+                    let TokenizeOutput {
+                        file_tokens: tokens,
+                        span_builder,
+                    } = CompilerFrontend::tokenize_source(
                         &self.source_files,
                         &style_directives,
                         &source_code,
@@ -618,6 +621,7 @@ impl MothTemplateScopeFixture {
                     FrontendFilePrepareSource::Moth {
                         source_path,
                         tokens: Box::new(tokens),
+                        span_builder,
                     }
                 }
                 SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {

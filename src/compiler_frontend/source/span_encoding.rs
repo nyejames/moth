@@ -5,10 +5,8 @@
 //! WHY:  raw packing must stay in one place so the census-frozen split cannot drift through
 //!       ad hoc bit math in consumers.
 //!
-//! Slice 1D is the first production caller. Until then this module is reachable only through
-//! [`super::span`], which is itself unused outside tests.
-
-#![allow(dead_code)]
+//! The tokenizer is the first production caller: every token it mints encodes its exact byte
+//! range here, through [`super::span`].
 
 use std::num::NonZeroU32;
 

@@ -15,7 +15,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeOutput, TokenizerEntryMode};
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fmt;
 use std::fs;
@@ -482,7 +482,10 @@ pub(super) fn tokenize_source(
 
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str(relative, &mut string_table);
-    let file_tokens = tokenize(
+    let TokenizeOutput {
+        file_tokens,
+        span_builder,
+    } = tokenize(
         source,
         &source_path,
         entry_mode,
@@ -495,12 +498,13 @@ pub(super) fn tokenize_source(
     let mut spans = Vec::with_capacity(file_tokens.tokens.len());
 
     for token in &file_tokens.tokens {
-        let start = token.location.start_byte;
-        let end = token.location.end_byte;
+        let resolved = token.span.resolve_with(span_builder.resolver());
+        let start = resolved.start();
+        let end = resolved.end();
 
         if end < start {
             return Err(format!(
-                "token {:?} has end_byte {end} before start_byte {start}",
+                "token {:?} has resolved end {end} before start {start}",
                 token_kind_name(&token.kind)
             ));
         }

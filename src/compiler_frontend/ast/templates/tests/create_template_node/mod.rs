@@ -81,7 +81,8 @@ fn template_tokens_from_source_with_style_directives(
         string_table,
         None,
     )
-    .expect("tokenization should succeed");
+    .expect("tokenization should succeed")
+    .file_tokens;
 
     tokens.index = tokens
         .tokens

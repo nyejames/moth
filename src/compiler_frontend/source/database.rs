@@ -262,8 +262,9 @@ impl SourceDatabase {
     ///
     /// Installation is monotonic: a pending or failed source never receives a table, and a
     /// loaded source can transition from absent to installed only once.
-    // The producer that freezes a builder is the tokenizer, which arrives in slice 1D2 and
-    // removes this allowance with the module-level ones 1C3 landed.
+    // Installing needs a mutable database, which parallel file workers never hold. The caller is
+    // therefore a post-worker merge boundary, reached once the source preparation delta of slice
+    // 1D4 carries each source's builder there.
     #[allow(dead_code)]
     pub(crate) fn install_extended_spans(
         &mut self,

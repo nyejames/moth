@@ -23,7 +23,8 @@ fn tokenize_source(
         &mut string_table,
         None,
     )
-    .expect("source should tokenize");
+    .expect("source should tokenize")
+    .file_tokens;
     (tokens, string_table)
 }
 

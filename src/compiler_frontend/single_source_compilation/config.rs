@@ -511,7 +511,7 @@ fn prepare_config_file(
 ) -> Result<Option<FileFrontendPrepareOutput>, CompilerMessages> {
     // Config uses the identity registered by its owning project boundary. Standalone config
     // service callers may omit that boundary identity.
-    let mut token_stream = match tokenize(
+    let mut tokenization = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
@@ -519,16 +519,16 @@ fn prepare_config_file(
         string_table,
         request.file_id,
     ) {
-        Ok(tokens) => tokens,
+        Ok(output) => output,
         Err(error) => {
             errors.push(*error);
             return Ok(None);
         }
     };
-    token_stream.canonical_os_path = Some(request.canonical_path.to_path_buf());
+    tokenization.file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
 
     let output = match prepare_file_from_tokens(
-        token_stream,
+        tokenization,
         request.authored_path,
         &HeaderParseOptions::default(),
         string_table,

@@ -42,6 +42,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -145,6 +146,7 @@ fn make_prepared_output(
     FileFrontendPrepareOutput {
         source_file,
         file_id: Some(file_id),
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -767,6 +769,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: None,
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 12,
         token_stats: TokenStats::default(),
@@ -872,6 +875,7 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: None,
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1016,6 +1020,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source.clone(),
         file_id: Some(SourceId::from_index(7)),
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 3,
         token_stats: TokenStats::default(),
@@ -1268,6 +1273,7 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source,
         file_id: Some(SourceId::from_index(3)),
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1358,6 +1364,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: None,
+        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),

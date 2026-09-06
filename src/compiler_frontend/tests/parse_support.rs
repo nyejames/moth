@@ -36,7 +36,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenizeOutput, TokenizerEntryMode};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -272,7 +272,7 @@ pub(crate) fn tokenize_source_for_test(
     source_code: &str,
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
-) -> Result<FileTokens, Box<CompilerDiagnostic>> {
+) -> Result<TokenizeOutput, Box<CompilerDiagnostic>> {
     CompilerFrontend::tokenize_source(
         &frontend.source_files,
         &frontend.style_directives,

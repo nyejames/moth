@@ -317,7 +317,7 @@ pub(super) fn prepare_owned_source_input(
                 string_table,
             ))
         })?;
-        Some(Box::new(
+        Some(
             tokenize(
                 source_code,
                 &interned_path,
@@ -327,19 +327,24 @@ pub(super) fn prepare_owned_source_input(
                 None,
             )
             .map_err(SourceDiscoveryError::Diagnostic)?,
-        ))
+        )
     } else {
         None
     };
 
     Ok(match *source_kind {
         SourceFileKind::Moth => {
-            let Some(tokens) = tokens else {
+            let Some(tokenization) = tokens else {
                 return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
                     "Moth source preparation completed without a token stream",
                 )));
             };
-            PreparedSourceInput::Moth { source_id, tokens }
+            let (file_tokens, span_builder) = tokenization.into_parts();
+            PreparedSourceInput::Moth {
+                source_id,
+                tokens: Box::new(file_tokens),
+                span_builder,
+            }
         }
         SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate { source_id },
         SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown { source_id },

@@ -5,6 +5,7 @@
 //! callers can run it against worker-local string tables before deterministic module aggregation.
 
 use crate::compiler_frontend::arena::TokenStats;
+use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
     DiagnosticOperator, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
@@ -28,7 +29,7 @@ use crate::compiler_frontend::tokenizer::text_modes::{
 };
 use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode,
-    TokenizerEntryMode,
+    TokenizeOutput, TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -47,10 +48,21 @@ pub const END_SCOPE_CHAR: char = ';';
 /// remain separate owners, so their plain results are adapted only where they enter this family.
 type LexerResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
+/// Mint the token the stream has just finished reading, from its anchored start to the cursor.
+///
+/// WHY: `return_token!` expands to this call, so every authored token in the lexer takes its
+/// span from the one encoder and reports a span-capacity failure through the same boundary.
+pub(crate) fn mint_token(stream: &mut TokenStream<'_>, kind: TokenKind) -> LexerResult<Token> {
+    stream.new_token(kind).map_err(|error| {
+        let compiler_error = stream.span_capacity_error(error);
+        Box::new(compiler_error_to_diagnostic(&compiler_error))
+    })
+}
+
 #[macro_export]
 macro_rules! return_token {
     ($kind:expr, $stream:expr $(,)?) => {
-        return Ok(Token::new($kind, $stream.new_location()))
+        return $crate::compiler_frontend::tokenizer::lexer::mint_token($stream, $kind)
     };
 }
 
@@ -469,7 +481,7 @@ pub fn tokenize(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     file_id: Option<SourceId>,
-) -> LexerResult<FileTokens> {
+) -> LexerResult<TokenizeOutput> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
@@ -480,9 +492,10 @@ pub fn tokenize(
     // `ModuleStart` is synthetic, but it can remain in a retained dormant `start` body. Give it
     // the source file scope so every token that crosses the prepared-file boundary has one
     // coherent source identity.
-    let mut token = Token::new(
+    let mut token = Token::with_span(
         TokenKind::ModuleStart,
         SourceLocation::new(src_path.to_owned(), Default::default(), Default::default()),
+        crate::compiler_frontend::source::LocalSpan::source_start(),
     );
     let mut last_meaningful_token_kind: Option<TokenKind> = None;
     let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
@@ -513,16 +526,21 @@ pub fn tokenize(
     }
 
     tokens.push(token);
-
-    let mut file_tokens = FileTokens::new_with_identity(
-        src_path.to_owned(),
-        file_id,
-        None,
-        tokens,
-        stream.path_syntax,
+    let path_syntax = std::mem::replace(
+        &mut stream.path_syntax,
+        crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
+    let span_builder = std::mem::replace(
+        &mut stream.extended_span_builder,
+        crate::compiler_frontend::source::ExtendedSpanBuilder::new(),
+    );
+    let mut file_tokens =
+        FileTokens::new_with_identity(src_path.to_owned(), file_id, None, tokens, path_syntax);
     file_tokens.token_stats = token_stats;
-    Ok(file_tokens)
+    Ok(TokenizeOutput {
+        file_tokens,
+        span_builder,
+    })
 }
 
 fn get_token_kind(

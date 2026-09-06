@@ -1186,8 +1186,9 @@ therefore `ExtendedSpanTable`, and the authority's `LocalSpan::resolve(&SourceRe
 The endpoints are already reachable through `ResolvedByteRange`.
 
 The module carries `allow(dead_code)` until 1D, which the style guide permits for clearly
-identified planned work. **1D must remove both suppressions and the `allow(unused_imports)` on the
-re-export**; if any survives, the slice that was supposed to consume this API did not.
+identified planned work. **1D must remove the module-wide suppressions and the
+`allow(unused_imports)` on the re-export**; an operation whose consumer has genuinely not landed
+yet keeps an item-level allowance naming that slice, but a module-wide one hides the rest.
 
 **Delivered as 1C4.** `src/compiler_frontend/source/line_index.rs` owns every line and column
 conversion as a borrowed view over one retained snapshot and its line-start table. Nothing is
@@ -1308,12 +1309,14 @@ text of provider-owned files, which exist only to hold an identity and are never
 ### Slice 1D — Migrate tokenization and source preparation
 
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
+  — **tokens carry exact spans as of 1D2a; the diagnostic half is 1D3**
 - [ ] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
 - [x] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
   `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
   `allow(unused_imports)` suppressions that 1C3 landed for the interval before this consumer
-  — **table and signatures delivered as 1D1; the suppressions go with 1D2, the first producer**
+  — **table and signatures delivered as 1D1; 1D2a retired both module-wide suppressions and
+  left item-level allowances on the consumer half, each naming its first caller's slice**
 - [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
   retained prepared facts without rereading, cloning or owning a second source snapshot
 - [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final
@@ -1341,10 +1344,42 @@ validation and is audited on its own:
   and a second install. The authority's unqualified names went to the consumer forms that read a
   frozen record or the database; the producer forms that hold a live builder took a `_with` suffix,
   which puts the qualifier on the smaller call-site population and keeps the authority's spelling.
-  One `allow(dead_code)` remains on the install until 1D2 calls it.
-- **1D2 — tokenizer emits local spans:** the tokenizer owns one `ExtendedSpanBuilder` per source and
-  gives every token an exact `LocalSpan`; `FileTokens` carries a final `SourceId`; span and
-  line-index suppressions go with the arrival of this consumer.
+  One `allow(dead_code)` remains on the install. Its caller cannot be the tokenizer: installation
+  needs `&mut SourceDatabase`, and file preparation runs in parallel workers holding `&SourceDatabase`
+  only. The mutable owners are the post-worker merge boundaries — `finalize_reachable_files`, the
+  HTML bundle's final database and `compile_directory_frontend` — which the builder reaches in 1D4,
+  so the allowance dies there.
+- **1D2 — tokenizer emits local spans.** Split in two: the span half and the identity half share
+  `FileTokens` and its seven constructors, but nothing else.
+  - **1D2a — token spans:** one `ExtendedSpanBuilder` per `TokenStream`, an exact `LocalSpan` on
+    every token, and the builder travelling beside the tokens it encoded. Retires the `span.rs` and
+    `span_encoding.rs` module suppressions.
+
+    **Delivered as 1D2a.** `return_token!` routes every authored token through one `mint_token`,
+    so a token's byte range is encoded once by the codec and its legacy `SourceLocation` range is
+    then read back out of that span. `tokenize` returns a `TokenizeOutput`: the tokens plus the
+    one builder whose rows they index. That pair travels as a pair through discovery, source
+    preparation, the parallel worker boundary and header parsing into
+    `FileFrontendPrepareOutput`, so no consumer can reach a source's tokens without the table
+    that resolves them. Borrowing the tokens stays free through `Deref`, which cannot separate
+    them; ownership is only available through `into_parts`.
+
+    Three things the clause did not predict. Tokens that stand in for an authored position — the
+    EOF terminators of declaration, function and loop sub-streams — copy both halves of that
+    position, while tokens with no authored text at all take a zero-width span at offset 0 under
+    a `debug_assert` that their location carries no bytes. A declaration shell can only name its
+    anchor as a `SourceLocation`, so `Token::terminator_at` pairs that anchor with a zero-width
+    span and dies in 1D5 when the shells carry spans of their own; anchoring those terminators on
+    the last initializer token instead moved `MOTH-RULE-0042` off the declaration it belongs to.
+    The `span_encoding.rs` suppression is retired, but `span.rs` keeps item-level allowances on
+    its consumer half — record-based resolution, global spans, joins and the frozen table — each
+    naming the slice that supplies its first caller. The module-wide suppression and the
+    `allow(unused_imports)` on the re-export are both gone: the re-export now lists exactly the
+    four names production uses, and the source tests reach the deferred types through
+    `super::span`.
+  - **1D2b — final token identity:** `FileTokens::file_id` becomes a final `SourceId`, which
+    removes the unregistered-path fallback in `source_identity_facts` and the `Option` unwrap
+    error paths in `export_projection`.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D4 — source preparation delta:** file workers return `SourcePreparationDelta` values keyed by

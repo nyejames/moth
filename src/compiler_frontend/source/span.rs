@@ -9,8 +9,7 @@
 //! Producers that still append to a source's builder use the resolver-taking `*_with` operations.
 //! Consumers use the unqualified record and database operations after the builder is installed
 //! into a frozen [`super::SourceRecord`]. This module does not convert bytes to lines or columns.
-
-#![allow(dead_code)]
+//!
 
 use super::span_encoding::{
     DecodedSpan, decode_logical, encode_extended_index, encode_inline, fits_inline, load_logical,
@@ -67,6 +66,9 @@ pub struct ExtendedSpanBuilder {
 /// Frozen extended-span table with no spare capacity.
 #[derive(Debug)]
 pub struct ExtendedSpanTable {
+    /// Read through [`ExtendedSpanTable::resolver`] and [`record_resolver`]; both reach
+    /// production when slice 1D4 installs a table on a loaded record.
+    #[allow(dead_code)]
     entries: Box<[ExtendedSpan]>,
 }
 
@@ -110,12 +112,17 @@ pub enum SpanCapacityReason {
 }
 
 /// Failure to join two global spans.
+///
+/// Returned by [`SourceSpan::join`], whose first caller is the diagnostic migration of slice 1D3.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanJoinError {
     DifferentSources { left: SourceId, right: SourceId },
     Capacity(SpanCapacityError),
 }
 
+/// A record's own resolver, available once slice 1D4 installs the source's frozen table.
+#[allow(dead_code)]
 fn record_resolver(
     source: &SourceRecord,
     source_identity: Option<SourceId>,
@@ -130,6 +137,15 @@ fn record_resolver(
 }
 
 impl LocalSpan {
+    /// The empty span at byte offset zero, for a synthetic token or anchor with no authored text.
+    ///
+    /// This is the one span a caller can name without the source's builder, because it always
+    /// packs inline. It goes through the codec rather than a literal so the packing stays owned
+    /// by `span_encoding`.
+    pub fn source_start() -> Self {
+        Self(store_logical(encode_inline(0, 0)))
+    }
+
     /// Encode the exact half-open range `[start, start + length)`.
     ///
     /// Inline packing is used when the frozen 22/10 split can hold both values. Otherwise the
@@ -160,6 +176,32 @@ impl LocalSpan {
         Ok(Self(store_logical(logical)))
     }
 
+    /// Resolve with a producer's live builder or a frozen table resolver.
+    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
+        match decode_logical(load_logical(self.0)) {
+            DecodedSpan::Inline { start, length } => {
+                ResolvedByteRange::from_start_length(start, length)
+            }
+
+            DecodedSpan::Extended { index } => {
+                let entry = resolver
+                    .extended_entry(index)
+                    .unwrap_or_else(|| resolver.report_unresolvable_index(index));
+
+                ResolvedByteRange::from_start_length(entry.start, entry.length)
+            }
+        }
+    }
+}
+
+/// The consumer half of a local span.
+///
+/// WHY: resolving against a `SourceRecord` needs the table slice 1D4 installs there, and
+/// insertion points, emptiness and joins get their first callers in the diagnostic, syntax and
+/// renderer migrations of slices 1D3, 1E and 1F. This module's tests exercise every operation
+/// here, so the allowance covers unreached callers rather than unproven code.
+#[allow(dead_code)]
+impl LocalSpan {
     // The reserved-value test reads the packed logical word without exposing its representation.
     pub(super) fn logical_word(self) -> u32 {
         load_logical(self.0)
@@ -179,23 +221,6 @@ impl LocalSpan {
     /// absent table is a compiler bug because its producer failed to install that builder.
     pub fn resolve(self, source: &SourceRecord) -> ResolvedByteRange {
         self.resolve_with(record_resolver(source, None))
-    }
-
-    /// Resolve with a producer's live builder or a frozen table resolver.
-    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
-        match decode_logical(load_logical(self.0)) {
-            DecodedSpan::Inline { start, length } => {
-                ResolvedByteRange::from_start_length(start, length)
-            }
-
-            DecodedSpan::Extended { index } => {
-                let entry = resolver
-                    .extended_entry(index)
-                    .unwrap_or_else(|| resolver.report_unresolvable_index(index));
-
-                ResolvedByteRange::from_start_length(entry.start, entry.length)
-            }
-        }
     }
 
     pub fn is_empty(self, source: &SourceRecord) -> bool {
@@ -236,6 +261,9 @@ impl LocalSpan {
     }
 }
 
+/// Global spans reach production with the diagnostics of slice 1D3, the first values that cross
+/// a source boundary. This module's tests prove every operation below.
+#[allow(dead_code)]
 impl SourceSpan {
     pub fn new(source: SourceId, local: LocalSpan) -> Self {
         Self { source, local }
@@ -375,19 +403,27 @@ impl ExtendedSpanBuilder {
         }
     }
 
+    pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
+        ExtendedSpanResolver {
+            entries: Some(&self.entries),
+            source_identity: None,
+        }
+    }
+}
+
+/// Row counts and the freeze that ends a source's production.
+///
+/// WHY: `freeze` is called by slice 1D4, which installs the finished table on the loaded record.
+/// The counts are how this module's tests and the tokenizer's tests state how many rows a source
+/// needed.
+#[allow(dead_code)]
+impl ExtendedSpanBuilder {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-
-    pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
-        ExtendedSpanResolver {
-            entries: Some(&self.entries),
-            source_identity: None,
-        }
     }
 
     pub fn freeze(self) -> ExtendedSpanTable {
@@ -397,6 +433,8 @@ impl ExtendedSpanBuilder {
     }
 }
 
+/// A frozen table is only read once slice 1D4 installs it on a loaded record.
+#[allow(dead_code)]
 impl ExtendedSpanTable {
     pub fn len(&self) -> usize {
         self.entries.len()

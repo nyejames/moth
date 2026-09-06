@@ -405,13 +405,10 @@ fn token_stream_with_eof(
     };
 
     let mut tokens_with_eof = tokens.to_vec();
-    let eof_location = tokens
-        .last()
-        .map(|token| token.location.clone())
-        .unwrap_or_else(|| first_token.location.clone());
+    let eof_anchor = tokens.last().unwrap_or(first_token);
     let src_path = first_token.location.scope.clone();
-
-    tokens_with_eof.push(Token::new(TokenKind::Eof, eof_location));
+    let eof_token = Token::with_span(TokenKind::Eof, eof_anchor.location.clone(), eof_anchor.span);
+    tokens_with_eof.push(eof_token);
 
     FileTokens::new_from_slice(src_path, None, None, tokens_with_eof, path_syntax)
         .map_err(ExpressionParseError::from)

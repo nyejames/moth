@@ -36,7 +36,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TemplateBodyMode, TokenizerEntryMode,
+    TemplateBodyMode, TokenizeOutput, TokenizerEntryMode,
 };
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
@@ -133,7 +133,7 @@ impl FrontendProject {
         }
     }
 
-    fn tokenize_all(&mut self) -> Vec<FileTokens> {
+    fn tokenize_all(&mut self) -> Vec<TokenizeOutput> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
 
         for file in &self.files {

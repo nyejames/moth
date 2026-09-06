@@ -5,18 +5,20 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 pub use crate::compiler_frontend::compiler_messages::source_location::{
     CharPosition, SourceLocation,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SpanCapacityError, SpanCapacityReason,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::token_log;
 use std::iter::Peekable;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::Chars;
 use std::sync::Arc;
@@ -100,11 +102,43 @@ impl TemplateBodyMode {
 pub struct Token {
     pub kind: TokenKind,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 impl Token {
+    /// Construct a synthetic token that has no authored source text.
+    ///
+    /// WHY: the empty span at offset zero is the only span nameable without the source's builder,
+    /// so the location must carry no authored byte range for the two to agree. Authored tokens
+    /// come from [`TokenStream::new_token`], and a synthetic token standing in for an authored
+    /// position copies that position's span through [`Self::with_span`].
     pub fn new(kind: TokenKind, location: SourceLocation) -> Self {
-        Self { kind, location }
+        debug_assert_eq!(
+            (location.start_byte, location.end_byte),
+            (0, 0),
+            "a synthetic token's location must have no authored byte range"
+        );
+        Self::with_span(kind, location, LocalSpan::source_start())
+    }
+
+    /// Construct a token from a span and the location derived from it.
+    pub fn with_span(kind: TokenKind, location: SourceLocation, span: LocalSpan) -> Self {
+        Self {
+            kind,
+            location,
+            span,
+        }
+    }
+
+    /// Construct a sub-stream terminator anchored at an authored position the caller can name
+    /// only as a [`SourceLocation`].
+    ///
+    /// WHY: a declaration shell hands its initializer parser a location but not yet a span, and
+    /// that location is what anchors every diagnostic the sub-stream raises, so it must not be
+    /// re-derived from whichever token happened to come last. The span is zero-width until slice
+    /// 1D5 gives the shells spans of their own, which is where this constructor dies.
+    pub fn terminator_at(location: SourceLocation) -> Self {
+        Self::with_span(TokenKind::Eof, location, LocalSpan::source_start())
     }
 }
 
@@ -620,6 +654,42 @@ impl FileTokens {
     }
 }
 
+/// Result of one lexical pass, retaining the source-local span table beside its tokens.
+///
+/// The builder is deliberately outside [`FileTokens`]. `FileTokens` is cloned when parser
+/// substreams are created, while this builder must remain the one mutable owner for every span
+/// encoded by the source's token stream.
+#[derive(Debug)]
+pub(crate) struct TokenizeOutput {
+    pub(crate) file_tokens: FileTokens,
+    pub(crate) span_builder: ExtendedSpanBuilder,
+}
+
+impl TokenizeOutput {
+    pub(crate) fn into_parts(self) -> (FileTokens, ExtendedSpanBuilder) {
+        (self.file_tokens, self.span_builder)
+    }
+}
+
+/// Borrowing the token stream is free; separating it from its builder is not.
+///
+/// WHY: consumers that only read tokens should not have to name the pair, but a borrow cannot
+/// move the stream away from the table its spans index. Ownership is taken through
+/// [`TokenizeOutput::into_parts`], where both halves travel together.
+impl Deref for TokenizeOutput {
+    type Target = FileTokens;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file_tokens
+    }
+}
+
+impl DerefMut for TokenizeOutput {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.file_tokens
+    }
+}
+
 pub struct TokenStream<'a> {
     pub file_path: &'a InternedPath,
     pub chars: Peekable<Chars<'a>>,
@@ -652,6 +722,10 @@ pub struct TokenStream<'a> {
     /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
     /// completes.
     pub path_syntax: PathSyntaxTable,
+    /// One mutable extended-span table for every token encoded by this source stream.
+    ///
+    /// This owner stays outside [`FileTokens`] because parser substreams clone that value.
+    pub extended_span_builder: ExtendedSpanBuilder,
 }
 
 // WHAT: Metadata for one template nesting level in the tokenizer.
@@ -714,6 +788,7 @@ impl<'a> TokenStream<'a> {
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
             path_syntax: PathSyntaxTable::new(),
+            extended_span_builder: ExtendedSpanBuilder::new(),
         }
     }
 
@@ -771,6 +846,70 @@ impl<'a> TokenStream<'a> {
             start_byte,
             self.byte_offset,
         )
+    }
+    /// Mint one authored token and encode its exact byte interval.
+    ///
+    /// The span is encoded first and then resolved to fill the legacy byte range. Diagnostic
+    /// locations continue to use [`Self::new_location`] and therefore never append a row.
+    pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
+        let start_pos = self.start_position;
+        let start_byte = self.start_byte_offset;
+        let length = self
+            .byte_offset
+            .checked_sub(start_byte)
+            .expect("token byte cursor moved before its anchored start");
+        let span = LocalSpan::exact(start_byte, length, &mut self.extended_span_builder)?;
+        let resolved = span.resolve_with(self.extended_span_builder.resolver());
+
+        self.start_position = self.position;
+        self.start_byte_offset = self.byte_offset;
+
+        let location = SourceLocation::with_byte_range(
+            self.file_path.to_owned(),
+            start_pos,
+            self.position,
+            resolved.start(),
+            resolved.end(),
+        );
+        Ok(Token::with_span(kind, location, span))
+    }
+
+    /// Convert a span-capacity failure into the tokenizer's boundary error.
+    ///
+    /// The error's location carries this source's identity, so the message names only the
+    /// offending interval. The extended-table limit is reported in the file lane today, beside
+    /// the source-size limit in `source::record`; Phase 5 owns reclassifying both. An
+    /// unrepresentable `u32` end is a compiler bug instead, because slice 1C6 already rejects
+    /// any snapshot whose offsets a `u32` cannot address.
+    pub fn span_capacity_error(&self, error: SpanCapacityError) -> CompilerError {
+        let (message, error_type) = match error.reason() {
+            SpanCapacityReason::ExtendedTableFull => (
+                format!(
+                    "this source needs an exact token span at byte offset {} with length {}, but \
+                     its span table cannot hold another long or late range",
+                    error.start(),
+                    error.length(),
+                ),
+                ErrorType::File,
+            ),
+            SpanCapacityReason::EndUnrepresentable => (
+                format!(
+                    "token span at byte offset {} with length {} ends past u32::MAX in a source \
+                     that was accepted as addressable; this is a compiler bug",
+                    error.start(),
+                    error.length(),
+                ),
+                ErrorType::Compiler,
+            ),
+        };
+
+        let mut compiler_error = CompilerError::compiler_error(message).with_error_type(error_type);
+        compiler_error.location = SourceLocation::new(
+            self.file_path.clone(),
+            CharPosition::default(),
+            CharPosition::default(),
+        );
+        compiler_error
     }
 
     /// Anchor the next token's character columns at the cursor.

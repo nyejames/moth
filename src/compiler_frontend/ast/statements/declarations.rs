@@ -437,10 +437,7 @@ pub fn resolve_declaration_syntax(
         .map_err(|diagnostic| diagnostic.into_boxed())?;
 
         let mut initializer_tokens = declaration_syntax.initializer_tokens.clone();
-        initializer_tokens.push(Token::new(
-            TokenKind::Eof,
-            declaration_syntax.location.to_owned(),
-        ));
+        initializer_tokens.push(Token::terminator_at(declaration_syntax.location.to_owned()));
         let mut initializer_stream = FileTokens::new_from_slice(
             qualified_name.to_owned(),
             None,
@@ -600,10 +597,7 @@ pub fn resolve_declaration_syntax(
     }
 
     let mut initializer_tokens = declaration_syntax.initializer_tokens;
-    initializer_tokens.push(Token::new(
-        TokenKind::Eof,
-        declaration_syntax.location.to_owned(),
-    ));
+    initializer_tokens.push(Token::terminator_at(declaration_syntax.location.to_owned()));
     let mut initializer_stream = FileTokens::new_from_slice(
         qualified_name.to_owned(),
         None,

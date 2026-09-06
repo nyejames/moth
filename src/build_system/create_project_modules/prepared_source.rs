@@ -15,7 +15,7 @@
 //! output); paths and retained snapshots are resolved from the shared source database.
 
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Owned prepared source input keyed by its final build-lifetime source identity.
@@ -34,6 +34,7 @@ pub(crate) enum PreparedSourceInput {
     Moth {
         source_id: SourceId,
         tokens: Box<FileTokens>,
+        span_builder: ExtendedSpanBuilder,
     },
     /// A Moth file whose complete header output was retained during synthetic discovery.
     ///

@@ -118,6 +118,38 @@ fn prepare_test_source_file(
     )
 }
 
+/// The span table the tokenizer filled must reach the prepared output, because the retained
+/// header tokens' spans index its rows.
+///
+/// The literal is longer than a `LocalSpan` can pack inline, so its span is an index into that
+/// table and nothing else can resolve it. This covers `prepare_file_from_tokens`, which forks a
+/// local string table and finalises the output: a table swapped or replaced along that path fails
+/// here rather than at the first consumer to resolve a span. The parallel worker transport that
+/// calls `parse_file_headers_with_table` directly is not exercised.
+#[test]
+fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"\n");
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let output = prepare_single_file(&source, &file_path, &file_path, &mut string_table);
+
+    let resolver = output.span_builder.resolver();
+    let literal = output
+        .headers
+        .iter()
+        .flat_map(|header| header.tokens.tokens.iter())
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the retained header must keep its long string literal");
+    let resolved = literal.span.resolve_with(resolver);
+
+    assert_eq!(
+        source.get(resolved.start() as usize..resolved.end() as usize),
+        Some(format!("\"{quoted}\"").as_str()),
+        "the retained token's span must resolve through the prepared output's own table"
+    );
+}
+
 #[test]
 fn dependency_shell_without_retained_file_identity_fails_preparation() {
     let mut string_table = StringTable::new();
@@ -250,13 +282,19 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         Some(SourceId::from_index(1)),
     )
     .expect("other file should tokenize");
-    let swapped = FileTokens::new_with_identity(
-        file_tokens.src_path,
-        file_tokens.file_id,
-        file_tokens.canonical_os_path,
-        file_tokens.tokens,
-        (*other_tokens.path_syntax).clone(),
-    );
+    let (file_tokens, span_builder) = file_tokens.into_parts();
+    let other_path_syntax = (*other_tokens.path_syntax).clone();
+    // The stream keeps its own tokens and span builder; only the path table is another file's.
+    let swapped = TokenizeOutput {
+        file_tokens: FileTokens::new_with_identity(
+            file_tokens.src_path,
+            file_tokens.file_id,
+            file_tokens.canonical_os_path,
+            file_tokens.tokens,
+            other_path_syntax,
+        ),
+        span_builder,
+    };
 
     expect_prepare_infrastructure(
         match prepare_file_from_tokens(

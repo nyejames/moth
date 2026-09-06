@@ -5,7 +5,7 @@
 //! compact non-zero identity carried by tokens, headers and references. [`SourceSlot`] owns every
 //! candidate's identity, path metadata and load status. [`SourceRecord`] owns the exact UTF-8
 //! snapshot and line starts after loading, then receives its frozen extended-span table once the
-//! final span-producing stage installs it. [`LocalSpan`] and [`SourceSpan`] encode exact half-open
+//! final span-producing stage installs it. [`LocalSpan`] and [`span::SourceSpan`] encode exact half-open
 //! UTF-8 byte ranges, while [`line_index`] computes source and tooling line/column positions
 //! lazily from a loaded snapshot.
 //!
@@ -38,10 +38,4 @@ pub(crate) use database::SourceDatabase;
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
-// Slice 1D is the first production consumer. Re-exporting now would otherwise look unused
-// in a lib-only build.
-#[allow(unused_imports)]
-pub(crate) use span::{
-    ExtendedSpan, ExtendedSpanBuilder, ExtendedSpanResolver, ExtendedSpanTable, LocalSpan,
-    ResolvedByteRange, SourceSpan, SpanCapacityError, SpanCapacityReason, SpanJoinError,
-};
+pub(crate) use span::{ExtendedSpanBuilder, LocalSpan, SpanCapacityError, SpanCapacityReason};

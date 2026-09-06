@@ -820,14 +820,17 @@ impl ModulePreparationContext<'_> {
                 file => {
                     let source_id = file.source_id();
                     let source = match file {
-                        PreparedSourceInput::Moth { tokens, .. } => {
-                            source_path_for_id(prepare_context.source_files, source_id).map(
-                                |source_path| FrontendFilePrepareSource::Moth {
-                                    source_path,
-                                    tokens,
-                                },
-                            )
-                        }
+                        PreparedSourceInput::Moth {
+                            tokens,
+                            span_builder,
+                            ..
+                        } => source_path_for_id(prepare_context.source_files, source_id).map(
+                            |source_path| FrontendFilePrepareSource::Moth {
+                                source_path,
+                                tokens,
+                                span_builder,
+                            },
+                        ),
                         PreparedSourceInput::MothTemplate { .. } => source_path_for_id(
                             prepare_context.source_files,
                             source_id,
@@ -971,7 +974,11 @@ impl ModuleSyntaxDiscovery<'_> {
             options: &options,
         };
         let frontend_source = match source {
-            PreparedSourceInput::Moth { tokens, .. } => {
+            PreparedSourceInput::Moth {
+                tokens,
+                span_builder,
+                ..
+            } => {
                 let source_path = match source_path_for_id(self.context.source_files, source_id) {
                     Ok(source_path) => source_path,
                     Err(error) => {
@@ -981,6 +988,7 @@ impl ModuleSyntaxDiscovery<'_> {
                 FrontendFilePrepareSource::Moth {
                     source_path,
                     tokens,
+                    span_builder,
                 }
             }
             PreparedSourceInput::MothTemplate { .. } => {
