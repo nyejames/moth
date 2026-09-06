@@ -4,6 +4,7 @@
 //! candidates that never load. A [`SourceRecord`] is only created after a snapshot loads, so it
 //! unconditionally owns the exact text and line-start table used by compilation.
 
+use super::span::ExtendedSpanTable;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
@@ -110,10 +111,15 @@ pub struct SourceSlot {
 /// A loaded record unconditionally owns the exact UTF-8 snapshot and its line-start table. It has
 /// no identity or failure state of its own: the registration [`SourceSlot`] owns that metadata
 /// and points here when loading succeeds.
+///
+/// `extended_spans` remains absent until the source's mutable builder is installed at the final
+/// span-producing boundary. `None` means that installation has not happened yet, not that the
+/// source has no extended spans.
 #[derive(Debug)]
 pub struct SourceRecord {
     pub(super) text: Box<str>,
     pub(super) line_starts: Box<[u32]>,
+    pub(super) extended_spans: Option<ExtendedSpanTable>,
 }
 
 /// Reject a snapshot that `u32` byte offsets cannot address.

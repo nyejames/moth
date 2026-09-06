@@ -3,13 +3,14 @@
 //!
 //! The database owns the ordered source-slot inventory, the dense array of loaded snapshots, and
 //! the cold array of load failures. Loaded records retain the exact UTF-8 source text plus
-//! line-start table for each successful load. Source spans remain outside this slice and are
-//! deliberately not stored here.
+//! line-start table for each successful load. Their extended-span table is installed once, after
+//! the final span-producing stage, and remains source-owned for frozen consumers.
 
 use super::line_index::LineIndex;
 use super::record::{
     LoadFailureIndex, LoadedSourceIndex, SourceLoadStatus, SourceSlot, ensure_source_snapshot_fits,
 };
+use super::span::ExtendedSpanTable;
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
@@ -245,6 +246,7 @@ impl SourceDatabase {
         self.loaded.push(SourceRecord {
             text: text.into_boxed_str(),
             line_starts,
+            extended_spans: None,
         });
 
         let slot = self
@@ -253,6 +255,61 @@ impl SourceDatabase {
             .expect("source slot validated before retaining text");
         debug_assert!(matches!(slot.load, SourceLoadStatus::Pending));
         slot.load = SourceLoadStatus::Loaded(loaded_index);
+        Ok(())
+    }
+
+    /// Install the one frozen extended-span table produced for a loaded source.
+    ///
+    /// Installation is monotonic: a pending or failed source never receives a table, and a
+    /// loaded source can transition from absent to installed only once.
+    // The producer that freezes a builder is the tokenizer, which arrives in slice 1D2 and
+    // removes this allowance with the module-level ones 1C3 landed.
+    #[allow(dead_code)]
+    pub(crate) fn install_extended_spans(
+        &mut self,
+        id: SourceId,
+        extended_spans: ExtendedSpanTable,
+    ) -> Result<(), CompilerError> {
+        let loaded_index = {
+            let slot = self.slots.get(id.index()).ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "source identity {} is absent from the source database",
+                    id.index()
+                ))
+            })?;
+
+            if slot.provenance == SourceProvenance::CompilationRoot {
+                return Err(CompilerError::compiler_error(format!(
+                    "extended spans cannot be installed on compilation root source identity {}",
+                    id.index()
+                )));
+            }
+
+            match slot.load {
+                SourceLoadStatus::Loaded(index) => index,
+                SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "extended spans for source identity {} were installed before its source \
+                         was loaded",
+                        id.index()
+                    )));
+                }
+            }
+        };
+
+        let record = self
+            .loaded
+            .get_mut(loaded_index.index())
+            .expect("loaded source status points outside the loaded record array");
+
+        if record.extended_spans.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "extended spans for source identity {} were installed more than once",
+                id.index()
+            )));
+        }
+
+        record.extended_spans = Some(extended_spans);
         Ok(())
     }
 
@@ -306,6 +363,44 @@ impl SourceDatabase {
             SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => return None,
         };
         self.loaded.get(loaded_index.index())
+    }
+
+    /// Resolve the loaded record addressed by a source identity for frozen span consumers.
+    ///
+    /// Missing, pending, failed and reserved-root identities are compiler bugs at this boundary.
+    pub(super) fn source_record(&self, id: SourceId) -> &SourceRecord {
+        let slot = self.slots.get(id.index()).unwrap_or_else(|| {
+            panic!(
+                "source identity {} is absent from the source database; this is a compiler bug",
+                id.index()
+            )
+        });
+
+        if slot.provenance == SourceProvenance::CompilationRoot {
+            panic!(
+                "source identity {} is the compilation root and has no loaded source record; \
+                 this is a compiler bug",
+                id.index()
+            );
+        }
+
+        let loaded_index = match slot.load {
+            SourceLoadStatus::Loaded(index) => index,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
+                panic!(
+                    "source identity {} has no loaded source record; this is a compiler bug",
+                    id.index()
+                )
+            }
+        };
+
+        self.loaded.get(loaded_index.index()).unwrap_or_else(|| {
+            panic!(
+                "source identity {} points outside the loaded source records; this is a compiler \
+                 bug",
+                id.index()
+            )
+        })
     }
 
     /// Register one canonical source file and return its source identity.

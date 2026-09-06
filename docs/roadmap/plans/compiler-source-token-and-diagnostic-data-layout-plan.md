@@ -1310,9 +1310,10 @@ text of provider-owned files, which exist only to hold an identity and are never
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
 - [ ] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
-- [ ] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
+- [x] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
   `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
   `allow(unused_imports)` suppressions that 1C3 landed for the interval before this consumer
+  — **table and signatures delivered as 1D1; the suppressions go with 1D2, the first producer**
 - [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
   retained prepared facts without rereading, cloning or owning a second source snapshot
 - [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final
@@ -1324,6 +1325,43 @@ text of provider-owned files, which exist only to hold an identity and are never
 - [ ] remove source-location string-ID remapping from file-preparation outputs
 - [ ] preserve stable diagnostic codes, source ranges and ordering
 - [ ] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API
+
+#### 1D sub-slices and the interval bridge
+
+1D's twelve clauses cross the tokenizer, file preparation, the parallel worker boundary and every
+preparation-owned record, so they are split into six accepted slices. Each one reaches green
+validation and is audited on its own:
+
+- **1D1 — frozen record spans:** give the loaded `SourceRecord` its extended-span table, add the
+  authority's `&SourceRecord` and `&SourceDatabase` span signatures deferred by 1C3, and define the
+  one-shot install that freezes a source's builder into its record.
+  **Delivered.** A loaded record holds `Option<ExtendedSpanTable>`, absent until installed: absence
+  is not "no extended spans", since a source with none installs an empty table. Install is fallible
+  and monotonic, rejecting an absent identity, the compilation root, an unloaded or failed source
+  and a second install. The authority's unqualified names went to the consumer forms that read a
+  frozen record or the database; the producer forms that hold a live builder took a `_with` suffix,
+  which puts the qualifier on the smaller call-site population and keeps the authority's spelling.
+  One `allow(dead_code)` remains on the install until 1D2 calls it.
+- **1D2 — tokenizer emits local spans:** the tokenizer owns one `ExtendedSpanBuilder` per source and
+  gives every token an exact `LocalSpan`; `FileTokens` carries a final `SourceId`; span and
+  line-index suppressions go with the arrival of this consumer.
+- **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
+  retain exact final `SourceId` plus local span data owned by the same producer.
+- **1D4 — source preparation delta:** file workers return `SourcePreparationDelta` values keyed by
+  final `SourceId`, each owning its diagnostics, token/header preparation and span builder; the
+  prepared-source handoff drops its transitional key and its source-location string-ID remapping.
+- **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
+  shells, source contracts, const fragments and source-kind adapters carry spans.
+- **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
+  repeated ad hoc path/location constructors in Rust tests.
+
+**Interval bridge.** A token cannot switch representation and migrate its consumers in the same
+slice: the tokenizer has hundreds of downstream location readers, and 1E exists precisely to move
+them. So from 1D2 until 1H a token carries both its exact span and the legacy `SourceLocation`. The
+span is the authority: the legacy value is derived from it at construction, never computed
+independently, so the two cannot disagree, and a test pins that every token's legacy byte range
+equals its span's resolved range. 1H deletes the legacy field once 1E has moved its readers.
+
 
 ### Slice group 1E — Migrate all downstream source spans
 

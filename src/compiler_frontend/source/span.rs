@@ -6,17 +6,17 @@
 //!       scanning source or guessing ends. Inline packing covers the common case; rare long or
 //!       late ranges pay for one table entry.
 //!
-//! This slice does not convert bytes to lines or columns, and it does not store an extended
-//! table on [`super::SourceRecord`]. Consumers arrive in later slices. Until then the API is
-//! unused in production.
+//! Producers that still append to a source's builder use the resolver-taking `*_with` operations.
+//! Consumers use the unqualified record and database operations after the builder is installed
+//! into a frozen [`super::SourceRecord`]. This module does not convert bytes to lines or columns.
 
 #![allow(dead_code)]
 
-use super::SourceId;
 use super::span_encoding::{
     DecodedSpan, decode_logical, encode_extended_index, encode_inline, fits_inline, load_logical,
     store_logical,
 };
+use super::{SourceDatabase, SourceId, SourceRecord};
 
 use std::cmp::Ordering;
 use std::mem::size_of;
@@ -32,10 +32,12 @@ const _: () = assert!(size_of::<ExtendedSpan>() == 8);
 ///
 /// A local span carries no source identity, so every resolver, builder and second operand it is
 /// given must belong to the source that produced it. Pairing it with another source's extended
-/// table resolves to that table's row instead, and nothing at this level can detect that.
-/// [`SourceSpan`] is what a consumer crossing a source boundary must hold: it checks that two
-/// operands name the same source before joining, overlapping or containing them. The resolver
-/// itself carries no identity either, so supplying the wrong table stays the caller's obligation.
+/// table resolves to that table's row instead, and no resolver can detect that. Database-backed
+/// resolution knows the identity it looked the record up by, so it can name that source when a
+/// span reaches an absent or too-short table; resolving through a bare record cannot, because a
+/// [`SourceRecord`] carries no identity. [`SourceSpan`] is what a consumer crossing a source
+/// boundary must hold: it checks that two operands name the same source before joining,
+/// overlapping or containing them.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LocalSpan(NonZeroU32);
@@ -71,7 +73,13 @@ pub struct ExtendedSpanTable {
 /// Borrowed view of extended entries used to resolve spans without freezing a live builder.
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedSpanResolver<'a> {
-    entries: &'a [ExtendedSpan],
+    /// A live builder and a frozen table both present their entries here. Absent means the
+    /// source's builder was never installed on its loaded record, which is a producer bug rather
+    /// than a source with no extended spans: that source has an installed empty table.
+    entries: Option<&'a [ExtendedSpan]>,
+    /// Names the source when the caller knows its identity, so a compiler-bug panic can point at
+    /// it. A `SourceRecord` carries no identity of its own, so the record-only form has none.
+    source_identity: Option<SourceId>,
 }
 
 /// Exact half-open `[start, end)` byte range.
@@ -106,6 +114,19 @@ pub enum SpanCapacityReason {
 pub enum SpanJoinError {
     DifferentSources { left: SourceId, right: SourceId },
     Capacity(SpanCapacityError),
+}
+
+fn record_resolver(
+    source: &SourceRecord,
+    source_identity: Option<SourceId>,
+) -> ExtendedSpanResolver<'_> {
+    ExtendedSpanResolver {
+        entries: source
+            .extended_spans
+            .as_ref()
+            .map(|table| table.entries.as_ref()),
+        source_identity,
+    }
 }
 
 impl LocalSpan {
@@ -152,29 +173,47 @@ impl LocalSpan {
         Self::exact(offset, 0, extended)
     }
 
-    /// Resolve to the exact half-open byte range.
+    /// Resolve through a loaded record's frozen extended-span table.
     ///
-    /// Inline spans are arithmetic only. Extended spans are one bounds-checked lookup. The
-    /// resolver may be a live builder or a frozen table.
-    pub fn resolve(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
+    /// Inline spans remain valid before the builder is installed. An extended span reaching an
+    /// absent table is a compiler bug because its producer failed to install that builder.
+    pub fn resolve(self, source: &SourceRecord) -> ResolvedByteRange {
+        self.resolve_with(record_resolver(source, None))
+    }
+
+    /// Resolve with a producer's live builder or a frozen table resolver.
+    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
         match decode_logical(load_logical(self.0)) {
             DecodedSpan::Inline { start, length } => {
                 ResolvedByteRange::from_start_length(start, length)
             }
 
             DecodedSpan::Extended { index } => {
-                let entry = resolver.entries.get(index as usize).expect(
-                    "extended span index is outside its source table; this is a compiler bug",
-                );
+                let entry = resolver
+                    .extended_entry(index)
+                    .unwrap_or_else(|| resolver.report_unresolvable_index(index));
 
                 ResolvedByteRange::from_start_length(entry.start, entry.length)
             }
         }
     }
 
-    pub fn is_empty(self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        let range = self.resolve(resolver);
+    pub fn is_empty(self, source: &SourceRecord) -> bool {
+        let range = self.resolve(source);
         range.start() == range.end()
+    }
+
+    pub fn is_empty_with(self, resolver: ExtendedSpanResolver<'_>) -> bool {
+        let range = self.resolve_with(resolver);
+        range.start() == range.end()
+    }
+
+    fn resolve_from_record(
+        self,
+        source: &SourceRecord,
+        source_identity: SourceId,
+    ) -> ResolvedByteRange {
+        self.resolve_with(record_resolver(source, Some(source_identity)))
     }
 
     /// Smallest span covering both inputs.
@@ -186,8 +225,8 @@ impl LocalSpan {
         other: Self,
         extended: &mut ExtendedSpanBuilder,
     ) -> Result<Self, SpanCapacityError> {
-        let left = self.resolve(extended.resolver());
-        let right = other.resolve(extended.resolver());
+        let left = self.resolve_with(extended.resolver());
+        let right = other.resolve_with(extended.resolver());
 
         let start = left.start().min(right.start());
         let end = left.end().max(right.end());
@@ -210,12 +249,43 @@ impl SourceSpan {
         self.local
     }
 
-    pub fn resolve(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
-        self.local.resolve(resolver)
+    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
+        self.local.resolve_with(resolver)
     }
 
-    pub fn is_empty(self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        self.local.is_empty(resolver)
+    pub fn is_empty_with(self, resolver: ExtendedSpanResolver<'_>) -> bool {
+        self.local.is_empty_with(resolver)
+    }
+
+    pub fn byte_range(self, sources: &SourceDatabase) -> ResolvedByteRange {
+        let source = sources.source_record(self.source);
+        self.local.resolve_from_record(source, self.source)
+    }
+
+    pub fn start(self, sources: &SourceDatabase) -> u32 {
+        self.byte_range(sources).start()
+    }
+
+    pub fn end(self, sources: &SourceDatabase) -> u32 {
+        self.byte_range(sources).end()
+    }
+
+    pub fn overlaps(self, other: Self, sources: &SourceDatabase) -> bool {
+        if self.source != other.source {
+            return false;
+        }
+
+        let source = sources.source_record(self.source);
+        self.overlaps_with(other, record_resolver(source, Some(self.source)))
+    }
+
+    pub fn contains(self, other: Self, sources: &SourceDatabase) -> bool {
+        if self.source != other.source {
+            return false;
+        }
+
+        let source = sources.source_record(self.source);
+        self.contains_with(other, record_resolver(source, Some(self.source)))
     }
 
     /// Smallest span covering both inputs.
@@ -250,17 +320,17 @@ impl SourceSpan {
     /// WHY: overlap is the non-emptiness of the intersection, so a zero-length span overlaps
     /// nothing, not even the range it sits inside. Comparing endpoints pairwise instead would make
     /// an insertion point overlap a range when it is strictly interior and not when it sits on
-    /// either edge, so neither answer would mean anything. Use [`Self::contains`] to ask whether
-    /// an insertion point lies inside a range, boundaries included.
+    /// either edge, so neither answer would mean anything. Use [`Self::contains_with`] to ask
+    /// whether an insertion point lies inside a range, boundaries included.
     ///
     /// Ranges from different sources never overlap.
-    pub fn overlaps(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
+    pub fn overlaps_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
         if self.source != other.source {
             return false;
         }
 
-        let left = self.local.resolve(resolver);
-        let right = other.local.resolve(resolver);
+        let left = self.local.resolve_with(resolver);
+        let right = other.local.resolve_with(resolver);
         let shared_start = left.start().max(right.start());
         let shared_end = left.end().min(right.end());
 
@@ -270,23 +340,23 @@ impl SourceSpan {
     /// `self` contains `other` when both share a source and `other`'s range lies inside `self`.
     ///
     /// Ranges from different sources are never containment, even when the byte ranges coincide.
-    pub fn contains(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
+    pub fn contains_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
         if self.source != other.source {
             return false;
         }
 
-        let left = self.local.resolve(resolver);
-        let right = other.local.resolve(resolver);
+        let left = self.local.resolve_with(resolver);
+        let right = other.local.resolve_with(resolver);
 
         left.start() <= right.start() && left.end() >= right.end()
     }
 
     /// Deterministic display order: source identity, then start, then end.
-    pub fn source_order(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> Ordering {
+    pub fn source_order_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> Ordering {
         match self.source.cmp(&other.source) {
             Ordering::Equal => {
-                let left = self.local.resolve(resolver);
-                let right = other.local.resolve(resolver);
+                let left = self.local.resolve_with(resolver);
+                let right = other.local.resolve_with(resolver);
 
                 left.start()
                     .cmp(&right.start())
@@ -315,7 +385,8 @@ impl ExtendedSpanBuilder {
 
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
         ExtendedSpanResolver {
-            entries: &self.entries,
+            entries: Some(&self.entries),
+            source_identity: None,
         }
     }
 
@@ -337,7 +408,39 @@ impl ExtendedSpanTable {
 
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
         ExtendedSpanResolver {
-            entries: &self.entries,
+            entries: Some(&self.entries),
+            source_identity: None,
+        }
+    }
+}
+
+impl<'a> ExtendedSpanResolver<'a> {
+    fn extended_entry(self, index: u32) -> Option<&'a ExtendedSpan> {
+        self.entries?.get(index as usize)
+    }
+
+    /// Report an extended index this resolver cannot resolve.
+    ///
+    /// WHY: both causes are compiler bugs, but they are different bugs. An absent table means the
+    /// producer never installed its builder on the loaded record, so no index could resolve. An
+    /// index past an installed table means the span was encoded against a table that is not this
+    /// one, whether another source's or an earlier builder for this source.
+    #[cold]
+    fn report_unresolvable_index(self, index: u32) -> ! {
+        let source = match self.source_identity {
+            Some(identity) => format!("source identity {}", identity.index()),
+            None => "this source record".to_owned(),
+        };
+
+        match self.entries {
+            Some(entries) => panic!(
+                "extended span index {index} is outside the {} extended spans of {source}; \
+                 this is a compiler bug",
+                entries.len()
+            ),
+            None => panic!(
+                "extended span builder for {source} was never installed; this is a compiler bug"
+            ),
         }
     }
 }
