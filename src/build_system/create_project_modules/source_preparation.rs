@@ -84,6 +84,17 @@ pub(super) fn prepare_discovery_source_text(
         }
     };
 
+    // Register the file before tokenization because `FileTokens` is minted with the traversal-local
+    // source identity. Discovery rebinds every prepared output to the final sorted database once the
+    // closure is complete, and this table dies with the traversal.
+    let source_id = source_files.insert(
+        file_path.to_path_buf(),
+        SourceKind::Compiler(SourceFileKind::Moth),
+        entry_file_path,
+        project_path_resolver.as_ref(),
+        string_table,
+    )?;
+
     // Tokenize the file once. Callers may supply source text that was read during an earlier
     // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
     // file before assembling `PreparedSourceInput` values.
@@ -93,20 +104,9 @@ pub(super) fn prepare_discovery_source_text(
         TokenizerEntryMode::SourceFile,
         style_directives,
         string_table,
-        None,
+        Some(source_id),
     )
     .map_err(SourceDiscoveryError::Diagnostic)?;
-
-    // Register this file in the traversal-local identity table so header preparation can stamp
-    // real shells. Discovery rebinds every prepared output to the final sorted database once the
-    // closure is complete, and this table dies with the traversal.
-    source_files.insert(
-        file_path.to_path_buf(),
-        SourceKind::Compiler(SourceFileKind::Moth),
-        entry_file_path,
-        project_path_resolver.as_ref(),
-        string_table,
-    )?;
 
     let prepared_output = prepare_discovery_file(
         file_path,

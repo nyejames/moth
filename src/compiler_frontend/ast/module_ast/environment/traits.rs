@@ -447,8 +447,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )?;
 
-        let mut type_resolution_context =
-            self.type_resolution_context_for(&visibility, generic_parameter_scope);
+        let mut type_resolution_context = self.type_resolution_context_for(
+            &visibility,
+            header.tokens.file_id,
+            generic_parameter_scope,
+        );
         let resolved_signature = resolve_function_signature(
             &header.tokens.src_path,
             &unresolved_signature,

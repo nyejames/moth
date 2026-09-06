@@ -1415,8 +1415,33 @@ validation and is audited on its own:
     - **1D2b2 — template bundle registers before preparing:** the HTML direct-template bundle
       prepares `.mtf`/`.md` sources against an empty database and rebinds afterwards, so its
       tokens are minted with no identity at all.
+
+      **Delivered.** Each candidate is registered into the traversal-local database immediately
+      before it is prepared, so no production lane tokenizes without an identity and the
+      fabricated-path fallback in `source_identity_facts` is deleted with its last caller: an
+      unregistered source is now a compiler invariant failure. Discovery mints traversal-local
+      IDs in BFS order; the final sorted registration still assigns canonical-logical-order IDs
+      once the candidate set is complete, and the end-of-bundle rebind rewrites them. The
+      provisional and final logical paths are identical — both come from the same resolver and
+      canonical path — so only the numeric identity moves.
     - **1D2b3 — config and synthetic lane identity:** `ConfigCompilationRequest` and the remaining
       synthetic producers carry an optional identity that the final type cannot accept.
+
+      **Delivered.** `SourceId::COMPILATION_ROOT` names the record every database already reserves
+      at index 0, and the CLI command-input lexer mints its stream with it: command text belongs to
+      the whole compilation, not to a file, and the root record owns no path or snapshot, so a
+      physical-source lookup still finds nothing. `ConfigCompilationRequest::file_id` is a plain
+      `SourceId`; `compile_project_config_file` takes `&mut SourceDatabase` and always registers,
+      and a config file reached without a database is now a compiler-invariant failure rather than
+      an unregistered compile. Directory bootstrap is the only production caller and always
+      supplies one. Synthetic discovery registers before it tokenizes, and struct field defaults
+      evaluate in a scope carrying the identity of the header that authored them, threaded through
+      a required `TypeResolutionContext` field so no call site can decline it.
+
+      No test added, on the 1D2b1 grounds. Mutating either identity back to `None` leaves the suite
+      green: frontend preparation rebinds the discovery identity before header parsing, and
+      field-default re-evaluation runs on resolved RPN that never reads the declaring file. Both
+      become unrepresentable-wrong at 1D2b4 and by construction respectively.
     - **1D2b4 — final token identity type cutover:** the `Option` disappears from `FileTokens`,
       `source_identity_facts` and the prepared-output identity fields.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics

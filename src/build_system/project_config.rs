@@ -81,6 +81,14 @@ pub fn load_project_config(
 
         return validate_directory_output_settings_if_needed(config, string_table);
     }
+    let Some(project_source_files) = project_source_files else {
+        return Err(CompilerMessages::from_error(
+            CompilerError::compiler_error(
+                "config.moth exists but the project source database is absent",
+            ),
+            string_table.clone(),
+        ));
+    };
 
     compile_project_config_file(
         config,
@@ -104,7 +112,7 @@ pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
-    mut project_source_files: Option<&mut SourceDatabase>,
+    project_source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     // A failed reload must not leave prior project-global/config provenance visible to the next
@@ -128,50 +136,39 @@ pub(crate) fn compile_project_config_file(
     // project identity context with every source discovered later. Config sits outside the entry
     // root, so its own directory roots the logical path and yields a bare `config.moth`.
     let config_file_id = project_source_files
-        .as_deref_mut()
-        .map(|source_files| {
-            source_files.insert(
-                canonical_config_path.clone(),
-                SourceKind::Compiler(SourceFileKind::Moth),
-                &canonical_config_path,
-                None,
-                string_table,
-            )
-        })
-        .transpose()
+        .insert(
+            canonical_config_path.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &canonical_config_path,
+            None,
+            string_table,
+        )
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 
     let source_code = match extract_source_code(&canonical_config_path, string_table) {
         Ok(source_code) => source_code,
         Err(error) => {
-            if let (Some(source_files), Some(config_file_id)) =
-                (project_source_files.as_deref_mut(), config_file_id)
-            {
-                source_files
-                    .record_source_load_error(config_file_id, error.clone())
-                    .map_err(|slot_error| {
-                        CompilerMessages::from_error(slot_error, string_table.clone())
-                    })?;
-            }
+            project_source_files
+                .record_source_load_error(config_file_id, error.clone())
+                .map_err(|slot_error| {
+                    CompilerMessages::from_error(slot_error, string_table.clone())
+                })?;
             return Err(CompilerMessages::from_error(error, string_table.clone()));
         }
     };
-    let source_code = match (project_source_files, config_file_id) {
-        (Some(source_files), Some(config_file_id)) => {
-            source_files
-                .retain_text(config_file_id, source_code)
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-            source_files.retained_text(config_file_id).ok_or_else(|| {
-                CompilerMessages::from_error(
-                    CompilerError::compiler_error(
-                        "registered config source lost its retained source text",
-                    ),
-                    string_table.clone(),
-                )
-            })?
-        }
-        (_, _) => source_code.as_str(),
-    };
+    project_source_files
+        .retain_text(config_file_id, source_code)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let source_code = project_source_files
+        .retained_text(config_file_id)
+        .ok_or_else(|| {
+            CompilerMessages::from_error(
+                CompilerError::compiler_error(
+                    "registered config source lost its retained source text",
+                ),
+                string_table.clone(),
+            )
+        })?;
     let compiled_config = compile_config_source(
         ConfigCompilationRequest {
             authored_path: config_path,

@@ -211,7 +211,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<ResolvedTypeAnnotation, CompilerMessages> {
         let resolved_target = {
-            let mut type_resolution_context = self.type_resolution_context_for(visibility, None);
+            let mut type_resolution_context = self.type_resolution_context_for(
+                visibility,
+                scope_context.shared.declaring_file_id,
+                None,
+            );
             resolve_parsed_type_annotation(
                 target.clone(),
                 target_location,

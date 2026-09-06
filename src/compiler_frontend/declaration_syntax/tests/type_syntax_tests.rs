@@ -579,6 +579,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
 
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
+        declaring_file_id: None,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -684,6 +685,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
+        declaring_file_id: None,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -745,6 +747,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
+        declaring_file_id: None,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -812,6 +815,7 @@ fn bare_generic_type_name_requires_type_arguments() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
+        declaring_file_id: None,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,

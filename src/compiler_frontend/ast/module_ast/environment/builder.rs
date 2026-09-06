@@ -76,6 +76,7 @@ use crate::compiler_frontend::public_interface::{
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -987,23 +988,31 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHAT: centralizes the repeated `TypeResolutionContext::from_inputs(...)` construction
     /// across type alias, struct field, choice variant, and function signature resolution.
-    /// WHY: avoids duplicating the same 8-field initialization in four different files.
+    /// WHY: avoids duplicating the same context initialization in four different files.
     pub(crate) fn type_resolution_context_for<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
+        declaring_file_id: Option<SourceId>,
         generic_parameters: Option<&'a GenericParameterScope>,
     ) -> TypeResolutionContext<'a> {
-        self.type_resolution_context_for_with_traits(visibility, generic_parameters, None)
+        self.type_resolution_context_for_with_traits(
+            visibility,
+            declaring_file_id,
+            generic_parameters,
+            None,
+        )
     }
 
     pub(crate) fn type_resolution_context_for_with_traits<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
+        declaring_file_id: Option<SourceId>,
         generic_parameters: Option<&'a GenericParameterScope>,
         trait_environment: Option<&'a TraitEnvironment>,
     ) -> TypeResolutionContext<'a> {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
+            declaring_file_id,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
             visible_external_symbols: Some(&visibility.visible_external_symbols),
             visible_source_bindings: Some(&visibility.visible_source_names),

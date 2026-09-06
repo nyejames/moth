@@ -3069,7 +3069,7 @@ fn directory_project_rejects_missing_entry_root() {
         &mut config,
         &config_path,
         &services,
-        Some(&mut source_files),
+        &mut source_files,
         &mut string_table,
     );
     assert!(parse_result.is_ok(), "config parse should succeed");

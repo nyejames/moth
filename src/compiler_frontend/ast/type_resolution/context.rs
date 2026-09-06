@@ -24,6 +24,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -41,6 +42,8 @@ use std::sync::Arc;
 ///      make every helper signature noisy and error-prone.
 pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
+    /// Authored source identity used when nested semantic scopes resolve file-owned references.
+    pub declaring_file_id: Option<SourceId>,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -74,6 +77,7 @@ pub(crate) struct TypeResolutionContext<'a> {
 ///       have to remember the field order of the context constructor.
 pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
+    pub declaring_file_id: Option<SourceId>,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -91,6 +95,9 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
 }
 
 impl<'a> TypeResolutionContext<'a> {
+    /// Construct a minimal context for isolated type-resolution tests.
+    ///
+    /// This test-only helper intentionally leaves the authored source identity absent.
     #[cfg(test)]
     pub(crate) fn from_declaration_table(
         declaration_table: &'a Rc<TopLevelDeclarationTable>,
@@ -98,6 +105,7 @@ impl<'a> TypeResolutionContext<'a> {
     ) -> Self {
         Self {
             declaration_table,
+            declaring_file_id: None,
             visible_declaration_ids: None,
             visible_external_symbols: None,
             visible_source_bindings: None,
@@ -118,6 +126,7 @@ impl<'a> TypeResolutionContext<'a> {
     pub(crate) fn from_inputs(inputs: TypeResolutionContextInputs<'a>) -> Self {
         Self {
             declaration_table: inputs.declaration_table,
+            declaring_file_id: inputs.declaring_file_id,
             visible_declaration_ids: inputs.visible_declaration_ids,
             visible_external_symbols: inputs.visible_external_symbols,
             visible_source_bindings: inputs.visible_source_bindings,

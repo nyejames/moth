@@ -70,9 +70,9 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) authored_path: &'a Path,
     /// The canonical filesystem path the authored config resolved to.
     pub(crate) canonical_path: &'a Path,
-    /// The source identity registered for this config in the owning project boundary, when one
-    /// exists. Standalone compiler tests may intentionally compile without a boundary identity.
-    pub(crate) file_id: Option<SourceId>,
+    /// The source identity carried by this config's token stream. Standalone callers use the
+    /// compilation-root identity because their source text belongs to the whole compilation.
+    pub(crate) file_id: SourceId,
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) binding_packages: &'a ExternalPackageRegistry,
@@ -509,15 +509,15 @@ fn prepare_config_file(
     errors: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> Result<Option<FileFrontendPrepareOutput>, CompilerMessages> {
-    // Config uses the identity registered by its owning project boundary. Standalone config
-    // service callers may omit that boundary identity.
+    // Config streams carry the request's source identity. Standalone callers use the
+    // compilation-root identity because their source text belongs to the whole compilation.
     let mut tokenization = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
-        request.file_id,
+        Some(request.file_id),
     ) {
         Ok(output) => output,
         Err(error) => {

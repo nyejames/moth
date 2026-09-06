@@ -11,6 +11,11 @@ use std::num::NonZeroU32;
 pub struct SourceId(NonZeroU32);
 
 impl SourceId {
+    /// Identity every database reserves at index 0, for a token stream whose text belongs to the
+    /// whole compilation rather than to any registered file. The record itself owns no path and
+    /// no snapshot, so a lookup for physical source text still finds nothing.
+    pub const COMPILATION_ROOT: Self = Self(NonZeroU32::new(1).unwrap());
+
     /// Convert a zero-based source-record index into its non-zero identity.
     pub(crate) fn from_index(index: usize) -> Self {
         let index = u32::try_from(index)

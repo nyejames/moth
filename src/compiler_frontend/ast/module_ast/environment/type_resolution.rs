@@ -368,6 +368,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let template_ir_store = Rc::clone(&self.context.template_ir_store);
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
+                header.tokens.file_id,
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -473,6 +474,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
+                header.tokens.file_id,
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -865,6 +867,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
+                                header.tokens.file_id,
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );
@@ -932,6 +935,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
+                                header.tokens.file_id,
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );

@@ -263,7 +263,7 @@ fn parse_project_config_for_test(
         config,
         config_path,
         &services,
-        Some(&mut source_files),
+        &mut source_files,
         &mut string_table,
     )
     .map(|_| ())
@@ -289,7 +289,7 @@ fn parse_project_config_for_test_with_html_keys(
         config,
         config_path,
         &services,
-        Some(&mut source_files),
+        &mut source_files,
         &mut string_table,
     )
     .map(|_| ())
@@ -313,7 +313,7 @@ fn parse_project_config_for_test_with_packages(
         config,
         config_path,
         &services,
-        Some(&mut source_files),
+        &mut source_files,
         &mut string_table,
     )
     .map(|_| ())

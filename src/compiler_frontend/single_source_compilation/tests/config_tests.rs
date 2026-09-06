@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -33,7 +34,7 @@ fn compile_project_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -59,7 +60,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -109,7 +110,7 @@ fn projects_authored_anonymous_const_records() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= |\n    first = \"a\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -152,7 +153,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "Inner = |\n    x Int,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -192,7 +193,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -234,7 +235,7 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    child = | value = 1 |,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -275,7 +276,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    alias = name,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -315,7 +316,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "html #= |\n    origin #Config of String = \"/docs\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,

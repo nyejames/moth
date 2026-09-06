@@ -149,6 +149,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
+                header.tokens.file_id,
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );

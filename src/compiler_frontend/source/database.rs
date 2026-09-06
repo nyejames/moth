@@ -478,10 +478,10 @@ impl SourceDatabase {
 
     /// Resolve one physical source slot.
     ///
-    /// The compilation root is addressed by `SourceId(1)` but is not a physical source, so it is
-    /// never returned here. A consumer that reaches this with the root holds an identity from the
-    /// wrong domain, and absence lets it fail in its own lane rather than reading a pathless
-    /// slot as though it were a file.
+    /// The compilation root is addressed by [`SourceId::COMPILATION_ROOT`] but is not a physical
+    /// source, so it is never returned here. A consumer that reaches this with the root holds an
+    /// identity from the wrong domain, and absence lets it fail in its own lane rather than
+    /// reading a pathless slot as though it were a file.
     pub fn get(&self, id: SourceId) -> Option<&SourceSlot> {
         let slot = self.slots.get(id.index())?;
         (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
@@ -521,7 +521,7 @@ impl SourceDatabase {
 
 fn compilation_root_slot() -> SourceSlot {
     SourceSlot {
-        id: SourceId::from_index(0),
+        id: SourceId::COMPILATION_ROOT,
         canonical_os_path: None,
         logical_path: InternedPath::new(),
         kind: None,

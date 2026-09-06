@@ -30,6 +30,7 @@ use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -397,10 +398,12 @@ struct QuotedLiteralRejection {
 /// Reason text for a value that tokenizes but carries text past its complete literal.
 const QUOTED_LITERAL_TRAILING_TEXT: &str = "text follows the literal";
 
-/// The synthetic file identity given to the ordinary lexer for standalone command values.
+/// The logical path and source identity supplied to the ordinary lexer for standalone command
+/// values.
 ///
-/// Command inputs carry no source span, so the path only exists to keep the ordinary lexer's
-/// diagnostics well-formed; command diagnostics use its stable titles, not the location.
+/// Command-input text belongs to the whole compilation rather than any file, so its token stream
+/// carries [`SourceId::COMPILATION_ROOT`]. The path remains only a lexer scope for well-formed
+/// diagnostics; command diagnostics use their stable titles rather than that location.
 const COMMAND_INPUT_TOKENIZER_PATH: &str = "command-input";
 
 /// Map a quoted-literal rejection to the typed error for the authored leading quote.
@@ -442,7 +445,7 @@ fn parse_ordinary_quoted_literal(
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        Some(SourceId::COMPILATION_ROOT),
     )
     .map_err(|diagnostic| QuotedLiteralRejection {
         reason: diagnostic.kind.descriptor().title,

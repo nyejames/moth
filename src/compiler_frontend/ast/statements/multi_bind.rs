@@ -657,6 +657,7 @@ fn resolve_target_explicit_type(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
+                declaring_file_id: context.shared.declaring_file_id,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
