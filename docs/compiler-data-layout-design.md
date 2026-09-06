@@ -589,6 +589,16 @@ For rendering or tooling:
 The source database may later cache hot conversions, but caching is benchmark-selectable and cannot
 change span representation. Newline handling must preserve the exact authored bytes, including CRLF.
 
+The line-break set is the tokenizer's, not `str::lines()`: `\n`, `\r\n` and a bare `\r` each start
+a new line, because a bare `\r` already ends a statement in the authored language. A line's visible
+text drops its terminator, and an offset inside a terminator resolves to the visible end of the
+line that terminator ends, so a caret cannot land on a byte that renders nowhere. A trailing
+terminator closes its line without opening another, so the zero-width EOF of a file ending in one
+resolves to the end of the last authored line rather than to a phantom line after it. An empty
+snapshot has no lines and still resolves its EOF to line 0, column 0. Columns count scalar starts
+before the offset, so an offset inside a scalar counts that scalar and no conversion slices on a
+non-boundary offset.
+
 ## Genuine path interning
 
 ### Identity

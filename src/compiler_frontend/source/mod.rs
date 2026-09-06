@@ -3,11 +3,12 @@
 //! [`SourceDatabase`] owns the ordered source-record inventory used by frontend preparation, while
 //! [`SourceId`] provides the compact non-zero identity carried by tokens, headers and references.
 //! Physical source records own the exact UTF-8 snapshots used during compilation. [`LocalSpan`]
-//! and [`SourceSpan`] encode exact half-open UTF-8 byte ranges; line and column conversion is
-//! still outside this slice, and extended tables are not stored on source records yet.
+//! and [`SourceSpan`] encode exact half-open UTF-8 byte ranges, while [`line_index`] computes
+//! source and tooling line/column positions lazily from retained text and line starts.
 //!
 //! - [`id`] defines the four-byte source identity.
 //! - [`record`] defines one source identity, its retained text, loading status and paths.
+//! - [`line_index`] owns the borrowed line and column conversions over retained snapshots.
 //! - [`database`] owns deterministic lookup, snapshot retention and traversal-time insertion.
 //! - [`span`] defines exact local and global spans, the per-source extended table and the
 //!   shared resolver over a live builder and a frozen table.
@@ -16,6 +17,7 @@
 
 mod database;
 mod id;
+pub(crate) mod line_index;
 mod record;
 mod registration;
 mod span;

@@ -1,10 +1,10 @@
 //! Retained identity metadata for one frontend source record.
 
+use super::line_index::{LineIndex, line_start_offsets};
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 /// Describes how a source record entered the compiler's identity context.
@@ -140,72 +140,14 @@ impl SourceRecord {
         self.state.retained_text()
     }
 
-    /// Number of lines in the retained snapshot, or zero when this record is not loaded.
-    ///
-    /// An empty snapshot has no lines, so the table is empty and this is zero. Slice 1C4 owns
-    /// the final empty-file, final-newline and zero-width-EOF semantics.
-    pub(crate) fn line_count(&self) -> u32 {
+    pub(crate) fn line_index(&self) -> Option<LineIndex<'_>> {
         match &self.state {
-            SourceRecordState::Loaded { line_starts, .. } => line_starts.len() as u32,
-            SourceRecordState::Registered | SourceRecordState::Unreadable(_) => 0,
+            SourceRecordState::Loaded { text, line_starts } => {
+                Some(LineIndex::new(text, line_starts))
+            }
+            SourceRecordState::Registered | SourceRecordState::Unreadable(_) => None,
         }
     }
-
-    /// Byte range of one zero-based line: this start through the next start, or EOF.
-    ///
-    /// The range includes a terminating `\n` when one was authored. Lookup is an index into the
-    /// line-start table, not a scan of the snapshot.
-    pub(crate) fn line_byte_range(&self, line_number: u32) -> Option<Range<u32>> {
-        let SourceRecordState::Loaded { text, line_starts } = &self.state else {
-            return None;
-        };
-        let index = line_number as usize;
-        let start = *line_starts.get(index)?;
-        let end = line_starts
-            .get(index + 1)
-            .copied()
-            .unwrap_or(text.len() as u32);
-        Some(start..end)
-    }
-}
-
-/// Build the line-start table for a snapshot that has just become owned.
-///
-/// A `\n` byte cannot occur inside a multi-byte UTF-8 sequence, so a byte scan is exact. The
-/// first entry is always `0`. Each later entry is the byte immediately after a `\n`. A trailing
-/// newline terminates the last authored line; it does not start another, so a start at
-/// `text.len()` is not recorded. An empty snapshot has no lines and so no entries, which keeps
-/// the rule in the table rather than in every consumer that would otherwise special-case it.
-///
-/// WHY two passes: counting is a branchless reduction the compiler vectorises, and it sizes the
-/// table exactly, so the fill never reallocates. Growing a `Vec` while scanning would copy the
-/// table roughly once per doubling for no benefit.
-fn line_start_offsets(text: &str) -> Box<[u32]> {
-    let bytes = text.as_bytes();
-    let Some((_, leading_bytes)) = bytes.split_last() else {
-        return Box::default();
-    };
-
-    // A newline in the final byte terminates its line without starting another, so only the
-    // earlier bytes can contribute a start. Each of those newlines contributes exactly one,
-    // alongside the leading zero.
-    let line_count = 1 + leading_bytes.iter().filter(|byte| **byte == b'\n').count();
-
-    let mut line_starts = Vec::with_capacity(line_count);
-    line_starts.push(0);
-
-    for (offset, byte) in leading_bytes.iter().enumerate() {
-        if *byte == b'\n' {
-            line_starts.push(offset as u32 + 1);
-        }
-    }
-
-    debug_assert_eq!(
-        line_starts.len(),
-        line_count,
-        "the counting pass must predict the fill exactly, or the fill reallocates"
-    );
-    line_starts.into_boxed_slice()
 }
 
 /// Reject a snapshot that `u32` byte offsets cannot address.

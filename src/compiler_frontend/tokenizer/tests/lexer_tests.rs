@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::{
     SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
@@ -2148,6 +2149,133 @@ fn ordinary_import_identifier_does_not_receive_path_correction() {
             .iter()
             .any(|token| matches!(token.kind, TokenKind::As)),
         "ordinary `import` followed by `as` should tokenize both words independently"
+    );
+}
+
+/// Token start lines must use the same LF, CRLF and bare-CR boundaries as the lazy line index.
+///
+/// The fixture drives every path that consumes a carriage return: a whitespace tail, a CRLF
+/// statement break, a physical CR inside a quoted string and one inside a template body. Those
+/// paths reach the stream through different helpers, so a table that disagreed with only one of
+/// them would still pass a single-shape fixture.
+///
+/// Columns are checked on the line index alone: `CharPosition` is captured after a token's first
+/// character is consumed for code tokens and inherited unchanged by re-anchored ones, so column
+/// equality is not a property this slice can assert. Slice 1F4 removes that convention.
+#[test]
+fn token_start_lines_match_line_index_across_newline_shapes() {
+    let source =
+        "name = \"café😀\"  \r  next\nvalue = 'q'\r\ntext = \"a\rb\"\nbody = [:one\rtwo]\nlast = 2";
+    let (file_tokens, _string_table) = tokenize_source(source);
+    let line_starts = line_start_offsets(source);
+    let line_index = LineIndex::new(source, &line_starts);
+
+    let mut lines_with_token_starts: Vec<u32> = Vec::new();
+    let mut columns_checked = 0;
+
+    for token in &file_tokens.tokens {
+        let start_byte = token.location.start_byte;
+        let end_byte = token.location.end_byte;
+        let line = line_index
+            .line_of_offset(start_byte)
+            .expect("every token start, including EOF, must be addressable");
+        assert_eq!(
+            line,
+            u32::try_from(token.location.start_pos.line_number)
+                .expect("tokenizer line numbers should be non-negative"),
+            "{:?}: tokenizer and line index line numbers must agree at byte {start_byte}",
+            token.kind
+        );
+        if lines_with_token_starts.last() != Some(&line) {
+            lines_with_token_starts.push(line);
+        }
+
+        if start_byte == end_byte {
+            continue;
+        }
+
+        let authored = source
+            .get(start_byte as usize..end_byte as usize)
+            .expect("token byte ranges must stay on UTF-8 boundaries");
+        let first_authored_scalar = authored
+            .chars()
+            .next()
+            .expect("non-empty token ranges must contain a scalar");
+        if matches!(first_authored_scalar, '\r' | '\n') {
+            continue;
+        }
+
+        // A column names an offset inside one line's visible text, so the reported column must
+        // round-trip back to the token's own byte start.
+        let position = line_index
+            .position(start_byte)
+            .expect("the token start position must resolve");
+        let line_text = line_index
+            .line_text(line)
+            .expect("a token on a non-empty line must have visible text");
+        let line_start = line_index
+            .line_byte_range(line)
+            .expect("a line carrying a token must have a byte range")
+            .start;
+        let (offset_in_line, scalar_at_column) = line_text
+            .char_indices()
+            .nth(position.column as usize)
+            .expect("a reported column must name a scalar in that line's visible text");
+        assert_eq!(
+            scalar_at_column, first_authored_scalar,
+            "{:?}: line-index column must point at the token's first authored scalar",
+            token.kind
+        );
+        assert_eq!(
+            line_start + offset_in_line as u32,
+            start_byte,
+            "{:?}: line-index column must round-trip to the token's byte start",
+            token.kind
+        );
+        columns_checked += 1;
+    }
+
+    // Every authored line carries a token start, including the two that a multi-line string and
+    // a multi-line template body end on, so no CR shape in the fixture goes unmeasured.
+    assert_eq!(
+        lines_with_token_starts,
+        (0..=7).collect::<Vec<u32>>(),
+        "every authored line must carry a token start"
+    );
+    // The column check skips newline and multi-line tokens, so a future tokenizer change that
+    // skipped everything would leave it vacuous.
+    assert!(
+        columns_checked >= 10,
+        "the column check ran on only {columns_checked} tokens"
+    );
+}
+
+/// A discarded template body still anchors its closing bracket at the authored byte.
+///
+/// The lexer skips a discarded body's text, so the close bracket is re-anchored by byte alone and
+/// its inherited `CharPosition` still names the line the body started on. The byte-anchored line
+/// is the correct one, and slice 1F4 makes the renderers use it.
+#[test]
+fn discarded_template_body_close_resolves_to_its_authored_line() {
+    let source = "[$note:one\rtwo]x = 1";
+    let (file_tokens, _string_table) = tokenize_source(source);
+    let line_starts = line_start_offsets(source);
+    let line_index = LineIndex::new(source, &line_starts);
+
+    let close = file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::TemplateClose))
+        .expect("a discarded body must still emit its closing bracket");
+
+    assert_eq!(
+        source.get(close.location.start_byte as usize..close.location.end_byte as usize),
+        Some("]")
+    );
+    assert_eq!(
+        line_index.line_of_offset(close.location.start_byte),
+        Some(1),
+        "the closing bracket is authored on the line after the discarded body's carriage return"
     );
 }
 

@@ -1,6 +1,7 @@
 use super::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceKind, SourceProvenance,
     SourceRecord, SourceRegistrationIndex, SourceSpan, SpanCapacityReason, SpanJoinError,
+    line_index::{LineIndex, LinePosition, line_start_offsets},
     record::ensure_source_snapshot_fits,
 };
 
@@ -531,13 +532,20 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .retain_text(empty_id, String::new())
         .expect("empty source text should be retained");
     assert_eq!(database.retained_text(empty_id), Some(""));
+    let empty_line_index = database
+        .get(empty_id)
+        .expect("empty source should be addressable")
+        .line_index()
+        .expect("loaded empty source should expose its line index");
     assert_eq!(
-        database
-            .get(empty_id)
-            .expect("empty source should be addressable")
-            .line_count(),
+        empty_line_index.line_count(),
         0,
-        "an empty snapshot has no lines, matching str::lines()"
+        "an empty snapshot has no table entries, matching str::lines()"
+    );
+    assert_eq!(
+        empty_line_index.position(0),
+        Some(LinePosition { line: 0, column: 0 }),
+        "empty EOF still resolves as line 0, column 0"
     );
     assert!(database.source_load_error(empty_id).is_none());
 
@@ -548,12 +556,12 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .expect("source load error should be retained");
     assert!(database.retained_text(failed_id).is_none());
     assert!(database.source_load_error(failed_id).is_some());
-    assert_eq!(
+    assert!(
         database
             .get(failed_id)
             .expect("failed source should be addressable")
-            .line_count(),
-        0,
+            .line_index()
+            .is_none(),
         "an unreadable source has no line table"
     );
 
@@ -754,9 +762,9 @@ fn loaded_source_line_ranges_reconstruct_the_snapshot() {
             "α\nβ",
             &["α\n", "β"],
         ),
-        ("lone CR is not a line terminator", "a\rb", &["a\rb"]),
+        ("bare CR line ending", "a\rb", &["a\r", "b"]),
         ("a single newline", "\n", &["\n"]),
-        ("a lone CR at the end", "a\r", &["a\r"]),
+        ("a trailing bare CR", "a\r", &["a\r"]),
     ];
 
     for (label, text, expected_lines) in cases {
@@ -768,15 +776,18 @@ fn loaded_source_line_ranges_reconstruct_the_snapshot() {
             .retained_text()
             .expect("loaded source should retain text");
         assert_eq!(source_text, *text, "{label}: retained text");
+        let line_index = record
+            .line_index()
+            .expect("loaded source should expose its line index");
         assert_eq!(
-            record.line_count() as usize,
+            line_index.line_count() as usize,
             expected_lines.len(),
             "{label}: line count"
         );
 
-        let lines: Vec<&str> = (0..record.line_count())
+        let lines: Vec<&str> = (0..line_index.line_count())
             .map(|line_number| {
-                let range = record
+                let range = line_index
                     .line_byte_range(line_number)
                     .expect("every counted line should resolve");
                 &source_text[range.start as usize..range.end as usize]
@@ -785,10 +796,165 @@ fn loaded_source_line_ranges_reconstruct_the_snapshot() {
         assert_eq!(lines, *expected_lines, "{label}: line boundaries");
         assert_eq!(lines.concat(), *text, "{label}: reconstructed snapshot");
         assert!(
-            record.line_byte_range(record.line_count()).is_none(),
+            line_index
+                .line_byte_range(line_index.line_count())
+                .is_none(),
             "{label}: past-the-end line should not resolve"
         );
     }
+}
+
+#[test]
+fn line_index_resolves_newline_shapes_and_zero_width_eof() {
+    let crlf = "ab\r\n";
+    let crlf_starts = line_start_offsets(crlf);
+    let crlf_index = LineIndex::new(crlf, &crlf_starts);
+    assert_eq!(crlf_index.line_count(), 1);
+    assert_eq!(crlf_index.line_text(0), Some("ab"));
+    for offset in [2, 3, 4] {
+        assert_eq!(
+            crlf_index.position(offset),
+            Some(LinePosition { line: 0, column: 2 }),
+            "CRLF offset {offset} should render at the visible line end"
+        );
+        assert_eq!(
+            crlf_index.utf16_column(offset),
+            Some(2),
+            "UTF-16 conversion must use the same visible-line end"
+        );
+    }
+    assert_eq!(crlf_index.line_of_offset(4), Some(0));
+
+    let bare_cr = "ab\rc";
+    let bare_cr_starts = line_start_offsets(bare_cr);
+    let bare_cr_index = LineIndex::new(bare_cr, &bare_cr_starts);
+    assert_eq!(bare_cr_index.line_count(), 2);
+    assert_eq!(bare_cr_index.line_text(0), Some("ab"));
+    assert_eq!(bare_cr_index.line_text(1), Some("c"));
+    assert_eq!(
+        bare_cr_index.position(2),
+        Some(LinePosition { line: 0, column: 2 })
+    );
+    assert_eq!(
+        bare_cr_index.position(3),
+        Some(LinePosition { line: 1, column: 0 })
+    );
+
+    let trailing_bare_cr = "ab\r";
+    let trailing_bare_cr_starts = line_start_offsets(trailing_bare_cr);
+    let trailing_bare_cr_index = LineIndex::new(trailing_bare_cr, &trailing_bare_cr_starts);
+    assert_eq!(trailing_bare_cr_index.line_count(), 1);
+    assert_eq!(trailing_bare_cr_index.line_text(0), Some("ab"));
+    assert_eq!(
+        trailing_bare_cr_index.position(3),
+        Some(LinePosition { line: 0, column: 2 })
+    );
+
+    let final_newline = "ab\n";
+    let final_newline_starts = line_start_offsets(final_newline);
+    let final_newline_index = LineIndex::new(final_newline, &final_newline_starts);
+    assert_eq!(final_newline_index.line_count(), 1);
+    assert_eq!(final_newline_index.line_text(0), Some("ab"));
+    assert_eq!(
+        final_newline_index.position(3),
+        Some(LinePosition { line: 0, column: 2 })
+    );
+    assert_eq!(final_newline_index.line_of_offset(3), Some(0));
+
+    let no_final_newline = "ab\ncd";
+    let no_final_newline_starts = line_start_offsets(no_final_newline);
+    let no_final_newline_index = LineIndex::new(no_final_newline, &no_final_newline_starts);
+    assert_eq!(no_final_newline_index.line_count(), 2);
+    assert_eq!(no_final_newline_index.line_text(1), Some("cd"));
+    assert_eq!(
+        no_final_newline_index.position(5),
+        Some(LinePosition { line: 1, column: 2 })
+    );
+
+    let empty = "";
+    let empty_starts = line_start_offsets(empty);
+    let empty_index = LineIndex::new(empty, &empty_starts);
+    assert_eq!(empty_index.line_count(), 0);
+    assert_eq!(empty_index.line_text(0), None);
+    assert_eq!(empty_index.line_of_offset(0), Some(0));
+    assert_eq!(
+        empty_index.position(0),
+        Some(LinePosition { line: 0, column: 0 })
+    );
+    assert_eq!(empty_index.utf16_column(0), Some(0));
+}
+
+/// `str::lines()` agrees only for the LF and CRLF subset; bare CR is a tokenizer line break.
+#[test]
+fn line_text_matches_str_lines_for_lf_and_crlf() {
+    let text = "lf\ncrlf\r\nempty\n\r\nlast";
+    let line_starts = line_start_offsets(text);
+    let line_index = LineIndex::new(text, &line_starts);
+    let expected_lines: Vec<&str> = text.lines().collect();
+
+    let actual_lines: Vec<&str> = (0..line_index.line_count())
+        .map(|line| {
+            line_index
+                .line_text(line)
+                .expect("counted line should have text")
+        })
+        .collect();
+    assert_eq!(actual_lines, expected_lines);
+}
+
+#[test]
+fn line_index_counts_scalar_and_utf16_columns_at_arbitrary_offsets() {
+    let text = "aé😀z";
+    let line_starts = line_start_offsets(text);
+    let line_index = LineIndex::new(text, &line_starts);
+
+    // `é` begins at byte 1 and occupies bytes 1..3; byte 2 is not a UTF-8 boundary.
+    assert_eq!(
+        line_index.position(2),
+        Some(LinePosition { line: 0, column: 2 })
+    );
+    assert_eq!(
+        line_index.position(5),
+        Some(LinePosition { line: 0, column: 3 })
+    );
+    assert_eq!(
+        line_index.utf16_column(5),
+        Some(4),
+        "the astral scalar occupies two UTF-16 code units"
+    );
+    assert_eq!(
+        line_index.position(text.len() as u32),
+        Some(LinePosition { line: 0, column: 4 })
+    );
+    assert_eq!(line_index.utf16_column(text.len() as u32), Some(5));
+    assert_eq!(line_index.position(text.len() as u32 + 1), None);
+    assert_eq!(line_index.utf16_column(text.len() as u32 + 1), None);
+    assert_eq!(line_index.line_of_offset(text.len() as u32 + 1), None);
+}
+
+#[test]
+fn line_index_keeps_long_lines_addressable_without_truncation() {
+    let text = format!("{}\nend", "x".repeat(4096));
+    let line_starts = line_start_offsets(&text);
+    let line_index = LineIndex::new(&text, &line_starts);
+
+    assert_eq!(line_index.line_count(), 2);
+    assert_eq!(line_index.line_text(0).map(str::len), Some(4096));
+    assert_eq!(
+        line_index.position(4096),
+        Some(LinePosition {
+            line: 0,
+            column: 4096
+        })
+    );
+    assert_eq!(
+        line_index.position(4097),
+        Some(LinePosition { line: 1, column: 0 })
+    );
+    assert_eq!(
+        line_index.position(text.len() as u32),
+        Some(LinePosition { line: 1, column: 3 })
+    );
 }
 
 fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {

@@ -178,17 +178,15 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
 }
 
 #[test]
-fn rendered_source_lines_match_str_lines_across_carriage_returns() {
-    // A `\r` is only part of a terminator when a `\n` follows it. Anywhere else it is authored
-    // text and must survive into the rendered excerpt, exactly as `str::lines()` leaves it.
-    let texts = [
-        "hello\r\nworld\r\n",
-        "a\rb",
-        "trailing\r",
-        "mixed\r\n\rlone\n",
+fn rendered_source_lines_match_tokenizer_line_breaks() {
+    let cases: &[(&str, &[&str])] = &[
+        ("hello\r\nworld\r\n", &["hello", "world"]),
+        ("a\rb", &["a", "b"]),
+        ("trailing\r", &["trailing"]),
+        ("mixed\r\n\rlone\n", &["mixed", "", "lone"]),
     ];
 
-    for text in texts {
+    for (text, expected_lines) in cases {
         let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
         let mut string_table = StringTable::new();
         let (source_database, location) = retained_source_database(
@@ -201,12 +199,16 @@ fn rendered_source_lines_match_str_lines_across_carriage_returns() {
 
         let context = DiagnosticRenderContext::new(&string_table)
             .with_optional_source_database(Some(&source_database));
-        let expected_lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            context.retained_source_line(&logical_path, -1),
+            None,
+            "{text:?}: negative lines are not addressable"
+        );
         for (line_number, expected_line) in expected_lines.iter().enumerate() {
             assert_eq!(
                 context.retained_source_line(&logical_path, line_number as i32),
                 Some(*expected_line),
-                "{text:?}: line {line_number} must match str::lines()"
+                "{text:?}: line {line_number} must match tokenizer line breaks"
             );
         }
         assert_eq!(

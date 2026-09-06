@@ -717,34 +717,33 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Option<char> {
-        match self.chars.peek() {
-            Some(c) => {
-                if *c == '\n' {
-                    self.position.line_number += 1;
-                    self.position.char_column = 0;
-                } else {
-                    self.position.char_column += 1;
-                }
-
-                let consumed = self.chars.next()?;
-                self.last_char_start = self.byte_offset;
-                self.byte_offset += consumed.len_utf8() as u32;
-                Some(consumed)
-            }
-
-            None => None,
-        }
-    }
-
-    /// Consume one character, advancing the byte cursor but not the column.
+    /// Consume the next character, advancing the byte cursor and the authored position.
     ///
-    /// Used for a pending `\r` so the authored byte is counted without treating
-    /// carriage return as a visible column.
-    pub fn consume_char_without_column_advance(&mut self) -> Option<char> {
+    /// WHY this owns the line counter: a `\n`, a bare `\r` and a `\r\n` pair each end one
+    /// authored line, and the tokenizer reaches them from whitespace runs, comments, string and
+    /// template bodies, discarded bodies and character literals. Counting here means every one
+    /// of those paths agrees with the source line table by construction, instead of each caller
+    /// remembering to normalize. A pair is counted once, at its `\n`, which is why the `\r`
+    /// looks ahead after consuming itself.
+    pub fn next(&mut self) -> Option<char> {
         let consumed = self.chars.next()?;
         self.last_char_start = self.byte_offset;
         self.byte_offset += consumed.len_utf8() as u32;
+
+        match consumed {
+            '\n' => {
+                self.position.line_number += 1;
+                self.position.char_column = 0;
+            }
+            '\r' => {
+                self.position.char_column = 0;
+                if self.chars.peek() != Some(&'\n') {
+                    self.position.line_number += 1;
+                }
+            }
+            _ => self.position.char_column += 1,
+        }
+
         Some(consumed)
     }
 

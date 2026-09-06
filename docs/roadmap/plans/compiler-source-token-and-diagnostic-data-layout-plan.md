@@ -1189,10 +1189,61 @@ The module carries `allow(dead_code)` until 1D, which the style guide permits fo
 identified planned work. **1D must remove both suppressions and the `allow(unused_imports)` on the
 re-export**; if any survives, the slice that was supposed to consume this API did not.
 
+**Delivered as 1C4.** `src/compiler_frontend/source/line_index.rs` owns every line and column
+conversion as a borrowed view over one retained snapshot and its line-start table. Nothing is
+precomputed or cached: line lookup is a binary search, and the column scan is linear in that one
+line, so a long line needs no special case. A line's visible text drops its terminator; an offset
+inside a terminator, and EOF after a final one, resolve to the visible end of the line that
+terminator ends, because both column counters walk the terminator-free text. An empty snapshot
+keeps its empty table and still resolves its zero-width EOF to line 0, column 0. Columns count
+Unicode scalar starts before the offset, so an offset inside a scalar counts that scalar and
+nothing slices on a non-boundary. The UTF-16 counter shares those rules and is reserved for an
+LSP-facing caller.
+
+**The line-break set is the tokenizer's, not `str::lines()`.** A bare `\r` starts a new line,
+because `normalize_consumed_carriage_return_newline` already treats one as a break and the lexer
+emits a Newline token for it, so a bare CR ends a statement in the authored language. 1C1's table
+split on `\n` alone, which would have put every diagnostic in a bare-CR file on the wrong line and
+rendered a whole CR-delimited chunk as one line. Aligning the tokenizer to the table instead would
+have changed the language's line-break set, which no data-layout slice may decide. Two tests that
+pinned the old rule were corrected rather than worked around, and `str::lines()` equivalence is now
+asserted only over the LF and CRLF subset where it genuinely holds.
+
+A tokenizer equivalence test pins the two models together: every token's byte-anchored start
+resolves to the line the tokenizer recorded, across LF, CRLF, a whitespace-tail CR, a CR inside a
+quoted string, a CR inside a template body, multi-byte and astral source. That equality now holds
+because `TokenStream::next` became the single owner of the authored line counter: two newline
+helpers were each incrementing it as well, so a CR reached through a whitespace tail, a discarded
+body or a character literal counted its break once while the same CR reached through a string body
+counted it twice. Column equality is deliberately not asserted; the test instead requires the line
+index's own reported column to round-trip back to the token's byte start. That is the evidence
+slice 1H needs before it deletes the older model.
+
+Three obligations follow from this slice:
+
+- The module carries one documented `allow(dead_code)`. `line_of_offset`, `position`,
+  `utf16_column` and `LinePosition` have tests but no production caller until **1F4** migrates the
+  renderers onto byte offsets. **1F4 must retire the module-wide suppression by consuming the
+  scalar API**; `utf16_column` keeps a narrowly scoped allowance until the LSP consumer the
+  architecture document defers actually arrives, because no renderer may use UTF-16 columns.
+- **1F4 must also fix a caret defect this slice exposed but did not touch.** `terminal.rs` and
+  `dev_server.rs` derive their underline column from `CharPosition::char_column`. For a code token
+  the lexer consumes the first character before recording the start, so that column is one scalar
+  right of the authored start and the caret points one column past the offending text.
+  `SourceLocation` has carried exact byte offsets since 1C1, and `LineIndex::position(start_byte)`
+  is the correct position. No existing renderer test asserts caret alignment, so 1F4 owns both the
+  fix and its first test.
+- **A token whose position is inherited rather than captured is a second, worse case for the same
+  migration.** Newline tokens, EOF and a discarded template body's closing bracket are re-anchored
+  by byte alone, so their `CharPosition` keeps whatever the stream held earlier: in
+  `[$note:one\rtwo]` the closing bracket carries line 0 while it is authored on line 1. The
+  byte-anchored line is the correct one, which a test now pins, and 1F4 removes the stale field
+  rather than repairing it.
+
 - [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
 - [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
 - [x] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations. **Frozen-record half deferred to 1D:** see the delivery note above.
-- [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
+- [x] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion. **Widened at delivery:** the slice also had to decide the line-break set, chose the tokenizer's, and had to make `TokenStream::next` the single owner of the authored line counter before the two models could agree; see the delivery note above.
 - [ ] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests
 - [ ] **1C6 — registration slot and loaded record:** split the dense array into a compact
   registration slot per candidate and a loaded record that owns text, line starts and extended
@@ -1238,7 +1289,7 @@ a public boundary supporting both location models.
 - [ ] **1F1 — frozen lookup foundation:** add consuming string/source/minimal-path freeze operations that move or share current allocations and create the final lookup-only `FrozenIdentityContext`
 - [ ] **1F2 — pre-merge boundary cleanup:** make file stages return `SourcePreparationDelta` with a move-only diagnostic bag and make module stages return a move-only legacy diagnostic batch plus their local identity deltas; create a boundary message set only after the final canonical build/package merge instead of cloning `StringTable` through `from_*_ref` helpers
 - [ ] **1F3 — transitional message ownership:** only at the final build/package render boundary, make current `CompilerMessages` temporarily own diagnostics, existing type context and `Arc<FrozenIdentityContext>` rather than a mutable/deep-cloned string table; make it move-only and use an outer `Arc` only where a host genuinely shares it; module outcomes must not freeze or clone a context before their deltas merge; name this bridge and delete it in Slice 4I
-- [ ] **1F4 — renderer migration:** resolve paths, excerpts, line/column and UTF-16 positions through retained source snapshots and remove filesystem rereads used only for excerpts
+- [ ] **1F4 — renderer migration:** resolve paths, excerpts and line/column positions through retained source snapshots and remove filesystem rereads used only for excerpts. Both renderers must derive line and column from `SourceLocation`'s exact byte offsets through `LineIndex`, which fixes the `char_column` caret that currently points one scalar past the offending text and the stale line an inherited position can carry; add the first caret-alignment regression tests, covering both a captured code-token column and a re-anchored token such as a discarded template body's closing bracket. Consuming `line_of_offset`, `position` and `LinePosition` retires 1C4's module-wide `allow(dead_code)`; `utf16_column` keeps a narrowly scoped documented allowance until the LSP consumer the architecture document defers actually arrives
 - [ ] preserve terminal, terse and dev-server code/span identity
 - [ ] define synthetic/compilation-root display and provenance explicitly
 - [ ] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
