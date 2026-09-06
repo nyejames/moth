@@ -26,6 +26,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -116,6 +117,7 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
 
     let stream = FileTokens::new(
         scope,
+        SourceId::COMPILATION_ROOT,
         vec![
             Token::new(TokenKind::Comma, offending_location.clone()),
             Token::new(TokenKind::Eof, end_location),

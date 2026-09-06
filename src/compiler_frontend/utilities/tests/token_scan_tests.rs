@@ -1,5 +1,6 @@
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -16,6 +17,7 @@ fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> F
     let tokens = kinds.into_iter().map(token).collect();
     FileTokens::new(
         InternedPath::from_single_str("token_scan_tests", string_table),
+        SourceId::COMPILATION_ROOT,
         tokens,
     )
 }

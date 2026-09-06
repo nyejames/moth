@@ -195,14 +195,13 @@ fn capture_test_body(
     source_file: &InternedPath,
     source_table: &StringTable,
 ) -> StableBodySyntax {
-    let mut tokens = original.clone();
-    tokens.file_id = Some(SourceId::from_index(0));
+    let tokens = original.clone();
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     for (path_syntax, _) in tokens.path_syntax.iter() {
         resolved_references
             .push(ResolvedFileReference {
-                source_file: SourceId::from_index(0),
+                source_file: tokens.file_id,
                 path_syntax,
                 class: PreparedFileReferenceClass::ResourceFile,
                 outcome: ResolvedFileReferenceOutcome::Target(
@@ -244,21 +243,6 @@ fn direct_content_body_fixture() -> (
 ) {
     let mut string_table = StringTable::new();
     let source_file = InternedPath::from_single_str("@mod.moth", &mut string_table);
-    let path_location = location("@mod.moth", &mut string_table);
-    let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(
-        InternedPath::from_single_str("@private.mtf", &mut string_table),
-        path_location.clone(),
-    );
-    let tokens = vec![Token::new(TokenKind::Path(path_id), path_location)];
-    let body = FileTokens::new_with_identity(
-        source_file.clone(),
-        Some(SourceId::from_index(0)),
-        None,
-        tokens,
-        path_syntax,
-    );
-
     let source_files = SourceDatabase::build(
         [PathBuf::from("@mod.moth"), PathBuf::from("@private.mtf")],
         Path::new("@mod.moth"),
@@ -266,15 +250,32 @@ fn direct_content_body_fixture() -> (
         &mut string_table,
     )
     .expect("content fixture source identities should build");
+    let body_file_id = source_files
+        .get_by_canonical_path(Path::new("@mod.moth"))
+        .expect("content fixture body source identity should be registered")
+        .id;
+    let path_location = location("@mod.moth", &mut string_table);
+    let mut path_syntax = PathSyntaxTable::new();
+    let path_id = path_syntax.push(
+        InternedPath::from_single_str("@private.mtf", &mut string_table),
+        path_location.clone(),
+    );
+    let tokens = vec![Token::new(TokenKind::Path(path_id), path_location)];
+    let body =
+        FileTokens::new_with_identity(source_file.clone(), body_file_id, None, tokens, path_syntax);
+
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
-            source_file: SourceId::from_index(0),
+            source_file: body_file_id,
             path_syntax: path_id,
             class: PreparedFileReferenceClass::ContentSource,
             outcome: ResolvedFileReferenceOutcome::Target(
                 ResolvedFileReferenceTarget::ContentSource {
-                    source: SourceId::from_index(1),
+                    source: source_files
+                        .get_by_canonical_path(Path::new("@private.mtf"))
+                        .expect("content fixture target identity should be registered")
+                        .id,
                 },
             ),
         })
@@ -336,7 +337,7 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         value: Some(value),
     } = materialised
         .resolution_facts
-        .lookup(None, path_id)
+        .lookup(SourceId::COMPILATION_ROOT, path_id)
         .expect("materialised content row should be readable")
         .expect("materialised content row should be retained")
         .outcome
@@ -417,7 +418,7 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     let (tokens, path_syntax, path_id) = sample_tokens(&mut source_table);
     let original = FileTokens::new_with_identity(
         InternedPath::from_single_str("src/@mod.moth", &mut source_table),
-        None,
+        SourceId::COMPILATION_ROOT,
         None,
         tokens.clone(),
         path_syntax.clone(),
@@ -478,7 +479,13 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table);
     let source_file = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
     let declaration_path = source_file.join_str("generic_fn", &mut source_table);
-    let original = FileTokens::new_with_identity(declaration_path, None, None, tokens, path_syntax);
+    let original = FileTokens::new_with_identity(
+        declaration_path,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     let frozen = capture_test_body(&original, &source_file, &source_table);
     let mut generated_table = StringTable::new();
@@ -539,7 +546,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let source_file = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
     let original = FileTokens::new_with_identity(
         source_file.clone(),
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
         None,
         vec![
             Token::new(TokenKind::Path(second_donor_path), base_location.clone()),
@@ -630,7 +637,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let resolve_resource = |path_id| {
         let reference = materialised
             .resolution_facts
-            .lookup(None, path_id)
+            .lookup(SourceId::COMPILATION_ROOT, path_id)
             .expect("materialised facts should accept a compact handle")
             .expect("materialised facts should retain each compact row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -655,7 +662,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     assert!(
         materialised
             .resolution_facts
-            .lookup(None, second_donor_path)
+            .lookup(SourceId::COMPILATION_ROOT, second_donor_path)
             .expect("materialised facts should accept a donor handle lookup")
             .is_none(),
         "a donor handle that differs from its compact handle must not select a retained row"
@@ -687,7 +694,7 @@ fn repeated_spellings_share_one_frozen_string_entry() {
     ];
     let original = FileTokens::new_with_identity(
         InternedPath::from_single_str("src/@mod.moth", &mut source_table),
-        None,
+        SourceId::COMPILATION_ROOT,
         None,
         tokens,
         path_syntax,
@@ -717,7 +724,13 @@ fn persistent_generic_subset_counts_stay_separate_from_authored_path_rows() {
     let mut source_table = StringTable::new();
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table);
     let source_path = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
-    let original = FileTokens::new_with_identity(source_path, None, None, tokens, path_syntax);
+    let original = FileTokens::new_with_identity(
+        source_path,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _counter_capture = capture_frontend_counters_for_test();
@@ -787,8 +800,13 @@ fn retained_template(
         generic_parameter_owner: None,
         generic_parameter_list_id: GenericParameterListId(0),
         signature: FunctionSignature::default(),
-        body_tokens: has_body
-            .then(|| GenericFunctionBody::source(FileTokens::new(path, Vec::new()))),
+        body_tokens: has_body.then(|| {
+            GenericFunctionBody::source(FileTokens::new(
+                path,
+                SourceId::COMPILATION_ROOT,
+                Vec::new(),
+            ))
+        }),
         declaration_location: SourceLocation::default(),
     }
 }
@@ -978,9 +996,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             tokens,
             path_syntax,
         );
-        let body_source_file = body
-            .file_id
-            .expect("generic body should retain its source file");
+        let body_source_file = body.file_id;
         template.body_tokens = Some(GenericFunctionBody::source(body));
         (body_source_file, path_id)
     };
@@ -1209,7 +1225,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         );
         let body = FileTokens::new_with_identity(
             source_file.clone(),
-            Some(SourceId::from_index(0)),
+            SourceId::COMPILATION_ROOT,
             None,
             vec![Token::new(TokenKind::Path(path_id), path_location)],
             path_syntax,
@@ -1271,7 +1287,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let reference = body
             .resolution_facts()
             .expect("materialised body should carry its Stage 0 facts")
-            .lookup(None, path_id)
+            .lookup(SourceId::COMPILATION_ROOT, path_id)
             .expect("materialised body facts should accept its compact handle")
             .expect("materialised body should retain its path row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -1817,7 +1833,13 @@ fn invalid_frozen_path_handle_returns_compiler_error() {
     let mut source_table = StringTable::new();
     let (tokens, path_syntax, _) = sample_tokens(&mut source_table);
     let source_path = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
-    let original = FileTokens::new_with_identity(source_path, None, None, tokens, path_syntax);
+    let original = FileTokens::new_with_identity(
+        source_path,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
     let source_file = original.src_path.clone();
     let mut frozen = capture_test_body(&original, &source_file, &source_table);
     let TokenKind::Path(path_id) = &mut frozen

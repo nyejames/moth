@@ -27,7 +27,7 @@ fn prepare_source(
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 

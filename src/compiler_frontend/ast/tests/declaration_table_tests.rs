@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -835,7 +836,7 @@ fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut Stri
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: Default::default(),
         name_location: SourceLocation::default(),
-        tokens: FileTokens::new(path, Vec::new()),
+        tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
         source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),
     }

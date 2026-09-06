@@ -79,7 +79,7 @@ fn template_tokens_from_source_with_style_directives(
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         style_directives,
         string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;
@@ -340,7 +340,7 @@ fn template_parse_rendered_error_with_style_directives(
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     ) {
         Ok(tokens) => tokens,
         Err(error) => {

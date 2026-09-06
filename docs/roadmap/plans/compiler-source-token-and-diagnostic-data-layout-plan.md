@@ -1444,6 +1444,15 @@ validation and is audited on its own:
       become unrepresentable-wrong at 1D2b4 and by construction respectively.
     - **1D2b4 — final token identity type cutover:** the `Option` disappears from `FileTokens`,
       `source_identity_facts` and the prepared-output identity fields.
+      **Delivered.** The cutover pulled the whole identity chain that feeds a token stream with
+      it: `ScopeShared::declaring_file_id`, `TypeResolutionContext::declaring_file_id`, the
+      emitter's scope input, `PreparedFileReference::source_file` and `Stage0ResolutionFacts::
+      lookup` are all plain `SourceId` now, because a sub-stream helper reading an optional
+      identity to build a non-optional one can only panic or fabricate. Five absence errors died
+      with the `Option`: two in `export_projection.rs`, the dependency-shell stamp, the ordinary
+      Stage 0 lookup and the file-reference resolver. `SourceModuleOriginTable::origin_for` still
+      rejects the compilation root, so an export-targeted header that names it is still an error —
+      the two export tests that covered the absent case now cover that one.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D4 — source preparation delta:** file workers return `SourcePreparationDelta` values keyed by

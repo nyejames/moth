@@ -254,7 +254,7 @@ fn resolve_struct_field_defaults(
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
-    declaring_file_id: Option<SourceId>,
+    declaring_file_id: SourceId,
 }
 
 fn inline_visible_constant_references(

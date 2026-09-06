@@ -1286,8 +1286,6 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     }
 
     fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {
-        // Kind is owned by `SourceSlot`. A missing identity is unregistered compilation
-        // (`file_id: None`, `SourceDatabase::empty()`), which is never a Moth template scope.
         matches!(
             self.module_symbols
                 .source_record(source_file, self.source_files)

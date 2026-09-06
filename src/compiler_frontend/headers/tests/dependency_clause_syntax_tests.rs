@@ -6,6 +6,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyClauseParseError;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -27,7 +28,7 @@ fn tokenize_named_source(source: &str, file_name: &str) -> (FileTokens, StringTa
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("source should tokenize")
     .file_tokens;

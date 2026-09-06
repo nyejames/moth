@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -92,7 +93,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -129,7 +130,7 @@ fn bounded_expression_parses_simple_literal() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -165,7 +166,7 @@ fn bounded_expression_nested_parentheses() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -202,7 +203,7 @@ fn bounded_expression_nested_curly_braces() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -232,7 +233,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(

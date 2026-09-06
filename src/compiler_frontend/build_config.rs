@@ -445,7 +445,7 @@ fn parse_ordinary_quoted_literal(
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        Some(SourceId::COMPILATION_ROOT),
+        SourceId::COMPILATION_ROOT,
     )
     .map_err(|diagnostic| QuotedLiteralRejection {
         reason: diagnostic.kind.descriptor().title,

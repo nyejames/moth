@@ -71,7 +71,7 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable) {
             .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("Moth template body should tokenize");
 
@@ -92,7 +92,7 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
             .expect("Moth template should have a tokenizer entry mode"),
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("test Moth template should tokenize");
     let _path_syntax = file_tokens
@@ -195,14 +195,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         &mut string_table,
     )
     .expect("Moth template source identity should register");
-    let entry_file_id = Some(
-        source_files
-            .get_by_canonical_path(&input_path)
-            .map(|identity| identity.id)
-            .expect("standalone Moth template source identity was not registered"),
-    );
+    let entry_file_id = source_files
+        .get_by_canonical_path(&input_path)
+        .map(|identity| identity.id)
+        .expect("standalone Moth template source identity was not registered");
     let options = HeaderParseOptions {
-        entry_file_id,
+        entry_file_id: Some(entry_file_id),
         project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
@@ -224,9 +222,9 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let mut prepared_file =
         CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
             .expect("Moth template source should prepare");
-    assert!(
-        prepared_file.file_id.is_some(),
-        "registered Moth template source should stamp a source identity"
+    assert_eq!(
+        prepared_file.file_id, entry_file_id,
+        "registered Moth template source should stamp its source identity"
     );
     prepared_file
         .freeze_path_syntax(&string_table)
@@ -770,7 +768,7 @@ fn prepare_moth_source(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("Moth source should tokenize");
 

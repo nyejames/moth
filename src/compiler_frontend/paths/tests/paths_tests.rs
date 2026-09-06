@@ -1,6 +1,7 @@
 //! Path-only syntax tests.
 
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, PathKind};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -21,7 +22,7 @@ fn tokenize_source(
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("source should tokenize")
     .file_tokens;
@@ -141,7 +142,7 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
             TokenizerEntryMode::SourceFile,
             &StyleDirectiveRegistry::built_ins(),
             &mut strings,
-            None,
+            SourceId::COMPILATION_ROOT,
         )
         .expect_err("whitespace cannot separate a path introducer or separator from its component");
         assert!(matches!(
@@ -161,7 +162,7 @@ fn path_errors_remain_structured() {
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut strings,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect_err("public root suffix should fail");
     assert!(matches!(

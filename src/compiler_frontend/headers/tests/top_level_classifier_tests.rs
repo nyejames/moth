@@ -1,6 +1,7 @@
 //! Shared top-level statement-start classification tests.
 
 use super::*;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
@@ -44,6 +45,7 @@ fn qualified_match_arm_is_not_a_choice_declaration() {
 
     let mut token_stream = FileTokens::new(
         InternedPath::from_single_str("src/@page.moth", &mut string_table),
+        SourceId::COMPILATION_ROOT,
         tokens,
     );
     token_stream.index = 0;

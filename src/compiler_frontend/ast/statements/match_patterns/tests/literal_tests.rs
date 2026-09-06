@@ -15,6 +15,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -93,7 +94,7 @@ fn parse_whole_number_pattern(
         ),
         Token::new(TokenKind::Eof, SourceLocation::default()),
     ];
-    let mut token_stream = FileTokens::new(scope, tokens);
+    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let type_environment = TypeEnvironment::new();
 
     parse_literal_pattern(
@@ -130,7 +131,7 @@ fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestRes
         ),
         Token::new(TokenKind::Eof, SourceLocation::default()),
     ];
-    let mut token_stream = FileTokens::new(scope, tokens);
+    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let type_environment = TypeEnvironment::new();
 
     parse_literal_pattern(

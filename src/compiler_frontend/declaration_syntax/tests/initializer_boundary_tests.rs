@@ -49,7 +49,7 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;
@@ -243,7 +243,7 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;

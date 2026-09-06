@@ -45,12 +45,9 @@ pub(super) fn build_module_symbols(
         module_symbols
             .file_roles_by_source
             .insert(file_output.source_file.to_owned(), file_output.file_role);
-
-        if let Some(file_id) = file_output.file_id {
-            module_symbols
-                .source_ids_by_source
-                .insert(file_output.source_file.to_owned(), file_id);
-        }
+        module_symbols
+            .source_ids_by_source
+            .insert(file_output.source_file.to_owned(), file_output.file_id);
 
         for header in &file_output.headers {
             if !validate_declared_name(header, string_table, &mut diagnostic_bag) {

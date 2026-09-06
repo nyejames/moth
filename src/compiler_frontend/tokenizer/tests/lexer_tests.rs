@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::{
     SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 
 use crate::compiler_frontend::style_directives::{
@@ -46,7 +47,7 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect_err("tokenization should fail");
     (*diagnostic, string_table)
@@ -64,7 +65,7 @@ fn tokenize_source_with_registry(
         TokenizerEntryMode::SourceFile,
         style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;
@@ -85,7 +86,7 @@ fn tokenize_source_with_directives(
         TokenizerEntryMode::SourceFile,
         &registry,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;
@@ -103,7 +104,7 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
             .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("Moth template tokenization should succeed")
     .file_tokens;
@@ -121,7 +122,7 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
             .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect_err("Moth template tokenization should fail");
     (*diagnostic, string_table)
@@ -1593,7 +1594,7 @@ fn rejects_legacy_reset_style_directive_name() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect_err("legacy reset directive should be rejected");
 
@@ -1694,7 +1695,7 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     );
     assert!(
         result.is_err(),
@@ -1755,7 +1756,7 @@ fn unknown_style_directives_fail_under_strict_registry() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     );
     let error = result.expect_err("unknown directive should fail during tokenization");
 
@@ -1806,7 +1807,7 @@ fn rejects_numeric_slot_directive_prefixes() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     );
     assert!(
         result.is_err(),
@@ -2464,7 +2465,7 @@ fn every_token_legacy_byte_range_matches_its_encoded_span() {
         TokenizerEntryMode::SourceFile,
         &frontend_test_style_directives(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("span bridge fixture should tokenize");
     let resolver = output.span_builder.resolver();
@@ -2556,7 +2557,7 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
         TokenizerEntryMode::SourceFile,
         &frontend_test_style_directives(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("long token should tokenize");
     let resolver = output.span_builder.resolver();

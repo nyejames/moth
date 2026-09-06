@@ -28,7 +28,7 @@ use std::path::PathBuf;
 pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) source_file: InternedPath,
-    pub(crate) file_id: Option<SourceId>,
+    pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
 }
 

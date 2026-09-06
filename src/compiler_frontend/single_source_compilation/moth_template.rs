@@ -227,7 +227,7 @@ pub(crate) fn compile_moth_template_source(
                 string_table,
             )
         })?;
-    let entry_file_id = Some(source_identity.id);
+    let entry_file_id = source_identity.id;
     let entry_scope = source_identity.logical_path.clone();
 
     // 1. Prepare the single source into retained syntax.
@@ -338,11 +338,11 @@ fn prepare_template_source(
     path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
     source_code: &str,
-    entry_file_id: Option<SourceId>,
+    entry_file_id: SourceId,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
     let options = HeaderParseOptions {
-        entry_file_id,
+        entry_file_id: Some(entry_file_id),
         project_path_resolver: Some(path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,

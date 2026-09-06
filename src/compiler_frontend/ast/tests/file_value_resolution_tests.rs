@@ -172,7 +172,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect_err("a public root path cannot have a suffix");
 
@@ -354,7 +354,7 @@ fn compile_fixture(
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
         )
         .expect("Moth tokenization should succeed");
 
@@ -376,7 +376,7 @@ fn compile_fixture(
             entry_mode,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
         )
         .expect("Moth template tokenization should succeed");
 
@@ -395,7 +395,7 @@ fn compile_fixture(
                 source_code: source,
                 source_file: InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
                     .expect("test path should be UTF-8"),
-                file_id: Some(file_id_for(path)),
+                file_id: file_id_for(path),
                 canonical_os_path: None,
             },
             &mut string_table,
@@ -412,9 +412,7 @@ fn compile_fixture(
     let mut resource_source_index = 0;
     for output in &prepared_outputs {
         for reference in output.structural_file_references.iter() {
-            let source_file = reference
-                .source_file
-                .expect("prepared rows carry a source SourceId");
+            let source_file = reference.source_file;
             let authored_path = output
                 .path_syntax
                 .table()
@@ -580,7 +578,7 @@ fn resolve_file_value_fixture(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(source_file),
+        source_file,
     )
     .expect("file-value fixture should tokenize");
     token_stream.freeze_path_syntax_for_test();
@@ -623,7 +621,7 @@ fn resolve_file_value_fixture(
         module_resources: Rc::clone(&module_resources),
         module_origin: Some(module_origin.clone()),
     }))
-    .with_declaring_file_id(Some(source_file));
+    .with_declaring_file_id(source_file);
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();

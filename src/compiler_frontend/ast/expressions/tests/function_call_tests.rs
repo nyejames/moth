@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
@@ -48,7 +49,7 @@ fn parse_args(
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
@@ -81,7 +82,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
@@ -155,7 +156,7 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
@@ -280,7 +281,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 

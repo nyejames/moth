@@ -781,11 +781,8 @@ impl Header {
             .tokens
             .src_path
             .try_rebind_required_prefix(&provisional_source_file, &logical_path)?;
-        self.tokens.rebind_file_identity(
-            logical_path.clone(),
-            Some(file_id),
-            Some(canonical_os_path),
-        );
+        self.tokens
+            .rebind_file_identity(logical_path.clone(), file_id, Some(canonical_os_path));
         self.tokens.src_path = rebound_header_path;
         self.source_file = logical_path.clone();
         for reference in &mut self.capacity_references {
@@ -1077,7 +1074,7 @@ pub struct FileFrontendPrepareOutput {
     pub source_file: InternedPath,
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
-    pub file_id: Option<SourceId>,
+    pub file_id: SourceId,
     /// The one mutable source-local span table encoded by this file's token stream.
     ///
     /// The reader arrives with slice 1D4: the source preparation delta installs this table into
@@ -1341,7 +1338,7 @@ impl FileFrontendPrepareOutput {
         self.path_syntax.table_mut()?;
         self.validate_source_rebinding(&provisional_source_file)?;
         self.source_file = final_logical_path.clone();
-        self.file_id = Some(final_file_id);
+        self.file_id = final_file_id;
         self.canonical_os_path = Some(canonical_os_path.clone());
 
         for clause in &mut self.file_dependency_clauses {
@@ -1478,7 +1475,7 @@ impl FileFrontendPrepareOutput {
 fn validate_dependency_clauses(
     clauses: &[RetainedDependencyClause],
     selections: &[DependencySelection],
-    file_id: Option<SourceId>,
+    file_id: SourceId,
     source_file: &InternedPath,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
@@ -1552,7 +1549,7 @@ fn validate_dependency_clauses(
 
 fn validate_dependency_path(
     dependency: &RetainedDependencyPath,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
     source_file: &InternedPath,
     string_table: &StringTable,
 ) -> Result<(), CompilerError> {
@@ -1563,14 +1560,12 @@ fn validate_dependency_path(
     }
     decode_dependency_target(&dependency.path, &dependency.target, string_table)?;
     validate_source_location(&dependency.location, source_file, "dependency path")?;
-    match file_id {
-        Some(file_id) if dependency.dependency_shell_id.source == file_id => Ok(()),
-        Some(_) => Err(CompilerError::compiler_error(
+    if dependency.dependency_shell_id.source == file_id {
+        Ok(())
+    } else {
+        Err(CompilerError::compiler_error(
             "dependency shell identity does not match the prepared file identity",
-        )),
-        None => Err(CompilerError::compiler_error(
-            "dependency clause retained a shell without a prepared file identity",
-        )),
+        ))
     }
 }
 
@@ -1591,7 +1586,7 @@ fn validate_dependency_selection(
 
 fn validate_header(
     header: &Header,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
     canonical_os_path: Option<&std::path::Path>,
     source_file: &InternedPath,
     path_syntax: &PathSyntaxTable,

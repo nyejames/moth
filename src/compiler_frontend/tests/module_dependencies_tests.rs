@@ -39,6 +39,19 @@ fn parse_module_headers(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path_buf = PathBuf::from(entry_path);
+    let all_paths = files
+        .iter()
+        .map(|(path, _)| PathBuf::from(path))
+        .collect::<Vec<_>>();
+    let source_files =
+        SourceDatabase::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
+            .expect("fixture source identities should build");
+    let file_id_for = |path: &str| {
+        source_files
+            .get_by_canonical_path(&PathBuf::from(path))
+            .map(|identity| identity.id)
+            .unwrap_or_else(|| panic!("fixture file {path} should have a source identity"))
+    };
 
     let mut prepared_outputs = Vec::with_capacity(files.len());
     let mut const_template_offset = 0usize;
@@ -54,7 +67,7 @@ fn parse_module_headers(
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(SourceId::from_index(0)),
+            file_id_for(path),
         )
         .expect("tokenization should succeed");
 
@@ -81,7 +94,7 @@ fn parse_module_headers(
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
-        &crate::compiler_frontend::source::SourceDatabase::empty(),
+        &source_files,
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -361,6 +374,17 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path = PathBuf::from("src/a.moth");
     let file_path = PathBuf::from("src/a.moth");
+    let source_files = SourceDatabase::build(
+        std::iter::once(&file_path),
+        &entry_path,
+        None,
+        &mut string_table,
+    )
+    .expect("fixture source identity should build");
+    let file_id = source_files
+        .get_by_canonical_path(&file_path)
+        .expect("fixture source identity should be present")
+        .id;
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let file_tokens = tokenize(
@@ -369,7 +393,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        file_id,
     )
     .expect("tokenization should succeed");
 
@@ -385,7 +409,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         options.project_path_resolver,
-        &crate::compiler_frontend::source::SourceDatabase::empty(),
+        &source_files,
         &mut string_table,
     );
 
@@ -973,7 +997,7 @@ fn parse_module_headers_with_content_sources(
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
         )
         .expect("tokenization should succeed");
 
@@ -1002,7 +1026,7 @@ fn parse_module_headers_with_content_sources(
             entry_mode,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
         )
         .expect("template tokenization should succeed");
 
@@ -1020,7 +1044,7 @@ fn parse_module_headers_with_content_sources(
             PlainMarkdownPrepareInput {
                 source_code: source,
                 source_file: interned_path,
-                file_id: Some(file_id_for(path)),
+                file_id: file_id_for(path),
                 canonical_os_path: None,
             },
             &mut string_table,
@@ -1052,11 +1076,10 @@ fn parse_module_headers_with_content_sources(
             else {
                 continue;
             };
+            let source_file = reference.source_file;
             resolved_references
                 .push(ResolvedFileReference {
-                    source_file: reference
-                        .source_file
-                        .expect("fixture prepared rows carry a SourceId"),
+                    source_file,
                     path_syntax: reference.path_syntax,
                     class: reference.class,
                     outcome: ResolvedFileReferenceOutcome::Target(
@@ -1289,7 +1312,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(root_file_id),
+        root_file_id,
     )
     .expect("root file should tokenize");
     prepared_outputs.push(
@@ -1311,7 +1334,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
             .expect("Moth template has a tokenizer entry mode"),
         &style_directives,
         &mut string_table,
-        Some(icon_file_id),
+        icon_file_id,
     )
     .expect("icon template should tokenize");
     prepared_outputs.push(
@@ -1321,17 +1344,15 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
 
     // Simulate Stage 0 for the nested module: the module-relative authored occurrence inside
     // `components/@page.moth` resolves to the icon template's canonical identity.
+    let mut resolved_references = ResolvedFileReferenceTable::new();
     let content_row = prepared_outputs[0]
         .structural_file_references
         .iter()
         .find(|reference| reference.class == PreparedFileReferenceClass::ContentSource)
         .expect("the nested initializer should retain a content-class row");
-    let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
-            source_file: content_row
-                .source_file
-                .expect("fixture prepared rows carry a SourceId"),
+            source_file: content_row.source_file,
             path_syntax: content_row.path_syntax,
             class: content_row.class,
             outcome: ResolvedFileReferenceOutcome::Target(

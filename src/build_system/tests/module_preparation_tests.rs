@@ -1443,8 +1443,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                     panic!("every fixture source should prepare under {strategy:?}");
                 };
                 assert_eq!(
-                    output.file_id,
-                    Some(registered_ids[prepared_file.file_index]),
+                    output.file_id, registered_ids[prepared_file.file_index],
                     "{strategy:?} must stamp the registered identity on file index {}",
                     prepared_file.file_index
                 );
@@ -1535,7 +1534,7 @@ fn parsed_prepared_output(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("test source should tokenize");
 

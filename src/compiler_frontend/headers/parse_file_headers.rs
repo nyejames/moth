@@ -65,10 +65,10 @@ pub fn parse_file_headers_with_table(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let HeaderParseOptions { entry_file_id, .. } = options;
 
-    let is_entry_file = match (*entry_file_id, file_tokens.file_id) {
-        (Some(expected_id), Some(current_id)) => expected_id == current_id,
-        _ => file_tokens.src_path.to_path_buf(string_table) == entry_file_path,
-    };
+    let is_entry_file = entry_file_id.map_or_else(
+        || file_tokens.src_path.to_path_buf(string_table) == entry_file_path,
+        |expected_id| expected_id == file_tokens.file_id,
+    );
 
     let source_path = file_tokens
         .canonical_os_path

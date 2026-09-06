@@ -36,7 +36,7 @@ pub(crate) enum PreparedFileReferenceClass {
 /// One graph-active file-value path occurrence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PreparedFileReference {
-    pub(crate) source_file: Option<SourceId>,
+    pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) location: SourceLocation,
     pub(crate) class: PreparedFileReferenceClass,
@@ -69,7 +69,7 @@ impl PreparedFileReferenceTable {
         logical_path: &InternedPath,
     ) {
         for reference in &mut self.references {
-            reference.source_file = Some(file_id);
+            reference.source_file = file_id;
             reference.location.rebind_source_identity(logical_path);
         }
     }
@@ -84,7 +84,7 @@ impl PreparedFileReferenceTable {
 pub(crate) fn classify_prepared_file_references(
     path_syntax: &PathSyntaxTable,
     consumed_by_dependency_clauses: impl IntoIterator<Item = PathSyntaxId>,
-    source_file: Option<SourceId>,
+    source_file: SourceId,
     string_table: &StringTable,
 ) -> PreparedFileReferenceTable {
     let consumed: FxHashSet<PathSyntaxId> = consumed_by_dependency_clauses

@@ -107,7 +107,7 @@ fn make_file_tokens(symbol_name: &str, string_table: &mut StringTable) -> FileTo
         TokenKind::Symbol(string_table.intern(symbol_name)),
         make_location("test.moth", string_table),
     );
-    FileTokens::new(src_path, vec![token])
+    FileTokens::new(src_path, SourceId::COMPILATION_ROOT, vec![token])
 }
 
 fn make_prepared_header(
@@ -128,7 +128,7 @@ fn make_prepared_header(
         ),
         tokens: FileTokens::new_deferred_with_identity(
             source_file.clone(),
-            Some(file_id),
+            file_id,
             Some(canonical_os_path.to_path_buf()),
             tokens,
         ),
@@ -145,7 +145,7 @@ fn make_prepared_output(
 ) -> FileFrontendPrepareOutput {
     FileFrontendPrepareOutput {
         source_file,
-        file_id: Some(file_id),
+        file_id,
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -768,7 +768,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
 
     let mut output = FileFrontendPrepareOutput {
         source_file,
-        file_id: None,
+        file_id: SourceId::COMPILATION_ROOT,
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 12,
@@ -798,7 +798,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     );
 
     // file_id unchanged.
-    assert!(output.file_id.is_none());
+    assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);
 
     // Header nested fields remapped.
     assert_eq!(output.headers.len(), 1);
@@ -874,7 +874,7 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
 
     let mut output = FileFrontendPrepareOutput {
         source_file,
-        file_id: None,
+        file_id: SourceId::COMPILATION_ROOT,
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -1019,7 +1019,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
 
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source.clone(),
-        file_id: Some(SourceId::from_index(7)),
+        file_id: SourceId::from_index(7),
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 3,
@@ -1046,7 +1046,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(SourceId::from_index(7)),
+                    SourceId::from_index(7),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("function_body")),
@@ -1072,7 +1072,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(SourceId::from_index(7)),
+                    SourceId::from_index(7),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("constant_body")),
@@ -1097,7 +1097,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 name_location: provisional_location.clone(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
-                    Some(SourceId::from_index(7)),
+                    SourceId::from_index(7),
                     Some(PathBuf::from("/provisional/src/main.moth")),
                     vec![Token::new(
                         TokenKind::Symbol(string_table.intern("trait_body")),
@@ -1132,13 +1132,13 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         .expect("the fully rebound retained output should satisfy the file invariant gate");
 
     assert_eq!(output.source_file, final_source);
-    assert_eq!(output.file_id, Some(SourceId::from_index(42)));
+    assert_eq!(output.file_id, SourceId::from_index(42));
     assert_eq!(output.canonical_os_path, Some(final_os_path.clone()));
 
     for header in &output.headers {
         assert_eq!(header.source_file, output.source_file);
         assert_eq!(header.tokens.src_path, output.source_file);
-        assert_eq!(header.tokens.file_id, Some(SourceId::from_index(42)));
+        assert_eq!(header.tokens.file_id, SourceId::from_index(42));
         assert_eq!(header.tokens.canonical_os_path, Some(final_os_path.clone()));
         assert_eq!(header.name_location.scope, output.source_file);
         assert!(
@@ -1272,7 +1272,7 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
     };
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source,
-        file_id: Some(SourceId::from_index(3)),
+        file_id: SourceId::from_index(3),
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -1363,7 +1363,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
     };
     let mut output = FileFrontendPrepareOutput {
         source_file,
-        file_id: None,
+        file_id: SourceId::COMPILATION_ROOT,
         span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -1697,7 +1697,7 @@ fn prepared_file_rebinding_preflights_required_paths_without_partial_mutation() 
         ),
         tokens: FileTokens::new_deferred_with_identity(
             malformed_header_path.clone(),
-            Some(SourceId::from_index(6)),
+            SourceId::from_index(6),
             Some(provisional_os_path.clone()),
             Vec::new(),
         ),
@@ -1719,7 +1719,7 @@ fn prepared_file_rebinding_preflights_required_paths_without_partial_mutation() 
         "unexpected rebind error: {error:?}"
     );
     assert_eq!(output.source_file, provisional_source);
-    assert_eq!(output.file_id, Some(SourceId::from_index(6)));
+    assert_eq!(output.file_id, SourceId::from_index(6));
     assert_eq!(output.canonical_os_path, Some(provisional_os_path));
     assert_eq!(output.headers[0].source_file, output.source_file);
     assert_eq!(output.headers[0].tokens.src_path, malformed_header_path);

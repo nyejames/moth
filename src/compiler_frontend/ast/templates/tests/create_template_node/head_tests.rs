@@ -50,6 +50,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -282,7 +283,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
     }))
-    .with_declaring_file_id(Some(source_file));
+    .with_declaring_file_id(source_file);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
@@ -357,6 +358,7 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
 
     let mut token_stream = FileTokens::new(
         scope,
+        SourceId::COMPILATION_ROOT,
         vec![
             token(TokenKind::TemplateHead, 1),
             numeric_token("3", 1, &mut string_table),
@@ -378,6 +380,7 @@ fn single_item_template_head_with_close_is_foldable() {
 
     let mut token_stream = FileTokens::new(
         scope,
+        SourceId::COMPILATION_ROOT,
         vec![
             token(TokenKind::TemplateHead, 1),
             numeric_token("3", 1, &mut string_table),

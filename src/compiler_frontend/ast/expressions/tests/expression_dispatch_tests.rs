@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -82,7 +83,7 @@ fn hash_in_expression_position_rejected() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -136,7 +137,7 @@ fn hash_before_template_head_allowed() {
         token(TokenKind::TemplateHead, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -178,7 +179,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         token(TokenKind::Symbol(name), &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -227,7 +228,7 @@ fn hash_from_tokenized_source_rejected() {
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .unwrap();
 
@@ -244,7 +245,7 @@ fn hash_from_tokenized_source_rejected() {
     // Slice from after Assign to end
     let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
     let scope = InternedPath::from_single_str("test.moth", &mut string_table);
-    let mut stream = FileTokens::new(scope.clone(), expr_tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, expr_tokens);
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
@@ -341,7 +342,7 @@ fn constant_identifier_uses_module_store_tir() {
         token(TokenKind::Symbol(constant_name), &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut token_stream = FileTokens::new(scope, tokens);
+    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);

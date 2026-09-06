@@ -470,9 +470,9 @@ fn greater_than_is_template_tag_end(
         )
 }
 
-/// Tokenize one source file and optionally attach stable file identity metadata.
+/// Tokenize one source file and attach its stable file identity metadata.
 ///
-/// WHAT: wraps lexing output in `FileTokens` carrying both logical path and optional `SourceId`.
+/// WHAT: wraps lexing output in `FileTokens` carrying logical path and `SourceId`.
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
 pub fn tokenize(
     source_code: &str,
@@ -480,7 +480,7 @@ pub fn tokenize(
     entry_mode: TokenizerEntryMode,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
 ) -> LexerResult<TokenizeOutput> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.

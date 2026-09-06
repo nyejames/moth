@@ -1,6 +1,7 @@
 //! Unit tests for `TokenStats` classification.
 
 use crate::compiler_frontend::arena::TokenStats;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -21,7 +22,7 @@ fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
         TokenizerEntryMode::SourceFile,
         &directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("source should tokenize");
 

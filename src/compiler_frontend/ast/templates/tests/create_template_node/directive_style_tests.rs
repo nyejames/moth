@@ -39,7 +39,7 @@ fn directive_tokens(source: &str, string_table: &mut StringTable) -> FileTokens 
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;

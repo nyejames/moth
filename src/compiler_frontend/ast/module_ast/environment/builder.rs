@@ -992,7 +992,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn type_resolution_context_for<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
-        declaring_file_id: Option<SourceId>,
+        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
     ) -> TypeResolutionContext<'a> {
         self.type_resolution_context_for_with_traits(
@@ -1006,7 +1006,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn type_resolution_context_for_with_traits<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
-        declaring_file_id: Option<SourceId>,
+        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
         trait_environment: Option<&'a TraitEnvironment>,
     ) -> TypeResolutionContext<'a> {

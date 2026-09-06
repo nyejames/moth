@@ -8,6 +8,7 @@
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
@@ -132,7 +133,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
     let canonical_path = std::path::PathBuf::from("/absolute/local.moth");
     let mut file_tokens = FileTokens::new_with_identity(
         src_path_local.clone(),
-        None,
+        SourceId::COMPILATION_ROOT,
         Some(canonical_path.clone()),
         tokens,
         PathSyntaxTable::new(),
@@ -212,8 +213,13 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
         make_token(TokenKind::Path(utils_helper), token_scope_local),
     ];
 
-    let mut file_tokens =
-        FileTokens::new_with_identity(src_path_local, None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        src_path_local,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     let remap = global_table.merge_from(&local_table);
 
@@ -261,8 +267,13 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
         make_location(source_path.clone()),
     );
     let tokens = vec![make_token(TokenKind::Path(button), source_path.clone())];
-    let mut file_tokens =
-        FileTokens::new_with_identity(source_path, None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        source_path,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
@@ -305,21 +316,22 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     ];
 
     let canonical = std::path::PathBuf::from("/canonical/logical.moth");
-    let mut file_tokens =
-        FileTokens::new_with_identity(original_scope.clone(), None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        original_scope.clone(),
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
-    let file_id = crate::compiler_frontend::source::SourceId::from_index(7);
+    let file_id = SourceId::from_index(7);
     file_tokens
-        .rebind_source_identity(
-            logical_scope.clone(),
-            Some(file_id),
-            Some(canonical.clone()),
-        )
+        .rebind_source_identity(logical_scope.clone(), file_id, Some(canonical.clone()))
         .expect("the sole mutable source table should accept final identity rebinding");
 
     // Top-level identity fields are rebound.
     assert_eq!(file_tokens.src_path, logical_scope);
-    assert_eq!(file_tokens.file_id, Some(file_id));
+    assert_eq!(file_tokens.file_id, file_id);
     assert_eq!(file_tokens.canonical_os_path, Some(canonical));
 
     // Every token location scope is rebound, spans are untouched.

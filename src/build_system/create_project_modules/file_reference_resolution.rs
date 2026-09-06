@@ -98,9 +98,7 @@ impl<'a> FileReferenceResolver<'a> {
         string_table: &mut StringTable,
         discovered_content_sources: &mut Vec<SourceRecordIndex>,
     ) -> Result<ResolvedFileReference, CompilerError> {
-        let source_file = reference.source_file.ok_or_else(|| {
-            CompilerError::compiler_error("graph-active file reference has no preparing SourceId")
-        })?;
+        let source_file = reference.source_file;
         let authored_path = &path_syntax
             .try_path_for_token(reference.path_syntax, &reference.location)?
             .root;

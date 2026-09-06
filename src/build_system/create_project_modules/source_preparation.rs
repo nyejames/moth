@@ -104,7 +104,7 @@ pub(super) fn prepare_discovery_source_text(
         TokenizerEntryMode::SourceFile,
         style_directives,
         string_table,
-        Some(source_id),
+        source_id,
     )
     .map_err(SourceDiscoveryError::Diagnostic)?;
 

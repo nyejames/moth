@@ -34,7 +34,7 @@ fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTabl
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed")
     .file_tokens;

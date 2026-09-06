@@ -55,6 +55,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -552,6 +553,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         signature: method_signature,
         body_tokens: Some(GenericFunctionBody::source(FileTokens::new(
             method_fn_path.clone(),
+            SourceId::COMPILATION_ROOT,
             vec![],
         ))),
         declaration_location: SourceLocation::default(),

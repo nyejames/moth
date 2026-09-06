@@ -71,7 +71,7 @@ pub(crate) fn prepare_single_file(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
@@ -95,7 +95,7 @@ fn prepare_test_source_file(
         TokenizerEntryMode::SourceFile,
         context.style_directives,
         string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     ) {
         Ok(file_tokens) => file_tokens,
         Err(diagnostic) => {
@@ -151,7 +151,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
 }
 
 #[test]
-fn dependency_shell_without_retained_file_identity_fails_preparation() {
+fn dependency_shell_with_compilation_root_identity_prepares() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
@@ -163,33 +163,27 @@ fn dependency_shell_without_retained_file_identity_fails_preparation() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
-    let error = match prepare_file_from_tokens(
+    let output = prepare_file_from_tokens(
         file_tokens,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
         0,
         0,
-    ) {
-        Ok(_) => {
-            panic!("a dependency shell without a retained file identity must fail preparation")
-        }
-        Err(FileFrontendPrepareFailure::Diagnosed(error)) => panic!(
-            "missing shell identity must not become a source diagnostic: {:?}",
-            error.diagnostic.payload
-        ),
-        Err(FileFrontendPrepareFailure::Infrastructure(error)) => error,
-    };
+    )
+    .expect("a dependency shell with a compilation-root identity should prepare");
 
-    assert!(
-        error
-            .msg
-            .contains("cannot be stamped without a retained source file identity"),
-        "unexpected infrastructure error: {error:?}"
+    assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);
+    assert_eq!(
+        output.file_dependency_clauses[0]
+            .dependency
+            .dependency_shell_id
+            .source,
+        SourceId::COMPILATION_ROOT
     );
 }
 
@@ -205,7 +199,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
     let path_token = file_tokens
@@ -269,7 +263,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
     let other_path = InternedPath::from_single_str("other.moth", &mut string_table);
@@ -279,7 +273,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(1)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("other file should tokenize");
     let (file_tokens, span_builder) = file_tokens.into_parts();
@@ -430,7 +424,7 @@ fn parse_single_file_headers_with_entry(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )
     .expect("tokenization should succeed");
 
@@ -2614,6 +2608,7 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
 
     let mut token_stream = FileTokens::new(
         source_file,
+        SourceId::COMPILATION_ROOT,
         vec![
             Token::new(TokenKind::Symbol(status), location.clone()),
             Token::new(TokenKind::DoubleColon, location.clone()),

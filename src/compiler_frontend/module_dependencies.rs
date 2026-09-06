@@ -108,9 +108,9 @@ impl ContentSourceTargets {
     fn content_header_path(
         &self,
         hint: &LocalDeclarationOrderingHint,
-        referencing_file: Option<SourceId>,
+        referencing_file: SourceId,
     ) -> Option<&InternedPath> {
-        self.targets.get(&(referencing_file?, hint.occurrence()?))
+        self.targets.get(&(referencing_file, hint.occurrence()?))
     }
 }
 

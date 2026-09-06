@@ -624,7 +624,7 @@ fn synthetic_prepared_identity_snapshot(
                 .iter()
                 .filter(|header| header.source_file == *logical_path)
             {
-                assert_eq!(header.tokens.file_id, Some(file_id));
+                assert_eq!(header.tokens.file_id, file_id);
                 assert_eq!(
                     header.tokens.canonical_os_path.as_deref(),
                     identity.canonical_os_path.as_deref()
@@ -8260,7 +8260,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                 crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
                 &style_directives,
                 &mut expected_token_string_table,
-                None,
+                crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
             )
             .expect("counter fixture source should tokenize")
             .length
@@ -8393,7 +8393,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(SourceId::from_index(0)),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8435,7 +8435,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("missing.moth", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(SourceId::from_index(0)),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::SourceKindNoFileValue,
@@ -8477,7 +8477,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(SourceId::from_index(0)),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ContentSource,
@@ -8529,7 +8529,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(SourceId::from_index(0)),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8589,7 +8589,7 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
         let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
         let reference = PreparedFileReference {
-            source_file: Some(SourceId::from_index(0)),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
@@ -8656,7 +8656,7 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
             let reference = PreparedFileReference {
-                source_file: Some(SourceId::from_index(0)),
+                source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),
                 class: PreparedFileReferenceClass::ResourceFile,
@@ -8747,7 +8747,7 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
             let reference = PreparedFileReference {
-                source_file: Some(SourceId::from_index(0)),
+                source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),
                 class,

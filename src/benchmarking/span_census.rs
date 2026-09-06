@@ -11,6 +11,7 @@
 //! Moth tokenizer never produces spans for them.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -491,7 +492,7 @@ pub(super) fn tokenize_source(
         entry_mode,
         style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
     )
     .map_err(|diagnostic| format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind))?;
 

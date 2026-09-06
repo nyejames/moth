@@ -28,7 +28,7 @@ const SYNTHETIC_CONTENT_NAME: &str = "content";
 ///      source-identity and initializer facts while this helper owns the repetitive header shape.
 pub(crate) struct SyntheticContentHeaderInput {
     pub(crate) source_file: InternedPath,
-    pub(crate) file_id: Option<SourceId>,
+    pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
     pub(crate) location: SourceLocation,
     pub(crate) initializer_tokens: Vec<Token>,

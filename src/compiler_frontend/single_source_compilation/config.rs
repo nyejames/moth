@@ -517,7 +517,7 @@ fn prepare_config_file(
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
-        Some(request.file_id),
+        request.file_id,
     ) {
         Ok(output) => output,
         Err(error) => {

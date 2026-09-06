@@ -23,7 +23,8 @@ fn classify_one(spelling: &str) -> PreparedFileReferenceClass {
         },
         location,
     );
-    let classified = classify_prepared_file_references(&table, [], None, &strings);
+    let classified =
+        classify_prepared_file_references(&table, [], SourceId::COMPILATION_ROOT, &strings);
     classified.references()[0].class
 }
 
@@ -82,7 +83,8 @@ fn dependency_clause_rows_are_not_reclassified_as_file_values() {
         location,
     );
 
-    let classified = classify_prepared_file_references(&table, [clause], None, &strings);
+    let classified =
+        classify_prepared_file_references(&table, [clause], SourceId::COMPILATION_ROOT, &strings);
     let references = classified.references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].path_syntax, value);
@@ -96,7 +98,8 @@ fn dependency_clause_rows_are_not_reclassified_as_file_values() {
 fn quoted_url_strings_are_not_path_rows() {
     let strings = StringTable::new();
     let table = PathSyntaxTable::new();
-    let classified = classify_prepared_file_references(&table, [], None, &strings);
+    let classified =
+        classify_prepared_file_references(&table, [], SourceId::COMPILATION_ROOT, &strings);
     assert!(classified.references().is_empty());
 }
 

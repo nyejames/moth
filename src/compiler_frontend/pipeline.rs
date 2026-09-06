@@ -272,7 +272,7 @@ impl CompilerFrontend {
             tokenizer_entry_mode,
             style_directives,
             string_table,
-            Some(source_id),
+            source_id,
         )
         .map_err(map_tokenize_error)?;
         tokens.canonical_os_path = canonical_os_path;
@@ -306,7 +306,7 @@ impl CompilerFrontend {
                     PlainMarkdownPrepareInput {
                         source_code,
                         source_file: logical_path,
-                        file_id: Some(source_id),
+                        file_id: source_id,
                         canonical_os_path,
                     },
                     local_string_table,
@@ -324,7 +324,7 @@ impl CompilerFrontend {
                     source_identity_facts(context.source_files, &source_path)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 tokens
-                    .rebind_source_identity(logical_path, Some(source_id), canonical_os_path)
+                    .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 parse_file_headers_with_table(
                     &mut tokens,

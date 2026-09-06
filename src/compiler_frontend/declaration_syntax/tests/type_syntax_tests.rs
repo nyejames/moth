@@ -34,6 +34,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -52,6 +53,7 @@ use std::rc::Rc;
 fn stream_from_tokens(tokens: Vec<Token>, string_table: &mut StringTable) -> FileTokens {
     FileTokens::new(
         InternedPath::from_single_str("type_syntax_tests", string_table),
+        SourceId::COMPILATION_ROOT,
         tokens,
     )
 }
@@ -579,7 +581,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
 
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: None,
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -685,7 +687,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: None,
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -747,7 +749,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: None,
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -815,7 +817,7 @@ fn bare_generic_type_name_requires_type_arguments() {
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: None,
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,

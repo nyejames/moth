@@ -18,6 +18,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -140,7 +141,7 @@ fn parse_whole_number_token(
         ),
         Token::new(TokenKind::Eof, SourceLocation::default()),
     ];
-    let mut token_stream = FileTokens::new(scope, tokens);
+    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;
     let mut type_environment = TypeEnvironment::new();

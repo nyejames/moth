@@ -131,9 +131,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     // the site root's no-target outcome, keyed by the prepared occurrence identities.
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
     for reference in prepared_template.structural_file_references.references() {
-        let source_file = reference
-            .source_file
-            .expect("prepared rows carry a source SourceId");
+        let source_file = reference.source_file;
         let outcome = match reference.class {
             PreparedFileReferenceClass::ContentSource => {
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {

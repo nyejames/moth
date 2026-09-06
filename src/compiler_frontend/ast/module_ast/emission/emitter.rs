@@ -101,7 +101,7 @@ struct BaseScopeContextInput<'scope> {
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
-    declaring_file_id: Option<SourceId>,
+    declaring_file_id: SourceId,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }

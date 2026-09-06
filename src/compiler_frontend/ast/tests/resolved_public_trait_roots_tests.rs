@@ -15,6 +15,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -43,6 +44,7 @@ fn trait_header(
         name_location: SourceLocation::default(),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
+            SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
         source_file: InternedPath::from_single_str("root.moth", string_table),
@@ -67,6 +69,7 @@ fn function_header(
         name_location: SourceLocation::default(),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
+            SourceId::COMPILATION_ROOT,
             Vec::new(),
         ),
         source_file: InternedPath::from_single_str("root.moth", string_table),

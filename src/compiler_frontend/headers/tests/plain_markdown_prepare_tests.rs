@@ -11,6 +11,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -28,7 +29,7 @@ fn prepare(
         PlainMarkdownPrepareInput {
             source_code: source,
             source_file: source_path,
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             canonical_os_path: None,
         },
         &mut string_table,

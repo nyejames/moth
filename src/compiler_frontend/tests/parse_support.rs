@@ -133,7 +133,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(SourceId::from_index(0)),
+        SourceId::COMPILATION_ROOT,
     )?;
 
     let output =
@@ -146,9 +146,7 @@ pub(crate) fn parse_single_file_ast_build_result(
                     error,
                 ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
             })?;
-    let source_file_id = output
-        .file_id
-        .expect("single-file parser fixture should assign a source SourceId");
+    let source_file_id = output.file_id;
     let file_value_resolution = test_file_value_resolution_services(
         source_file_id,
         &output.structural_file_references,

@@ -103,7 +103,7 @@ pub(crate) fn prepare_moth_template_file(
 /// threading the same path, location, and interned names through every helper.
 struct MothTemplatePrepareContext {
     source_file: InternedPath,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
     canonical_os_path: Option<PathBuf>,
     body_tokens: Vec<Token>,
     synthetic_location: SourceLocation,
