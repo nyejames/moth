@@ -51,8 +51,30 @@ impl<'a> DiagnosticRenderContext<'a> {
         line_number: i32,
     ) -> Option<&'a str> {
         let source_database = self.source_database?;
-        let source_text = source_database.retained_text_for_logical_path(scope)?;
-        source_text.lines().nth(line_number.max(0) as usize)
+        let record = source_database.unique_record_for_logical_path(scope)?;
+        let source_text = record.retained_text()?;
+        let line_count = if source_text.is_empty() {
+            0
+        } else {
+            record.line_count()
+        };
+        let line_number = line_number.max(0) as u32;
+        if line_number >= line_count {
+            return None;
+        }
+
+        let range = record.line_byte_range(line_number)?;
+        let line = &source_text[range.start as usize..range.end as usize];
+        // Slicing between line starts keeps the terminating `\n`, which `str::lines()` drops
+        // along with a `\r` immediately before it. A `\r` that terminates nothing is authored
+        // text, so it survives, exactly as `str::lines()` leaves it.
+        let line = match line.strip_suffix('\n') {
+            Some(without_newline) => without_newline
+                .strip_suffix('\r')
+                .unwrap_or(without_newline),
+            None => line,
+        };
+        Some(line)
     }
 }
 

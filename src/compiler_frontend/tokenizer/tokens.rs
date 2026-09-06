@@ -487,6 +487,10 @@ impl FileTokens {
     /// WHY: suffix diagnostics must retain the operator the user wrote even after parsing has
     ///       advanced to the following delimiter. This keeps source context in the resolved
     ///       handling fact without rescanning source text.
+    ///
+    /// Only the character positions need rewinding. They are captured after the operator was
+    /// consumed and so collapse onto each other, whereas the byte range already denotes the
+    /// operator exactly.
     pub fn current_postfix_operator_location(&self) -> SourceLocation {
         let mut location = self.current_location();
         if location.start_pos == location.end_pos {
@@ -621,6 +625,17 @@ pub struct TokenStream<'a> {
     pub chars: Peekable<Chars<'a>>,
     pub position: CharPosition,
     pub start_position: CharPosition,
+    /// Byte offset of the next character to consume.
+    pub byte_offset: u32,
+    /// Byte offset where the current token's authored text begins.
+    pub start_byte_offset: u32,
+    /// Byte offset of the character most recently consumed.
+    ///
+    /// WHY: the lexer reads a token's first character before deciding the token starts here, so
+    /// the start of that character is the only correct byte start. Character columns are
+    /// captured after consumption and keep their existing off-by-one convention until slice 1D
+    /// replaces them.
+    pub last_char_start: u32,
     pub mode: TokenizeMode,
     // WHAT: Stack of per-template parsing frames.
     //
@@ -693,6 +708,9 @@ impl<'a> TokenStream<'a> {
             chars: source_code.chars().peekable(),
             position: CharPosition::default(),
             start_position: Default::default(),
+            byte_offset: 0,
+            start_byte_offset: 0,
+            last_char_start: 0,
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
             path_syntax: PathSyntaxTable::new(),
@@ -709,11 +727,25 @@ impl<'a> TokenStream<'a> {
                     self.position.char_column += 1;
                 }
 
-                self.chars.next()
+                let consumed = self.chars.next()?;
+                self.last_char_start = self.byte_offset;
+                self.byte_offset += consumed.len_utf8() as u32;
+                Some(consumed)
             }
 
             None => None,
         }
+    }
+
+    /// Consume one character, advancing the byte cursor but not the column.
+    ///
+    /// Used for a pending `\r` so the authored byte is counted without treating
+    /// carriage return as a visible column.
+    pub fn consume_char_without_column_advance(&mut self) -> Option<char> {
+        let consumed = self.chars.next()?;
+        self.last_char_start = self.byte_offset;
+        self.byte_offset += consumed.len_utf8() as u32;
+        Some(consumed)
     }
 
     pub fn peek(&mut self) -> Option<&char> {
@@ -730,12 +762,44 @@ impl<'a> TokenStream<'a> {
 
     pub fn new_location(&mut self) -> SourceLocation {
         let start_pos = self.start_position;
-        self.update_start_position();
-        SourceLocation::new(self.file_path.to_owned(), start_pos, self.position)
+        let start_byte = self.start_byte_offset;
+        self.start_position = self.position;
+        self.start_byte_offset = self.byte_offset;
+        SourceLocation::with_byte_range(
+            self.file_path.to_owned(),
+            start_pos,
+            self.position,
+            start_byte,
+            self.byte_offset,
+        )
     }
 
+    /// Anchor the next token's character columns at the cursor.
+    ///
+    /// Columns are captured after the token's first character was consumed, so they name the
+    /// position one character past the authored start. That off-by-one is a property of
+    /// `CharPosition` itself and is removed with it; byte offsets are anchored separately and
+    /// are exact today.
     pub fn update_start_position(&mut self) {
         self.start_position = self.position;
+    }
+
+    /// Anchor the token's byte range at the character already consumed.
+    ///
+    /// WHY: the lexer reads a token's first character before it can classify the token, and it
+    /// skips leading whitespace, comments and discarded template bodies the same way. The
+    /// authored token begins at that character's own offset, never at the cursor sitting after
+    /// it or at the start of the trivia that preceded it.
+    pub fn begin_token_bytes_at_consumed_char(&mut self) {
+        self.start_byte_offset = self.last_char_start;
+    }
+
+    /// Anchor the token's byte range at the cursor: a zero-width insertion point.
+    ///
+    /// `Eof` denotes a position rather than authored text, so it must not inherit the byte start
+    /// of whatever trivia the lexer skipped to reach the end of the source.
+    pub fn begin_token_bytes_at_cursor(&mut self) {
+        self.start_byte_offset = self.byte_offset;
     }
 
     pub fn push_template_mode(&mut self, mode: TokenizeMode) {

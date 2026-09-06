@@ -50,6 +50,7 @@ fn token(kind: TokenKind, line: i32) -> Token {
                 line_number: line,
                 char_column: 120, // Arbitrary number
             },
+            ..Default::default()
         },
     )
 }
@@ -249,6 +250,7 @@ fn runtime_template_context_with_style_directives(
                     line_number: 1,
                     char_column: 120, // Arbitrary number
                 },
+                ..Default::default()
             },
             ValueMode::ImmutableOwned,
         ),

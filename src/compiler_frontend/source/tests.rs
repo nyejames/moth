@@ -150,7 +150,7 @@ fn insert_keeps_authored_kind_when_canonical_extension_disagrees() {
 
 #[test]
 fn source_record_identity_row_stays_within_its_measured_width() {
-    assert_eq!(size_of::<SourceRecord>(), 80);
+    assert_eq!(size_of::<SourceRecord>(), 96);
 }
 
 #[test]
@@ -530,6 +530,14 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .retain_text(empty_id, String::new())
         .expect("empty source text should be retained");
     assert_eq!(database.retained_text(empty_id), Some(""));
+    assert_eq!(
+        database
+            .get(empty_id)
+            .expect("empty source should be addressable")
+            .line_count(),
+        0,
+        "an empty snapshot has no lines, matching str::lines()"
+    );
     assert!(database.source_load_error(empty_id).is_none());
 
     let load_error =
@@ -539,6 +547,14 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .expect("source load error should be retained");
     assert!(database.retained_text(failed_id).is_none());
     assert!(database.source_load_error(failed_id).is_some());
+    assert_eq!(
+        database
+            .get(failed_id)
+            .expect("failed source should be addressable")
+            .line_count(),
+        0,
+        "an unreadable source has no line table"
+    );
 
     // Every further write is refused and leaves the recorded state untouched, so a stage can
     // never observe a snapshot the compiler did not compile.
@@ -604,7 +620,9 @@ fn source_database_resolves_retained_text_by_logical_path() {
         .expect("source text should be retained");
 
     assert_eq!(
-        database.retained_text_for_logical_path(&logical_path),
+        database
+            .unique_record_for_logical_path(&logical_path)
+            .and_then(SourceRecord::retained_text),
         Some("compiled snapshot\n"),
     );
 }
@@ -671,9 +689,10 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
 
     // Ambiguity is a property of the identities, not of how many happen to be loaded: one loaded
     // candidate among colliding records must not become the answer by default.
-    assert_eq!(
-        database.retained_text_for_logical_path(&root_logical_path),
-        None
+    assert!(
+        database
+            .unique_record_for_logical_path(&root_logical_path)
+            .is_none()
     );
     database
         .retain_text(entry_id, "entry source snapshot\n".to_owned())
@@ -703,4 +722,90 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
         !rendered.contains("entry source snapshot"),
         "an ambiguous logical path must omit the frame rather than guess: {rendered}"
     );
+}
+
+#[test]
+fn loaded_source_line_ranges_reconstruct_the_snapshot() {
+    // Each case names the exact lines the table must produce, including their terminators.
+    // Reconstruction alone cannot catch a misplaced interior boundary, because any partition
+    // of the snapshot concatenates back to it.
+    let cases: &[(&str, &str, &[&str])] = &[
+        ("empty text", "", &[]),
+        ("text with no newline", "hello", &["hello"]),
+        ("text ending in a newline", "hello\n", &["hello\n"]),
+        (
+            "text ending without a newline",
+            "hello\nworld",
+            &["hello\n", "world"],
+        ),
+        (
+            "consecutive blank lines",
+            "a\n\n\nb",
+            &["a\n", "\n", "\n", "b"],
+        ),
+        (
+            "CRLF line endings",
+            "hello\r\nworld\r\n",
+            &["hello\r\n", "world\r\n"],
+        ),
+        (
+            "multi-byte UTF-8 adjacent to a newline",
+            "α\nβ",
+            &["α\n", "β"],
+        ),
+        ("lone CR is not a line terminator", "a\rb", &["a\rb"]),
+        ("a single newline", "\n", &["\n"]),
+        ("a lone CR at the end", "a\r", &["a\r"]),
+    ];
+
+    for (label, text, expected_lines) in cases {
+        let (database, source_id) = database_with_retained_text(text);
+        let record = database
+            .get(source_id)
+            .expect("loaded source should be addressable");
+        let source_text = record
+            .retained_text()
+            .expect("loaded source should retain text");
+        assert_eq!(source_text, *text, "{label}: retained text");
+        assert_eq!(
+            record.line_count() as usize,
+            expected_lines.len(),
+            "{label}: line count"
+        );
+
+        let lines: Vec<&str> = (0..record.line_count())
+            .map(|line_number| {
+                let range = record
+                    .line_byte_range(line_number)
+                    .expect("every counted line should resolve");
+                &source_text[range.start as usize..range.end as usize]
+            })
+            .collect();
+        assert_eq!(lines, *expected_lines, "{label}: line boundaries");
+        assert_eq!(lines.concat(), *text, "{label}: reconstructed snapshot");
+        assert!(
+            record.line_byte_range(record.line_count()).is_none(),
+            "{label}: past-the-end line should not resolve"
+        );
+    }
+}
+
+fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {
+    let source_path = PathBuf::from("/project/main.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        std::iter::once(&source_path),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+    let source_id = database
+        .get_by_canonical_path(&source_path)
+        .expect("source should be registered")
+        .id;
+    database
+        .retain_text(source_id, text.to_owned())
+        .expect("source text should be retained");
+    (database, source_id)
 }

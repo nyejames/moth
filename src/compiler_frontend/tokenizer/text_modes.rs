@@ -220,6 +220,11 @@ pub(super) fn tokenize_code_template_body(
     return_token!(TokenKind::StringSliceLiteral(interned_string), stream);
 }
 
+/// Consume a discarded template body, emitting only its closing bracket.
+///
+/// The body text is skipped rather than tokenized, so the emitted `TemplateClose` and the
+/// unterminated-body `Eof` are re-anchored: their spans denote the bracket and the insertion
+/// point, never the discarded run that preceded them.
 pub(super) fn tokenize_discard_template_body(
     current_char: char,
     stream: &mut TokenStream<'_>,
@@ -246,6 +251,7 @@ pub(super) fn tokenize_discard_template_body(
             ']' => {
                 if stream.template_body_next_close_balances_brackets() {
                     stream.next();
+                    stream.begin_token_bytes_at_consumed_char();
                     stream.register_template_body_close_square_bracket();
                     stream.pop_template_mode();
                     return_token!(TokenKind::TemplateClose, stream);
@@ -259,6 +265,7 @@ pub(super) fn tokenize_discard_template_body(
         }
     }
 
+    stream.begin_token_bytes_at_cursor();
     return_token!(TokenKind::Eof, stream)
 }
 

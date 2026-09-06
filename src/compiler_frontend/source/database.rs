@@ -1,8 +1,8 @@
 //! Database of source identities and retained snapshots for one frontend compilation lifetime.
 //!
-//! The database owns source-record identity, path metadata and the exact UTF-8 source snapshot
-//! used for compilation. Source line indexes and spans remain outside this slice and are
-//! deliberately not stored here.
+//! The database owns source-record identity, path metadata, the exact UTF-8 source snapshot used
+//! for compilation, and the line-start table built when that snapshot becomes owned. Source spans
+//! remain outside this slice and are deliberately not stored here.
 
 use super::record::{SourceRecordState, ensure_source_snapshot_fits};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
@@ -182,7 +182,7 @@ impl SourceDatabase {
     /// The reserved compilation root is excluded by [`Self::get`], so it cannot accidentally
     /// become a physical source frame.
     pub fn retained_text(&self, id: SourceId) -> Option<&str> {
-        self.get(id)?.state.retained_text()
+        self.get(id)?.retained_text()
     }
 
     /// Return the structured error recorded when loading a source snapshot failed.
@@ -324,7 +324,7 @@ impl SourceDatabase {
         self.files[1..].iter()
     }
 
-    /// Resolve a retained source snapshot by logical path.
+    /// Resolve the unique physical record for a logical path, if one exists.
     ///
     /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
     /// diagnostic frame, and keeping the source database's compact identity storage free of a
@@ -332,12 +332,12 @@ impl SourceDatabase {
     ///
     /// A logical path is safe to render only when it identifies exactly one record in this
     /// database. Collisions can arise when independently rooted sources share a portable spelling;
-    /// returning no snapshot on ambiguity is safer than guessing and displaying another file's
+    /// returning no record on ambiguity is safer than guessing and displaying another file's
     /// text.
-    pub(crate) fn retained_text_for_logical_path(
+    pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: &InternedPath,
-    ) -> Option<&str> {
+    ) -> Option<&SourceRecord> {
         let mut matches = self
             .iter()
             .filter(|record| record.logical_path == *logical_path);
@@ -345,7 +345,7 @@ impl SourceDatabase {
         if matches.next().is_some() {
             return None;
         }
-        record.state.retained_text()
+        Some(record)
     }
 }
 

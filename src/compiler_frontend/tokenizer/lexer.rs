@@ -537,9 +537,18 @@ fn get_token_kind(
     'next_token: loop {
         let mut whitespace_before_current = false;
 
+        // Anchor the token's byte start at the character that begins it, before any dispatch can
+        // return. Every path below — template bodies, raw strings, newline runs, comments that
+        // restart this loop — inherits an exact byte start from here.
         let mut current_char = match stream.next() {
-            Some(ch) => ch,
-            None => return_token!(TokenKind::Eof, stream),
+            Some(ch) => {
+                stream.begin_token_bytes_at_consumed_char();
+                ch
+            }
+            None => {
+                stream.begin_token_bytes_at_cursor();
+                return_token!(TokenKind::Eof, stream);
+            }
         };
 
         let mut token_value = String::new();
@@ -595,13 +604,21 @@ fn get_token_kind(
                 return_token!(TokenKind::Newline, stream);
             } else {
                 current_char = match stream.next() {
-                    Some(ch) => ch,
-                    None => return_token!(TokenKind::Eof, stream),
+                    Some(ch) => {
+                        // Discarded whitespace: re-anchor so the token starts where it starts.
+                        stream.begin_token_bytes_at_consumed_char();
+                        ch
+                    }
+                    None => {
+                        stream.begin_token_bytes_at_cursor();
+                        return_token!(TokenKind::Eof, stream);
+                    }
                 };
             }
         }
 
-        // Ignore leading whitespace for the next token's source location.
+        // Ignore leading whitespace for the next token's character columns. Byte offsets were
+        // anchored at the token's own first character above.
         stream.update_start_position();
 
         // ---------------------

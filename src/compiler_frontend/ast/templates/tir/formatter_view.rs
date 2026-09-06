@@ -1149,6 +1149,8 @@ fn representative_location_for_run(
             scope: start.scope,
             start_pos: start.start_pos,
             end_pos: end.end_pos,
+            start_byte: start.start_byte,
+            end_byte: end.end_byte,
         });
     }
 

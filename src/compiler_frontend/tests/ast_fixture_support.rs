@@ -39,6 +39,7 @@ pub(crate) fn test_source_location(line: i32) -> SourceLocation {
             line_number: line,
             char_column: 120,
         },
+        ..Default::default()
     }
 }
 

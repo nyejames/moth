@@ -91,6 +91,7 @@ fn children_directive_accepts_const_string_reference() {
                     line_number: 1,
                     char_column: 120,
                 },
+                ..Default::default()
             },
             ValueMode::ImmutableOwned,
         ),

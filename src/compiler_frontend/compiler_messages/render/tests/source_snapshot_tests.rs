@@ -1,5 +1,6 @@
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::source::SourceDatabase;
@@ -173,5 +174,73 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
     assert!(
         beta_frame.contains("beta_snapshot") && !beta_frame.contains("alpha_snapshot"),
         "the beta diagnostic must render its own snapshot: {beta_frame}"
+    );
+}
+
+#[test]
+fn rendered_source_lines_match_str_lines_across_carriage_returns() {
+    // A `\r` is only part of a terminator when a `\n` follows it. Anywhere else it is authored
+    // text and must survive into the rendered excerpt, exactly as `str::lines()` leaves it.
+    let texts = [
+        "hello\r\nworld\r\n",
+        "a\rb",
+        "trailing\r",
+        "mixed\r\n\rlone\n",
+    ];
+
+    for text in texts {
+        let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+        let mut string_table = StringTable::new();
+        let (source_database, location) = retained_source_database(
+            temporary_directory.path(),
+            "main.moth",
+            text,
+            &mut string_table,
+        );
+        let logical_path = location.scope.clone();
+
+        let context = DiagnosticRenderContext::new(&string_table)
+            .with_optional_source_database(Some(&source_database));
+        let expected_lines: Vec<&str> = text.lines().collect();
+        for (line_number, expected_line) in expected_lines.iter().enumerate() {
+            assert_eq!(
+                context.retained_source_line(&logical_path, line_number as i32),
+                Some(*expected_line),
+                "{text:?}: line {line_number} must match str::lines()"
+            );
+        }
+        assert_eq!(
+            context.retained_source_line(&logical_path, expected_lines.len() as i32),
+            None,
+            "{text:?}: a trailing terminator must not invent an extra rendered line"
+        );
+    }
+}
+
+#[test]
+fn rendered_crlf_source_line_matches_str_lines() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let text = "hello\r\nworld\r\n";
+    let (source_database, location) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        text,
+        &mut string_table,
+    );
+
+    let name = string_table.intern("undefined_thing");
+    let diagnostic = CompilerDiagnostic::unknown_value_name(name, location);
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    messages.set_source_database(Arc::new(source_database));
+
+    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    assert!(
+        rendered.contains(r#"<span class="source-line">hello</span>"#),
+        "the source frame must render the CRLF line without a trailing CR: {rendered}"
+    );
+    assert!(
+        !rendered.contains('\r'),
+        "rendered HTML must not keep a CR from the line terminator: {rendered}"
     );
 }

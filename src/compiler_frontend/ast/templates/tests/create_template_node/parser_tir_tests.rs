@@ -787,6 +787,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
             line_number: 1,
             char_column: 120,
         },
+        ..Default::default()
     };
     let source = ReactiveSource {
         path: source_path.clone(),
@@ -920,6 +921,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
                     line_number: 1,
                     char_column: 120,
                 },
+                ..Default::default()
             },
             ValueMode::ImmutableOwned,
         ),

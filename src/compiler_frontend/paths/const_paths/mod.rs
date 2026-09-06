@@ -53,10 +53,12 @@ pub fn parse_file_path(
             None => {
                 let path_id = stream.path_syntax.push(
                     InternedPath::new(),
-                    SourceLocation::new(
+                    SourceLocation::with_byte_range(
                         stream.file_path.to_owned(),
                         stream.start_position,
                         stream.position,
+                        stream.start_byte_offset,
+                        stream.byte_offset,
                     ),
                 );
                 return_token!(TokenKind::Path(path_id), stream);
@@ -65,10 +67,12 @@ pub fn parse_file_path(
                 if next.is_whitespace() || matches!(next, ':' | ']' | ')' | '}' | ',' | ';') {
                     let path_id = stream.path_syntax.push(
                         InternedPath::new(),
-                        SourceLocation::new(
+                        SourceLocation::with_byte_range(
                             stream.file_path.to_owned(),
                             stream.start_position,
                             stream.position,
+                            stream.start_byte_offset,
+                            stream.byte_offset,
                         ),
                     );
                     return_token!(TokenKind::Path(path_id), stream);
@@ -99,12 +103,14 @@ pub fn parse_file_path(
     }
 
     let root = InternedPath::from_components(parsed_prefix.components);
-    let path_location = SourceLocation::new(
+    let path_location = SourceLocation::with_byte_range(
         stream.file_path.to_owned(),
         stream.start_position,
         parsed_prefix
             .last_component_end
             .expect("a non-empty path has a final component position"),
+        stream.start_byte_offset,
+        stream.byte_offset,
     );
 
     let path_id = stream.path_syntax.push(root, path_location);

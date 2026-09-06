@@ -2150,3 +2150,116 @@ fn ordinary_import_identifier_does_not_receive_path_correction() {
         "ordinary `import` followed by `as` should tokenize both words independently"
     );
 }
+
+/// Every token's byte range must recover exactly the text its author wrote.
+///
+/// The expectations are the authored lexemes, not a second derivation from the tokenizer's own
+/// `CharPosition` state: those columns are captured after consumption and so name the wrong start
+/// until slice 1D replaces them. A range that slid by one character would still round-trip
+/// against them.
+#[test]
+fn token_byte_ranges_recover_the_authored_text() {
+    let source = "name = \"café\"\n[outer: a\r\nb[inner: nested]c\rd]\n";
+    let (file_tokens, _string_table) = tokenize_source(source);
+
+    let authored: Vec<&str> = file_tokens
+        .tokens
+        .iter()
+        .map(|token| &source[token.location.start_byte as usize..token.location.end_byte as usize])
+        .collect();
+
+    assert_eq!(
+        authored,
+        vec![
+            "", // ModuleStart, before any authored byte
+            "name",
+            "=",
+            "\"café\"", // multi-byte scalar inside the quoted span
+            "\n",
+            "[",
+            "outer",
+            ":",
+            " a\r\nb", // template body text spanning a CRLF
+            "[",
+            "inner",
+            ":",
+            " nested",
+            "]",
+            // The body's token value normalizes `\r` to `\n`; the byte range still covers the
+            // carriage return the author actually wrote.
+            "c\rd",
+            "]",
+            "\n",
+            "", // Eof
+        ],
+        "token byte ranges must slice the authored lexemes"
+    );
+
+    let source_len = source.len() as u32;
+    let mut previous_end = 0u32;
+    for token in &file_tokens.tokens {
+        let start_byte = token.location.start_byte;
+        let end_byte = token.location.end_byte;
+
+        assert!(
+            start_byte <= end_byte,
+            "token byte range must be half-open and well-ordered: {start_byte}..{end_byte}"
+        );
+        assert!(
+            end_byte <= source_len,
+            "token end_byte {end_byte} exceeds source length {source_len}"
+        );
+        assert!(
+            start_byte >= previous_end,
+            "token ranges must not overlap: {start_byte} precedes the previous end {previous_end}"
+        );
+        previous_end = end_byte;
+    }
+}
+
+/// Tokens returned while skipping trivia must span the token, never the trivia before it.
+///
+/// Whitespace runs, comments and discarded template bodies are consumed without producing a
+/// token, so each of these sources previously left the following token anchored at the start of
+/// the discarded text.
+#[test]
+fn skipped_trivia_is_excluded_from_the_following_token_range() {
+    let cases: &[(&str, &[&str])] = &[
+        ("name   ", &["", "name", ""]),
+        ("a  \nb", &["", "a", "\n", "b", ""]),
+        // A run of blank lines is one boundary token spanning exactly that run.
+        ("\n\n  \nz", &["", "\n\n  \n", "z", ""]),
+        ("-- hi\n", &["", "\n", ""]),
+        ("-- hi", &["", ""]),
+        // The discarded body is skipped; only its closing bracket is emitted.
+        ("[$note: abc]", &["", "[", "$note", ":", "]", ""]),
+        ("y!", &["", "y", "!", ""]),
+        ("`raw`", &["", "`raw`", ""]),
+    ];
+
+    for (source, expected) in cases {
+        let (file_tokens, _string_table) = tokenize_source(source);
+        let authored: Vec<&str> = file_tokens
+            .tokens
+            .iter()
+            .map(|token| {
+                &source[token.location.start_byte as usize..token.location.end_byte as usize]
+            })
+            .collect();
+        assert_eq!(authored, *expected, "{source:?}: token byte ranges");
+
+        let end_of_source = source.len() as u32;
+        let final_token = file_tokens
+            .tokens
+            .last()
+            .expect("tokenization always emits Eof");
+        assert_eq!(
+            (
+                final_token.location.start_byte,
+                final_token.location.end_byte
+            ),
+            (end_of_source, end_of_source),
+            "{source:?}: Eof is a zero-width insertion point at the end of the source"
+        );
+    }
+}

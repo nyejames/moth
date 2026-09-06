@@ -1254,6 +1254,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 line_number: location.end_line,
                 char_column: location.end_column,
             },
+            start_byte: 0,
+            end_byte: 0,
         }
     }
 

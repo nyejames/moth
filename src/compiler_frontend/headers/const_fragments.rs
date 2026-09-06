@@ -89,10 +89,13 @@ pub(super) fn create_top_level_const_template(
     let condition_references = collect_template_if_condition_references(&body);
 
     let full_name = scope.append(const_template_name);
+    let end_location = token_stream.current_location();
     let name_location = SourceLocation {
         scope,
         start_pos: start_location.start_pos,
-        end_pos: token_stream.current_location().end_pos,
+        end_pos: end_location.end_pos,
+        start_byte: start_location.start_byte,
+        end_byte: end_location.end_byte,
     };
 
     let template_tokens =

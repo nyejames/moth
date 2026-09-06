@@ -15,19 +15,41 @@ pub struct CharPosition {
     pub char_column: i32,
 }
 
+/// One source span: interned path, inclusive character positions, and a half-open
+/// source-local UTF-8 byte range.
+///
+/// Byte offsets are local to the originating source snapshot, so string-ID remapping
+/// and source-identity rebinding leave them untouched. The range `0..0` means this
+/// location has a source identity but no authored byte range.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct SourceLocation {
     pub scope: InternedPath,
     pub start_pos: CharPosition,
     pub end_pos: CharPosition,
+    pub start_byte: u32,
+    pub end_byte: u32,
 }
 
 impl SourceLocation {
+    /// Create a location with no authored byte range (`0..0`).
     pub fn new(scope: InternedPath, start: CharPosition, end: CharPosition) -> Self {
+        Self::with_byte_range(scope, start, end, 0, 0)
+    }
+
+    /// Create a location with an exact half-open source-local byte range.
+    pub fn with_byte_range(
+        scope: InternedPath,
+        start: CharPosition,
+        end: CharPosition,
+        start_byte: u32,
+        end_byte: u32,
+    ) -> Self {
         Self {
             scope,
             start_pos: start,
             end_pos: end,
+            start_byte,
+            end_byte,
         }
     }
 

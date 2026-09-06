@@ -141,6 +141,8 @@ fn map_warning_span_to_text_location(
         scope: start_point.scope,
         start_pos: start_point.start_pos,
         end_pos: end_point.end_pos,
+        start_byte: start_point.start_byte,
+        end_byte: end_point.end_byte,
     })
 }
 
@@ -162,6 +164,8 @@ fn map_offset_to_point_location(spans: &[BodySourceSpan], offset: usize) -> Opti
         scope: span.location.scope.to_owned(),
         start_pos: position,
         end_pos: position,
+        start_byte: 0,
+        end_byte: 0,
     })
 }
 

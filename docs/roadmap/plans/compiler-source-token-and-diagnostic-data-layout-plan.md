@@ -1112,7 +1112,36 @@ Slice order note, recorded at activation: the encoding cannot be selected before
 The original order put selection (`1C1`) before the byte cursor (`1C3`), which would have forced a
 throwaway offset tracker duplicating the line-index builder. The byte cursor now comes first.
 
-- [ ] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
+**Traversal correction, recorded at 1C1.** The clause asks that both the byte cursor and the
+line-index builder ride the existing traversal. That is right for the cursor and wrong for the
+line index, so the two are built in different places.
+
+Token spans originate in `TokenStream`, so the byte cursor belongs there, threaded through its one
+consumption chokepoint. The line index does not. Three facts decide it. Preparation and
+tokenization hold `&SourceDatabase` (`module_preparation.rs:179-247`), so a worker cannot write a
+line table back into a record; carrying one out through `FileTokens`, the prepared output and the
+merge would thread it through exactly the types 3D and 3E1 delete. `PlainMarkdown` is never
+tokenized (`prepared_source.rs:49-55`), so traversal-threading needs a second mechanism for it
+anyway. And a `\n` byte cannot occur inside a multi-byte UTF-8 sequence, so a byte scan over text
+already in cache vectorises, where the traversal version adds a branch per character to the
+frontend's hottest loop.
+
+The line index is therefore built at `SourceRecordState::retain_text`, the one point a snapshot
+becomes owned — single-threaded, `&mut`, and uniform across every source kind. That is a scan the
+clause's last sentence permits for the non-tokenized kind and that the tokenized kinds share
+rather than duplicate. Inside that builder the bytes are read twice: a counting reduction sizes
+the table exactly, then the fill writes it. Both passes are branchless reductions over text
+already in cache, and the count is what lets the fill run without a single reallocation.
+
+**Delivered as 1C1.** Byte offsets are exact: every token's range slices precisely the text its
+author wrote, including tokens the lexer returns while skipping trivia. `TokenStream` anchors a
+token's byte start at the character that begins it, separately from `CharPosition`, whose
+columns keep their off-by-one until 1D removes them. `Eof` is a zero-width insertion point.
+`SourceRecord` owns the line-start table; `line_count` and `line_byte_range` reconstruct
+`str::lines()` semantics, and the terminal/dev-server renderers read lines through it instead of
+rescanning the snapshot.
+
+- [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
 - [ ] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, run the bounded terminator experiment once, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone.
 - [ ] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations
 - [ ] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion
