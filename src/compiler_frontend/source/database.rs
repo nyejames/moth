@@ -1,10 +1,15 @@
-//! Database of source identities and retained snapshots for one frontend compilation lifetime.
+//! Database of registered source slots, loaded snapshots, and cold load failures for one frontend
+//! compilation lifetime.
 //!
-//! The database owns source-record identity, path metadata, the exact UTF-8 source snapshot used
-//! for compilation, and the line-start table built when that snapshot becomes owned. Source spans
-//! remain outside this slice and are deliberately not stored here.
+//! The database owns the ordered source-slot inventory, the dense array of loaded snapshots, and
+//! the cold array of load failures. Loaded records retain the exact UTF-8 source text plus
+//! line-start table for each successful load. Source spans remain outside this slice and are
+//! deliberately not stored here.
 
-use super::record::{SourceRecordState, ensure_source_snapshot_fits};
+use super::line_index::LineIndex;
+use super::record::{
+    LoadFailureIndex, LoadedSourceIndex, SourceLoadStatus, SourceSlot, ensure_source_snapshot_fits,
+};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
@@ -17,20 +22,32 @@ use rustc_hash::FxHashMap;
 
 use std::path::{Path, PathBuf};
 
-/// Source identity records in deterministic logical-path order.
+/// Source identity slots in deterministic logical-path order, plus the snapshots and failures
+/// associated with candidates that loaded or failed.
+///
+/// The database owns three arrays: the ordered source-slot inventory, a dense array of loaded
+/// snapshots in load order, and a cold array of load failures. The failure array is separate
+/// because failures are rare and too wide for the dense registration row.
+///
+/// Slot order is the identity order `SourceId` addresses. The loaded array is a separate dense
+/// array in load order, reached only through the slot that owns the identity; the failure array is
+/// reached through the failure index stored by a failed slot.
 ///
 /// The database is not `Clone`. One boundary registers it once and shares it as an `Arc`, so a
 /// deep copy would silently duplicate identities that are meant to be unique for the build.
 #[derive(Debug)]
 pub struct SourceDatabase {
-    files: Vec<SourceRecord>,
+    slots: Vec<SourceSlot>,
+    loaded: Vec<SourceRecord>,
+    load_failures: Vec<CompilerError>,
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
 }
-
 impl Default for SourceDatabase {
     fn default() -> Self {
         Self {
-            files: vec![compilation_root_record()],
+            slots: vec![compilation_root_slot()],
+            loaded: Vec::new(),
+            load_failures: Vec::new(),
             canonical_to_id: FxHashMap::default(),
         }
     }
@@ -104,7 +121,7 @@ impl SourceDatabase {
     /// Build source identities from the ordered candidates produced by Stage 0.
     ///
     /// WHAT: preserves the registration index's already-sorted Stage 0 logical-identity order
-    ///       while computing each record's compiler-facing logical path.
+    ///       while computing each slot's compiler-facing logical path.
     /// WHY: Stage 0 owns module origin and rootedness, so it is the authority that can order by
     ///      `SourceLogicalIdentity`. The compiler must not re-sort those rows by display logical
     ///      path.
@@ -157,7 +174,7 @@ impl SourceDatabase {
                 )));
             }
 
-            self.push_record(canonical, logical.interned, kind);
+            self.push_slot(canonical, logical.interned, kind);
         }
 
         Ok(())
@@ -172,7 +189,7 @@ impl SourceDatabase {
         Ok(database)
     }
 
-    pub fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceRecord> {
+    pub fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
         let id = self.canonical_to_id.get(canonical_path)?;
         self.get(*id)
     }
@@ -182,30 +199,61 @@ impl SourceDatabase {
     /// The reserved compilation root is excluded by [`Self::get`], so it cannot accidentally
     /// become a physical source frame.
     pub fn retained_text(&self, id: SourceId) -> Option<&str> {
-        self.get(id)?.retained_text()
+        self.loaded_record(id).map(|record| record.text.as_ref())
     }
 
-    /// Return the structured error recorded when loading a source snapshot failed.
-    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
-        self.get(id)?.state.source_load_error()
-    }
-
-    /// Move one loaded source snapshot into its preassigned record.
+    /// Construct a line index for the retained snapshot of one physical source.
     ///
-    /// A record that already holds a snapshot or a load failure is a lifecycle violation, so the
-    /// size policy is applied only to a record that can still accept one. Otherwise an oversized
+    /// The loaded array remains private to the database; callers address its record through the
+    /// source identity carried by the corresponding registration slot.
+    pub(crate) fn line_index(&self, id: SourceId) -> Option<LineIndex<'_>> {
+        let record = self.loaded_record(id)?;
+        Some(LineIndex::new(&record.text, &record.line_starts))
+    }
+
+    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
+        match &self.get(id)?.load {
+            SourceLoadStatus::Failed(index) => self.load_failures.get(index.index()),
+            SourceLoadStatus::Pending | SourceLoadStatus::Loaded(_) => None,
+        }
+    }
+
+    /// Move one loaded source snapshot into a record owned by its preassigned slot.
+    ///
+    /// A slot that already holds a snapshot or a load failure is a lifecycle violation, so the
+    /// size policy is applied only to a slot that can still accept one. Otherwise an oversized
     /// second snapshot would report the user's file instead of the compiler's own mistake.
     pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
-        let record = self.source_record_mut(id)?;
-        if record.state.is_registered() {
+        {
+            let slot = self.source_slot_mut(id)?;
+            if !matches!(slot.load, SourceLoadStatus::Pending) {
+                return Err(CompilerError::compiler_error(format!(
+                    "source text for source identity {} was retained more than once",
+                    id.index()
+                )));
+            }
             ensure_source_snapshot_fits(
                 text.len(),
-                record.provenance,
-                &record.logical_path,
-                record.canonical_os_path.as_deref(),
+                slot.provenance,
+                &slot.logical_path,
+                slot.canonical_os_path.as_deref(),
             )?;
         }
-        record.state.retain_text(id, text)
+
+        let line_starts = super::line_index::line_start_offsets(&text);
+        let loaded_index = LoadedSourceIndex::from_index(self.loaded.len());
+        self.loaded.push(SourceRecord {
+            text: text.into_boxed_str(),
+            line_starts,
+        });
+
+        let slot = self
+            .slots
+            .get_mut(id.index())
+            .expect("source slot validated before retaining text");
+        debug_assert!(matches!(slot.load, SourceLoadStatus::Pending));
+        slot.load = SourceLoadStatus::Loaded(loaded_index);
+        Ok(())
     }
 
     /// Record a source-read failure in its preassigned slot without aborting the whole build.
@@ -214,23 +262,50 @@ impl SourceDatabase {
         id: SourceId,
         error: CompilerError,
     ) -> Result<(), CompilerError> {
-        let record = self.source_record_mut(id)?;
-        record.state.record_load_error(id, error)
+        {
+            let slot = self.source_slot_mut(id)?;
+            if !matches!(slot.load, SourceLoadStatus::Pending) {
+                return Err(CompilerError::compiler_error(format!(
+                    "source load status for source identity {} was recorded more than once",
+                    id.index()
+                )));
+            }
+        }
+
+        let failure_index = LoadFailureIndex::from_index(self.load_failures.len());
+        self.load_failures.push(error);
+
+        let slot = self
+            .slots
+            .get_mut(id.index())
+            .expect("source slot validated before recording load error");
+        debug_assert!(matches!(slot.load, SourceLoadStatus::Pending));
+        slot.load = SourceLoadStatus::Failed(failure_index);
+        Ok(())
     }
 
-    fn source_record_mut(&mut self, id: SourceId) -> Result<&mut SourceRecord, CompilerError> {
-        let record = self.files.get_mut(id.index()).ok_or_else(|| {
+    fn source_slot_mut(&mut self, id: SourceId) -> Result<&mut SourceSlot, CompilerError> {
+        let slot = self.slots.get_mut(id.index()).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "source identity {} is absent from the source database",
                 id.index()
             ))
         })?;
-        if record.provenance == SourceProvenance::CompilationRoot {
+        if slot.provenance == SourceProvenance::CompilationRoot {
             return Err(CompilerError::compiler_error(
                 "source snapshots cannot be retained on the compilation root",
             ));
         }
-        Ok(record)
+        Ok(slot)
+    }
+
+    fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
+        let slot = self.get(id)?;
+        let loaded_index = match slot.load {
+            SourceLoadStatus::Loaded(index) => index,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => return None,
+        };
+        self.loaded.get(loaded_index.index())
     }
 
     /// Register one canonical source file and return its source identity.
@@ -259,17 +334,17 @@ impl SourceDatabase {
             string_table,
         )?;
 
-        if let Some(record) = self.get_by_canonical_path(&canonical_path) {
-            if record.logical_path != logical.interned {
+        if let Some(slot) = self.get_by_canonical_path(&canonical_path) {
+            if slot.logical_path != logical.interned {
                 return Err(CompilerError::compiler_error(format!(
                     "Source identity inventory registered canonical source path {} under \
                      conflicting logical paths {} and {}",
                     canonical_path.display(),
-                    record.logical_path.to_portable_string(string_table),
+                    slot.logical_path.to_portable_string(string_table),
                     logical.interned.to_portable_string(string_table),
                 )));
             }
-            if let Some(stored_kind) = record.kind
+            if let Some(stored_kind) = slot.kind
                 && stored_kind != kind
             {
                 return Err(CompilerError::compiler_error(format!(
@@ -280,83 +355,82 @@ impl SourceDatabase {
                     kind,
                 )));
             }
-            return Ok(record.id);
+            return Ok(slot.id);
         }
-        Ok(self.push_record(canonical_path, logical.interned, kind))
+        Ok(self.push_slot(canonical_path, logical.interned, kind))
     }
 
-    /// Append one record and return the identity its position assigns.
-    fn push_record(
+    /// Append one slot and return the identity its position assigns.
+    fn push_slot(
         &mut self,
         canonical_path: PathBuf,
         logical_path: InternedPath,
         kind: SourceKind,
     ) -> SourceId {
-        let id = SourceId::from_index(self.files.len());
+        let id = SourceId::from_index(self.slots.len());
         self.canonical_to_id.insert(canonical_path.clone(), id);
-        self.files.push(SourceRecord {
+        self.slots.push(SourceSlot {
             id,
             canonical_os_path: Some(canonical_path),
             logical_path,
-            state: SourceRecordState::Registered,
             kind: Some(kind),
             provenance: SourceProvenance::AuthoredPhysical,
+            load: SourceLoadStatus::Pending,
         });
         id
     }
 
-    /// Resolve one physical source record.
+    /// Resolve one physical source slot.
     ///
     /// The compilation root is addressed by `SourceId(1)` but is not a physical source, so it is
     /// never returned here. A consumer that reaches this with the root holds an identity from the
     /// wrong domain, and absence lets it fail in its own lane rather than reading a pathless
-    /// record as though it were a file.
-    pub fn get(&self, id: SourceId) -> Option<&SourceRecord> {
-        let record = self.files.get(id.index())?;
-        (record.provenance != SourceProvenance::CompilationRoot).then_some(record)
+    /// slot as though it were a file.
+    pub fn get(&self, id: SourceId) -> Option<&SourceSlot> {
+        let slot = self.slots.get(id.index())?;
+        (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, SourceRecord> {
+    pub fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
         debug_assert_eq!(
-            self.files.first().map(|record| record.provenance),
+            self.slots.first().map(|slot| slot.provenance),
             Some(SourceProvenance::CompilationRoot)
         );
-        self.files[1..].iter()
+        self.slots[1..].iter()
     }
 
-    /// Resolve the unique physical record for a logical path, if one exists.
+    /// Resolve the unique physical slot for a logical path, if one exists.
     ///
     /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
     /// diagnostic frame, and keeping the source database's compact identity storage free of a
     /// second logical-path index avoids another allocation and synchronization boundary.
     ///
-    /// A logical path is safe to render only when it identifies exactly one record in this
+    /// A logical path is safe to render only when it identifies exactly one slot in this
     /// database. Collisions can arise when independently rooted sources share a portable spelling;
-    /// returning no record on ambiguity is safer than guessing and displaying another file's
-    /// text.
+    /// returning no slot on ambiguity is safer than guessing and displaying another file's text.
     pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: &InternedPath,
-    ) -> Option<&SourceRecord> {
+    ) -> Option<&SourceSlot> {
         let mut matches = self
             .iter()
-            .filter(|record| record.logical_path == *logical_path);
-        let record = matches.next()?;
+            .filter(|slot| slot.logical_path == *logical_path);
+        let slot = matches.next()?;
         if matches.next().is_some() {
             return None;
         }
-        Some(record)
+        Some(slot)
     }
 }
 
-fn compilation_root_record() -> SourceRecord {
-    SourceRecord {
+fn compilation_root_slot() -> SourceSlot {
+    SourceSlot {
         id: SourceId::from_index(0),
         canonical_os_path: None,
         logical_path: InternedPath::new(),
-        state: SourceRecordState::Registered,
         kind: None,
         provenance: SourceProvenance::CompilationRoot,
+        load: SourceLoadStatus::Pending,
     }
 }
 
@@ -365,7 +439,7 @@ fn compilation_root_record() -> SourceRecord {
 /// Every production lane supplies an authored kind through the registration index,
 /// [`SourceDatabase::insert`] or a Stage 0 constructor instead, so this derivation only
 /// serves test fixtures. Recognized extensions become compiler kinds; every other physical path is
-/// provider-owned, so `None` on a record can only mean the reserved compilation root.
+/// provider-owned, so `None` on a slot can only mean the reserved compilation root.
 #[cfg(test)]
 fn physical_source_kind(canonical_path: &Path) -> SourceKind {
     let extension = canonical_path

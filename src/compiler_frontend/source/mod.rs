@@ -1,13 +1,15 @@
-//! Frontend source identity, retained snapshots, path metadata and exact compact spans.
+//! Frontend source identity slots, loaded snapshots, retained text and exact compact spans.
 //!
-//! [`SourceDatabase`] owns the ordered source-record inventory used by frontend preparation, while
-//! [`SourceId`] provides the compact non-zero identity carried by tokens, headers and references.
-//! Physical source records own the exact UTF-8 snapshots used during compilation. [`LocalSpan`]
-//! and [`SourceSpan`] encode exact half-open UTF-8 byte ranges, while [`line_index`] computes
-//! source and tooling line/column positions lazily from retained text and line starts.
+//! [`SourceDatabase`] owns the ordered source-slot inventory used by frontend preparation, plus
+//! the dense loaded-record array addressed by each successful slot load. [`SourceId`] provides the
+//! compact non-zero identity carried by tokens, headers and references. [`SourceSlot`] owns every
+//! candidate's identity, path metadata and load status; [`SourceRecord`] owns the exact UTF-8
+//! snapshot and line starts only after that candidate loads. [`LocalSpan`] and [`SourceSpan`]
+//! encode exact half-open UTF-8 byte ranges, while [`line_index`] computes source and tooling
+//! line/column positions lazily from a loaded snapshot.
 //!
 //! - [`id`] defines the four-byte source identity.
-//! - [`record`] defines one source identity, its retained text, loading status and paths.
+//! - [`record`] defines source slots and loaded records.
 //! - [`line_index`] owns the borrowed line and column conversions over retained snapshots.
 //! - [`database`] owns deterministic lookup, snapshot retention and traversal-time insertion.
 //! - [`span`] defines exact local and global spans, the per-source extended table and the
@@ -28,7 +30,7 @@ mod tests;
 
 pub(crate) use database::SourceDatabase;
 pub(crate) use id::SourceId;
-pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord};
+pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
 // Slice 1D is the first production consumer. Re-exporting now would otherwise look unused
 // in a lib-only build.

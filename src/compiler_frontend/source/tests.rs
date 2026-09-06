@@ -1,6 +1,7 @@
 use super::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceKind, SourceProvenance,
-    SourceRecord, SourceRegistrationIndex, SourceSpan, SpanCapacityReason, SpanJoinError,
+    SourceRecord, SourceRegistrationIndex, SourceSlot, SourceSpan, SpanCapacityReason,
+    SpanJoinError,
     line_index::{LineIndex, LinePosition, line_start_offsets},
     record::ensure_source_snapshot_fits,
 };
@@ -150,9 +151,99 @@ fn insert_keeps_authored_kind_when_canonical_extension_disagrees() {
     );
 }
 
+/// The 64-byte registration row holds identity metadata plus a load status that is a discriminant
+/// and a four-byte index. The 32-byte loaded record owns snapshot payload, and failure payload
+/// lives in its own database array, so neither payload widens every registered candidate.
 #[test]
 fn source_record_identity_row_stays_within_its_measured_width() {
-    assert_eq!(size_of::<SourceRecord>(), 96);
+    assert_eq!(size_of::<SourceSlot>(), 64);
+    assert_eq!(size_of::<SourceRecord>(), 32);
+}
+
+#[test]
+fn source_database_keeps_each_load_failure_with_its_source_identity() {
+    let first_failed_path = PathBuf::from("/project/first-failed.moth");
+    let second_failed_path = PathBuf::from("/project/second-failed.moth");
+    let loaded_path = PathBuf::from("/project/loaded.moth");
+    let pending_path = PathBuf::from("/project/pending.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        [
+            &first_failed_path,
+            &second_failed_path,
+            &loaded_path,
+            &pending_path,
+        ],
+        &first_failed_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+
+    let first_failed_id = database
+        .get_by_canonical_path(&first_failed_path)
+        .expect("first failed source should be registered")
+        .id;
+    let second_failed_id = database
+        .get_by_canonical_path(&second_failed_path)
+        .expect("second failed source should be registered")
+        .id;
+    let loaded_id = database
+        .get_by_canonical_path(&loaded_path)
+        .expect("loaded source should be registered")
+        .id;
+    let pending_id = database
+        .get_by_canonical_path(&pending_path)
+        .expect("pending source should be registered")
+        .id;
+
+    let first_error = CompilerError::file_error(
+        &first_failed_path,
+        "first source read failed",
+        &mut string_table,
+    );
+    database
+        .record_source_load_error(first_failed_id, first_error)
+        .expect("first source load error should be retained");
+    let second_error = CompilerError::file_error(
+        &second_failed_path,
+        "second source read failed",
+        &mut string_table,
+    );
+    database
+        .record_source_load_error(second_failed_id, second_error)
+        .expect("second source load error should be retained");
+    database
+        .retain_text(loaded_id, "loaded source".to_owned())
+        .expect("loaded source text should be retained");
+
+    assert_eq!(
+        database
+            .source_load_error(first_failed_id)
+            .map(|error| error.msg.as_str()),
+        Some("first source read failed"),
+        "the first failed source must resolve its own structured error"
+    );
+    assert_eq!(
+        database
+            .source_load_error(second_failed_id)
+            .map(|error| error.msg.as_str()),
+        Some("second source read failed"),
+        "the second failed source must resolve its own structured error"
+    );
+    assert!(
+        database.source_load_error(loaded_id).is_none(),
+        "a loaded source has no load failure"
+    );
+    assert!(
+        database.source_load_error(pending_id).is_none(),
+        "a pending source has no load failure"
+    );
+
+    assert!(database.retained_text(first_failed_id).is_none());
+    assert!(database.retained_text(second_failed_id).is_none());
+    assert!(database.line_index(first_failed_id).is_none());
+    assert!(database.line_index(second_failed_id).is_none());
 }
 
 #[test]
@@ -533,9 +624,7 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .expect("empty source text should be retained");
     assert_eq!(database.retained_text(empty_id), Some(""));
     let empty_line_index = database
-        .get(empty_id)
-        .expect("empty source should be addressable")
-        .line_index()
+        .line_index(empty_id)
         .expect("loaded empty source should expose its line index");
     assert_eq!(
         empty_line_index.line_count(),
@@ -557,15 +646,11 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
     assert!(database.retained_text(failed_id).is_none());
     assert!(database.source_load_error(failed_id).is_some());
     assert!(
-        database
-            .get(failed_id)
-            .expect("failed source should be addressable")
-            .line_index()
-            .is_none(),
+        database.line_index(failed_id).is_none(),
         "an unreadable source has no line table"
     );
 
-    // Every further write is refused and leaves the recorded state untouched, so a stage can
+    // Every further write is refused and leaves the recorded slot untouched, so a stage can
     // never observe a snapshot the compiler did not compile.
     let repeated_snapshot_error = database
         .retain_text(empty_id, "second snapshot".to_owned())
@@ -631,10 +716,11 @@ fn source_database_resolves_retained_text_by_logical_path() {
     assert_eq!(
         database
             .unique_record_for_logical_path(&logical_path)
-            .and_then(SourceRecord::retained_text),
+            .and_then(|slot| database.retained_text(slot.id)),
         Some("compiled snapshot\n"),
     );
 }
+
 #[test]
 fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing() {
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
@@ -769,15 +855,12 @@ fn loaded_source_line_ranges_reconstruct_the_snapshot() {
 
     for (label, text, expected_lines) in cases {
         let (database, source_id) = database_with_retained_text(text);
-        let record = database
-            .get(source_id)
-            .expect("loaded source should be addressable");
-        let source_text = record
-            .retained_text()
+        let source_text = database
+            .retained_text(source_id)
             .expect("loaded source should retain text");
         assert_eq!(source_text, *text, "{label}: retained text");
-        let line_index = record
-            .line_index()
+        let line_index = database
+            .line_index(source_id)
             .expect("loaded source should expose its line index");
         assert_eq!(
             line_index.line_count() as usize,

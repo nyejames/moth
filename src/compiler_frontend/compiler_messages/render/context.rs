@@ -51,9 +51,9 @@ impl<'a> DiagnosticRenderContext<'a> {
         line_number: i32,
     ) -> Option<&'a str> {
         let source_database = self.source_database?;
-        let record = source_database.unique_record_for_logical_path(scope)?;
+        let slot = source_database.unique_record_for_logical_path(scope)?;
         let line_number = u32::try_from(line_number).ok()?;
-        record.line_index()?.line_text(line_number)
+        source_database.line_index(slot.id)?.line_text(line_number)
     }
 }
 

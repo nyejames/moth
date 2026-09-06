@@ -258,10 +258,10 @@ pub struct SourceId(NonZeroU32);
 
 Rules:
 
-- `SourceId(1)` is a deterministic synthetic compilation-root record with empty source text. It gives
-  project-wide user diagnostics an exact context-owned primary span before or outside any physical
-  source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
-- Physical and other synthetic IDs begin after that root record.
+- `SourceId(1)` is a deterministic synthetic compilation-root slot that never loads a snapshot. It
+  gives project-wide user diagnostics an exact context-owned primary span before or outside any
+  physical source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
+- Physical and other synthetic IDs begin after that root slot.
 - IDs are assigned deterministically before tokenization begins.
 - Physical sources are sorted by canonical logical source order, never filesystem iteration or
   worker completion order.
@@ -279,38 +279,58 @@ Rules:
 
 ### Source records
 
+Registration, snapshot ownership and load failure are three arrays, not one row. Every candidate
+gets a slot when its identity is assigned; only a candidate whose snapshot loads gets a record, and
+only a candidate that fails to load occupies a failure row.
+
 ```rust
-pub struct SourceRecord {
+pub struct SourceSlot {
+    id: SourceId,
     logical_path: PathId,
     canonical_os_path: Option<Box<Path>>,
+    kind: Option<SourceKind>,
+    provenance: SourceProvenance,
+    load: SourceLoadStatus,
+}
+
+pub struct SourceRecord {
     text: Box<str>,
     line_starts: Box<[u32]>,
     extended_spans: Box<[ExtendedSpan]>,
-    kind: Option<SourceKind>,
-    provenance: SourceProvenance,
 }
 ```
 
-The final record may split hot and cold fields into parallel arrays after measurement. Its semantics
-are fixed:
+The final arrays may split hot and cold fields further after measurement. Their semantics are
+fixed:
 
+- a slot exists for every registered candidate, addressed directly by its `SourceId`.
 - `logical_path` is the compiler-visible logical path.
 - `canonical_os_path` exists only for filesystem-adjacent operations and is absent for synthetic
   sources.
+- `load` is the candidate's lifecycle: identity assigned and nothing attempted, one loaded record,
+  or one read failure. A failure belongs to the slot's lifecycle, but its payload does not: a
+  `CompilerError` is wide and absent for every source in a successful build, so it lives in a cold
+  database-owned failure array that the slot indexes. The transition out of the pending state
+  happens exactly once per candidate, and both indexes stay private to the source database.
+- a record is created only by a successful load, so it unconditionally owns its payload and has no
+  absent or failed state of its own. Its index is private to the source database: a consumer
+  addresses source text and spans through the `SourceId` on the slot.
 - `text` is the exact UTF-8 source snapshot compiled.
-- `line_starts` contains byte offsets into `text`; the first entry is always `0`.
+- `line_starts` contains byte offsets into `text`. A snapshot with any content starts its first
+  entry at `0`; an empty snapshot has no lines, so its table is empty rather than carrying a
+  phantom entry every consumer would have to special-case.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
 - `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind, or
-  marks the record as provider-owned. It is absent only for the reserved compilation root, which is
-  not a file and has no lexical kind; an adapted or synthetic source that does carry content keeps
-  its real kind here.
+  marks the candidate as provider-owned. It is absent only for the reserved compilation root, which
+  is not a file and has no lexical kind; an adapted or synthetic source that does carry content
+  keeps its real kind here.
 - `SourceKind` needs a provider-owned variant because the database is registered from Stage 0's
   whole sorted canonical inventory, which includes provider-owned physical files such as an
-  external `.js` module. Those records exist to hold an identity, not to be compiled, so they
+  external `.js` module. Those slots exist to hold an identity, not to be compiled, so they
   carry no compiler source kind and their extension stays in `canonical_os_path`.
-- a record's kind states what the compiler recognizes, not what the active builder supports, and it
-  is the kind of the authored spelling rather than of whatever the path resolves to. Registration is
-  unconditional: an unsupported kind still gets an identity, and support is diagnosed where the
+- a candidate's kind states what the compiler recognizes, not what the active builder supports, and
+  it is the kind of the authored spelling rather than of whatever the path resolves to. Registration
+  is unconditional: an unsupported kind still gets an identity, and support is diagnosed where the
   source is referenced.
 - `provenance` distinguishes authored physical source from synthetic or adapted source and points to
   its owning source where needed.

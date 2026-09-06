@@ -38,7 +38,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceRecord};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -317,15 +317,15 @@ impl ModuleSymbols {
         clause.selections(selections)
     }
 
-    /// Join a module source's logical path to its build-lifetime record.
+    /// Join a module source's logical path to its build-lifetime registration slot.
     ///
     /// WHY: neighbouring tables stay keyed by `InternedPath`; canonical OS path and kind live
-    ///      only on `SourceRecord`. Callers with no registered identity observe `None`.
+    ///      only on `SourceSlot`. Callers with no registered identity observe `None`.
     pub(crate) fn source_record<'a>(
         &'a self,
         source_file: &InternedPath,
         source_files: &'a SourceDatabase,
-    ) -> Option<&'a SourceRecord> {
+    ) -> Option<&'a SourceSlot> {
         let source_id = *self.source_ids_by_source.get(source_file)?;
         source_files.get(source_id)
     }

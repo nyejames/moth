@@ -1278,11 +1278,32 @@ it could not complete, not a zero-width point at the end of the file.
 - [x] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations. **Frozen-record half deferred to 1D:** see the delivery note above.
 - [x] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion. **Widened at delivery:** the slice also had to decide the line-break set, chose the tokenizer's, and had to make `TokenStream::next` the single owner of the authored line counter before the two models could agree; see the delivery note above.
 - [x] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests. **Narrowed at delivery:** join and ordering were already covered by 1C3's named operations tests, so the slice added the gaps rather than a second layer; see the delivery note above.
-- [ ] **1C6 — registration slot and loaded record:** split the dense array into a compact
+- [x] **1C6 — registration slot and loaded record:** split the dense array into a compact
   registration slot per candidate and a loaded record that owns text, line starts and extended
   spans unconditionally; keep an unreadable source's failure at the slot layer and remove the
   `Unreadable` variant from the record. Moved here from 1B4: the split pays once the three loaded
   boxes exist, and doing it earlier would re-split the same array twice.
+
+**Delivered as 1C6.** `SourceSlot` is the registration row for every candidate and owns the
+identity, path metadata, kind, provenance and load status; `SourceRecord` now exists only because a
+snapshot loaded, so it owns its text and line-start table with no absent or failed state. Both the
+loaded array's index and the failure array's index are private to the source database, so a
+consumer reaches source text, a line index, an excerpt or a read failure only through the
+`SourceId` its slot owns. The extended-span table is the one field the clause names that is not
+there yet: 1C3 deferred the frozen-record half to 1D, which already owns adding it.
+
+The clause's compactness had to be measured rather than assumed. A first split kept the boxed read
+failure inside the slot, which measured 72 bytes; with a 32-byte loaded record that is 104 bytes
+per loaded source against the old row's 96. It would have been a regression, because
+`load_registered_source_texts` attempts every registration row without filtering by kind, so a
+slot that stays unloaded through a completed preload is only the compilation root or a read
+failure. Moving the failure payload into a third cold array took the slot to 64 bytes: a loaded
+source costs exactly the 96 bytes of row storage it cost before, a candidate that never loads
+costs 32 less, and the failure lane leaves the dense array entirely. These are row widths, not
+total retained allocation; Phase 7A owns the retained-memory ledger.
+
+One observation for that ledger, outside this slice: `load_registered_source_texts` retains the
+text of provider-owned files, which exist only to hold an identity and are never compiled.
 
 ### Slice 1D — Migrate tokenization and source preparation
 
