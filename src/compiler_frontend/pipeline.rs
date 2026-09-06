@@ -193,52 +193,30 @@ pub(crate) struct AstBuildRequest<'a> {
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
 
-/// Intern a filesystem path that is not in the source database.
-///
-/// Tokenized Moth/Moth template files and non-tokenized Markdown files share this
-/// fallback so unregistered test and direct-compilation paths still produce UTF-8
-/// identity or the same file-error lane.
-fn intern_unregistered_source_path(
-    source_path: &Path,
-    string_table: &mut StringTable,
-) -> Result<InternedPath, CompilerError> {
-    InternedPath::try_from_filesystem_path(source_path, string_table).map_err(
-        |NonUtf8PathComponent { path }| {
-            CompilerError::file_error(
-                &path,
-                format!(
-                    "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                ),
-                string_table,
-            )
-        },
-    )
-}
-
 /// Resolve the identity facts one prepared source stamps onto its token stream.
 ///
-/// WHAT: returns the logical path, source identity and canonical OS path for one source path.
-/// WHY: a source registered by Stage 0 supplies all three from its own record, so nothing here
-///      derives identity a second time; a test or direct-compilation path that never entered the
-///      database interns its logical path here and carries no source identity. Keeping the
-///      fallback in one place stops each consumer from repeating it.
+/// WHAT: returns the registered logical path, source identity and canonical OS path for one
+///       source path.
+/// WHY: every production preparation owner registers its candidate before handing it to the
+///      frontend, so an unregistered source is a compiler invariant failure rather than a path
+///      that can receive a fabricated identity.
 fn source_identity_facts(
     source_files: &SourceDatabase,
     source_path: &Path,
-    string_table: &mut StringTable,
-) -> Result<(InternedPath, Option<SourceId>, Option<PathBuf>), CompilerError> {
-    match source_files.get_by_canonical_path(source_path) {
-        Some(record) => Ok((
-            record.logical_path.clone(),
-            Some(record.id),
-            record.canonical_os_path.clone(),
-        )),
-        None => Ok((
-            intern_unregistered_source_path(source_path, string_table)?,
-            None,
-            Some(source_path.to_owned()),
-        )),
-    }
+) -> Result<(InternedPath, SourceId, Option<PathBuf>), CompilerError> {
+    let record = source_files
+        .get_by_canonical_path(source_path)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source {source_path:?} was not registered before frontend preparation"
+            ))
+        })?;
+
+    Ok((
+        record.logical_path.clone(),
+        record.id,
+        record.canonical_os_path.clone(),
+    ))
 }
 
 impl CompilerFrontend {
@@ -285,7 +263,7 @@ impl CompilerFrontend {
         };
 
         let (logical_path, source_id, canonical_os_path) =
-            source_identity_facts(source_files, module_path, string_table)
+            source_identity_facts(source_files, module_path)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
 
         let mut tokens = tokenize(
@@ -294,7 +272,7 @@ impl CompilerFrontend {
             tokenizer_entry_mode,
             style_directives,
             string_table,
-            source_id,
+            Some(source_id),
         )
         .map_err(map_tokenize_error)?;
         tokens.canonical_os_path = canonical_os_path;
@@ -322,13 +300,13 @@ impl CompilerFrontend {
                 source_path,
             } => {
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_string_table)
+                    source_identity_facts(context.source_files, &source_path)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code,
                         source_file: logical_path,
-                        file_id: source_id,
+                        file_id: Some(source_id),
                         canonical_os_path,
                     },
                     local_string_table,
@@ -343,10 +321,10 @@ impl CompilerFrontend {
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
                 let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_string_table)
+                    source_identity_facts(context.source_files, &source_path)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 tokens
-                    .rebind_source_identity(logical_path, source_id, canonical_os_path)
+                    .rebind_source_identity(logical_path, Some(source_id), canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 parse_file_headers_with_table(
                     &mut tokens,

@@ -107,18 +107,32 @@ pub(super) fn prepare_file_value_bundle(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    // 1. Walk the content fixed point without assigning SourceIds. Nested `.mtf`/`.md` targets
-    //    join the candidate set in BFS order; identities wait until that set is complete.
-    let discovery_options = HeaderParseOptions {
-        entry_file_id: None,
-        project_path_resolver: Some(&path_resolver),
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
-    };
+    // 1. Walk the content fixed point with traversal-local identities. Nested `.mtf`/`.md`
+    //    targets join the candidate set in BFS order; final identities wait until that set is
+    //    complete.
+    let mut discovery_files = SourceDatabase::empty();
     // The request owner's registry receives every source this resolver issues. Watch and
     // missing-target interests remain this lane's physical facts for the caller to use.
     let mut resolver =
         SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
+
+    // The entry is registered before the walk so header preparation can name the entry file by
+    // identity. Its first BFS visit re-registers the same path and kind, returning this same ID.
+    let entry_file_id = discovery_files
+        .insert(
+            unit.source_path.clone(),
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
+            &unit.source_path,
+            Some(&path_resolver),
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let discovery_options = HeaderParseOptions {
+        entry_file_id: Some(entry_file_id),
+        project_path_resolver: Some(&path_resolver),
+        entry_file_role: None,
+        active_root_role: ModuleRootRole::Normal,
+    };
 
     let mut candidates: FxHashMap<PathBuf, SourceFileKind> = FxHashMap::default();
     candidates.insert(unit.source_path.clone(), SourceFileKind::MothTemplate);
@@ -128,7 +142,6 @@ pub(super) fn prepare_file_value_bundle(
         unit.source_path.clone(),
         Ok(std::mem::take(&mut unit.source_text)),
     );
-
     let mut queue = VecDeque::new();
     queue.push_back(QueuedSource::Entry);
     // One row per visited source, in discovery order. Pairing the path with its own prepared
@@ -137,7 +150,6 @@ pub(super) fn prepare_file_value_bundle(
     let mut prepared_sources: Vec<(PathBuf, FileFrontendPrepareOutput)> = Vec::new();
     let mut pending_references = Vec::new();
     let mut visited = FxHashSet::default();
-    let discovery_files = SourceDatabase::empty();
 
     while let Some(pending) = queue.pop_front() {
         let (path, kind) = match pending {
@@ -147,6 +159,7 @@ pub(super) fn prepare_file_value_bundle(
         if !visited.insert(path.clone()) {
             continue;
         }
+
         let prepared = {
             let source_code = match loaded.get(&path) {
                 Some(Ok(source_code)) => source_code.as_str(),
@@ -167,6 +180,19 @@ pub(super) fn prepare_file_value_bundle(
                     ));
                 }
             };
+
+            // Register immediately before preparation so every token stream receives a
+            // traversal-local identity.
+            discovery_files
+                .insert(
+                    path.clone(),
+                    SourceKind::Compiler(kind),
+                    &unit.source_path,
+                    Some(&path_resolver),
+                    string_table,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
             prepare_one_source(
                 &discovery_files,
                 &path,
@@ -276,10 +302,11 @@ pub(super) fn prepare_file_value_bundle(
 
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
     for resolved in pending_references {
-        // Discovery prepared this reference's owner before any identity existed, so its tokens
-        // and the diagnostics cloned from them carry the provisional interned filesystem path.
-        // Prepared outputs were rebound above; a diagnostic is separately owned and must be
-        // rebound here, or a missing-target failure would name an absolute path.
+        // Discovery prepared this reference's owner with a traversal-local SourceId. The shared
+        // path resolver computes the same logical path during final registration, but final
+        // sorted identities can differ. Prepared outputs were rebound above. The diagnostic is
+        // separately owned, so keep its identity normalization alongside the final row's SourceId
+        // assignment even though the logical path is already final.
         let owner = source_files
             .get_by_canonical_path(&resolved.source_path)
             .ok_or_else(|| {

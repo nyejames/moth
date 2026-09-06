@@ -614,10 +614,49 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
     );
 }
 
-/// Discovery prepares every source before identities exist, so a reference's tokens - and the
-/// diagnostics cloned from them - start out carrying the provisional interned filesystem path.
-/// A retained resolution diagnostic must name the module-relative logical source, not that
-/// absolute path, or the failure a user reads points outside the project.
+/// A content source is registered before it is prepared, so a failure raised during its
+/// preparation names the source the way the project spells it. Nothing rebinds that diagnostic:
+/// preparation failures leave the walk immediately, carrying the scope the tokenizer stamped.
+#[test]
+fn content_source_preparation_failures_name_the_logical_source() {
+    let temp_dir = temp_project(&[
+        ("page.mtf", "# Page\n\n[@docs/broken.mtf]"),
+        ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
+    ]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let Err(messages) = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    ) else {
+        panic!("an unterminated string in a content source should fail preparation");
+    };
+
+    let scopes = messages
+        .diagnostics()
+        .map(|diagnostic| diagnostic.primary_location.scope.to_path_buf(&string_table))
+        .collect::<Vec<_>>();
+    assert!(
+        scopes
+            .iter()
+            .any(|scope| scope == Path::new("docs/broken.mtf")),
+        "the failure should name the logical content source, got {scopes:?}"
+    );
+}
+
+/// Discovery and final registration use the same resolver for logical source paths, while a
+/// resolved diagnostic remains separately owned from its reference row. Keep its source scope
+/// aligned with the final logical source as the bundle settles its identities.
 #[test]
 fn retained_resolution_diagnostics_name_the_final_logical_source() {
     let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);

@@ -127,26 +127,35 @@ fn config_marked_moth_template_paths_stay_out_of_structural_references() {
 fn prepare_via_pipeline(
     source: &str,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let source_files = SourceDatabase::empty();
+    let mut source_files = SourceDatabase::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_file_path = PathBuf::from("src/@page.moth");
     let options = HeaderParseOptions::default();
+    let input_path = PathBuf::from("src/intro.mtf");
+    let input = FrontendFilePrepareInput {
+        source: FrontendFilePrepareSource::MothTemplate {
+            source_code: source,
+            source_path: input_path.clone(),
+        },
+        const_template_offset: 0,
+        runtime_fragment_offset: 0,
+    };
+    let mut string_table = StringTable::new();
+    source_files
+        .insert(
+            input_path,
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
+            &entry_file_path,
+            None,
+            &mut string_table,
+        )
+        .expect("test Moth template source identity should register");
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
         style_directives: &style_directives,
         entry_file_path: entry_file_path.as_path(),
         options: &options,
     };
-    let input_path = PathBuf::from("src/intro.mtf");
-    let input = FrontendFilePrepareInput {
-        source: FrontendFilePrepareSource::MothTemplate {
-            source_code: source,
-            source_path: input_path,
-        },
-        const_template_offset: 0,
-        runtime_fragment_offset: 0,
-    };
-    let mut string_table = StringTable::new();
 
     CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
 }
