@@ -604,7 +604,7 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
-- [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data
+- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data — token and prepared-output storage deferred to 3D/3E1, see the delivery note
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
@@ -775,9 +775,27 @@ source is no longer a template. Production always registers, but three test fixt
 they silently bound under a contract production never uses. They register now. No expectation was
 edited to accommodate this.
 
-**1B6 stays open** for `FileTokens.canonical_os_path`, `FileFrontendPrepareOutput.canonical_os_path`
-and the three helper-input copies in `moth_template_prepare.rs`, `plain_markdown_prepare.rs` and
-`synthetic_content_header.rs`. Those land in **1B6-c**.
+**1B6's last sentence is deferred to 3D and 3E1, which name it.** Two copies remain:
+`FileTokens.canonical_os_path` and `FileFrontendPrepareOutput.canonical_os_path`, with the three
+helper inputs in `moth_template_prepare.rs`, `plain_markdown_prepare.rs` and
+`synthetic_content_header.rs` as their plumbing. Clause 3D already owns the first ("remove source
+path, canonical OS path, `index` and `length` from token storage") and 3E1 replaces the second
+with `PreparedSource`, so this is their work, not a new 1B6 sub-slice.
+
+It cannot be pulled forward without doing that work twice. Two readers remain.
+`parse_file_headers.rs:72` can move today, because `pipeline.rs:350` holds the database.
+`Header::canonical_source_file` cannot: its nine call sites are in
+`ast/module_ast/{emission,environment}`, `headers/{constant_dependencies,public_exports}` and
+`traits/evidence/validation.rs`, and none of those stages carries a `SourceDatabase`. Threading
+one through the AST stage now would be undone by 3E, which restructures exactly that handoff.
+
+Storing the interned scope on `Header` instead is the wrong shape: it is a per-file fact, and one
+copy per header is the repetition 3E4 exists to remove. `validate_header`'s canonical-path
+agreement check (`headers/types.rs:1608`) stays until the field goes; it polices the duplicate, so
+deleting it early would weaken the prepared-file gate rather than close the duplication.
+
+What 1B6 owned is done: no *service* now holds a second canonical path. The survivors are token
+and prepared-output storage, written once from the record and consumed by their own stage.
 
 **Delivered as 1B7-a.** The design authority's source-size bound ("Source size and complexity
 limits") is enforced at `SourceDatabase::retain_text`, the one point a snapshot becomes owned. The
@@ -1306,7 +1324,7 @@ Evaluate only these production candidates:
 - [ ] implement `TokenCursor` as short-lived index/range state over a borrowed store
 - [ ] implement compact `TokenRef`/views without cloning cold payloads
 - [ ] use `u32` token indexes and checked range construction
-- [ ] remove source path, canonical OS path, `index` and `length` from token storage
+- [ ] remove source path, canonical OS path, `index` and `length` from token storage; this inherits 1B6's last sentence, so also drop `Header::canonical_source_file`'s re-derivation, its nine call sites' dependency on the token copy, and `validate_header`'s canonical-path agreement check
 - [ ] add cursor boundary, EOF, peek, nested-range and malformed-index tests
 
 ### Slice group 3E — Make prepared syntax source-owned
