@@ -371,7 +371,8 @@ fn parse_signature_default_expression(
     let mut expected_type = parse_expectation_for_type_id(type_id, type_interner.environment());
     let mut cast_target_context =
         cast_target_context_for_type_id(type_id, type_interner.environment(), string_table);
-    let mut expression_stream = token_stream_with_eof(&member.default_tokens, path_syntax)?;
+    let mut expression_stream =
+        token_stream_with_eof(&member.default_tokens, path_syntax, expression_context)?;
 
     let input = ExpressionParseInput::new(
         ExpressionParseResources {
@@ -394,9 +395,13 @@ fn parse_signature_default_expression(
 }
 
 /// Wrap a raw token slice in a `FileTokens` stream terminated by EOF.
+///
+/// WHY the context: a default expression's tokens were lexed from the file that declared the
+/// signature, so the substream takes that scope's source identity instead of a caller's argument.
 fn token_stream_with_eof(
     tokens: &[Token],
     path_syntax: &FilePathSyntax,
+    context: &ScopeContext,
 ) -> SignatureResult<FileTokens> {
     let Some(first_token) = tokens.first() else {
         return Err(
@@ -410,8 +415,14 @@ fn token_stream_with_eof(
     let eof_token = Token::with_span(TokenKind::Eof, eof_anchor.location.clone(), eof_anchor.span);
     tokens_with_eof.push(eof_token);
 
-    FileTokens::new_from_slice(src_path, None, None, tokens_with_eof, path_syntax)
-        .map_err(ExpressionParseError::from)
+    FileTokens::new_from_slice(
+        src_path,
+        context.shared.declaring_file_id,
+        None,
+        tokens_with_eof,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 /// Build a `ReturnSlot` from parsed syntax.

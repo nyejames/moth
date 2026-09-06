@@ -436,16 +436,13 @@ pub fn resolve_declaration_syntax(
         )
         .map_err(|diagnostic| diagnostic.into_boxed())?;
 
-        let mut initializer_tokens = declaration_syntax.initializer_tokens.clone();
-        initializer_tokens.push(Token::terminator_at(declaration_syntax.location.to_owned()));
-        let mut initializer_stream = FileTokens::new_from_slice(
-            qualified_name.to_owned(),
-            None,
-            None,
-            initializer_tokens,
+        let mut initializer_stream = declaration_initializer_stream(
+            &qualified_name,
+            declaration_syntax.initializer_tokens.clone(),
+            &declaration_location,
             path_syntax,
-        )
-        .map_err(ExpressionParseError::from)?;
+            context,
+        )?;
 
         // Shorthand requires an immediate collection literal initializer.
         if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
@@ -596,16 +593,13 @@ pub fn resolve_declaration_syntax(
         });
     }
 
-    let mut initializer_tokens = declaration_syntax.initializer_tokens;
-    initializer_tokens.push(Token::terminator_at(declaration_syntax.location.to_owned()));
-    let mut initializer_stream = FileTokens::new_from_slice(
-        qualified_name.to_owned(),
-        None,
-        None,
-        initializer_tokens,
+    let mut initializer_stream = declaration_initializer_stream(
+        &qualified_name,
+        declaration_syntax.initializer_tokens,
+        &declaration_location,
         path_syntax,
-    )
-    .map_err(ExpressionParseError::from)?;
+        context,
+    )?;
 
     // Check the first token before dispatching so we don't wastefully call
     // `create_expression` recursively when the initializer is a struct definition.
@@ -848,6 +842,28 @@ pub fn resolve_declaration_syntax(
         value: parsed_initializer,
         config_qualifier,
     })
+}
+
+/// Wrap a declaration's initializer tokens in a stream terminated at the declaration's location.
+///
+/// WHY the context: the initializer was lexed from the file that declared it, so the substream
+/// takes that scope's source identity rather than an identity a caller could pass wrongly.
+fn declaration_initializer_stream(
+    qualified_name: &InternedPath,
+    mut initializer_tokens: Vec<Token>,
+    declaration_location: &SourceLocation,
+    path_syntax: &FilePathSyntax,
+    context: &ScopeContext,
+) -> DeclarationResult<FileTokens> {
+    initializer_tokens.push(Token::terminator_at(declaration_location.to_owned()));
+    FileTokens::new_from_slice(
+        qualified_name.to_owned(),
+        context.shared.declaring_file_id,
+        None,
+        initializer_tokens,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 #[cfg(test)]

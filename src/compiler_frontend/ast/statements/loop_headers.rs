@@ -559,7 +559,7 @@ fn parse_range_loop_spec_from_tokens(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> LoopHeaderResult<RangeLoopSpec> {
-    let mut stream = token_stream_with_eof(range_tokens, path_syntax)?;
+    let mut stream = token_stream_with_eof(range_tokens, path_syntax, context)?;
 
     // Omitted-start sugar: `loop to 5:` desugars to `loop 0 to 5:`.
     let start = if matches!(stream.current_token_kind(), TokenKind::ExclusiveRange) {
@@ -887,7 +887,7 @@ fn parse_expression_from_tokens(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> LoopHeaderResult<Expression> {
-    let mut expression_stream = token_stream_with_eof(expression_tokens, path_syntax)?;
+    let mut expression_stream = token_stream_with_eof(expression_tokens, path_syntax, context)?;
     let mut inferred_type = ExpectedType::Infer;
 
     let expression = create_expression_without_boundary_catch(
@@ -903,9 +903,14 @@ fn parse_expression_from_tokens(
     Ok(expression)
 }
 
+/// Wrap a loop header's tokens in a `FileTokens` stream terminated by EOF.
+///
+/// WHY the context: the header tokens were lexed from the file that owns this loop, so the
+/// substream takes that scope's source identity instead of a caller's argument.
 fn token_stream_with_eof(
     tokens: &[Token],
     path_syntax: &FilePathSyntax,
+    context: &ScopeContext,
 ) -> LoopHeaderResult<FileTokens> {
     if tokens.is_empty() {
         return loop_header_error(
@@ -923,8 +928,14 @@ fn token_stream_with_eof(
         eof_anchor.span,
     ));
 
-    FileTokens::new_from_slice(src_path, None, None, tokens_with_eof, path_syntax)
-        .map_err(ExpressionParseError::from)
+    FileTokens::new_from_slice(
+        src_path,
+        context.shared.declaring_file_id,
+        None,
+        tokens_with_eof,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 fn is_numeric_type_id(type_id: TypeId, type_environment: &TypeEnvironment) -> bool {

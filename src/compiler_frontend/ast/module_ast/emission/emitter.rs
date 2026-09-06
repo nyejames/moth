@@ -689,7 +689,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: request.instance_path.clone(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
-                declaring_file_id: None,
+                declaring_file_id: token_stream.file_id,
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
             })

@@ -324,7 +324,7 @@ pub(super) fn prepare_owned_source_input(
                 TokenizerEntryMode::SourceFile,
                 style_directives,
                 string_table,
-                None,
+                Some(source_id),
             )
             .map_err(SourceDiscoveryError::Diagnostic)?,
         )

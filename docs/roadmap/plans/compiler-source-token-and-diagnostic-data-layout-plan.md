@@ -1379,7 +1379,46 @@ validation and is audited on its own:
     `super::span`.
   - **1D2b — final token identity:** `FileTokens::file_id` becomes a final `SourceId`, which
     removes the unregistered-path fallback in `source_identity_facts` and the `Option` unwrap
-    error paths in `export_projection`.
+    error paths in `export_projection`. Three lanes still produce a token stream with no identity,
+    so each is closed before the type changes.
+    - **1D2b1 — sub-streams keep their source identity:** the declaration initializer, signature
+      default and loop header streams took `None` while the source that authored their tokens was
+      known, and directory discovery tokenized with `None` immediately after resolving that
+      source's registered `SourceId`.
+
+      **Delivered.** Each sub-stream helper now takes the `ScopeContext` that owns the tokens and
+      reads `declaring_file_id` from it, so a call site can no longer choose an identity at all;
+      the identity is whichever one the owning scope carries. Directory discovery passes the
+      identity it already resolved, so a Moth token stream is minted with its final identity
+      rather than acquiring it at the later preparation rebind. The generated generic-body context
+      takes its stream's identity instead of a literal `None`.
+
+      One identity was deliberately **not** carried. A materialised generic body's tokens were
+      authored in the template's file, and freezing could retain that `SourceId` — but a package's
+      published `ModuleMaterialisationContext` is seeded into a consuming project's registry while
+      that project's database mints its own IDs, so the retained number would name the donor's
+      source in a domain where it means something else. Nothing resolves it today, because frozen
+      generic facts dispatch on `PathSyntaxId` alone; it is a wrong identity waiting for 1E's
+      resolvers. Materialisation cannot remap it either: no `SourceDatabase` reaches
+      `StableBodySyntax::materialise`. The artefact keeps carrying its provenance as canonical
+      strings until the frozen identity context of 1F can remap it, so **1D2b4 must keep an
+      identity-free frozen constructor** or supply that remap first.
+
+      Struct field defaults also evaluate in a context with no declaring identity, because
+      `TypeResolutionContext` carries none; their default *tokens* are parsed in a header scope
+      that does have one. That gap is 1D2b3's to close.
+
+      This slice adds no test. Both properties it establishes — a helper that cannot be handed an
+      identity, and a stream minted with the identity its producer already holds — are made
+      unrepresentable-wrong by 1D2b4's type cutover, and a test written now would be one 1D2b4
+      deletes.
+    - **1D2b2 — template bundle registers before preparing:** the HTML direct-template bundle
+      prepares `.mtf`/`.md` sources against an empty database and rebinds afterwards, so its
+      tokens are minted with no identity at all.
+    - **1D2b3 — config and synthetic lane identity:** `ConfigCompilationRequest` and the remaining
+      synthetic producers carry an optional identity that the final type cannot accept.
+    - **1D2b4 — final token identity type cutover:** the `Option` disappears from `FileTokens`,
+      `source_identity_facts` and the prepared-output identity fields.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D4 — source preparation delta:** file workers return `SourcePreparationDelta` values keyed by
