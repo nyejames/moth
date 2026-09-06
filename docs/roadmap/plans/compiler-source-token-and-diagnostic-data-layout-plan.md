@@ -69,16 +69,17 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 0 complete; Phase 1 (build-lifetime source identity and exact compact spans) is next
-- Checklist item: Slice 1A — introduce `PathId(NonZeroU32)` and the dense parent/component path table
-- Goal: land the path identity foundation that `SourceRecord` needs, without migrating the compiler's `InternedPath` owners yet
-- Non-goals: no `InternedPath` migration (Phase 2), no token or diagnostic representation change, no filesystem-path semantics change
+- Phase: Phase 1 (build-lifetime source identity and exact compact spans), in progress. Slice groups 1A, 1B and 1C are accepted and closed; 1D is the open group.
+- Delivered inside 1D: 1D1 (frozen record spans), 1D2a (token spans), 1D2b1–1D2b4 (final token identity, complete). 1D2 and 1D2b are closed by their sub-slices.
+- Checklist item: Slice 1D3 — preparation diagnostics carry source spans. Sized but not started; read the 1D3 sizing note in the 1D sub-slice section before planning it, because it changes the slice order.
+- Non-goals for 1D3: no change to `SourceLocation` itself, no migration of the hundreds of out-of-lane diagnostic constructors (that is slice group 1E, and 1E5 owns build-system and Stage 0 diagnostics).
 
 LAST_GOOD_COMMIT:
-- Phase 0 activation baseline: `b6f81fe58` (pre-Phase-0 activation state); Phase 0 documentation/evidence commit recorded below it
+- `bed74c13b` — "refactor: make the token source identity non-optional" (slice 1D2b4). Gate green: `just validate` exit 0, 5050 lib tests, 1951/1951 integration, source-audit 1318 files 0 findings, all three scaling series within budget.
+- Checkpoint sequence for Phase 1's 1D group: `1D1 … 1D2a` → `113ffb528` (1D2a) → `8e04e407a` (1D2b1) → `16c6aa21e` (1D2b2) → `ce274194b` (1D2b3) → `bed74c13b` (1D2b4).
 
 CURRENT_WORKTREE_STATE:
-- Clean at activation; Phase 0 changed only `AGENTS.md`, `docs/compiler-data-layout-design.md`, this plan and `benchmarks/frontend-optimization-results.md`
+- Clean at `bed74c13b`. No uncommitted work, no stashes, no unrelated user work in the tree.
 - Branch: `token-and-diagnostic-data-layout-changes`
 - Dedicated worker worktrees: none; a single worktree at the repository root is the whole inventory
 
@@ -162,16 +163,18 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- last command: `just validate`, the three Clippy lanes, `just bench-frontend-check`, `just bench-check`
-- result: fully green on `b6f81fe58`. 4947 + 817 + 17 unit tests, 1951/1951 integration cases, docs clean, 82/82 bench preflight, 40/40 bench-check cases
+- last command: `just validate` on the settled tree at `bed74c13b`
+- result: fully green. 5050 + 17 + 825 unit tests, 1951/1951 integration cases, source-audit 1318 files with 0 findings, docs clean, all three scaling series within budget
 - known unrelated failures: none
+- gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
+- `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-- next action: Phase 1, Slice 1A
+- next action: Phase 1, Slice 1D3, starting from its sizing note
 
 ---
 
@@ -1310,7 +1313,13 @@ text of provider-owned files, which exist only to hold an identity and are never
 
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
   — **tokens carry exact spans as of 1D2a; the diagnostic half is 1D3**
-- [ ] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
+- [x] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
+  — **delivered across 1D2b1–1D2b4.** Five `Option<SourceId>` fields survive on purpose and are
+  not leftovers: `ExtendedSpanTable::source_identity` (twice, in `source/span.rs`) is the
+  producer-bug detector for a builder that was never installed, `source/tests.rs:27` asserts the
+  niche keeps the option free, `HeaderParseOptions::entry_file_id` asks whether a file is the entry
+  rather than naming an absent identity, and `module_preparation.rs:211` is a database lookup that
+  can legitimately miss.
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
 - [x] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
   `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
@@ -1469,6 +1478,52 @@ them. So from 1D2 until 1H a token carries both its exact span and the legacy `S
 span is the authority: the legacy value is derived from it at construction, never computed
 independently, so the two cannot disagree, and a test pins that every token's legacy byte range
 equals its span's resolved range. 1H deletes the legacy field once 1E has moved its readers.
+
+**1D3 sizing, recorded before starting it.** A read-only inventory of every diagnostic producer in
+the tokenizer and in file preparation found one structural fact that changes the slice order, and
+one that bounds the slice.
+
+*The order fact.* A diagnostic can only claim an exact span while the span data it names is still
+resolvable. An inline `LocalSpan` needs nothing, but an extended one needs its
+`ExtendedSpanBuilder` or the frozen table. `prepare_header_syntax` moves each prepared file's
+headers out and drops that file's un-moved `span_builder`
+(`headers/parse_file_headers.rs:205-216`, and `PreparedHeaderSyntax` at `headers/types.rs:55-92`
+has no builder field). Every `bind_module_headers`, public-export and binding-environment
+diagnostic is produced after that drop, and `SourceRecord::install` for the frozen table is still
+the test-only, `allow(dead_code)` API 1D1 left behind, because installing needs
+`&mut SourceDatabase` and preparation workers hold `&SourceDatabase`. So the post-file half of 1D3
+cannot be exact until 1D4 gives the delta's builder to a mutable merge boundary that installs it.
+**Do 1D4 before 1D3, or split 1D3 into the pre-merge lane (tokenizer and in-file preparation, where
+the builder is live) and the post-merge lane (which consumes 1D4's installed table).** The
+pre-merge half is genuinely independent and can land first either way.
+
+*The bounding fact.* `SourceLocation` must not gain a required span field. Outside this lane there
+are hundreds of `CompilerDiagnostic::`/`CompilerError::` construction and adapter sites across AST,
+HIR, backend, project and build code, plus synthetic and path-only diagnostics that have no
+authored span to give. Requiring a span on the shared type pulls all of slice group 1E forward and
+forces those sites to manufacture one. 1D3 adds an exact `SourceSpan` carrier on the preparation
+lane's diagnostics and leaves `SourceLocation` alone until 1H, exactly as the interval bridge says.
+
+*Where the producers are.* Tokenizer: 11 constructor sites in `tokenizer/lexer.rs`, 2 in
+`numeric.rs`, 5 in `text_modes.rs`, and 14 more in `paths/const_paths/` reached through path
+parsing — all of them call `stream.new_location()` while `TokenStream` still owns both the cursor
+and the live builder (`tokenizer/tokens.rs:693-729`), so the span is in scope at every one. The
+three escape sites are the exception: `escape_span` (`text_modes.rs:137-145`) takes only
+`CharPosition` and never retained the escape's byte start, so it needs that start threaded before
+it can be exact. File preparation: `headers/file_parser.rs` 20, `trait_headers.rs` 17,
+`header_dispatch.rs` 7 direct plus 10 `CompilerError` adapters, `dependency_clause_syntax.rs` 5
+(12 branches through one helper), `parse_file_headers.rs` 5, `hash_items.rs` 5,
+`file_dependency_clauses.rs` 3, `dependency_paths.rs` 4; these receive `FileTokens` and
+`SourceLocation` but never the builder, though it is alive in their caller. Stage 0:
+`source_preparation.rs` constructs one file error and otherwise forwards, and
+`source_discovery.rs` has 4 user diagnostics of which 3 synthesise `SourceLocation::from_path` and
+so have no authored span at all. `plain_markdown_prepare.rs` produces no diagnostics and
+`moth_template_prepare.rs` only propagates infrastructure errors.
+
+The existing token bridge to copy is `TokenStream::new_token` (`tokenizer/tokens.rs:854-878`),
+which builds the span first and derives the legacy range from it; its agreement test is
+`every_token_legacy_byte_range_matches_its_encoded_span`
+(`tokenizer/tests/lexer_tests.rs:2450-2505`).
 
 
 ### Slice group 1E — Migrate all downstream source spans
