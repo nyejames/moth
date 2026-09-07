@@ -69,22 +69,20 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D4b, direct-template source finalization and warning context retention.
-- Goal: move the bundle's source database into the compiler service, keep original builders
-  through folding and finalize under exclusive ownership before source contexts escape.
-- Diagnosed bundle discovery finalizes the known source set after its last producer, preserving
-  original snapshots and builders. Successful bundles keep their builders live for compilation.
-- Request aggregation preserves each document's finalized source context with its warnings,
-  including when a later document fails, without cloning accumulated warning vectors.
-- General source-preparation deltas, module finalization and later span migration remain open.
+- Phase: 1D4b, module source-preparation and finalization ownership.
+- Goal: retain original source builders through discovery, file/chunk aggregation and semantic
+  outcomes, then install each table under exclusive source ownership after its last producer.
+- Encode the approved private discovery-finalization contract and slim completed history.
+  Then repair diagnosed discovery ownership and prove the success/failure barrier.
+- Canonical/check-only duplicate preparation, general module deltas and the final lookup-only
+  boundary remain open.
 
 LAST_GOOD_COMMIT:
-- `63fd6d467` — config source-span finalization, validated and independently reviewed.
+- `5a25914ec` — direct-template source finalization and warning contexts, validated and reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- The config checkpoint is committed and the worktree was clean before this slice.
-- Compiler-service and project/request ownership reviews are accepted; the full gate passed.
+- Uncommitted: plan cleanup, approved authority updates and narrower source insertion visibility.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -168,42 +166,34 @@ BLOCKERS / RISKS:
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
   Preserve them in the remaining 1D4b/1F2 outcome migration; the accepted config-span checkpoint
   did not claim to repair that existing warning loss.
-- The delivered traversal-only registration policy below uses one local-to-canonical identity
-  rebind. Reconcile that explicit policy with the physical authority's unqualified
-  pre-tokenization-final-ID wording before 1D3 publishes source spans from those lanes.
+- Proven remaining ownership/proof gap inside the approved contract: the synthetic
+  `source_discovery` traversal returns its preparation `Err` directly (provider/resolution
+  failures included) before any finalizer, and `source_preparation` drops the failed tokenizer
+  or header builder and snapshot. 1D4b must retain them and prove an early preparation failure
+  after prior prepared sources leaks no provisional diagnostic or context; the approved policy
+  alone does not settle this.
 
 VALIDATION_STATE:
-- Direct-template implementation passed all 92 focused tests after formatting. The added
-  two-document warning regression exercises successful output and a later preparation failure,
-  resolving each diagnostic against its own snapshot despite colliding logical filenames.
-  Deliberately dropping prior warning contexts made that regression fail; restoring them passed.
-- Independent compiler-service ownership review found no required correction. Project review
-  required consolidating the new eight-argument abort helper. Its candidate, snapshot and
-  prepared-output owners now travel together as narrow discovery state, without a lint allowance.
-  The settled `just validate` gate passed: 5,058 compiler, 17 CLI and 825 xtask tests,
-  all 1,951 integration cases, clean docs and a 1,319-file source audit, all 82 benchmark
-  preflights, all three scaling budgets and timer erasure. No failure is waived.
-- Diagnosed-table contents, content-source one-shot installation and cross-document collision
-  secondary-site rendering remain coverage gaps for the upcoming source-span/render migration.
-- Accepted config checkpoint `63fd6d467`: 26 compiler config tests, 41 build config tests and the focused
-  build-finalization and successful/diagnosed aggregation regressions passed after cleanup.
-  A controlled restoration of dropping the config builder made the finalization regression
-  fail because a second table installation succeeded; restoring finalization made it pass.
-- Independent compiler/header ownership and build finalization reviews accepted the candidate
-  without required corrections. They did not claim coverage of every config exit or installed
-  table-content rendering, which remains part of the later source-span consumer migration.
-- `cargo fmt --all && just validate` passed: 5,056 + 17 + 825 Rust tests, all 1,951 integration
-  tests, clean docs and 1,319-file source audit, all 82 benchmark preflights, all three scaling
-  budgets and timer erasure. No validation failure is waived.
-- gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
-- `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
+- Accepted `5a25914ec`: independent reviews, 92 direct-template tests and `just validate` passed
+  (5,058 compiler, 17 CLI, 825 xtask, 1,951 integration, docs, 1,319-file audit, 82 preflights,
+  three scaling budgets and timer erasure). Warning-context mutation proof passed.
+- Config checkpoint `63fd6d467` passed its focused tests, mutation proof, reviews and full gate.
+  Exact historical commands and output remain in the checkpoint history.
+- Current contract/visibility candidate: `cargo fmt --all && just validate` passed with the same
+  suite counts. Independent review required one success-only wording correction, now applied.
+- Coverage gaps for the upcoming source-span/render migration: diagnosed-table contents,
+  content-source one-shot installation, cross-document collision secondary-site rendering.
+- Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
+  it starts or after it exits. `cargo test -p moth --lib` misses test targets; before calling a
+  slice green, run `cargo clippy -p moth --all-targets` with the featured feature set.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint direct-template finalization, then continue module source-preparation
-  deltas and exclusive finalization.
+- next action: implement the smallest coherent source-preparation delta and
+  exclusive-finalization slice, owning the approved discovery-finalization barrier and the
+  remaining 1D4b module ownership.
 
 ---
 
@@ -232,7 +222,7 @@ architecture document in the same accepted slice.
 
 | Contract | Required end state |
 |---|---|
-| Source identity | `SourceId` is a non-zero 4-byte build-lifetime ID; each final ID is assigned at a deterministic registration barrier before that source is tokenized |
+| Source identity | `SourceId` is a non-zero 4-byte build-lifetime ID, final before inventory-backed tokenization or at the one private discovery-finalization barrier, then immutable within its context |
 | Local source range | `LocalSpan` and `Option<LocalSpan>` are exactly 4 bytes and encode exact half-open UTF-8 byte ranges |
 | Global source range | `SourceSpan` and `Option<SourceSpan>` are exactly 8 bytes |
 | Path identity | `PathId` and `Option<PathId>` are exactly 4 bytes and identify a complete interned path |
@@ -328,7 +318,7 @@ This table is normative. Do not create a new subsystem when the listed current o
 The final build/freeze lifecycle must be implemented without a broad parallel context framework:
 
 ```text
-Stage 0's existing canonical source inventories pre-register final SourceId values before any source preparation
+Stage 0 inventories pre-register final SourceIds before preparation; traversal-only discovery normalizes private provisional IDs before publishing success or diagnosis
 -> selected source text is loaded once into its preassigned slot
 -> module work owns SourcePreparationDelta values plus local string/path deltas
 -> each source's preparation result is cached once for Stage 0 structural reachability and later module compilation while its source-local extended-span builder stays owned until the last span-producing stage
@@ -357,6 +347,22 @@ before the first implementation phase that freezes reports.
 
 Test Suite Hardening was delivered in `03168082d`. This plan is the sole active representation
 migration. The diagnostics plan remains paused until the full migration completes.
+
+### Approved private discovery-finalization contract
+
+User-approved authority: `docs/compiler-data-layout-design.md` >
+`Source identity and database > Private discovery finalization`.
+
+Directory/package inventories and standalone templates keep upfront final IDs. Synthetic
+single-file and recursive direct-template discovery may use private provisional IDs, normalized
+once before success or diagnosed publication. The authority owns ordering, disposal, visibility
+and context rules. This exception adds neither an eager inventory scan nor a second ID type.
+
+Required acceptance:
+- [ ] prove a traversal whose provisional and final numeric IDs differ normalizes retained facts
+- [ ] prove different discovery orders yield identical final identity and source-shell facts
+- [ ] prove early preparation failure after a prior prepared source leaves only final-domain
+  diagnostics and attached source context
 
 ### At activation
 
@@ -494,106 +500,25 @@ anticipated cross-phase cases.
 
 ## Phase 0 — Activation, current-state audit and evidence baseline
 
-### Summary, reasoning and context
+Completed. Evidence: `benchmarks/frontend-optimization-results.md`; searchable inventories:
+`target/data-layout-audit/`. Detailed execution history remains in Git.
 
-Activate when this plan reaches the queued implementation order after the delivered hardening prerequisite and earlier queued work. This phase replaces stale repository facts, parks overlapping work and
-records the exact baseline before representation changes make comparison impossible. It changes no compiler semantics.
+- [x] **0A — activation:** hardening prerequisite `03168082d`, branch/worktree inventory,
+  authority and owner refresh.
+- [x] **0B — roadmap ownership:** activated this plan, paused diagnostics work, updated authority
+  routing and built documentation. No support change required a matrix edit.
+- [x] **0C — migration inventory:** source/location, path, token, diagnostic, context-copy and
+  failure/recovery owners mapped to phases.
+- [x] **0D — baseline:** layouts, corpus source sizes and representative success/warning/failure
+  workloads recorded. Added `data_layout` benchmark support using existing machinery.
+  Instrumentation has no normal-build cost; the throwaway layout probe was removed.
+- [x] **0E — validation/evidence:** Rust 1.97.1 native/Linux/Windows Clippy, `just validate`,
+  frontend/CLI checks and five-run predecessor evidence passed.
+- [x] **Phase close:** ownership/style review and exit criteria accepted without semantic changes.
 
-### Slice 0A — Activate from the final hardening commit
-
-- [x] confirm the delivered hardening prerequisite at `03168082d`
-- [x] confirm the parent worktree is clean and inventory all worker worktrees
-- [x] reuse the root worktree on `token-and-diagnostic-data-layout-changes`; the current
-  continuation preserves the unrelated worktree and stash listed in the active capsule
-- [x] record the activation baseline and inventory what changed under the owners below
-- [x] refresh every path and symbol in the active context capsule
-- [x] re-read the progress matrix and all authority documents
-
-### Slice 0B — Serialize roadmap ownership
-
-- [x] apply the activation roadmap order defined above
-- [x] confirm the diagnostics plan remains paused until this representation migration completes
-- [x] add `docs/compiler-data-layout-design.md` to task-specific `AGENTS.md` reading
-- [x] update the design document's audit anchor, implementation map, deterministic source-registration barriers and lookup-only frozen-context example to the refreshed repo
-- [x] do not edit the progress matrix unless current support changes during activation or migration —
-  no current support changed, so the matrix was not edited
-- [x] build documentation and inspect all plan/authority links
-
-### Slice 0C — Produce the migration inventory
-
-Generate the complete searchable inventories under `target/data-layout-audit/`. Commit only a
-concise count/high-risk-owner/owning-phase summary in `benchmarks/frontend-optimization-results.md` and
-keep the active slice's exact affected symbols in the context capsule.
-
-Inventory:
-
-- [x] every `SourceLocation`, `CharPosition`, `FileId`, `SourceFileTable` and durable location field
-- [x] every source-text/path ownership, source cache, source reread and dependency-scan
-  retokenization — the carriers are `PreparedSourceInput` variants, not an `InputFile` type
-- [x] every `InternedPath` field, clone, append, parent, join and remap path
-- [x] every `Token`, `TokenKind`, path row, `FileTokens`, token clone and retained token vector
-- [x] every diagnostic kind, payload/reason/label-message variant, renderer, stable external code and `StringId`/string field containing compiler-generated prose rather than authored facts
-- [x] every `Box<CompilerDiagnostic>` alias or conversion
-- [x] every complete `StringTable` clone, diagnostic-only `TypeEnvironment` retention, backend/project-builder `StringTable` mutation and renderer query that depends on more than type spelling
-- [x] every `CompilerError` producer, macro, conversion, consumer and immediate-print path
-- [x] every panic catch, poisoned-lock recovery and panic-profile setting
-- [x] planned owning phase for each item
-
-### Slice 0D — Record layout, distribution and memory baseline
-
-- [x] record size/alignment of current location, path, path row, token, diagnostic, largest reason
-  types, labels, messages, render contexts and the retained `TypeEnvironment`, through a throwaway
-  probe deleted after recording. Durable layout assertions land with the replacement types in
-  Phase 1, so no predecessor-only layout-report module was added.
-- [x] record the corpus source-size distribution, which decides the `LocalSpan` start-bit gates
-- [x] **owned by Slice 1C2, delivered there:** exact span start/length histograms with boundary
-  buckets for every candidate split. The Phase 0 model stored line/column, not byte offsets, so the
-  census could not run against those spans. Slice group 1C was reordered at activation so the byte
-  cursor and line index land first; 1C1 supplied the offsets and 1C2 ran the census against them.
-- [x] add the `data_layout` case group to `benchmarks/manifest.toml`, extend `BenchmarkExpectation`
-  with expected warning and diagnosed outcomes, add `BenchmarkSuiteKind::DataLayout` and add the
-  `just bench-data-layout-check` / `just bench-data-layout` recipes. Built in Phase 0 rather than
-  deferred: the predecessor diagnostic and warning memory baseline is unrecoverable once Phases 3
-  and 4 delete the token and diagnostic models it measures.
-- [x] reuse existing benchmark inputs where they exercise the required workload; new diagnosed and
-  warning-heavy inputs live under `benchmarks/`, with correctness assertions left in `tests/cases/`
-- [x] record source, path/dependency, token, template, type/generic, warning-heavy and
-  malformed-source workloads
-- [x] ensure instrumentation is feature-gated or otherwise zero-cost in normal builds
-
-### Slice 0E — Establish correctness and performance baseline
-
-- [x] run the native/Linux/Windows Clippy commands and record all failures — all three lanes pass
-  under Rust 1.97.1, the repository's actual toolchain
-- [x] identify every existing boxed boundary and whether unboxed failures remain
-- [x] run full `just validate` when the baseline is green — green
-- [x] run `just bench-frontend-check` and `just bench-check`
-- [x] complete the predecessor five-run frontend, end-to-end and data-layout evidence;
-  the recovered data-layout invocations are recorded in the benchmark report
-- [x] record source ownership, bounded common/cold owner capacities, aggregate live/peak
-  allocation proxies and clone/remap pressure separately in the recovered predecessor section;
-  the report explicitly excludes unmeasured nested heaps and path-only remap counts
-- [x] capture focused profiles only where attribution is unclear — attribution was clear; none captured
-
-### Phase 0 — Audit / style-guide review / validation
-
-- [x] confirm no compiler or language semantics changed
-- [x] confirm every current owner appears in the migration ledger
-- [x] confirm locked design decisions still match the refreshed repo
-- [x] confirm no unrecorded lint allowance, boxing workaround or new compatibility path was added; the temporary pre-activation `result_large_err` bridge is recorded with its removal owner
-- [x] confirm instrumentation reuses existing owners and has no normal-build cost
-- [x] run the documentation-only gate for documentation-only commits
-- [x] record the exact green baseline
-- [x] record the Phase 0 commit and refresh the capsule/report
-
-### Phase 0 exit criteria
-
-- [x] this plan is the sole active owner of the source/token/diagnostic representation migration
-- [x] diagnostics work remains paused cleanly behind this migration
-- [x] every stale snapshot fact is refreshed
-- [x] migration and failure-site inventories are complete
-- [x] baseline correctness, layout, timing and CI evidence is recorded, with bounded owner
-  capacity samples and repeatable aggregate memory proxies; no complete heap partition is claimed
+Limits: memory evidence covers bounded capacities and aggregate live/peak allocation proxies,
+not a complete heap partition, nested heaps or path-only remap counts. No profiles were needed.
+Exact span histograms required byte offsets and were delivered in 1C2, not Phase 0.
 
 ---
 
@@ -627,9 +552,14 @@ The frozen table owns nodes and depths only; the child map lives and dies with t
 
 ### Slice group 1B — Replace per-module source tables with build-lifetime registration
 
-- [x] **1B1 — registration index and ID domain:** add the `compiler_frontend/source/` owner; keep `SourceTreeIndex`, source-package inventories and path resolution as the only filesystem discovery path; have those owners produce/move compact candidate rows into one sorted compiler-facing `SourceRegistrationIndex` rather than duplicating their tree/root metadata; implement `SourceId(NonZeroU32)` and the deterministic `CompilationRoot` record at ID 1
-- [x] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
-- [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
+- [x] **1B1 — registration index and ID domain:** one compiler-facing registration index from
+  existing Stage 0 inventories, `SourceId(NonZeroU32)` and compilation-root ID 1.
+- [x] **1B2 — registration barriers:** config and project share one domain; packages retain their
+  own. Canonical inventories register before preparation, independent of completion order.
+- [x] **1B3 — traversal and synthetic sources:** directory/packages pre-register inventory IDs.
+  Synthetic single-file and recursive direct-template traversal normalize private provisional
+  identities once before publication. Authored provenance and deterministic late deltas remain.
+  Diagnosed-exit ownership and its required proof remain open in 1D4b.
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [ ] **1B5 — module inputs and worker ownership:** ordered candidate `SourceId` sets and canonical file/chunk merge checks are delivered. The remaining per-source `SourcePreparationDelta`, live span-builder retention and final record installation belong to 1D4/1F; this item remains open until those ownership boundaries are implemented.
 - [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
@@ -639,94 +569,90 @@ The frozen table owns nodes and depths only; the child map lives and dies with t
 
 The source database owns one registration slot per candidate, dense loaded snapshots and a cold
 load-failure array. `SourceId(1)` is the compilation root. Config is registered before tokenization
-and remains in the project identity domain. Independently compiled packages keep separate domains.
-
-Stage 0's `SourceRegistrationIndex` preserves its module-origin order. Traversal-only single-file
-and direct-template lanes use canonical logical-path order because they have no module inventory.
-Their provisional identities remain local to discovery and are rebound once before publication.
-Replacing these two explicit ordering policies with a flat display-path sort is incorrect.
-
-Loaded text moves into its slot once. A second retain is an invariant failure. Re-registration of
+and remains in the project identity domain; independently compiled packages keep separate domains.
+Stage 0's `SourceRegistrationIndex` preserves its module-origin order; traversal-only single-file
+and direct-template lanes use canonical logical-path order because they have no module inventory,
+and their provisional identities stay in a private, disposable discovery-local domain, rebound
+exactly once before successful publication. The approved contract also requires the known-source
+barrier on diagnosed exits, still open in 1D4b. A flat display-path sort must not replace either
+lane's canonical ordering policy.
+Loaded text moves into its slot once; a second retain is an invariant failure. Re-registration of
 one canonical source rejects conflicting logical identity or supplied kind. Different physical
-sources may legitimately share a display path, for example bootstrap `config.moth` and
-`src/config.moth`; display-path equality is not source identity.
-
-`SourceKind` records the producer's authored classification, not the canonical target's extension
-or the active builder's support policy. Provider-owned slots carry identity but should not acquire
-compiler source snapshots merely because they were registered.
-
-Module inputs carry ordered candidate `SourceId` sets. Their external-import scope is the module's
-owned candidates, not every source in the boundary database. Existing file/chunk merges place
-prepared results in preassigned slots and reject duplicate, missing and out-of-range outputs.
-
-The current `Arc<SourceDatabase>` removed deep source-table copies, but it makes post-worker
-`Arc::get_mut` installation unavailable while other owners retain the database. It is not a
+sources may share a display path (bootstrap `config.moth` vs `src/config.moth`); display-path
+equality is not source identity. `SourceKind` records the producer's authored classification, not
+the canonical target's extension or the builder's support policy; provider-owned slots carry
+identity but acquire no compiler snapshots merely by registration. Module inputs carry ordered
+candidate `SourceId` sets whose external-import scope is the module's owned candidates, not every
+source in the boundary database. File/chunk merges place prepared results in preassigned slots and
+reject duplicate, missing and out-of-range outputs.
+The current `Arc<SourceDatabase>` removed deep source-table copies but makes post-worker
+`Arc::get_mut` installation unavailable while other owners retain the database; it is not a
 finished mutable/frozen lifecycle. 1D4 must preserve the source builder through its last producer;
 1F owns the final lookup-only boundary. Shared interior mutation is not a substitute for that
 ownership split.
-
-The source path foundation is delivered. `SourceDatabase` owns the existing path interner as its
-one source identity base. Stage 0's test-only path table and fields are gone; its stable logical
-ordering and authored classification remain unchanged. The source `PathId`/legacy-path bridge
-ends at 2D and reconstructs transient components from table nodes, never rendered text.
-
-Current bridge callers are source discovery/rebinding, frontend identity and AST entry setup,
-content dependency targets, AST file-value scope, direct-template entry setup, HTML template
-bundle rebinding/owner diagnostics and the source-size error path. Test callers are source
-invariants, frontend pipeline, module dependencies, template heads, source snapshot rendering and
-Stage 0 preparation fixtures. No new consumer may adopt this migration bridge.
-
+The source path foundation is delivered: `SourceDatabase` owns the existing path interner as its
+one source identity base; Stage 0's test-only path table is gone with its stable logical ordering
+and authored classification unchanged. The source `PathId`/legacy-path bridge ends at 2D and
+reconstructs transient components from table nodes, never rendered text. Current bridge callers:
+source discovery/rebinding, frontend identity and AST entry setup, content dependency targets, AST
+file-value scope, direct-template entry setup, HTML template bundle rebinding/owner diagnostics,
+the source-size error path; test callers: source invariants, frontend pipeline, module
+dependencies, template heads, source snapshot rendering, Stage 0 preparation fixtures. No new
+consumer may adopt this migration bridge.
 `ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
-`FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1 respectively. Their existing
-agreement checks stay until the duplicated fields are removed.
-
-Renderers already use retained snapshots rather than reopening files. Until 1F migrates them to
-source identity, per-diagnostic-range source contexts preserve package ownership and ambiguous
-display-path matches omit a frame rather than selecting the wrong file. The direct-template API
-now retains its finalized per-document source context with warnings and diagnosed outcomes.
-
-1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy.
-1B6 is delivered: the facade and module semantic context borrow immutable services.
-Individual mutation-test results and delivery history remain in Git.
-
+`FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1; their agreement checks stay
+until the duplicated fields are removed. Renderers already use retained snapshots rather than
+reopening files; until 1F migrates them to source identity, per-diagnostic-range source contexts
+preserve package ownership and ambiguous display-path matches omit a frame rather than select the
+wrong file. The direct-template API retains its finalized per-document source context with
+warnings and diagnosed outcomes.
+1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy;
+1B6 is delivered (facade and module semantic context borrow immutable services). Individual
+mutation-test results and delivery history remain in Git.
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
-The byte cursor and line index landed before the span census. The selected codec is the measured
-22/10 split (`LENGTH_BITS = 10`), with exact append-only overflow rows. The terminator experiment
-was deliberately deferred, not evaluated or rejected by measurement; its measured maximum prize
-was under 2 KB over the census corpus. Evidence and re-entry conditions remain in the layout
-authority and benchmark report.
+Delivered contracts (evidence: layout authority and benchmark report):
 
-`LocalSpan` and its option are four bytes; `SourceSpan` and its option are eight. Inline/extended
-resolution, capacity boundaries, exact joins, source ordering, overlap and containment have focused
-coverage. Empty spans overlap nothing; containment is the operation for insertion points.
+- [x] **1C1 — byte cursor and line index:** one line-index builder and byte-offset cursor
+  threaded through each source kind's existing traversal; no second pre-scan where a traversal
+  already existed.
+- [x] **1C2 — span census and encoding selection:** exact span start/length histograms with
+  boundary buckets over the 8–12 length-bit splits on the weighted corpus; benchmark-only
+  candidate codecs; constants frozen in the architecture document and evidence report. Selected
+  codec: the measured 22/10 split (`LENGTH_BITS = 10`) with exact append-only overflow rows. The
+  Phase 0 source-size census proved every candidate start-overflow-free, so length overflow alone
+  decided the split. **Amended at delivery:** the bounded terminator experiment was deferred
+  undone, not evaluated or rejected — its measured maximum prize is under 2 KB; re-entry criteria
+  are recorded.
+- [x] **1C3 — exact span codec:** `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder`
+  per source, one private source-local factory/codec for exact construction, join, insertion
+  point and resolution; one read-only resolver serves live builders and frozen records;
+  cross-source joins rejected; named source-order, overlap and containment operations.
+  **Frozen-record half deferred to 1D** and delivered there as 1D1.
+- [x] **1C4 — conversion semantics:** CRLF, empty-file, final-newline, long-line and zero-width
+  EOF behaviour; lazy line, Unicode-scalar and UTF-16 column conversion. **Widened at delivery:**
+  chose the tokenizer's line-break set (LF, CRLF, bare CR) and made `TokenStream::next` the
+  single owner of the authored line counter.
+- [x] **1C5 — invariants:** hard layout assertions plus boundary, malformed-capacity, Unicode
+  and conversion property tests. **Narrowed at delivery:** join/ordering coverage already existed
+  in 1C3's named-operation tests.
+- [x] **1C6 — registration slot and loaded record:** compact registration slot per candidate plus
+  a loaded record owning text, line starts and extended spans unconditionally; unreadable-source
+  failure stays at the slot layer; `Unreadable` variant removed from the record. Moved here from
+  1B4: the split pays once the three loaded boxes exist.
 
-The line index is built once when a snapshot loads. Its line-break set matches tokenization:
-LF, CRLF and bare CR. Empty snapshots have no lines. EOF after a final terminator resolves to
-the preceding visible line end. Unicode scalar columns serve rendering; UTF-16 columns are
-reserved for tooling. The byte cursor remains authoritative while legacy line/column fields survive.
-
-1F4 must consume `LineIndex` in both renderers, remove its module-wide dead-code allowance and
-cover code-token carets plus re-anchored tokens such as a discarded template body's closing
-bracket. Their old `CharPosition` columns or lines can be stale. The unused UTF-16 API may keep
-one narrowly documented allowance until the deferred tooling consumer exists.
-
-The loaded-record/registration-slot split is delivered. Frozen-record span APIs exist, but
-production installation and builder retention remain 1D/1F work. Codec operations may keep only
-narrow allowances naming an actual remaining consumer, not blanket suppressions.
-
-
-- [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
-- [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
-- [x] **1C3 — exact span codec:** implement the selected `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder` per source and one private source-local factory/codec for exact construction, join, insertion-point and resolution; expose the same read-only resolver over a live source builder and a frozen source record so consumers never freeze/copy just to inspect an existing span; reject cross-source joins and expose named source-order, overlap and containment operations. **Frozen-record half deferred to 1D:** see the delivery note above.
-- [x] **1C4 — conversion semantics:** define CRLF, empty-file, final-newline, long-line and zero-width EOF behaviour; implement lazy line, Unicode-scalar-column and UTF-16-column conversion. **Widened at delivery:** the slice also had to decide the line-break set, chose the tokenizer's, and had to make `TokenStream::next` the single owner of the authored line counter before the two models could agree; see the delivery note above.
-- [x] **1C5 — invariants:** add hard layout assertions plus exhaustive inline/extended boundary, malformed-capacity, join, ordering, Unicode and conversion property tests. **Narrowed at delivery:** join and ordering were already covered by 1C3's named operations tests, so the slice added the gaps rather than a second layer; see the delivery note above.
-- [x] **1C6 — registration slot and loaded record:** split the dense array into a compact
-  registration slot per candidate and a loaded record that owns text, line starts and extended
-  spans unconditionally; keep an unreadable source's failure at the slot layer and remove the
-  `Unreadable` variant from the record. Moved here from 1B4: the split pays once the three loaded
-  boxes exist, and doing it earlier would re-split the same array twice.
+Standing facts: `LocalSpan`/option are four bytes; `SourceSpan`/option are eight. The line index
+builds once per snapshot; empty snapshots have no lines; EOF after a final terminator resolves to
+the preceding visible line end. Unicode scalar columns serve rendering, UTF-16 columns are
+reserved for tooling (one narrowly documented allowance until that consumer exists); the byte
+cursor stays authoritative while legacy line/column fields survive. Empty spans overlap nothing;
+containment is the operation for insertion points. 1F4 must consume `LineIndex` in both
+renderers, remove its module-wide dead-code allowance and cover code-token carets plus
+re-anchored tokens such as a discarded template body's closing bracket — old `CharPosition`
+columns or lines can be stale. Frozen-record span APIs exist, but production installation and
+builder retention remain 1D/1F work. Codec operations may keep only narrow allowances naming an
+actual remaining consumer, not blanket suppressions.
 
 
 ### Slice 1D — Migrate tokenization and source preparation
@@ -737,11 +663,10 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
   `SourceId`; frozen generic syntax remains explicitly identity-free until 1F preserves or remaps
   its owning context. The compilation root must never stand in for that missing identity.
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
-- [x] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
-  `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
-  `allow(unused_imports)` suppressions that 1C3 landed for the interval before this consumer
-  — **table and signatures delivered as 1D1; 1D2a retired both module-wide suppressions and
-  left item-level allowances on the consumer half, each naming its first caller's slice**
+- [x] **delivered as 1D1** — `SourceRecord` gained its extended-span table plus the authority's
+  `&SourceRecord`/`&SourceDatabase` span signatures; 1D2a retired 1C3's module-wide
+  `allow(dead_code)`/`allow(unused_imports)`, leaving item-level allowances on the consumer half,
+  each naming its first caller's slice.
 - [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
   retained prepared facts without rereading, cloning or owning a second source snapshot
 - [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final
@@ -758,30 +683,33 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
 
 1D is split at source ownership boundaries:
 
-- **1D1 — frozen record spans:** delivered codec and one-shot install API. Production installation
-  remains open until an exclusive owner can finalize the source after its last span producer.
-- **1D2 — tokenizer spans and identity:** delivered exact local spans and required registered
-  inputs for authored tokenization. `TokenizeOutput` carries the builder beside its tokens.
-  Frozen generic materialisation must retain honest identity absence until 1F supplies its context.
+- **1D1 — frozen record spans:** delivered codec and one-shot install API; production
+  installation remains open until an exclusive owner can finalize the source after its last span
+  producer.
+- **1D2 — tokenizer spans and identity:** delivered exact local spans and registered inputs for
+  authored tokenization; `TokenizeOutput` carries the builder beside its tokens; frozen generic
+  materialisation must retain honest identity absence until 1F supplies its context.
 - **1D4 — builder lifetime and source preparation delta:** comes next. Preserve each builder on
   success and diagnosed paths, across file aggregation and all later span-producing stages.
   File/chunk merges move source-local data; they do not freeze builders early or mutate shared
   databases. Finalization happens under the outcome's exclusive owner.
-  - [x] **1D4a — diagnosed producer ownership:** return the existing span builder and real
-    source identity on tokenizer and file-header failures, retaining warnings and diagnostic facts.
-    This closes producer-local drops only, not later aggregation.
+  - [x] **1D4a — diagnosed producer ownership:** delivered; returns the existing span builder and
+    real source identity on tokenizer and file-header failures, retaining warnings and diagnostic
+    facts. Closed producer-local drops only, not later aggregation.
   - [ ] **1D4b — aggregation and outcome ownership:** move successful and diagnosed source
     deltas through existing file/chunk merges, header aggregation and module/direct-service
     outcomes. Keep builders separate from generic diagnostic bags and retain one live resolver
     through every later span producer. The final exclusive source owner installs each table once.
-  - [x] **1D4b prerequisite — direct-template entry reuse:** preserve the entry's original
-    preparation and builder through final identity rebinding and bundle consumption. The compiler
-    service prepares only standalone raw-source inputs, not bundle entries. This brings forward
-    the direct-entry portion of 3E without claiming its source-owned token storage migration.
-  - [x] **1D4b config finalization:** retain the original builder through compiler and build-owned
-    config validation, then install it once before source database sharing.
-  - [x] **1D4b direct-template finalization:** preserve builders and snapshots through bundle
-    diagnosis or compiler folding, then retain finalized per-document contexts with warnings.
+  - [x] **1D4b prerequisite — direct-template entry reuse:** delivered; preserves the entry's
+    original preparation and builder through final identity rebinding and bundle consumption; the
+    compiler service prepares only standalone raw-source inputs, not bundle entries. Brings
+    forward the direct-entry portion of 3E without claiming its source-owned token storage
+    migration.
+  - [x] **1D4b direct-template finalization:** delivered; preserves builders and snapshots through
+    bundle diagnosis or compiler folding, then retains finalized per-document contexts with
+    warnings.
+  - [x] **1D4b config finalization:** delivered; retains the original builder through compiler and
+    build-owned config validation, then installs it once before source database sharing.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
@@ -806,9 +734,8 @@ at their file merge is therefore impossible without changing ownership.
 resolver available before finalization. Later parsers still create joined or insertion spans, so
 file preparation is not the final span-producing boundary. Freeze each builder exactly once at
 the actual last producer, then assemble the source lookup context at 1F. Do not add a shared
-lock or `OnceLock` installation path to evade the exclusive-owner requirement.
-
-1D3's tokenizer/in-file lane can use the live builder. Its post-file lane depends on this retained
+lock or `OnceLock` installation path to evade the exclusive-owner requirement. 1D3's
+tokenizer/in-file lane can use the live builder; its post-file lane depends on this retained
 resolver ownership, not on an early frozen table.
 
 *The bounding fact.* `SourceLocation` must not gain a required span field. Outside this lane there

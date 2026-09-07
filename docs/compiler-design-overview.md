@@ -136,7 +136,8 @@ A canonical module compilation receives:
 - graph-resolved provider identities and dependency-ordered provider interfaces
 - the namespace and capability surface selected for the project or package build
 - resolved build-configuration values and synthetic compile-time interfaces visible to the module
-- deterministic source identities and a diagnostic identity context
+- final lane source identities and a diagnostic identity context; a module input therefore
+  carries no provisional identity
 
 Source preparation and provider binding are deliberately separate.
 
@@ -316,6 +317,10 @@ One project or package compilation boundary owns a diagnostic identity context f
 - File deltas merge in original source order.
 - Module deltas merge in canonical module order.
 - Diagnostics and warnings never merge in worker-completion order.
+- Source identities are final before every downstream consumer: inventory lanes register them
+  upfront and private discovery lanes rebind once at their finalize barrier
+  (`docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
+  finalization`).
 - Tokens, headers, visibility records, type-rendering contexts and artefacts are remapped before a later consumer uses them.
 - A success or failure result that outlives the active compilation call carries the merged `StringTable` or an equivalent self-contained render context.
 
@@ -769,7 +774,10 @@ outcomes retain the source context needed by their resource facts and warnings.
 
 If bundle discovery diagnoses a source before folding can begin, its owning preparation boundary
 retains the known snapshots and builders and finalizes them there. The request owner preserves each
-document's source context with its warnings, including when a later document fails.
+document's source context with its warnings, including when a later document fails. Recursive
+discovery normalizes provisional source identities once before publishing success or diagnosis,
+under `docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
+finalization`. Standalone sources receive final IDs upfront.
 
 #### Project config compilation service
 

@@ -137,10 +137,13 @@ Config stops after the folded AST boundary. It produces no HIR or borrow facts.
 
 That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded values, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Config schema definition, validation policy and application to the project record stay build-owned. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
 
-The compiler service returns the config source's live span builder with its outcome. Bootstrap retains
-it through schema application and output validation on successful and diagnosed paths, then installs
-the finished table once before sharing the source database. This handoff moves source data and does
-not give build code access to the compiler's semantic stages.
+The compiler service returns the config source's live span builder with its outcome. Bootstrap
+retains it through schema application and output validation on successful and diagnosed paths,
+then installs the finished table once before sharing the source database. This handoff moves
+source data and does not give build code access to the compiler's semantic stages. Config is one
+known-source inventory lane: its identity is registered upfront and final before the service
+tokenizes; only its table installation waits for the build-owned validation that can still
+produce spans.
 
 Allowed source includes:
 
@@ -683,7 +686,10 @@ Direct-template discovery follows the same ownership split. A successful bundle 
 database and live span builders into the named compiler service, which finalizes the tables after
 folding. A diagnosed discovery keeps the known source snapshots and finalizes at that terminal
 preparation boundary instead. Request aggregation keeps earlier documents' warning source contexts
-when a later document fails, without copying their warning vectors.
+when a later document fails, without copying their warning vectors. Synthetic single-file traversal
+and recursive direct-template discovery normalize private provisional identities once before
+publishing success or diagnosis. See `docs/compiler-data-layout-design.md` > `Source identity and
+database > Private discovery finalization`. Directory/package inventories retain upfront final IDs.
 
 ## Project and package topology
 

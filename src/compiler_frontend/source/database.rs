@@ -456,18 +456,15 @@ impl SourceDatabase {
         })
     }
 
-    /// Register one canonical source file and return its source identity.
+    /// Register a source in a private traversal-only discovery domain.
     ///
-    /// A repeated canonical path returns the existing identity only when its logical path and
-    /// authored kind match. A conflicting logical spelling or kind is rejected. New records
-    /// append after the existing records, matching the traversal-time registration behavior.
+    /// Use this only when preparation discovers source membership. The discovery finalization
+    /// barrier assigns deterministic final identities and normalizes retained source facts before
+    /// publication. Inventory-backed lanes use ordered registration instead.
     ///
-    /// Callers supply the authored kind their own lane compiles the source as. Kind is a property
-    /// of that unique record: a second registration of the same canonical path with a different
-    /// kind is a compiler invariant failure, because producers supply the kind rather than
-    /// deriving it from the path. Path-only registration that holds no authored spelling uses
-    /// [`Self::build`].
-    pub fn insert(
+    /// Re-registering a canonical path preserves its identity only when the logical path and
+    /// authored kind agree. Conflicts indicate a compiler invariant failure.
+    pub(crate) fn insert(
         &mut self,
         canonical_path: PathBuf,
         kind: SourceKind,

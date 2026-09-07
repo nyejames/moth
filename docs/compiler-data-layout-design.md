@@ -262,7 +262,9 @@ Rules:
   gives project-wide user diagnostics an exact context-owned primary span before or outside any
   physical source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
 - Physical and other synthetic IDs begin after that root slot.
-- IDs are assigned deterministically before tokenization begins.
+- Inventory-backed lanes assign final IDs in canonical order before tokenization. Traversal-only
+  lanes use the single private discovery-finalization barrier below. Every discovery output and
+  downstream compiler boundary carries final, immutable source identities.
 - Physical sources are sorted by canonical logical source order, never filesystem iteration or
   worker completion order.
 - Compiler-known synthetic sources are registered in a deterministic category and owner order before
@@ -276,6 +278,33 @@ Rules:
 - `SourceId` values are not serialized. Persistent artefacts store canonical source identity plus
   exact byte ranges and remap into a new context.
 - Absence uses `Option<SourceSpan>`, never `SourceId(0)` or a fabricated source.
+
+### Private discovery finalization
+
+Synthetic single-file traversal and recursive direct-template discovery learn source membership
+from preparation. Only these membership-discovering lanes may prepare under provisional IDs.
+Directory/package inventories and standalone templates register final IDs before tokenization.
+
+- Keep the provisional database private and disposable. Never compare its IDs with final IDs or
+  retain either the database or its IDs outside the traversal owner. Use ordinary `SourceId`,
+  not a second provisional-ID type.
+- Keep `SourceDatabase::insert` a discovery escape hatch, with the narrowest Rust visibility
+  that permits its owners. Inventory-backed compilation uses ordered registration.
+- Prepare each source once. On success, one barrier settles the complete reachable closure,
+  constructs its final database and normalizes every retained source-bearing record exactly once.
+  Normalization may rebind an existing fact or rebuild it against the final table.
+- Move snapshots and live span builders without copying. Identity finalization does not freeze a
+  builder whose later consumers can still produce spans. Destroy the provisional domain before
+  publishing the result.
+- Preserve each lane's canonical order: Stage 0 inventory identity order for directory/packages,
+  deterministic canonical logical order for synthetic traversal. Neither visit order nor worker
+  completion order determines final IDs.
+- On diagnosis, apply the same barrier to the known source set before publishing diagnostics and
+  their source context. Every retained source-bearing fact must leave in the final domain.
+- Discovery outputs, module preparation, header aggregation, semantic compilation, escaped
+  diagnostics and resolved-reference tables see only final IDs. Those identities never change
+  within their owning context. Cross-context import still requires explicit context ownership
+  or canonical remapping under the interface contract.
 
 ### Source records
 
@@ -1509,7 +1538,9 @@ For each parallel wave:
 8. Diagnostics are appended in canonical production order, not completion order.
 9. The next consumer sees only remapped identities.
 
-Source spans do not need remapping because final `SourceId`s are assigned before tokenization.
+Source spans need no remapping within a final identity domain. Inventory-backed workers receive
+final IDs before tokenization. Traversal-only discovery normalizes its provisional facts once
+before this boundary, as specified in `Source identity and database > Private discovery finalization`.
 
 No compact ID is allocated through a timing-dependent global atomic simply because the numeric type
 is cheap.
