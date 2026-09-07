@@ -16,7 +16,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use std::{cell::RefCell, rc::Rc};
 
 pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     module_ast: Ast,
     warnings: &[CompilerDiagnostic],
     function_origin_lookup: HirFunctionOriginLookup,
@@ -28,7 +28,7 @@ pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
 }
 
 pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
-    compiler: &CompilerFrontend,
+    compiler: &CompilerFrontend<'_>,
     hir_module: &HirModule,
     warnings: &[CompilerDiagnostic],
 ) -> Result<BorrowCheckReport, CompilerMessages> {

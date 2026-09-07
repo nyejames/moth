@@ -94,9 +94,16 @@ fn source_byte_count(input_files: &[PreparedSourceInput], source_files: &SourceD
         .sum()
 }
 
+struct FrontendPreparationInputs {
+    style_directives: StyleDirectiveRegistry,
+    string_table: StringTable,
+    project_path_resolver: Option<ProjectPathResolver>,
+    source_files: Arc<SourceDatabase>,
+}
+
 struct FrontendPreparationFixture {
     _temp_dir: tempfile::TempDir,
-    frontend: CompilerFrontend,
+    frontend: FrontendPreparationInputs,
     input_files: Vec<PreparedSourceInput>,
     entry_file_path: PathBuf,
 }
@@ -156,14 +163,12 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         })
         .collect();
 
-    let frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
-        string_table,
+    let frontend = FrontendPreparationInputs {
         style_directives,
-        Arc::new(ExternalPackageRegistry::new()),
-        None,
-        Arc::clone(&source_files),
-    );
+        string_table,
+        project_path_resolver: None,
+        source_files,
+    };
 
     FrontendPreparationFixture {
         _temp_dir: temp_dir,
@@ -237,13 +242,15 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 
     let module_table_size_before = string_table.len();
 
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
-        Arc::clone(&source_files),
+        &source_files,
     );
 
     let options = HeaderParseOptions {
@@ -251,7 +258,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .source_files
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.id),
-        project_path_resolver: frontend.project_path_resolver.as_ref(),
+        project_path_resolver: frontend.project_path_resolver,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -266,8 +273,8 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             file_tokens: retained_tokens,
             span_builder,
         } = CompilerFrontend::tokenize_source(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             source_code,
             source_path,
             TokenizerEntryMode::SourceFile,
@@ -280,8 +287,8 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 
         let result = {
             let prepare_context = FrontendFilePrepareContext {
-                source_files: &frontend.source_files,
-                style_directives: &frontend.style_directives,
+                source_files: frontend.source_files,
+                style_directives: frontend.style_directives,
                 entry_file_path: &canonical_a,
                 options: &options,
             };
@@ -575,7 +582,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
-        project_path_resolver: Some(project_path_resolver),
+        project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
         build_config_values: Arc::new(Default::default()),
@@ -742,7 +749,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
-        project_path_resolver: Some(project_path_resolver),
+        project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         external_packages,
         build_config_values: Arc::new(Default::default()),
@@ -921,33 +928,35 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
 
     let module_table_size_before = string_table.len();
 
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
-        Arc::clone(&source_files),
+        &source_files,
     );
 
     let input_files = vec![
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_a.clone(),
             "alpha = 1\n#[hello]\n[runtime]\n",
         ),
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_b.clone(),
             "Beta #= 2\n",
         ),
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_c.clone(),
             "Gamma #= 3\n",
@@ -960,9 +969,9 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     let preparation_context = super::ModulePreparationContext {
-        source_files: &frontend.source_files,
-        style_directives: &frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.clone(),
+        source_files: frontend.source_files,
+        style_directives: frontend.style_directives,
+        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
@@ -1161,13 +1170,14 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         })
         .collect::<Vec<PreparedSourceInput>>();
 
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        style_directives,
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
-        Arc::clone(&source_files),
+        &source_files,
     );
 
     let source_byte_count = source_byte_count(&input_files, &source_files);
@@ -1177,9 +1187,9 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     );
 
     let preparation_context = super::ModulePreparationContext {
-        source_files: &frontend.source_files,
-        style_directives: &frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.clone(),
+        source_files: frontend.source_files,
+        style_directives: frontend.style_directives,
+        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(

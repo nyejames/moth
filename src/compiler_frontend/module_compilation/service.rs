@@ -141,10 +141,10 @@ pub(crate) fn compile_module(
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
         string_table,
-        context.style_directives.to_owned(),
-        Arc::clone(&context.external_packages),
-        context.project_path_resolver.clone(),
-        Arc::clone(context.source_files),
+        context.style_directives,
+        &context.external_packages,
+        context.project_path_resolver,
+        context.source_files,
     );
 
     let compile_result = run_semantic_stages(
@@ -258,10 +258,10 @@ pub(crate) fn compile_module_for_boracle(
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
         string_table,
-        context.style_directives.to_owned(),
-        Arc::clone(&context.external_packages),
-        context.project_path_resolver.clone(),
-        Arc::clone(context.source_files),
+        context.style_directives,
+        &context.external_packages,
+        context.project_path_resolver,
+        context.source_files,
     );
 
     match run_semantic_stages(
@@ -349,7 +349,7 @@ struct CompleteSemanticStage {
 ///      [`compile_module`] classify them exactly once. Keeping the sequence in its own function
 ///      means `compile_module` reads as three steps rather than wrapping four hundred lines.
 fn run_semantic_stages(
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     context: &ModuleCompilationContext<'_>,
     known_generated: KnownGeneratedFunctions<'_>,
     mut warnings: Vec<CompilerDiagnostic>,
@@ -706,7 +706,7 @@ fn run_semantic_stages(
     if request == SemanticStageRequest::Boracle {
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,
-            external_package_registry: Arc::clone(&compiler.external_package_registry),
+            external_package_registry: Arc::clone(compiler.external_package_registry),
             entry_point: entry_file_path.to_path_buf(),
         })));
     }
@@ -837,7 +837,7 @@ fn run_semantic_stages(
                     borrow_analysis,
                 },
                 link_facts: ModuleLinkFacts {
-                    external_package_registry: Arc::clone(&compiler.external_package_registry),
+                    external_package_registry: Arc::clone(compiler.external_package_registry),
                     external_import_candidates,
                     functions: function_link_facts,
                 },
@@ -865,7 +865,7 @@ fn run_semantic_stages(
 /// WHY: these facts depend on provider interfaces and the project path resolver, so they
 ///      belong in the semantic phase after preparation has produced `PreparedHeaderSyntax`.
 fn bind_retained_headers(
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     prepared_header_syntax: PreparedHeaderSyntax,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -876,7 +876,7 @@ fn bind_retained_headers(
         compiler.external_package_registry.as_ref(),
         external_dependency_resolution_table,
         source_provider_dependencies,
-        compiler.project_path_resolver.as_ref(),
+        compiler.project_path_resolver,
         compiler.source_files.as_ref(),
         &mut compiler.string_table,
     )
@@ -894,7 +894,7 @@ fn bind_retained_headers(
 }
 
 fn sort_headers(
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
     warnings: &[CompilerDiagnostic],
@@ -916,7 +916,7 @@ fn sort_headers(
 #[allow(clippy::too_many_arguments)]
 fn build_ast_with_registered_types(
     context: &ModuleCompilationContext<'_>,
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     sorted: SortedHeaders,
     entry_file_path: &Path,
     root_role: ModuleRootRole,

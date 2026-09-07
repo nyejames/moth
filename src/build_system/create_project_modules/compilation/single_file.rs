@@ -466,7 +466,7 @@ fn compile_single_file_frontend_with_target(
         options: config.frontend_options(),
         build_profile,
         root_role_override: None,
-        project_path_resolver: Some(project_path_resolver),
+        project_path_resolver: Some(&project_path_resolver),
         source_files: &source_files,
         style_directives,
         external_packages: Arc::clone(&external_packages),

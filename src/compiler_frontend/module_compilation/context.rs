@@ -28,7 +28,8 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// Transient check-only units have no implicit start root; canonical modules derive this from
     /// their graph-owned stable origin.
     pub(crate) root_role_override: Option<ModuleRootRole>,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
+    /// The canonical boundary owns the resolver; module compilation only borrows it.
+    pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     /// Immutable source identities registered once by the enclosing compilation boundary.
     ///
     /// This context borrows the boundary's handle. Only a consumer that genuinely outlives the

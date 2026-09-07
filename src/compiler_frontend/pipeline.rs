@@ -1,8 +1,8 @@
 //! The frontend stage facade.
 //!
-//! WHAT: one value carrying the registries, options, string table and file identities every stage
-//!       needs, plus the thin per-stage calls that read them.
-//! WHY:  the stage owners each need a different slice of the same immutable context. Holding it
+//! WHAT: one value borrowing immutable build services while owning the string table, options and
+//!       the thin per-stage calls that read them.
+//! WHY: the stage owners each need a different slice of the same immutable context. Holding it
 //!       once keeps a service's flow readable as named stage calls instead of a growing argument
 //!       list threaded through each one.
 //!
@@ -113,15 +113,36 @@ pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usiz
         .unwrap_or(0)
 }
 
-pub(crate) struct CompilerFrontend {
-    pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    pub(crate) style_directives: StyleDirectiveRegistry,
+pub(crate) struct CompilerFrontend<'a> {
+    /// The shared registry handle remains owned by the enclosing compilation boundary.
+    pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
+    pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
+    pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
     /// Immutable source identities registered once by the enclosing compilation boundary and
     /// shared, never copied, by every module compiled inside it.
-    pub(crate) source_files: Arc<SourceDatabase>,
+    pub(crate) source_files: &'a Arc<SourceDatabase>,
+}
+
+impl<'a> CompilerFrontend<'a> {
+    pub(crate) fn new(
+        options: FrontendOptions,
+        string_table: StringTable,
+        style_directives: &'a StyleDirectiveRegistry,
+        external_package_registry: &'a Arc<ExternalPackageRegistry>,
+        project_path_resolver: Option<&'a ProjectPathResolver>,
+        source_files: &'a Arc<SourceDatabase>,
+    ) -> Self {
+        Self {
+            external_package_registry,
+            style_directives,
+            string_table,
+            project_path_resolver,
+            options,
+            source_files,
+        }
+    }
 }
 
 /// Shared immutable inputs used while one source file is prepared against a local string table.
@@ -219,25 +240,7 @@ fn source_identity_facts(
     ))
 }
 
-impl CompilerFrontend {
-    pub(crate) fn new(
-        options: FrontendOptions,
-        string_table: StringTable,
-        style_directives: StyleDirectiveRegistry,
-        external_package_registry: Arc<ExternalPackageRegistry>,
-        project_path_resolver: Option<ProjectPathResolver>,
-        source_files: Arc<SourceDatabase>,
-    ) -> Self {
-        Self {
-            external_package_registry,
-            style_directives,
-            string_table,
-            project_path_resolver,
-            options,
-            source_files,
-        }
-    }
-
+impl CompilerFrontend<'static> {
     // -----------------------------
     //  TOKENIZER
     // -----------------------------
@@ -360,7 +363,9 @@ impl CompilerFrontend {
             }
         }
     }
+}
 
+impl<'a> CompilerFrontend<'a> {
     // ---------------------------
     //  DEPENDENCY SORTING
     // ---------------------------
@@ -373,7 +378,7 @@ impl CompilerFrontend {
         // compiler instance already retains as the module source identities.
         let content_source_targets = ContentSourceTargets::from_resolved_references(
             resolved_file_references,
-            &self.source_files,
+            self.source_files.as_ref(),
             &mut self.string_table,
         );
 
@@ -419,7 +424,7 @@ impl CompilerFrontend {
         let file_value_resolution = Some(Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                 resolved_file_references,
-                Arc::clone(&self.source_files),
+                Arc::clone(self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
@@ -439,8 +444,8 @@ impl CompilerFrontend {
                 top_level_const_fragments: sorted.top_level_const_fragments,
             },
             AstBuildContext {
-                external_package_registry: Arc::clone(&self.external_package_registry),
-                style_directives: &self.style_directives,
+                external_package_registry: Arc::clone(self.external_package_registry),
+                style_directives: self.style_directives,
                 string_table: &mut self.string_table,
                 entry_dir: interned_entry_file,
                 root_role,

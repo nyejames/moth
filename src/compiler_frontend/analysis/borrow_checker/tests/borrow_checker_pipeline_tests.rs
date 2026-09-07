@@ -86,13 +86,17 @@ fn frontend_check_borrows_propagates_failures() {
         &mut string_table,
     );
 
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry =
+        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
+    let source_files = Arc::new(SourceDatabase::empty());
     let frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
-        Arc::new(SourceDatabase::empty()),
+        &source_files,
     );
     let messages = frontend
         .check_borrows(&hir)

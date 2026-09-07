@@ -305,7 +305,7 @@ fn add_model_edges(
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
-    compiler: &CompilerFrontend,
+    compiler: &CompilerFrontend<'_>,
     hir_module: &mut HirModule,
     function_link_facts: &HirModuleLinkFacts,
     generated_transaction: &mut GeneratedFunctionTransaction<'_>,

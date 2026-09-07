@@ -266,14 +266,14 @@ pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilerDiagnost
 /// WHY: tokenization-only tests need access to the tokenizer without taking ownership of the
 ///      frontend's string table, and this keeps test-only entry points out of production code.
 pub(crate) fn tokenize_source_for_test(
-    frontend: &mut CompilerFrontend,
+    frontend: &mut CompilerFrontend<'_>,
     source_code: &str,
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
 ) -> Result<TokenizeOutput, Box<CompilerDiagnostic>> {
     CompilerFrontend::tokenize_source(
-        &frontend.source_files,
-        &frontend.style_directives,
+        frontend.source_files.as_ref(),
+        frontend.style_directives,
         source_code,
         module_path,
         tokenizer_entry_mode,

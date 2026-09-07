@@ -45,13 +45,39 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 
+struct FrontendServices {
+    options: crate::compiler_frontend::module_compilation::FrontendOptions,
+    external_package_registry:
+        Arc<crate::compiler_frontend::external_packages::ExternalPackageRegistry>,
+    style_directives: StyleDirectiveRegistry,
+    string_table: StringTable,
+    project_path_resolver: Option<ProjectPathResolver>,
+    source_files: Arc<SourceDatabase>,
+}
+
+impl FrontendServices {
+    fn with_compiler<R>(&mut self, run: impl FnOnce(&mut CompilerFrontend<'_>) -> R) -> R {
+        let mut compiler = CompilerFrontend::new(
+            self.options.clone(),
+            std::mem::take(&mut self.string_table),
+            &self.style_directives,
+            &self.external_package_registry,
+            self.project_path_resolver.as_ref(),
+            &self.source_files,
+        );
+        let result = run(&mut compiler);
+        self.string_table = compiler.string_table;
+        result
+    }
+}
+
 struct FrontendProject {
     _temp_dir: TempDir,
     project_root: PathBuf,
     entry_file: PathBuf,
     files: Vec<PathBuf>,
     logical_paths: Vec<(PathBuf, InternedPath)>,
-    frontend: CompilerFrontend,
+    frontend: FrontendServices,
 }
 
 impl FrontendProject {
@@ -114,14 +140,16 @@ impl FrontendProject {
             })
             .collect::<Vec<_>>();
 
-        let frontend = CompilerFrontend::new(
-            Config::new(canonical_project_root).frontend_options(),
+        let frontend = FrontendServices {
+            options: Config::new(canonical_project_root).frontend_options(),
             string_table,
             style_directives,
-            Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),
-            Some(resolver),
-            Arc::clone(&source_files),
-        );
+            external_package_registry: Arc::new(
+                crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
+            ),
+            project_path_resolver: Some(resolver),
+            source_files,
+        };
 
         Self {
             _temp_dir: temp_dir,
@@ -135,20 +163,20 @@ impl FrontendProject {
 
     fn tokenize_all(&mut self) -> Vec<TokenizeOutput> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
-
-        for file in &self.files {
-            let source = fs::read_to_string(file).expect("should read source file");
-            tokenized_files.push(
-                tokenize_source_for_test(
-                    &mut self.frontend,
-                    &source,
-                    file,
-                    TokenizerEntryMode::SourceFile,
-                )
-                .expect("tokenization should succeed"),
-            );
-        }
-
+        self.frontend.with_compiler(|frontend| {
+            for file in &self.files {
+                let source = fs::read_to_string(file).expect("should read source file");
+                tokenized_files.push(
+                    tokenize_source_for_test(
+                        frontend,
+                        &source,
+                        file,
+                        TokenizerEntryMode::SourceFile,
+                    )
+                    .expect("tokenization should succeed"),
+                );
+            }
+        });
         tokenized_files
     }
 
@@ -207,7 +235,7 @@ impl FrontendProject {
                 .expect("header syntax preparation should succeed");
         bind_module_headers(
             prepared_syntax,
-            &self.frontend.external_package_registry,
+            self.frontend.external_package_registry.as_ref(),
             &ExternalImportResolutionTable::default(),
             &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
             options.project_path_resolver,
@@ -220,27 +248,31 @@ impl FrontendProject {
     fn sorted_headers(&mut self) -> crate::compiler_frontend::module_dependencies::SortedHeaders {
         let headers = self.headers();
         self.frontend
-            .sort_headers(headers, &ResolvedFileReferenceTable::default())
+            .with_compiler(|compiler| {
+                compiler.sort_headers(headers, &ResolvedFileReferenceTable::default())
+            })
             .expect("header sorting should succeed")
     }
 
     fn ast(&mut self) -> crate::compiler_frontend::ast::Ast {
         let sorted = self.sorted_headers();
         self.frontend
-            .headers_to_ast(
-                AstBuildRequest {
-                    sorted,
-                    entry_file_path: &self.entry_file,
-                    root_role: ModuleRootRole::Normal,
-                    build_profile: FrontendBuildProfile::Dev,
-                    capacity_estimate: Default::default(),
-                    resolved_file_references: ResolvedFileReferenceTable::default(),
-                    module_origin: None,
-                    build_config_values: Arc::new(Default::default()),
-                },
-                #[cfg(feature = "timers")]
-                None,
-            )
+            .with_compiler(|compiler| {
+                compiler.headers_to_ast(
+                    AstBuildRequest {
+                        sorted,
+                        entry_file_path: &self.entry_file,
+                        root_role: ModuleRootRole::Normal,
+                        build_profile: FrontendBuildProfile::Dev,
+                        capacity_estimate: Default::default(),
+                        resolved_file_references: ResolvedFileReferenceTable::default(),
+                        module_origin: None,
+                        build_config_values: Arc::new(Default::default()),
+                    },
+                    #[cfg(feature = "timers")]
+                    None,
+                )
+            })
             .expect("AST construction should succeed")
             .ast
     }
@@ -248,7 +280,9 @@ impl FrontendProject {
     fn hir(&mut self) -> crate::compiler_frontend::hir::module::HirModule {
         let ast = self.ast();
         self.frontend
-            .generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            .with_compiler(|compiler| {
+                compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            })
             .expect("HIR lowering should succeed")
             .hir_module
     }
@@ -259,7 +293,7 @@ impl FrontendProject {
         let hir = self.hir();
         let report = self
             .frontend
-            .check_borrows(&hir)
+            .with_compiler(|compiler| compiler.check_borrows(&hir))
             .expect("borrow checking should succeed");
         (hir, report)
     }
@@ -429,20 +463,22 @@ fn frontend_diagnostics_preserve_string_table_context() {
     );
 
     let sorted = project.sorted_headers();
-    let Err(messages) = project.frontend.headers_to_ast(
-        AstBuildRequest {
-            sorted,
-            entry_file_path: &project.entry_file,
-            root_role: ModuleRootRole::Normal,
-            build_profile: FrontendBuildProfile::Dev,
-            capacity_estimate: Default::default(),
-            resolved_file_references: ResolvedFileReferenceTable::default(),
-            build_config_values: Arc::new(Default::default()),
-            module_origin: None,
-        },
-        #[cfg(feature = "timers")]
-        None,
-    ) else {
+    let Err(messages) = project.frontend.with_compiler(|compiler| {
+        compiler.headers_to_ast(
+            AstBuildRequest {
+                sorted,
+                entry_file_path: &project.entry_file,
+                root_role: ModuleRootRole::Normal,
+                build_profile: FrontendBuildProfile::Dev,
+                capacity_estimate: Default::default(),
+                resolved_file_references: ResolvedFileReferenceTable::default(),
+                build_config_values: Arc::new(Default::default()),
+                module_origin: None,
+            },
+            #[cfg(feature = "timers")]
+            None,
+        )
+    }) else {
         panic!("const host calls should fail during AST construction");
     };
 
@@ -474,7 +510,7 @@ fn frontend_diagnostics_preserve_string_table_context() {
     let hir = project.hir();
     let messages = project
         .frontend
-        .check_borrows(&hir)
+        .with_compiler(|compiler| compiler.check_borrows(&hir))
         .expect_err("multiple mutable borrows should fail borrow checking");
 
     let first_diagnostic = messages

@@ -69,23 +69,22 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: branch-review corrections before continuing Phase 1.
-- Corrections delivered: identity-free frozen generic syntax, strict ordinary header identity
-  rejection, predecessor timing/allocation evidence and the source/span ownership sequence below.
-- Reopened obligations: the compiler source slots still own `InternedPath`; `CompilerFrontend`
-  still clones style directives and the path resolver. Stage 0's path table alone did not close 1A.
-- Next implementation boundary: finish the source path foundation, then carry live source span
-  builders through their semantic owners before migrating diagnostic and syntax consumers.
+- Phase: reopened Phase 1 foundation, 1A source path ownership.
+- Goal: compiler source slots use one database-owned path identity base.
+- 1B6 service borrowing is implemented, validated and independently reviewed.
+- Remove Stage 0's retained path table and path fields, which serve only a test lookup,
+  rather than adding context layers to preserve redundant ownership.
+- Non-goals: full semantic path migration, source loading policy and span-builder lifecycle changes.
 
 LAST_GOOD_COMMIT:
-- `bed74c13b` — "refactor: make the token source identity non-optional" (slice 1D2b4). Gate green: `just validate` exit 0, 5050 lib tests, 1951/1951 integration, source-audit 1318 files 0 findings, all three scaling series within budget.
-- Checkpoint sequence for Phase 1's 1D group: `1D1 … 1D2a` → `113ffb528` (1D2a) → `8e04e407a` (1D2b1) → `16c6aa21e` (1D2b2) → `ce274194b` (1D2b3) → `bed74c13b` (1D2b4).
+- `be002c2d2` — branch-review corrections, audited and validated. Honest frozen identity,
+  strict ordinary header identity and recovered predecessor evidence are committed.
 
 CURRENT_WORKTREE_STATE:
-- Continuation baseline: clean at `09f73762e`, with code checkpoint `bed74c13b`.
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- One unrelated `packages-work` worktree and one pre-existing stash exist. Neither belongs to this task.
-- Current correction workers own generic identity code and predecessor benchmark evidence separately.
+- 1B6 borrowing and its caller/test migrations are ready for the checkpoint commit.
+- One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
+- 1A implementation starts after that checkpoint; its ownership contract is fixed below.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -167,17 +166,17 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- Current correction gate: `cargo fmt --all && just validate` passed.
+- 1B6 gate: `cargo fmt --all && just validate` passed.
 - Results: 5052 + 17 + 825 Rust tests, 1951/1951 integration cases, source audit of
   1318 files with zero findings and all three scaling series within budget.
-- Focused checks: 25 frozen-body tests, 30 source-identity tests and 29 dependency-ordering
-  tests passed. The latter two cover the independent review's missing-identity corrections.
+- Focused checks: 10 frontend pipeline tests and 63 preparation tests passed.
+  An initial `module_preparation_tests` filter selected zero tests and is not coverage.
 - Actual CLI checks of `generic_fn_nested_generic_body_file_value_collision_success/input` and
   `exported_generic_private_content_success/input` both completed without errors or warnings.
-- Generic ownership, corrected ordering/projection and evidence audits are accepted. Evidence
-  corrections removed unsampled source counters and aligned the cold-store scope with its formulas.
-- Documentation release build passed (74 outputs). Unrelated regenerated stylesheet drift was
-  discarded; no generated documentation belongs to this correction.
+- Independent production ownership and fixture migration reviews found no required corrections.
+- Main restored the handoff's accidentally removed `SortedHeaders` argument, fixed missed
+  borrowed callers and removed the test facade's redundant per-method forwarding layer.
+- No new pointer-identity test was added: Rust borrowing enforces this internal ownership contract.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -186,7 +185,7 @@ DOCS_IMPACT:
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-- next action: accept the branch-review corrections, then resume the reopened Phase 1 obligations
+- next action: checkpoint 1B6, then implement the reopened source-path foundation
 
 ---
 
@@ -592,10 +591,10 @@ green before later layout work proceeds.
 ### Slice 1A — Add the final path foundation required by source records
 
 - [x] introduce `PathId(NonZeroU32)` and a dense parent/component path table
-- [x] intern source logical paths into the build base before string/path forks are created
-- [ ] use `PathId` in compiler source registration slots immediately; the existing Stage 0
-  `SourceRecord::logical_path: Option<PathId>` and its tree-owned table are delivered, but
-  `compiler_frontend::source::SourceSlot::logical_path` still owns `InternedPath`
+- [ ] intern source logical paths into the database-owned build base before string/path forks
+- [ ] use `PathId` in compiler source registration slots immediately; reuse the existing
+  interner in `SourceDatabase` and remove the Stage 0 path table and fields retained only
+  for its test-only entry-root-relative lookup
 - [x] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
 - [x] add layout, root, parent, append, equality and rendering tests
 - [x] defer the full compiler `InternedPath` migration to Phase 2
@@ -615,7 +614,7 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
-- [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data. The old table types are gone, but the facade still owns cloned style directives and a cloned resolver. Token and prepared-output path copies remain assigned to 3D/3E1.
+- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
 #### Delivered registration contracts and remaining ownership
@@ -648,9 +647,11 @@ finished mutable/frozen lifecycle. 1D4 must preserve the source builder through 
 1F owns the final lookup-only boundary. Shared interior mutation is not a substitute for that
 ownership split.
 
-The source path foundation is incomplete: the Stage 0 table must become the build identity base
-used by compiler source slots, rather than introducing another independent path interner.
-The source `PathId`/legacy-path bridge is permitted only through 2D.
+The source path foundation is incomplete. Move the existing path interner into `SourceDatabase`
+as the one source identity base. Stage 0's retained path fields and table serve only a test lookup
+and must be deleted, preserving `SourceLogicalIdentity` ordering and authored source classification.
+The source `PathId`/legacy-path bridge is permitted only through 2D. It reconstructs transient
+components from the table for existing consumers, never from rendered text or a stored second path.
 
 `ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
 `FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1 respectively. Their existing
@@ -662,8 +663,8 @@ display-path matches omit a frame rather than selecting the wrong file. The dire
 still needs its source context attached at its result boundary.
 
 1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy.
-1B6 remains open for actual borrowing of the facade's immutable services. Delivery history and
-individual mutation-test results are in Git rather than repeated in this work item.
+1B6 is delivered: the facade and module semantic context borrow immutable services.
+Individual mutation-test results and delivery history remain in Git.
 
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution

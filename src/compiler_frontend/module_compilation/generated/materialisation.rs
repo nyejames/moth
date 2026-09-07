@@ -61,7 +61,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     request_ids: &[GeneratedRequestId],
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<(), CompilerMessages> {
@@ -99,7 +99,7 @@ fn materialise_generated_request<'build>(
     request: &MaterialisingRequest,
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
 ) -> Result<(), CompilerMessages> {
     match transaction
@@ -207,10 +207,10 @@ fn materialise_generated_request<'build>(
     let mut generated_compiler = CompilerFrontend::new(
         context.options.clone(),
         generated_string_table,
-        context.style_directives.to_owned(),
-        Arc::clone(&context.external_packages),
-        context.project_path_resolver.clone(),
-        Arc::clone(context.source_files),
+        context.style_directives,
+        &context.external_packages,
+        context.project_path_resolver,
+        context.source_files,
     );
     for nested_request_id in &nested_request_ids {
         let nested_identity = transaction

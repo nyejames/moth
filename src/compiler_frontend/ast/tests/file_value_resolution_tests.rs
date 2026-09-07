@@ -476,10 +476,10 @@ fn compile_fixture(
     let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
-        style_directives,
-        external_package_registry,
+        &style_directives,
+        &external_package_registry,
         None,
-        Arc::clone(&source_files),
+        &source_files,
     );
     let sorted = frontend
         .sort_headers(headers, &resolved_references)

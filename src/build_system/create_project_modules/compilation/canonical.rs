@@ -648,7 +648,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             root_role_override: (check_only_provider_bindings.is_some()
                 || check_only_source_package_dependencies.is_some())
             .then_some(ModuleRootRole::Support),
-            project_path_resolver: Some(self.boundary.project_path_resolver.clone()),
+            project_path_resolver: Some(self.boundary.project_path_resolver),
             style_directives: self.boundary.style_directives,
             external_packages: effective_external_packages,
             build_config_values: effective_build_config_values,
