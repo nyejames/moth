@@ -119,12 +119,17 @@ impl HeaderFileParseState {
         span_builder: ExtendedSpanBuilder,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+        let file_id = token_stream.file_id.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "prepared header output cannot be assembled without a retained source file identity",
+            )
+        })?;
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
         Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
-            file_id: token_stream.file_id,
+            file_id,
             path_syntax,
             span_builder,
             token_count: self.token_count,
@@ -149,6 +154,11 @@ impl HeaderFileParseState {
         span_builder: ExtendedSpanBuilder,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+        let file_id = token_stream.file_id.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "prepared header output cannot be assembled without a retained source file identity",
+            )
+        })?;
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
@@ -157,7 +167,7 @@ impl HeaderFileParseState {
         let start_tokens = FileTokens::new_substream(
             token_stream,
             token_stream.src_path.to_owned(),
-            token_stream.file_id,
+            Some(file_id),
             self.start_function_body,
         );
 
@@ -180,7 +190,7 @@ impl HeaderFileParseState {
 
         Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
-            file_id: token_stream.file_id,
+            file_id,
             path_syntax,
             span_builder,
             token_count: self.token_count,

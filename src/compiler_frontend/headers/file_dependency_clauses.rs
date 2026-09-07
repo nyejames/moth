@@ -4,6 +4,7 @@
 //!       selections.
 //! WHY: one authored clause owns one dependency shell. Stage 0 and later header stages must
 //!      consume that ownership instead of receiving one provider row per selected name.
+use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
@@ -125,8 +126,12 @@ fn parse_and_record_dependency_clause(
         return Err(CompilerDiagnostic::invalid_export_target(clause_location).into());
     }
 
-    let clause_shell_id =
-        DependencyShellId::new(token_stream.file_id, state.dependency_clause_count as u32);
+    let file_id = token_stream.file_id.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "header dependency shell cannot be stamped without a retained source file identity",
+        )
+    })?;
+    let clause_shell_id = DependencyShellId::new(file_id, state.dependency_clause_count as u32);
     state.dependency_clause_count += 1;
     add_frontend_counter(FrontendCounter::DependencyClauseCount, 1);
     add_frontend_counter(FrontendCounter::RetainedShellCount, 1);

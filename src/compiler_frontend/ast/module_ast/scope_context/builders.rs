@@ -257,11 +257,13 @@ impl ScopeContext {
     }
 
     /// Identify the authored source file for path-syntax table joins.
-    pub(crate) fn with_declaring_file_id(mut self, file_id: SourceId) -> ScopeContext {
+    ///
+    /// `None` is reserved for an identity-free materialised generic body; ordinary
+    /// source/header contexts pass their registered `SourceId`.
+    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<SourceId>) -> ScopeContext {
         Rc::make_mut(&mut self.shared).declaring_file_id = file_id;
         self
     }
-
     pub fn with_template_const_loop_iteration_limit(mut self, limit: usize) -> ScopeContext {
         Rc::make_mut(&mut self.shared).template_const_loop_iteration_limit = limit;
         self

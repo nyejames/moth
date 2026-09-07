@@ -366,7 +366,12 @@ fn resolve_active_module_origin(
             continue;
         }
 
-        let file_id = header.tokens.file_id;
+        let Some(file_id) = header.tokens.file_id else {
+            return Err(CompilerError::compiler_error(format!(
+                "defined public export-origin construction: a directly-defined public header has no retained SourceId (path: {:?})",
+                header.tokens.src_path
+            )));
+        };
 
         let header_origin = source_module_origins
             .origin_for(file_id)?
@@ -513,7 +518,12 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
             _ => continue,
         };
 
-        let file_id = header.tokens.file_id;
+        let Some(file_id) = header.tokens.file_id else {
+            return Err(CompilerError::compiler_error(format!(
+                "defined public export-origin construction: a public export-targeted nominal type header has no retained SourceId (path: {:?})",
+                header.tokens.src_path
+            )));
+        };
 
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
@@ -570,7 +580,12 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
             )));
         };
 
-        let file_id = header.tokens.file_id;
+        let Some(file_id) = header.tokens.file_id else {
+            return Err(CompilerError::compiler_error(format!(
+                "defined public export-origin construction: a public export-targeted trait header has no retained SourceId (path: {:?})",
+                header.tokens.src_path
+            )));
+        };
 
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
@@ -969,7 +984,12 @@ fn collect_one_reexport_binding<'a>(
     // is not sufficient here because the retained header set also contains ordinary private files
     // from imported provider modules. Provider declarations remain references to provider
     // interfaces; they must never become consumer-owned direct bindings.
-    let file_id = header.tokens.file_id;
+    let Some(file_id) = header.tokens.file_id else {
+        return Err(CompilerError::compiler_error(format!(
+            "re-export binding construction: a local export target has no retained SourceId (path: {:?})",
+            target_path
+        )));
+    };
     let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
         return Ok(());
     };

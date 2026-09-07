@@ -67,7 +67,7 @@ pub fn parse_file_headers_with_table(
 
     let is_entry_file = entry_file_id.map_or_else(
         || file_tokens.src_path.to_path_buf(string_table) == entry_file_path,
-        |expected_id| expected_id == file_tokens.file_id,
+        |expected_id| Some(expected_id) == file_tokens.file_id,
     );
 
     let source_path = file_tokens

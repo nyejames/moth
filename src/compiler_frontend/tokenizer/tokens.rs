@@ -280,11 +280,9 @@ pub struct FileTokens {
     /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
     pub path_syntax: FilePathSyntax,
     pub src_path: InternedPath,
-    /// Stable source-file identity for this token stream.
-    ///
-    /// WHAT: carries frontend file identity into downstream parsing stages.
-    /// WHY: entry-file detection and diagnostics should not rely on comparing path text.
-    pub file_id: SourceId,
+    /// Optional only for materialised generic bodies, whose donor identity remains canonical
+    /// provenance until the consuming compilation context remaps it.
+    pub file_id: Option<SourceId>,
     /// Canonical filesystem source path for IO/path-resolution-only logic.
     pub canonical_os_path: Option<PathBuf>,
     // WHAT: Cheap token classification gathered during lexing.
@@ -311,7 +309,7 @@ impl FileTokens {
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            file_id,
+            Some(file_id),
             canonical_os_path,
             tokens,
             FilePathSyntax::preparing(path_syntax),
@@ -322,17 +320,17 @@ impl FileTokens {
     ///
     /// This is deliberately separate from source construction: generated generic materialisation
     /// is the only path that receives an independently captured table rather than the prepared
-    /// source's immutable shared table.
-    pub(crate) fn new_frozen_with_identity(
+    /// source's immutable shared table. It has no source identity until a consuming context remaps
+    /// the frozen provenance.
+    pub(crate) fn new_frozen(
         src_path: InternedPath,
-        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            file_id,
+            None,
             canonical_os_path,
             tokens,
             FilePathSyntax::shared(path_syntax),
@@ -349,7 +347,7 @@ impl FileTokens {
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            file_id,
+            Some(file_id),
             canonical_os_path,
             tokens,
             FilePathSyntax::Deferred,
@@ -358,7 +356,7 @@ impl FileTokens {
 
     fn with_path_syntax(
         src_path: InternedPath,
-        file_id: SourceId,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
@@ -382,7 +380,7 @@ impl FileTokens {
     pub fn new_substream(
         source: &FileTokens,
         src_path: InternedPath,
-        file_id: SourceId,
+        file_id: Option<SourceId>,
         tokens: Vec<Token>,
     ) -> FileTokens {
         Self::with_path_syntax(
@@ -404,7 +402,7 @@ impl FileTokens {
     ///      file owner from remapping or rebinding its one table.
     pub(crate) fn new_path_free_substream(
         src_path: InternedPath,
-        file_id: SourceId,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -423,7 +421,7 @@ impl FileTokens {
     /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
     pub fn new_from_slice(
         src_path: InternedPath,
-        file_id: SourceId,
+        file_id: Option<SourceId>,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         source_path_syntax: &FilePathSyntax,
@@ -642,7 +640,7 @@ impl FileTokens {
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) {
-        self.file_id = file_id;
+        self.file_id = Some(file_id);
         self.canonical_os_path = canonical_os_path;
 
         for token in &mut self.tokens {

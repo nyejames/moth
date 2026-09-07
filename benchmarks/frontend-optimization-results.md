@@ -3038,9 +3038,157 @@ Every run reported "no measurable change" over the full case set, so the noise f
 suite average. A later phase's regression claim must exceed that band on the same machine.
 
 Recorded suite averages at this baseline: frontend phases all ~155ms (Core ~34ms, Docs ~1822ms,
-Stress ~176ms, Module ~31ms, Parallelism ~24ms, Borrow ~17ms); end-to-end CLI all ~57ms; the
-diagnosed data-layout pair ~33ms average, with directory compile ~36ms, frontend ~25ms and boundary
-compile ~20ms as its top stages.
+Stress ~176ms, Module ~31ms, Parallelism ~24ms, Borrow ~17ms); end-to-end CLI all ~57ms.
+The earlier prose claiming a diagnosed data-layout pair at ~33ms was not backed by retained raw
+predecessor runs: activation commit `b6f81fe58` predates the data-layout harness. That claim is
+withdrawn; the recovered five-run predecessor evidence below is the only data-layout repeatability
+record for this checkpoint.
+
+### Recovered predecessor data-layout evidence - 2026-09-07
+
+The activation base `b6f81fe58` is not the measured data-layout predecessor: it lacks the data-layout
+benchmark harness. I extracted the immediately preceding instrumentation checkpoint
+`2843b9d6b55013b0cfbc45d45682de1a9aaf3efa` (`chore: record data layout Phase 0 benchmark baseline`)
+from a Git archive under `tmp/data-layout-baseline/archive/`. `git merge-base --is-ancestor` exits 0
+for `b6f81fe58..2843b9d6b` and `2843b9d6b..32d2584b1`, so this is the actual predecessor interval.
+A bounded owner diff proves that `b6f81fe58..2843b9d6b` changed no files under `src/compiler_frontend`,
+`src/build_system` or `src/lib.rs`; the harness/fixtures/report changes are benchmark, xtask, justfile
+and documentation changes. The first representation change is then visible in
+`2843b9d6b..32d2584b1`: the `path_interner` files and their Stage 0/source-owner callers are the
+first bounded source-owner changes. Raw ancestry and diff outputs are in
+`tmp/data-layout-baseline/evidence/ancestry-proof.txt`,
+`diff-b6f-to-2843-source.txt`, `diff-b6f-to-2843-harness-files.txt` and `diff-2843-to-32d-source.txt`.
+
+Environment for the archived experiment: MacBookPro18,1, Apple M1 Pro, 10 physical CPUs, 16 GiB,
+Darwin 23.6.0 ARM64; `rustc 1.97.1 (8bab26f4f 2026-07-14)`, LLVM 22.1.6; `cargo 1.97.1
+(c980f4866 2026-06-30)`; `just 1.50.0`. The archive used its own temporary Git repository and
+`CARGO_TARGET_DIR=tmp/data-layout-baseline/target`; no current-worktree target or source was used.
+
+Five independent, uninstrumented invocations used the archived engine:
+
+```text
+CARGO_TARGET_DIR=../target MOTH_COUNTERS=off cargo run --quiet --locked --package xtask \
+  --features moth/timers -- bench-data-layout-check
+```
+
+Each invocation performed one shared preflight and ten measured iterations for each of the two
+`data_layout` cases. These are the engine's actual rounded suite results, not inferred timings;
+the raw stdout is `tmp/data-layout-baseline/evidence/data-layout-uninstrumented-{1..5}.txt`.
+
+| Invocation | Reported data-layout average | Top-stage output |
+| ---: | ---: | --- |
+| 1 | ~41ms | directory compile ~46ms; frontend ~33ms; boundary compile ~25ms |
+| 2 | ~41ms | directory compile ~45ms; frontend ~32ms; boundary compile ~25ms |
+| 3 | ~42ms | directory compile ~46ms; frontend ~33ms; boundary compile ~25ms |
+| 4 | ~42ms | directory compile ~47ms; frontend ~33ms; boundary compile ~26ms |
+| 5 | ~41ms | directory compile ~45ms; frontend ~32ms; boundary compile ~25ms |
+| **Median** | **~41ms** | **engine output is rounded to whole milliseconds** |
+
+The extracted archive had no local history, so these read-only invocations correctly reported no
+baseline and no comparison delta is claimed. The cases remained distinct: the warning-heavy file
+completed successfully with warnings, while the diagnosed directory returned expected user errors.
+The archived counter engine provided the following per-case evidence. `SourceByteCount` records the
+sum of source-text lengths processed/prepared by the predecessor; it is neither a claim that those
+bytes remain simultaneously live after the phase nor an on-disk-byte substitute. `TokenCount` is the
+number of original prepared token rows and excludes any cloned retained shell bodies.
+
+| Representative case | Outcome | SourceFileCount | Source bytes processed (`SourceByteCount`) | Original prepared tokens (`TokenCount`) | PathSyntaxRowCount | Errors | Warnings |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | success | 358 | 1,353,547 | 50,015 | 386 | 0 | 0 |
+| `warning-heavy.moth` | success (warned) | 1 | 1,200 | 265 | 0 | 0 | 39 |
+| `diagnosed/` | diagnosed | 41 | 4,721 | 1,103 | 1 | 40 | 0 |
+
+Clone and remap pressure from the same archived counters:
+
+| Case | Full StringTable clones | Fork-source base copies | Module string-ID remap calls | Identity remaps | Non-identity remaps | Non-identity entries | Payload remaps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 0 | 2 | 76 | 0 | 0 | 0 | 0 |
+| `warning-heavy.moth` | 0 | 3 | 0 | 0 | 0 | 0 | 0 |
+| `diagnosed/` | 80 | 2 | 1 | 0 | 0 | 0 | 0 |
+
+The predecessor has no dedicated path-only remap counter. `file_prepare_output_remap_calls`,
+`file_prepare_error_remap_calls` and `file_prepare_non_identity_payload_remaps` were all zero in
+the three probes, but that does not recover a path-specific count; path remap counts/bytes remain
+unavailable and are not marked complete.
+
+The aggregate allocator proxy does not by itself partition common/cold ownership. To recover bounded
+owner evidence without changing the timing run, a feature-gated throwaway owner ledger was enabled
+only in the archived probe binary. It samples actual owner capacities at each successful
+`PreparedHeaderSyntax` retention boundary and each final `CompilerMessages` boundary. Every
+`fetch_add` row below is cumulative across the module/message samples in one process, sampled once
+per boundary; it is not simultaneous retained bytes and must not be compared with the peak row.
+Five independent probe processes per case produced identical owner values and identical aggregate
+allocator values. Raw owner runs are
+`tmp/data-layout-baseline/evidence/memory-probe-{docs,warning-heavy,diagnosed}-owner-final-{1..5}.txt`.
+
+The raw files were captured before a final ledger cleanup removed two unused, never-written
+source-string fields. Those withdrawn zero rows are not evidence and are omitted below; every
+retained-owner and aggregate allocator value shown here is unchanged.
+
+Preparation-retention owner capacities (median; all five-run ranges are identical):
+
+| Case | Direct `PreparedHeaderSyntax` arrays B | Retained token `Vec` capacity B | Deduplicated path-table row arrays B | Arc owners | Path-component `Vec` capacities B | Direct cold `Vec` capacities B | Local StringTable payload / slots B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 1,233,808 | 1,570,432 | 38,144 | 358 | 40,052 | 153,647 | 1,215,059 / 201,728 |
+| `warning-heavy.moth` | 2,848 | 32,768 | 0 | 1 | 8 | 118 | 0 / 512 |
+| `diagnosed/` | 138,840 | 30,720 | 256 | 41 | 1,064 | 8,860 | 2,499 / 22,528 |
+
+`PreparedHeaderSyntax` owns retained syntax rather than source text. Stage 0's Moth,
+MothPrepared and MothTemplatePrepared inputs carry tokens or prepared output; its raw MothTemplate
+and PlainMarkdown source strings are consumed before this boundary. This is a type/ownership fact,
+not a compiler-wide sampled source-retention total. `SourceByteCount` above remains processed source
+volume, not retained snapshots. Direct header arrays are the actual capacities of
+`PreparedHeaderSyntax.headers`, `source_build_config_contracts` and `top_level_const_fragments`.
+Token bytes sum each retained `Header.tokens.tokens` capacity using the actual `Token` size; no
+`TokenCount*size` estimate is used.
+
+Path-table rows are deduplicated by `Arc` pointer within one prepared module. The owner count is
+cumulative across modules; identical pointers in different modules are not globally deduplicated.
+Path-component bytes cover each deduplicated table's `PathSyntax` root component vectors plus each
+retained header's `source_file` and token `src_path` component vectors.
+
+The direct cold row includes only `Header.capacity_references` vector capacities and
+`FileTokens.canonical_os_path` `PathBuf` capacities. It explicitly excludes `HashSet`/`HashMap`
+bucket allocations, nested `SourceLocation` paths in token/header shells, nested declaration
+vectors, and all other syntax/module-symbol heap payloads. StringTable payload bytes are exact
+locally owned `Box<str>` lengths; slots are the local pointer-array capacity. Reverse hash maps and
+inherited StringTable Arc-base payloads are excluded.
+
+Render-result owner capacities (median; all five-run ranges are identical):
+
+| Case | `CompilerMessages.diagnostics` Vec B | Diagnostic-label Vec capacities B | Render-context Vec B | Inline `DiagnosticPayload` B | Counted diagnostic cold label/payload B | Local StringTable payload / slots B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 0 | 0 | 0 | 0 | 0 | 9,696,613 / 250,576 |
+| `warning-heavy.moth` | 7,176 | 2,808 | 0 | 4,368 | 312 | 1,208 / 1,984 |
+| `diagnosed/` | 11,776 | 2,880 | 40,960 | 4,480 | 640 | 3,568 / 5,280 |
+
+Inline `DiagnosticPayload` bytes are reported separately and are not added to the diagnostic Vec
+row. Counted diagnostic cold bytes include primary and label `SourceLocation.scope` component
+vectors, diagnostic label substitutions and enumerated payload `InternedPath`/vector capacities;
+nested `SourceLocation` paths inside payload fields and unenumerated payload heap fields are
+excluded. TypeEnvironment heaps are excluded from the render-context row.
+These owner rows are bounded direct-owner evidence, not a complete common/cold partition; the
+counting allocator remains the aggregate live-allocation proxy:
+
+| Case | Semantic-result live bytes (median; range) | Rendered-message live bytes (median; range) | Peak live bytes (median; range) | After report return (median; range) |
+| --- | ---: | ---: | ---: | ---: |
+| `docs` | 18,450,304 (18,450,304-18,450,304) | 21,961,099 (21,961,099-21,961,099) | 29,216,701 (29,216,701-29,216,701) | 455,591 (455,591-455,591) |
+| `warning-heavy.moth` | 465,288 (465,288-465,288) | 176,115 (176,115-176,115) | 3,306,673 (3,306,673-3,306,673) | 18,093 (18,093-18,093) |
+| `diagnosed/` | 1,644,107 (1,644,107-1,644,107) | 423,210 (423,210-423,210) | 2,579,817 (2,579,817-2,579,817) | 23,339 (23,339-23,339) |
+
+The owner-ledger command was:
+
+```text
+CARGO_TARGET_DIR=../target cargo run --quiet --locked --package moth \
+  --bin data_layout_memory_probe \
+  --features timers,benchmark_counters,data_layout_memory_probe -- <entry>
+```
+
+This recovery supplies predecessor counter volumes, bounded direct-owner capacities, repeatable
+boundary/peak allocation proxies, success/warning/diagnosed distinction and five raw timing
+invocations. Exact total common/cold bytes, path-only remap counts and a complete semantic
+ownership breakdown remain unpartitioned because the explicit nested/hash/type-environment
+exclusions above are not tagged by the predecessor.
 
 ### Work explicitly deferred out of Phase 0, with its owner
 

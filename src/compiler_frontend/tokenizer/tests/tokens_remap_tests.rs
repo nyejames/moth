@@ -331,7 +331,7 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
 
     // Top-level identity fields are rebound.
     assert_eq!(file_tokens.src_path, logical_scope);
-    assert_eq!(file_tokens.file_id, file_id);
+    assert_eq!(file_tokens.file_id, Some(file_id));
     assert_eq!(file_tokens.canonical_os_path, Some(canonical));
 
     // Every token location scope is rebound, spans are untouched.

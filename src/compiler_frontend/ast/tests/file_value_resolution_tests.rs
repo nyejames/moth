@@ -621,7 +621,7 @@ fn resolve_file_value_fixture(
         module_resources: Rc::clone(&module_resources),
         module_origin: Some(module_origin.clone()),
     }))
-    .with_declaring_file_id(source_file);
+    .with_declaring_file_id(Some(source_file));
 
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();

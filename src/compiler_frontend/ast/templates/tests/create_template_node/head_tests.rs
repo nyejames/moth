@@ -283,7 +283,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
     }))
-    .with_declaring_file_id(source_file);
+    .with_declaring_file_id(Some(source_file));
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)

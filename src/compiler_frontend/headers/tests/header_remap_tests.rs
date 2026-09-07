@@ -1138,7 +1138,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     for header in &output.headers {
         assert_eq!(header.source_file, output.source_file);
         assert_eq!(header.tokens.src_path, output.source_file);
-        assert_eq!(header.tokens.file_id, SourceId::from_index(42));
+        assert_eq!(header.tokens.file_id, Some(SourceId::from_index(42)));
         assert_eq!(header.tokens.canonical_os_path, Some(final_os_path.clone()));
         assert_eq!(header.name_location.scope, output.source_file);
         assert!(

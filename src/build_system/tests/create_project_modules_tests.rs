@@ -624,7 +624,7 @@ fn synthetic_prepared_identity_snapshot(
                 .iter()
                 .filter(|header| header.source_file == *logical_path)
             {
-                assert_eq!(header.tokens.file_id, file_id);
+                assert_eq!(header.tokens.file_id, Some(file_id));
                 assert_eq!(
                     header.tokens.canonical_os_path.as_deref(),
                     identity.canonical_os_path.as_deref()

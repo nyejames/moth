@@ -248,13 +248,13 @@ fn resolve_struct_field_defaults(
 /// The declaration surface one field default resolves against.
 ///
 /// WHAT: the visible declarations a reference may name, plus the identity of the file that
-///       authored the default.
+/// authored the default.
 /// WHY: inlining recurses through every nested expression shape, so these three facts travel
 ///      together to the evaluation scope at the bottom rather than through each hop by hand.
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
-    declaring_file_id: SourceId,
+    declaring_file_id: Option<SourceId>,
 }
 
 fn inline_visible_constant_references(

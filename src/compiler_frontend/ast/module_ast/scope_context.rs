@@ -217,7 +217,7 @@ impl Stage0ResolutionFacts {
 
     pub(crate) fn lookup(
         &self,
-        source_file: SourceId,
+        source_file: Option<SourceId>,
         path_syntax: PathSyntaxId,
     ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
         match &self.backing {
@@ -225,6 +225,11 @@ impl Stage0ResolutionFacts {
                 resolved_file_references,
                 source_files,
             } => {
+                let source_file = source_file.ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "ordinary Stage 0 file-reference lookup has no declaring SourceId",
+                    )
+                })?;
                 let Some(reference) = resolved_file_references.get(source_file, path_syntax) else {
                     return Ok(None);
                 };
@@ -404,8 +409,9 @@ pub struct ScopeShared {
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
     /// Optional compiler-owned direct-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
-    /// Source identity every stream lexed inside this scope carries.
-    pub(crate) declaring_file_id: SourceId,
+    /// Optional only while parsing a materialised generic body. Ordinary source preparation
+    /// installs its registered identity before header or body consumers run.
+    pub(crate) declaring_file_id: Option<SourceId>,
     pub(crate) template_const_loop_iteration_limit: usize,
 
     // Receiver method catalog for dispatch.
@@ -714,7 +720,7 @@ impl ScopeContext {
             source_build_config_values: None,
             source_build_config_contract_names: None,
             config_resolution: None,
-            declaring_file_id: SourceId::COMPILATION_ROOT,
+            declaring_file_id: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),

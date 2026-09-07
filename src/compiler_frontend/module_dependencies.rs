@@ -261,14 +261,22 @@ impl<'a> DependencyGraph<'a> {
         &self,
         header: &Header,
         string_table: &StringTable,
-    ) -> Vec<ResolvedDependencyEdge> {
+    ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
+        let source = header.tokens.file_id.ok_or_else(|| {
+            CompilerError::new(
+                "Dependency ordering requires a registered header source identity.".to_owned(),
+                header.name_location.to_owned(),
+                ErrorType::Compiler,
+            )
+        })?;
+
         // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
         // traversal needs one edge per resolved target. In particular, repeated file-value paths
         // can point at one synthetic `content` header even though their PathSyntaxIds differ.
         let mut seen_targets = FxHashSet::default();
         let mut edges = Vec::with_capacity(header.local_ordering_hints.len());
         for hint in &header.local_ordering_hints {
-            let edge = self.resolve_dependency_edge(header, hint, string_table);
+            let edge = self.resolve_dependency_edge(header, source, hint, string_table);
             let keep = edge
                 .resolved_path
                 .as_ref()
@@ -289,12 +297,13 @@ impl<'a> DependencyGraph<'a> {
             })
         });
 
-        edges
+        Ok(edges)
     }
 
     fn resolve_dependency_edge(
         &self,
         header: &Header,
+        source: SourceId,
         hint: &LocalDeclarationOrderingHint,
         string_table: &StringTable,
     ) -> ResolvedDependencyEdge {
@@ -308,7 +317,7 @@ impl<'a> DependencyGraph<'a> {
         let requested_path = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
             let Some(resolved_path) = self
                 .content_source_targets
-                .content_header_path(hint, header.tokens.file_id)
+                .content_header_path(hint, source)
             else {
                 return ResolvedDependencyEdge {
                     requested_path: hint.path().to_owned(),
@@ -617,12 +626,13 @@ fn visit_node(
             ));
         };
 
-        tracker.enter(resolved_path.to_owned());
-
         // Recurse on the dependency edges resolved from this header's retained hints.
         // WHY: edges include type surfaces and constant initializer references.
         // Executable body references are excluded.
-        let dependency_edges = graph.sorted_dependency_edges_for_header(header, string_table);
+        let dependency_edges = graph
+            .sorted_dependency_edges_for_header(header, string_table)
+            .map_err(|error| Box::new(error.into()))?;
+        tracker.enter(resolved_path.to_owned());
         for edge in dependency_edges {
             if let Err(error) = visit_dependency_edge(edge, graph, tracker, sorted, string_table) {
                 tracker.abandon(&resolved_path);

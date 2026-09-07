@@ -29,7 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -196,12 +196,15 @@ fn capture_test_body(
     source_table: &StringTable,
 ) -> StableBodySyntax {
     let tokens = original.clone();
+    let source_file_id = tokens
+        .file_id
+        .expect("ordinary frozen-body fixture should retain source identity");
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     for (path_syntax, _) in tokens.path_syntax.iter() {
         resolved_references
             .push(ResolvedFileReference {
-                source_file: tokens.file_id,
+                source_file: source_file_id,
                 path_syntax,
                 class: PreparedFileReferenceClass::ResourceFile,
                 outcome: ResolvedFileReferenceOutcome::Target(
@@ -337,7 +340,7 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         value: Some(value),
     } = materialised
         .resolution_facts
-        .lookup(SourceId::COMPILATION_ROOT, path_id)
+        .lookup(None, path_id)
         .expect("materialised content row should be readable")
         .expect("materialised content row should be retained")
         .outcome
@@ -432,6 +435,10 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
     let materialised = frozen
         .materialise(&generated_source_file, &mut generated_table)
         .expect("frozen body should materialise");
+    assert_eq!(
+        materialised.file_tokens.file_id, None,
+        "materialised generic syntax must not fabricate a compilation-root identity",
+    );
 
     let original_text = tokens
         .iter()
@@ -637,7 +644,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let resolve_resource = |path_id| {
         let reference = materialised
             .resolution_facts
-            .lookup(SourceId::COMPILATION_ROOT, path_id)
+            .lookup(None, path_id)
             .expect("materialised facts should accept a compact handle")
             .expect("materialised facts should retain each compact row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -662,7 +669,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     assert!(
         materialised
             .resolution_facts
-            .lookup(SourceId::COMPILATION_ROOT, second_donor_path)
+            .lookup(None, second_donor_path)
             .expect("materialised facts should accept a donor handle lookup")
             .is_none(),
         "a donor handle that differs from its compact handle must not select a retained row"
@@ -989,14 +996,17 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             }
         }
         assert!(replaced, "the placeholder body literal should be present");
+        let body_file_id = body
+            .file_id
+            .expect("ordinary materialisation fixture should retain source identity");
         let body = FileTokens::new_with_identity(
             body.src_path.clone(),
-            body.file_id,
+            body_file_id,
             body.canonical_os_path.clone(),
             tokens,
             path_syntax,
         );
-        let body_source_file = body.file_id;
+        let body_source_file = body_file_id;
         template.body_tokens = Some(GenericFunctionBody::source(body));
         (body_source_file, path_id)
     };
@@ -1287,7 +1297,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let reference = body
             .resolution_facts()
             .expect("materialised body should carry its Stage 0 facts")
-            .lookup(SourceId::COMPILATION_ROOT, path_id)
+            .lookup(None, path_id)
             .expect("materialised body facts should accept its compact handle")
             .expect("materialised body should retain its path row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -1729,6 +1739,19 @@ fn frozen_generic_rejects_absent_path_handle() {
         error.msg,
         "frozen generic resolved-reference row has an absent PathSyntaxId marker"
     );
+}
+
+#[test]
+fn ordinary_stage0_lookup_rejects_absent_source_identity() {
+    let facts = Stage0ResolutionFacts::ordinary(
+        ResolvedFileReferenceTable::new(),
+        SourceDatabase::empty().into(),
+    );
+    let error = match facts.lookup(None, PathSyntaxId::NONE) {
+        Ok(_) => panic!("ordinary Stage 0 lookup must reject an absent source identity"),
+        Err(error) => error,
+    };
+    assert_eq!(error.error_type, ErrorType::Compiler);
 }
 
 #[test]

@@ -115,6 +115,34 @@ fn header_name(
 }
 
 #[test]
+fn missing_header_source_identity_is_an_internal_failure() {
+    let (mut headers, mut string_table) = parse_module_headers(
+        &[("src/@page.moth", "content #= @intro.mtf\n")],
+        "src/@page.moth",
+    );
+    let header = headers
+        .headers
+        .iter_mut()
+        .find(|header| !matches!(header.kind, HeaderKind::StartFunction))
+        .expect("fixture must contain the content constant");
+    header.tokens.file_id = None;
+
+    let bag =
+        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
+            .expect_err("missing identity must not silently discard the content dependency");
+    assert!(matches!(
+        bag.diagnostics(),
+        [diagnostic] if matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InfrastructureError {
+                error_type: ErrorType::Compiler,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
 fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last() {
     let (headers, mut string_table) = parse_module_headers(
         &[
@@ -1188,7 +1216,9 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         .find(|header| header.local_ordering_hints.len() == 2)
         .expect("the repeated content shell should retain both authored hints");
 
-    let edges = graph.sorted_dependency_edges_for_header(consumer, &string_table);
+    let edges = graph
+        .sorted_dependency_edges_for_header(consumer, &string_table)
+        .expect("prepared content headers have registered source identities");
     let content_edges = edges
         .iter()
         .filter(|edge| matches!(edge.kind, DependencyEdgeKind::GraphHeader))

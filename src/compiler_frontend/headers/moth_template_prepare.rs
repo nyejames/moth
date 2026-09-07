@@ -38,10 +38,15 @@ pub(crate) fn prepare_moth_template_file(
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let (mut file_tokens, span_builder) = tokenized.into_parts();
+    let file_id = file_tokens.file_id.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "Moth template preparation requires a retained source file identity",
+        )
+    })?;
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;
-    let context = MothTemplatePrepareContext::new(file_tokens, string_table);
+    let context = MothTemplatePrepareContext::new(file_tokens, file_id, string_table);
     let content_header = context.content_header(string_table);
     let config_owned_path_syntax_ids = match &content_header.kind {
         HeaderKind::Constant { declaration }
@@ -111,7 +116,7 @@ struct MothTemplatePrepareContext {
 }
 
 impl MothTemplatePrepareContext {
-    fn new(file_tokens: FileTokens, string_table: &mut StringTable) -> Self {
+    fn new(file_tokens: FileTokens, file_id: SourceId, string_table: &mut StringTable) -> Self {
         let synthetic_location = SourceLocation::new(
             file_tokens.src_path.clone(),
             CharPosition::default(),
@@ -127,7 +132,7 @@ impl MothTemplatePrepareContext {
 
         Self {
             source_file: file_tokens.src_path,
-            file_id: file_tokens.file_id,
+            file_id,
             canonical_os_path: file_tokens.canonical_os_path,
             body_tokens,
             synthetic_location,

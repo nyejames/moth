@@ -7,10 +7,10 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Active. Phase 0 is complete: activated on branch `token-and-diagnostic-data-layout-changes` from
-> `b6f81fe58`, with the Test Suite Hardening prerequisite delivered in `03168082d`. The activation
-> baseline, migration inventory summary and layout/correctness evidence are recorded under
-> `Data Layout Migration - Phase 0 Activation Baseline` in `benchmarks/frontend-optimization-results.md`.
+> Active. Phase 1 is in progress. The current continuation reviews the existing implementation
+> and completes Phases 1–3, then pauses for user review. Phases 4–7 remain pending.
+> Test Suite Hardening was delivered in `03168082d`. Baseline evidence lives in
+> `benchmarks/frontend-optimization-results.md`.
 
 ## Purpose
 
@@ -69,19 +69,23 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 (build-lifetime source identity and exact compact spans), in progress. Slice groups 1A, 1B and 1C are accepted and closed; 1D is the open group.
-- Delivered inside 1D: 1D1 (frozen record spans), 1D2a (token spans), 1D2b1–1D2b4 (final token identity, complete). 1D2 and 1D2b are closed by their sub-slices.
-- Checklist item: Slice 1D3 — preparation diagnostics carry source spans. Sized but not started; read the 1D3 sizing note in the 1D sub-slice section before planning it, because it changes the slice order.
-- Non-goals for 1D3: no change to `SourceLocation` itself, no migration of the hundreds of out-of-lane diagnostic constructors (that is slice group 1E, and 1E5 owns build-system and Stage 0 diagnostics).
+- Phase: branch-review corrections before continuing Phase 1.
+- Corrections delivered: identity-free frozen generic syntax, strict ordinary header identity
+  rejection, predecessor timing/allocation evidence and the source/span ownership sequence below.
+- Reopened obligations: the compiler source slots still own `InternedPath`; `CompilerFrontend`
+  still clones style directives and the path resolver. Stage 0's path table alone did not close 1A.
+- Next implementation boundary: finish the source path foundation, then carry live source span
+  builders through their semantic owners before migrating diagnostic and syntax consumers.
 
 LAST_GOOD_COMMIT:
 - `bed74c13b` — "refactor: make the token source identity non-optional" (slice 1D2b4). Gate green: `just validate` exit 0, 5050 lib tests, 1951/1951 integration, source-audit 1318 files 0 findings, all three scaling series within budget.
 - Checkpoint sequence for Phase 1's 1D group: `1D1 … 1D2a` → `113ffb528` (1D2a) → `8e04e407a` (1D2b1) → `16c6aa21e` (1D2b2) → `ce274194b` (1D2b3) → `bed74c13b` (1D2b4).
 
 CURRENT_WORKTREE_STATE:
-- Clean at `bed74c13b`. No uncommitted work, no stashes, no unrelated user work in the tree.
-- Branch: `token-and-diagnostic-data-layout-changes`
-- Dedicated worker worktrees: none; a single worktree at the repository root is the whole inventory
+- Continuation baseline: clean at `09f73762e`, with code checkpoint `bed74c13b`.
+- Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
+- One unrelated `packages-work` worktree and one pre-existing stash exist. Neither belongs to this task.
+- Current correction workers own generic identity code and predecessor benchmark evidence separately.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -109,8 +113,8 @@ RELEVANT_CODE:
 - `src/build_system/create_project_modules/module_preparation.rs`: current source attachment and deterministic file-preparation merge. Stage 0 stops at prepared syntax; it owns no frontend stage.
 - `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the five current source-text/path carriers. There is no `InputFile` type; `src/build_system/build.rs` owns the mutable backend string-table handoff
 - `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
-- `src/compiler_frontend/pipeline.rs::CompilerFrontend`: current mutable stage-facade state and per-module `SourceFileTable`
-- `src/compiler_frontend/symbols/identity.rs`: current `FileId` and `SourceFileTable`
+- `src/compiler_frontend/pipeline.rs::CompilerFrontend`: stage facade with remaining immutable-service copies
+- `src/compiler_frontend/source/`: build registration, loaded snapshots, exact spans and line indexes
 - `src/compiler_frontend/symbols/interned_path.rs`: current `Vec<StringId>` complete-path owner
 - `src/compiler_frontend/symbols/string_interning.rs`: existing immutable-base fork and deterministic delta merge to reuse
 - `src/compiler_frontend/tokenizer/tokens.rs`: current `Token`, wide 94-variant `TokenKind` and `FileTokens`
@@ -163,9 +167,17 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- last command: `just validate` on the settled tree at `bed74c13b`
-- result: fully green. 5050 + 17 + 825 unit tests, 1951/1951 integration cases, source-audit 1318 files with 0 findings, docs clean, all three scaling series within budget
-- known unrelated failures: none
+- Current correction gate: `cargo fmt --all && just validate` passed.
+- Results: 5052 + 17 + 825 Rust tests, 1951/1951 integration cases, source audit of
+  1318 files with zero findings and all three scaling series within budget.
+- Focused checks: 25 frozen-body tests, 30 source-identity tests and 29 dependency-ordering
+  tests passed. The latter two cover the independent review's missing-identity corrections.
+- Actual CLI checks of `generic_fn_nested_generic_body_file_value_collision_success/input` and
+  `exported_generic_private_content_success/input` both completed without errors or warnings.
+- Generic ownership, corrected ordering/projection and evidence audits are accepted. Evidence
+  corrections removed unsampled source counters and aligned the cold-store scope with its formulas.
+- Documentation release build passed (74 outputs). Unrelated regenerated stylesheet drift was
+  discarded; no generated documentation belongs to this correction.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -174,7 +186,7 @@ DOCS_IMPACT:
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-- next action: Phase 1, Slice 1D3, starting from its sizing note
+- next action: accept the branch-review corrections, then resume the reopened Phase 1 obligations
 
 ---
 
@@ -326,21 +338,16 @@ before the first implementation phase that freezes reports.
 
 ### Current roadmap state
 
-Test Suite Hardening was delivered in `03168082d` and is no longer an active plan. This plan
-remains queued after the earlier implementation chain. The diagnostics plan is paused until this
-plan completes; this plan owns the source/token/diagnostic representation migration and must not
-be activated alongside another migration of the same representation.
-
-Adapt wording to the current roadmap conventions, but preserve the queued order and one owner for
-the representation migration.
+Test Suite Hardening was delivered in `03168082d`. This plan is the sole active representation
+migration. The diagnostics plan remains paused until the full migration completes.
 
 ### At activation
 
-- [ ] make this the sole active source/token/diagnostic representation migration
-- [ ] record the delivered hardening commit `03168082d` in this plan and the benchmark report
-- [ ] confirm the diagnostics plan remains paused until this representation migration completes
-- [ ] prohibit old-model diagnostic payload work while this plan is active
-- [ ] keep unrelated scope-frame, arena and semantic-invariant work deferred in the roadmap
+- [x] make this the sole active source/token/diagnostic representation migration
+- [x] record the delivered hardening commit `03168082d` in this plan and the benchmark report
+- [x] confirm the diagnostics plan remains paused until this representation migration completes
+- [x] prohibit old-model diagnostic payload work while this plan is active
+- [x] keep unrelated scope-frame, arena and semantic-invariant work deferred in the roadmap
 
 ### Progress matrix
 
@@ -479,9 +486,8 @@ records the exact baseline before representation changes make comparison impossi
 
 - [x] confirm the delivered hardening prerequisite at `03168082d`
 - [x] confirm the parent worktree is clean and inventory all worker worktrees
-- [x] create or reuse one dedicated implementation worktree according to current repository policy —
-  the repository has exactly one worktree and no worker-worktree policy; work proceeds on branch
-  `token-and-diagnostic-data-layout-changes` in the root worktree
+- [x] reuse the root worktree on `token-and-diagnostic-data-layout-changes`; the current
+  continuation preserves the unrelated worktree and stash listed in the active capsule
 - [x] record the activation baseline and inventory what changed under the owners below
 - [x] refresh every path and symbol in the active context capsule
 - [x] re-read the progress matrix and all authority documents
@@ -545,10 +551,11 @@ Inventory:
 - [x] identify every existing boxed boundary and whether unboxed failures remain
 - [x] run full `just validate` when the baseline is green — green
 - [x] run `just bench-frontend-check` and `just bench-check`
-- [x] run five recorded frontend and end-to-end benchmark invocations — three recorded suites
-  (frontend phases, end-to-end CLI, diagnosed data layout), each ten iterations per case, plus five
-  independent repeatability invocations per suite; the noise floor is +/-1ms on the suite average
-- [x] record retained source bytes, common data, cold data and clone/remap pressure separately
+- [x] complete the predecessor five-run frontend, end-to-end and data-layout evidence;
+  the recovered data-layout invocations are recorded in the benchmark report
+- [x] record source ownership, bounded common/cold owner capacities, aggregate live/peak
+  allocation proxies and clone/remap pressure separately in the recovered predecessor section;
+  the report explicitly excludes unmeasured nested heaps and path-only remap counts
 - [x] capture focused profiles only where attribution is unclear — attribution was clear; none captured
 
 ### Phase 0 — Audit / style-guide review / validation
@@ -568,7 +575,8 @@ Inventory:
 - [x] diagnostics work remains paused cleanly behind this migration
 - [x] every stale snapshot fact is refreshed
 - [x] migration and failure-site inventories are complete
-- [x] baseline correctness, layout, memory, timing and CI evidence is recorded
+- [x] baseline correctness, layout, timing and CI evidence is recorded, with bounded owner
+  capacity samples and repeatable aggregate memory proxies; no complete heap partition is claimed
 
 ---
 
@@ -585,9 +593,9 @@ green before later layout work proceeds.
 
 - [x] introduce `PathId(NonZeroU32)` and a dense parent/component path table
 - [x] intern source logical paths into the build base before string/path forks are created
-- [x] use `PathId` in `SourceRecord` immediately; do not store an interim `InternedPath` — Stage 0's
-  `SourceRecord` carries `Option<PathId>`; `None` only for a facade outside the entry root, which
-  has no entry-root-relative spelling. The frontend source record arrives in Slice group 1B
+- [ ] use `PathId` in compiler source registration slots immediately; the existing Stage 0
+  `SourceRecord::logical_path: Option<PathId>` and its tree-owned table are delivered, but
+  `compiler_frontend::source::SourceSlot::logical_path` still owns `InternedPath`
 - [x] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
 - [x] add layout, root, parent, append, equality and rendering tests
 - [x] defer the full compiler `InternedPath` migration to Phase 2
@@ -607,675 +615,83 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
-- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend<'build>` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data — token and prepared-output storage deferred to 3D/3E1, see the delivery note
+- [ ] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries; retain canonical OS paths only as cold source-record data. The old table types are gone, but the facade still owns cloned style directives and a cloned resolver. Token and prepared-output path copies remain assigned to 3D/3E1.
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
-This group was split at implementation. **1B-alpha** (delivered in `e39a35715`) relocated source
-identity into `compiler_frontend/source/` as `SourceId(NonZeroU32)` without changing when identity
-is assigned. **1B-beta** replaced the per-module tables with one boundary-lifetime database.
-**1B-gamma1** delivered the 1B1 ID domain and the 1B2 config/bootstrap barrier across `1a`, `1b`
-and `1c`, and 1B3 was found already satisfied against it. The remaining registration work — source
-slots and text loading, `SourceId`-set module inputs and the traversal-local database that
-synthetic rebinding still needs — is 1B4 and 1B5.
+#### Delivered registration contracts and remaining ownership
 
-**Source text moved into its slot, recorded against 1B4.** `SourceRecord` now owns the exact
-`Option<Box<str>>` snapshot plus the boxed `Option<Box<CompilerError>>` read failure, written once
-through `SourceDatabase::retain_text`. Boxing the error took the record from 264 to 80 bytes: 192 of
-those bytes were a `CompilerError` that is `None` for every source in a successful build. Every
-registered candidate is loaded at its barrier, so the text a stage compiles is the snapshot in its
-slot rather than a fresh read. Loading moves ahead of the BFS `visited` check in the
-direct-template bundle, so that lane dedupes on the slot and replays a recorded read failure at
-preparation rather than aborting during reference resolution. No fixture could be constructed where
-that deferral changes which diagnostic a user sees — every candidate aborts at the same point
-either way — so it carries no ordering test; the replay's error identity is tested.
+The source database owns one registration slot per candidate, dense loaded snapshots and a cold
+load-failure array. `SourceId(1)` is the compilation root. Config is registered before tokenization
+and remains in the project identity domain. Independently compiled packages keep separate domains.
 
-**Rendering from the snapshot, recorded against 1B4.** The renderers no longer reopen source
-files: `render/terminal.rs` and `render/dev_server.rs` resolve excerpts from retained text, and
-`display_messages::print_formatted_error` renders standalone output-plan `CompilerError`s that
-carry no source location at all, so its excerpt block is gone rather than fed an empty line. A
-diagnostic excerpt can no longer come from a newer file than the one compiled, and frames that
-vanished when the logical path was unreadable from the invoking directory now render: a project
-whose entry is `src/@page.moth` previously printed `--> @page.moth:1:10` with no frame under both
-`build` and `check`, and now prints the offending line with carets.
+Stage 0's `SourceRegistrationIndex` preserves its module-origin order. Traversal-only single-file
+and direct-template lanes use canonical logical-path order because they have no module inventory.
+Their provisional identities remain local to discovery and are rebound once before publication.
+Replacing these two explicit ordering policies with a flat display-path sort is incorrect.
 
-A diagnostic addresses its source by logical path, and that path is not unique. A project source
-and a source-package source both strip their own root, so `app/src/@mod.moth` and `pkg/@mod.moth`
-both intern to `@mod.moth`; within one database, a root `config.moth` and an ordinary
-`src/config.moth` also collide, which is reachable today. Resolving against the wrong record shows
-a different file's text, so two rules hold the lookup honest. Each diagnostic carries the database
-that produced it, as a per-range `RenderSourceContext` mirroring the existing `RenderTypeContext`;
-the project database is attached only as a whole-set fallback, and the first matching association
-wins so a package's own association takes precedence. Where a logical path still matches more than
-one record in the searched database, the frame is omitted rather than guessed.
+Loaded text moves into its slot once. A second retain is an invariant failure. Re-registration of
+one canonical source rejects conflicting logical identity or supplied kind. Different physical
+sources may legitimately share a display path, for example bootstrap `config.moth` and
+`src/config.moth`; display-path equality is not source identity.
 
-One lane is deliberately left unattached. `compile_moth_template_source` builds or receives its
-own `Arc<SourceDatabase>` part-way through a long function and then returns through nine separate
-exit sites, none of which attach it, so direct-template diagnostics render without a frame. Its
-only caller is the direct-template API in `projects/html_project/moth_template/compile.rs`, which
-no user-facing command reaches, so nothing a user runs loses a frame. Attaching it properly means
-splitting that function around the point its database exists, which is not worth the regression
-risk here: slice group 1F gives every report a frozen context and should absorb this lane.
+`SourceKind` records the producer's authored classification, not the canonical target's extension
+or the active builder's support policy. Provider-owned slots carry identity but should not acquire
+compiler source snapshots merely because they were registered.
 
-A retained `BuildResult` keeps the project database alive along with the package databases that
-produced warnings, and a failure's message set keeps every database its diagnostics came from.
-That is retained memory slice 7A accounts for and slice group 1F's frozen render context is meant
-to replace.
+Module inputs carry ordered candidate `SourceId` sets. Their external-import scope is the module's
+owned candidates, not every source in the boundary database. Existing file/chunk merges place
+prepared results in preassigned slots and reject duplicate, missing and out-of-range outputs.
 
-**Lifecycle made a type, recorded against 1B4.** A record's loading status is one
-`SourceRecordState` of `Registered`, `Loaded(Box<str>)` or `Unreadable(Box<CompilerError>)`,
-replacing the `Option` pair whose fourth combination — a snapshot and a read failure at once — was
-prevented only by a hand-written check in each writer. Transitions are accepted only from
-`Registered`, so the lifecycle is monotonic by construction and a refused write leaves the
-recorded state untouched. There is no finalized flag, and none is wanted: a write needs `&mut`,
-so exclusive ownership is the barrier. That is weaker than the word "finalized" suggests —
-`Arc::get_mut` still admits mutation whenever every other handle has been dropped, which is how
-the directory boundary appends its registration index after config sharing — so the guarantee is
-an ownership convention, not an irreversible state.
+The current `Arc<SourceDatabase>` removed deep source-table copies, but it makes post-worker
+`Arc::get_mut` installation unavailable while other owners retain the database. It is not a
+finished mutable/frozen lifecycle. 1D4 must preserve the source builder through its last producer;
+1F owns the final lookup-only boundary. Shared interior mutation is not a substitute for that
+ownership split.
 
-Registration now rejects one canonical path re-registered under a different logical identity
-instead of silently binding the caller to the first spelling. A repeated registration whose
-logical path matches still returns the existing identity, because that deduplication is
-load-bearing for the direct-template bundle and the discovery scan. No production caller
-re-registers one canonical path under two spellings today, so this is a guard on the invariant
-rather than a fix for a live defect.
+The source path foundation is incomplete: the Stage 0 table must become the build identity base
+used by compiler source slots, rather than introducing another independent path interner.
+The source `PathId`/legacy-path bridge is permitted only through 2D.
 
-**Two distinct canonical paths interning to one logical path stays legal.** It is reachable in
-production — a project-root `config.moth` collides with an ordinary `src/config.moth`, and the
-synthetic single-file database holds project and source-package sources together — so rejecting
-it would fail real projects. A diagnostic is addressed by logical path within a database it is
-associated with by identity, and a logical lookup matching more than one record in that database
-omits the frame rather than guessing. The 1B4 clause is read as covering one canonical source
-claiming two identities, which is what the new rejection enforces.
+`ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
+`FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1 respectively. Their existing
+agreement checks stay until the duplicated fields are removed.
 
-**Two 1B4 clauses remain outstanding after this slice, both moved rather than declined.** Each is
-locked architecture in `docs/compiler-data-layout-design.md`:
+Renderers already use retained snapshots rather than reopening files. Until 1F migrates them to
+source identity, per-diagnostic-range source contexts preserve package ownership and ambiguous
+display-path matches omit a frame rather than selecting the wrong file. The direct-template API
+still needs its source context attached at its result boundary.
 
-- `SourceRecord` must own its `kind` (design doc, "Source records"), which Stage 0's
-  `SourceClassification` used to hold alone. **Delivered in 1B5-c**, recorded below. An earlier
-  attempt was reverted for landing the field with no reader; the honest first consumer was
-  discovery's prepared-input selection, which is what 1B5-a rebuilt. The other kind re-derivers —
-  `binding_environment/builder.rs:1287-1305`, `paths/path_resolution.rs:440`,
-  `headers/dependency_target.rs:166` — still cannot read a record, because no `SourceDatabase`
-  reaches header binding or the AST layer until slice groups 1E and 1F thread it there.
-- Recognition, not support, is the record's kind: `SourceFileKind::from_extension` recognises
-  `.moth`, `.mtf` and `.md`, while `SourceFileKindRegistry` answers whether the *active builder*
-  supports a recognised kind and deliberately stores no `.moth` entry. The registry is therefore
-  not the kind authority, and threading it into the source database would have created a second
-  one. Recorded in the design document with the reserved root's absent kind.
-- "Reject conflicting kind" **is** enforceable, and 1B7 enforces it. An earlier note here argued
-  the opposite: that the canonical path is the deduplication key, so one path yields one record and
-  a repeated registration returns that identity rather than adding a second kind. That reasoning
-  refuted itself in its own last sentence — the kind is supplied by its producer and does *not*
-  follow from the canonical extension, so two producers reaching the same path can supply two
-  different kinds, and the deduplicating return silently kept the first. `insert` now rejects a
-  repeated canonical path whose supplied kind differs from the stored kind, in the same lane as the
-  existing conflicting-logical-path rejection. Delivered as 1B7-a; no production lane registers one
-  path under two kinds, so the check guards a producer mistake rather than a working build.
-- The design record's `text: Box<str>` is unconditional, so a registered-but-unloaded candidate is
-  not a record at all — it is the compact slot/index this clause asks for, and an unreadable source
-  keeps its failure at the candidate layer rather than inside a record. `SourceRecordState` is a
-  stepping stone to that shape, not its end state. **This moves into slice group 1C**, which is
-  where the record gains `line_starts` and `extended_spans`. Splitting the array now would save an
-  unloaded row only the few bytes a compact slot does not need — the canonical and logical paths
-  are required for lookup either way — and would then have to be re-split when the three loaded
-  boxes land. Persistent unloaded rows are real, not transient: unsupported recognized sources
-  (`source_tree_index.rs:658-703`), unrooted rows (`:1518-1554`) and unselected owned sources
-  (`module_inventory.rs:526-533`) stay registered without text, and each will carry 48 bytes of
-  unused boxes once the record owns text, line starts and extended spans. That is when the split
-  pays, and it removes the `Unreadable` variant from the record at the same time.
+1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy.
+1B6 remains open for actual borrowing of the facade's immutable services. Delivery history and
+individual mutation-test results are in Git rather than repeated in this work item.
 
-**Sharing decision, recorded against 1B6.** The database is shared as one `Arc<SourceDatabase>`
-rather than the borrow this checklist named. `Stage0ResolutionFacts` is already held as
-`Arc<Stage0ResolutionFacts>` inside a lifetime-free `ScopeShared`, so giving it a `'build` borrow
-infected every type reaching a `ScopeContext` — the whole AST parser — to reach one table that is
-immutable for the build. The `Arc` also removes a real deep copy: the facts derive `Clone` and
-previously owned the table by value, which is the broad source-database `Clone` the architecture
-document prohibits. `SourceDatabase` is no longer `Clone`, so a future deep copy is a compile
-error. Short-lived function contexts (`ModulePreparationContext`, `FrontendFilePrepareContext`)
-still take plain `&SourceDatabase`; only stored owners hold the `Arc`.
-
-**Delivered as 1B6-a.** `SourceFileTable`, `FileId` and `attach_source_files` were already gone;
-this slice removed the last carrier, `FrontendSourceFileIdentity`, whose three fields duplicated
-`SourceRecord::logical_path`, `::id` and `::canonical_os_path` and carried no fact the record did
-not. One `source_identity_facts` lookup in `pipeline.rs` now reads those facts from the record for
-all three consumers — tokenization, plain-Markdown preparation and retained-token rebinding. Header
-parse options borrow the path resolver instead of cloning one per module, which made
-`HeaderParseOptions` `Copy` and removed ten resolver clones. **1B6 stays open** for its last
-sentence, "retain canonical OS paths only as cold source-record data": `FileTokens.canonical_os_path`
-(`tokenizer/tokens.rs:255`) and `ModuleSymbols::canonical_os_path_by_source` still own a second copy.
-An earlier note here called those slice group 2C's property; that was wrong — 2C's own checklist
-covers logical path owners and never names these fields. They belong to 1B6 and land in **1B6-b**.
-The `CompilerFrontend<'build>` borrow is the `Arc<SourceDatabase>` sharing decision recorded above.
-
-**Delivered as 1B6-b, in part.** `ModuleSymbols::canonical_os_path_by_source` is gone. It held a
-`PathBuf` per module file, cloned from each prepared output, duplicating `SourceRecord`. It is now
-`source_ids_by_source: FxHashMap<InternedPath, SourceId>` — four bytes instead of a path
-allocation — and `ModuleSymbols::source_record` joins that to the record. The `InternedPath` key
-stays because every neighbouring table uses it and binding joins on it. Public-export membership,
-module-root checks and the binding environment now borrow the `&SourceDatabase` the frontend
-already holds.
-
-Three consumers were re-derivations, not lookups, and each is now resolved against the record:
-
-- `is_moth_template_source_file` classified a source by parsing its path extension. 1B5-c put
-  `kind` on `SourceRecord` precisely so readers stop doing that; it reads the record.
-- `source_directory` returned the canonical OS parent, falling back to the logical parent. Its
-  only consumer decides same-directory public-export visibility, which is a module-scope question,
-  so it is logical-only. The two agree for every valid current module input; they can disagree
-  under a symlink placing logical siblings on different physical directories, and the logical
-  answer is the correct one there.
-- `symbol_origin_matches_source` compares a rendered logical path against a canonical OS path
-  after an `InternedPath` comparison fails. That looked vestigial and is not:
-  `canonical_source_by_symbol_path` stores `Header::canonical_source_file`, which interns the OS
-  path when one exists, while module tables are keyed by the logical path. Deleting the join fails
-  three tests.
-
-All three were mutation-checked against the full lib suite: killing the join fails 3 tests,
-misreading the kind fails 10, disabling the directory lookup fails 4.
-
-Reading the kind from the record rather than a path extension is stricter — an unregistered
-source is no longer a template. Production always registers, but three test fixtures did not, so
-they silently bound under a contract production never uses. They register now. No expectation was
-edited to accommodate this.
-
-**1B6's last sentence is deferred to 3D and 3E1, which name it.** Two copies remain:
-`FileTokens.canonical_os_path` and `FileFrontendPrepareOutput.canonical_os_path`, with the three
-helper inputs in `moth_template_prepare.rs`, `plain_markdown_prepare.rs` and
-`synthetic_content_header.rs` as their plumbing. Clause 3D already owns the first ("remove source
-path, canonical OS path, `index` and `length` from token storage") and 3E1 replaces the second
-with `PreparedSource`, so this is their work, not a new 1B6 sub-slice.
-
-It cannot be pulled forward without doing that work twice. Two readers remain.
-`parse_file_headers.rs:72` can move today, because `pipeline.rs:350` holds the database.
-`Header::canonical_source_file` cannot: its nine call sites are in
-`ast/module_ast/{emission,environment}`, `headers/{constant_dependencies,public_exports}` and
-`traits/evidence/validation.rs`, and none of those stages carries a `SourceDatabase`. Threading
-one through the AST stage now would be undone by 3E, which restructures exactly that handoff.
-
-Storing the interned scope on `Header` instead is the wrong shape: it is a per-file fact, and one
-copy per header is the repetition 3E4 exists to remove. `validate_header`'s canonical-path
-agreement check (`headers/types.rs:1608`) stays until the field goes; it polices the duplicate, so
-deleting it early would weaken the prepared-file gate rather than close the duplication.
-
-What 1B6 owned is done: no *service* now holds a second canonical path. The survivors are token
-and prepared-output storage, written once from the record and consumed by their own stage.
-
-**Delivered as 1B7-a.** The design authority's source-size bound ("Source size and complexity
-limits") is enforced at `SourceDatabase::retain_text`, the one point a snapshot becomes owned. The
-lane follows the record's `provenance`: an authored physical source too large for `u32` byte
-offsets fails as a user-facing file error carrying that record's own interned identity, so the
-terminal and dev-server renderers can name the file; no source excerpt accompanies it, because the
-oversized snapshot is refused before retention. A compiler-produced snapshot of that size is a
-compiler bug. The size policy applies only to a record that can still accept a snapshot, because a
-second retain is a lifecycle violation that must be reported as the compiler's mistake rather than
-preempted by a message about the user's file.
-
-**1B7 stays open for its cross-strategy test, and the reason it looked unnecessary is worth keeping.**
-`SourceId` is assigned at the registration barrier, before any `FilePreparationStrategy` exists:
-`module_preparation.rs` selects the strategy at `:545-562` against an already-immutable source
-context, and `:823` only reads an ID its input already carries. So the test cannot expose a *current*
-bug. It can still expose a future one: a refactor that let a worker allocate or re-derive an identity
-would make prepared outputs disagree with the database, and nothing else in the suite would notice.
-That is a plausible bug, so the test earns its place and lands in **1B7-b**. The related property
-that identities follow canonical logical order rather than insertion order is already covered by
-`source_database_build_orders_records_by_portable_logical_path`
-(`src/compiler_frontend/source/tests.rs:215`); that test does not exercise preparation at all and
-cannot substitute for the cross-strategy contract.
-
-**1B1 and 1B2 stay open: two discovered lanes never reach a sorted registration index.** Directory and
-package builds project their `SourceTreeIndex`/package inventories into one sorted
-`SourceRegistrationIndex` before any structural work, ordered by `SourceLogicalIdentity` — module
-origin, then module-relative path (`source_tree_index.rs:223-241,1642`). Two lanes do not:
-
-- **Single-file/synthetic discovery** registers BFS-order candidates and sorts once at finalization by
-  `portable_sort_key` (`source_discovery.rs:475-493`; `database.rs:100-103`). The result is canonical
-  and traversal-independent, but it is a second ordering key, not the registration index 1B1 names.
-  The tree key groups by module origin and places rooted identities before unrooted ones, which a flat
-  path string cannot express.
-- **Direct-template compilation never sorts at all.** `compile.rs:94-109` always supplies
-  `Some(file_value_bundle)`, so the `build_classified` arm at `moth_template.rs:175` is dead for the
-  production caller. `bundle.rs:108-118` assigns the entry ID and `:326-334` assigns content IDs as
-  references are encountered, then `:263` publishes that database unchanged. An entry referring to
-  `alpha.mtf` from `zeta.mtf` therefore keeps `zeta` before `alpha`, and sibling content IDs follow
-  authored reference order. That is exactly the reachability order 1B2 forbids.
-
-`build_classified` had two callers, one of them the test-only `moth_template.rs` arm, so
-`source_discovery.rs:482` was the only production one; `source_discovery.rs:1420` is
-`#[cfg(test)]`. 1B2-b adds the direct-template lane as its second production caller. The
-registration-index constructors have two, both in directory-project and package compilation
-(`compilation.rs:541,593`).
-No build reaches both kinds of constructor: CLI and dev-server dispatch are mutually exclusive
-(`mod.rs:177-190`; dev-server `build_loop:111` calls the ordinary project build). Closing these two
-clauses is **1B1-b** (registration index for discovered lanes) and **1B2-b** (canonical order for the
-direct-template lane).
-
-**Delivered as 1B2-b.** The direct-template lane now separates the two concerns its walk fused.
-The BFS collects the complete candidate closure with each source's authored kind and loads its
-text, assigning no identities; the compiler then sorts that closure by canonical logical path once
-and assigns every `SourceId`. `zeta.mtf` referring to `gamma` then
-`alpha` now yields alpha, gamma, zeta.
-
-Preparing each source twice to reach that order would have been the obvious implementation and is
-the one to avoid: the discarded pass's strings stay interned in the caller's table forever. The
-lane instead follows `source_discovery.rs:543-562` - prepare once against the provisional path,
-then `rebind_source_identity` plus `freeze_path_syntax` onto the classified identity. That is one
-`prepare_one_source` call per source.
-
-Rebinding prepared outputs is not sufficient on its own. A resolution diagnostic is cloned from
-the reference's location before identities exist, and is owned by the resolved-reference row
-rather than by the prepared output, so it needs its own
-`CompilerDiagnostic::rebind_source_identity`. Without it a missing-target failure named
-`/private/var/folders/.../page.mtf` instead of `page.mtf`;
-`retained_resolution_diagnostics_name_the_final_logical_source` pins that.
-
-The `moth_template.rs` `None` arm was kept and its comment corrected: it compiles one in-memory
-source through the same canonical-order constructor, but only `single_source_compilation`'s own
-tests reach it, because the sole production caller always supplies a bundle. Removing that arm
-belongs to **7C**, not here.
-
-**Delivered as 1B1-b.** `SourceRegistrationIndex` is now the single compiler-facing handoff for
-every source lane, and `SourceDatabase::build_classified` is gone. Two ordering authorities remain,
-and both are named at that one boundary rather than being two independent constructors:
-`from_ordered_registration_index`/`append_ordered_registration_index` preserve Stage 0's
-`SourceLogicalIdentity` order, and `from_registration_index_sorted_by_logical_path` orders lanes
-that discover sources by traversal. Sorting exists in exactly one place.
-
-Two keys are correct here, and collapsing them would be the wrong simplification. Stage 0's key
-groups by module origin and places rooted identities before unrooted ones; a flat path string
-cannot express either, and the tree order is load-bearing for module scoping
-(`compile_project_frontend_tests.rs:3286-3348`). Traversal lanes own no per-source ownership
-inventory, so they cannot produce that key at all. What was wrong before was not that two keys
-existed but that the second one bypassed the registration type, so no boundary recorded which
-authority applied.
-
-That consolidation was unguarded: inserting the portable-key sort into
-`append_ordered_registration_index` - the exact "two sorts into one" simplification a later reader
-would try - passed all 4877 lib tests. Nothing asserted identity order past the tree index.
-`stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees` closes that with
-sibling modules `a` and `a-b`, whose module-origin order the flat key inverts because `-` precedes
-`/`; it fails under that mutation.
-
-**Delivered as 1B7-b.** `every_preparation_strategy_stamps_the_registered_source_identity`
-asserts that every prepared output's `file_id` is the identity its input already carried, under
-`Serial`, `ParallelPerFile` and `ParallelChunked`. The fixture names files in descending order so
-input order is the reverse of canonical identity order, and asserts that, because an identity
-re-derived from a file's position would otherwise pass. Eight files plan two chunks, so the
-chunked arm is not a single-chunk no-op.
-
-The earlier disposition that dropped this test as "structurally impossible" was wrong for the
-reason it gave and right by accident: the registration barrier does make a worker's re-derivation
-unreachable *today*, but the test is a regression guard on that barrier, not a bug hunt. It earns
-its place on evidence: perturbing the identity in the `ParallelPerFile` dispatch arm alone makes
-it the only failing test in the 4875-test lib suite. `ParallelPerFile` had no end-to-end
-preparation coverage before it - `parallel_file_preparation_produces_deterministic_ordered_output`
-asserts `ParallelChunked`. Coarser perturbations are caught by the prepared-file invariant gate,
-which checks a file's identity against its own header streams rather than against the database.
-
-`ProjectGlobalsInterface` and the source database reach canonical compilation as two arguments of one
-`BoundaryCompilationContext` (`compilation.rs:1022-1050`), so they do share one project identity
-context; bundling them into a context type now would pre-empt Phase 4's `FrozenIdentityContext`.
-
-**1B4 stays open, and 1C closes it.** Its loading, dense-slot-map and conflict-rejection halves are
-delivered; the compact registration-slot/loaded-record split is 1C6 by the relocation recorded above,
-and the `Finalized` state remains the `&mut` ownership convention recorded against 1B4's lifecycle.
-
-**Module scope decision, recorded against 1B5.** Widening the database to the boundary widened
-every module's external-import candidate set with it, because `run_semantic_stages` derived its
-source logical paths by iterating the whole table. Each prepared module now carries an ordered
-`candidate_source_ids: Vec<SourceId>` and resolves only those against the boundary database. The
-set is the module's owned *candidates*, not its header-reachable sources: the pre-slice per-module
-table was built from candidates, so unreachable owned sources contributed logical paths and must
-continue to. `directory_module_external_import_candidates_are_scoped_to_owned_sources` is the
-regression guard; it fails if that derivation widens again. This vector is the ID-set module input
-1B5 asks for, arriving early because the widening required it.
-
-**Remap ownership, decided against 1B5.** The synthetic lane cannot assign final `SourceId`s
-during its breadth-first walk: header preparation needs an identity to stamp retained shells, but
-final IDs follow canonical logical order, which 1B2 requires over reachability order, and that
-order is unknown until the closure is complete. The traversal-local database is therefore the
-sanctioned late-source mechanism 1B3 permits, not a defect to delete.
-
-What moves is *who* remaps. Today discovery returns path-bearing inputs, `single_file.rs:432`
-builds the final sorted database afterwards, `retain_single_file_source_texts` joins each carried
-`String` to a slot by canonical path, and `rebind_synthetic_prepared_inputs` joins prepared outputs
-by canonical path again. Discovery already holds the complete closure and both tables at the end
-of its walk, so it owns the one remap: it returns the final sorted database with text already in
-its slots, and inputs keyed by final `SourceId`. That deletes the late build, both path joins and
-the enum's `source_path`, `source_byte_len` and `source_code` fields, and it satisfies the
-architecture's rule that worker-owned records are remapped once before a later consumer observes
-them — today the remap happens after the inputs have already escaped discovery.
-
-The traversal identity domain must not leave discovery. Two domains existing at one instant is
-acceptable only inside that owner.
-
-**Delivered as 1B5-a.** `PreparedSourceInput` now carries a final `SourceId` plus the one work
-product that cannot be recomputed — retained tokens or a complete prepared output — and nothing
-else. Paths and snapshots resolve from the database, so `source_path`, `source_byte_len` and
-`source_code` are gone along with `take_source_code`, `retain_single_file_source_texts` and the
-late `SourceDatabase::build`. `finalize_reachable_files` performs the single remap. The traversal
-table is no longer returned from the traversal, so "no traversal identity escapes" holds by
-construction rather than by a check; an attempt to assert it with a traversal-to-final map was
-rejected as a tautology, because both sides were keyed by the canonical path the join already had.
-
-**Failure precedence changed for one input, accepted.** Registration now happens before the
-cache-miss reads, so a reachable source whose logical path is not valid UTF-8 reports the path
-failure instead of the read failure it used to report when its contents were also unreadable. Both
-are `ErrorType::File`, so the lane is unchanged; only which of two real problems is named first
-moved. Failing on an identity that cannot be represented before performing IO for it is the better
-order, and the load counters correctly do not fire for a source that was never read.
-
-**Delivered as 1B5-c.** `SourceRecord` owns `kind: Option<SourceKind>`, absent only for the
-reserved compilation root. The kind is the *authored* one: Stage 0 classifies the lexical file name
-and only then canonicalizes, so a `page.mtf` symlinked onto `payload.bin` is a template and must
-register as one. Every producer therefore supplies the kind it compiles the source as — the
-registration index maps each row's `SourceClassification` onto a `SourceKind`, discovery passes the
-reachable file's kind, and `insert` takes it from its caller. Deriving from a canonical extension
-survives in `SourceDatabase::build`, which is now `#[cfg(test)]` because a fixture holding nothing
-but canonical paths has no authored spelling to lose, and in the one production lane recorded
-below. Its first reader is discovery's prepared-input selection, which replaced a duplicate kind
-field on the discovery cache.
-
-One authored spelling is still lost, and it predates this slice: the nested content insert in
-`projects/html_project/moth_template/bundle.rs` receives only a resolved canonical path, so it
-derives the kind the same way its queue dispatch already does. That lane classifies and compiles
-consistently, so no record contradicts its own compilation; recovering the authored name there
-belongs with the file-reference resolution work, not here.
-
-**Delivered as 1B5-d.** Both canonical merges of prepared source outputs now place each output
-into a preassigned slot instead of pushing into a vector and restoring order afterwards, so
-exactly-once is structural: an unfilled slot means a selected source was never prepared, and an
-occupied slot means one was prepared twice. `merge_file_preparation_chunks` fills a
-`module_file_count`-sized slot vector by each record's `file_index` and requires full coverage
-before header aggregation, which the diagnosed-file path never reaches because it returns first.
-`ModuleSyntaxDiscovery` sizes its slots from `candidate_source_ids` and `retain_prepared_output`
-became fallible; unfilled slots stay legal there because that lane only prepares the candidates
-header discovery reaches.
-
-That replaced six checks that proved coverage indirectly from chunk range arithmetic — start
-continuity, reversed range, range past tail, result-count mismatch, internal-index mismatch and
-total coverage — plus the `FilePreparationChunk.file_range` field they read. Four guards remain,
-each failing exactly one test when disabled: an out-of-range `file_index`, an occupied slot, an
-unfilled slot and two chunks claiming one `chunk_index`. A chunk carrying an in-range permutation
-of its own file indexes is now accepted rather than rejected, because slot placement puts each
-output where its index says regardless of traversal order.
-
-`preparation_chunks.sort_by_key(chunk_index)` was briefly removed at implementation and replaced
-with a rejection of out-of-order chunks. That reverses the original decision — completion order is
-a scheduler detail and the merge normalises it — so the sort was restored, and only the case a
-stable sort cannot normalise, two chunks sharing an index, is rejected. No test can distinguish
-the sort in the chunked fixture: tokenization interns into the shared base before chunking, so the
-chunk-local deltas are identity and merge order is unobservable there. Rayon's `collect` also
-preserves plan order, so production never delivers a shuffled vector.
-
-**The last 1B5 clause is satisfied in substance, not by its name.** "Own per-source
-`SourcePreparationDelta`" is what `PreparedOwnedSource` already is — a per-source value owning its
-string-table fork, its base length and its result — with `PreparedFileResult` playing the same
-role under a chunk-owned table and `PreparedDiscoverySource` carrying an already-merged result.
-Unifying the three under one name would either force a table onto results that do not need one or
-strip it from the one that does, so the name is not adopted. On the borrowing half, directory
-preparation borrows `retained_text` and the synthetic lanes move their `String` into the record
-rather than copying it. The identity copies that remain — `FrontendSourceFileIdentity`,
-`FileTokens.canonical_os_path`, `ModuleSymbols.canonical_os_path_by_source` — are 1B6 and slice
-group 2C property by the plan's own assignment, not unfinished 1B5 work.
-
-**Root reservation, recorded against 1B1.** `SourceId(1)` is now the deterministic
-`CompilationRoot` record and physical sources begin at 2. `SourceRecord` carries `provenance`, an
-optional `canonical_os_path`, its `kind` and its retained text inside `SourceRecordState`; it does
-not yet carry `line_starts` or `extended_spans`, which arrive in 1C where they are first read.
-`SourceDatabase::get` and `iter` both exclude the root, so a physical-only consumer holding a root
-identity fails in its own lane instead of reading a pathless record as a file;
-`SourceId::physical_index` is the one place that knows the offset. The root is inert storage until a
-slice gives it text and a span — the reservation is what matters, because token identities already
-derive from this domain and shifting it later would invalidate them. Config tokenization passes
-`file_id: None` rather than the fabricated `SourceId::from_index(0)` it previously shared with the
-root; registering config into the project identity context is 1B-gamma1c.
-
-**Single ID domain, recorded against 1B1.** Stage 0 and the compiler previously ran two independent
-zero-based `SourceId` domains, reconciled by canonical path in `resolve_boundary_candidate_source_ids`.
-That helper is deleted. `SourceTreeIndex` now owns only a Stage-0-local row ordinal,
-`SourceRecordIndex`, which never reaches `PreparedModuleInput`, a compiler payload or a diagnostic;
-the compiler assigns the single real `SourceId` from the ordered `SourceRegistrationIndex` Stage 0
-hands it.
-
-This changed assignment order. `SourceDatabase` previously re-derived resolver *display* logical
-paths and sorted those, which contradicts lines 592-594 above naming `SourceLogicalIdentity`'s owned
-portable spelling as the sort key, so the display sort was a latent bug rather than an equal
-alternative. The orders genuinely diverge: for siblings `src/a/@a.moth` and `src/a-b/@b.moth`, `-`
-sorts before `/`, so display order yields `a-b` first while registration order yields `a` first.
-Under the old sort Stage 0's `a` row addressed the database's `a-b` source, leaking a sibling's
-provider into a module's external-import candidate scope;
-`directory_module_external_import_candidates_are_scoped_to_owned_sources_when_display_order_differs`
-is the regression guard and fails on exactly that leak.
-
-**Config barrier, recorded against 1B2 and delivered as 1B-gamma1c.** `config.moth` is registered
-into the project source database before it is tokenized and compiles with that real `SourceId`
-rather than none. A directory project numbers the compilation root 1, config 2 and tree rows from 3.
-Config is registered while no path resolver exists, so its own canonical directory roots the
-logical path and yields a bare `config.moth`; `entry_root` is validated as strictly below the
-project root, so config is never also discovered by traversal and cannot register twice.
-
-No positional bridge survives. `SourceId::from_physical_index` and
-`SourceDatabase::source_id_at_physical_index` mapped a Stage 0 row ordinal to an identity by
-arithmetic, which config's preceding row invalidates. Rather than re-offset them, both are deleted:
-a tree row resolves to its identity through the database's canonical-path lookup, which no prefix
-can shift. `SourceId::physical_index` remains for the dense origin table, which is built over the
-same records and therefore stays aligned.
-
-Config's `SourceId` has no consumer yet. Every ordinary `config.moth` dependency form is rejected
-before the shell-stamping path reads a file identity — private clauses as `DependencyClauseNotAllowed`,
-`export:` blocks as `ExportOutsideModuleRoot`, and the legacy form as `LegacyDependencyClause` — so
-no config diagnostic currently observes the identity. The barrier is what 1B2 asks for; consumption
-arrives when tokens and diagnostics migrate to `SourceId` in 1D and 1E. The registration is instead
-pinned through the identities it shifts: `loads_canonical_config_file_from_project_root` runs
-`load_project_config` and hands its database to directory compilation, then asserts a
-provider-backed module resolves its own candidate, which fails if row-to-identity mapping returns
-to arithmetic. That covers the config-to-frontend handoff, not `bootstrap_project_build` itself;
-nothing yet fails if bootstrap stops supplying the database, because no consumer reads config's
-identity.
-
-**Single-file inventory, recorded against 1B3.** This item is satisfied by the fourth of its own
-clauses rather than the first. A single-file closure cannot be inventoried before the entry scan:
-the scan *is* the discovery, because a file's dependency clauses are only known once that file has
-been header-prepared. The lane therefore takes the deterministic-delta form the same item permits.
-Discovery prepares each file against a traversal-local `SourceDatabase`
-(`source_discovery.rs:759-765`), the complete inventory is then registered in canonical logical
-order (`compilation/single_file.rs:378-385`, sorted at `source/database.rs:56-63`), and
-`rebind_synthetic_prepared_inputs` (`module_preparation.rs:437, 507-561`) moves every prepared
-output onto that authoritative database before any consumer reads an identity from it.
-
-An independent read-only audit traced every identity-bearing field of `FileFrontendPrepareOutput`
-and found no provisional `SourceId` or `DependencyShellId` reaching a consumer: the rebind at
-`headers/types.rs:1335-1368` visits all nine identity-bearing fields transitively, all five
-`PreparedSourceInput` variants are accounted for, and the two side channels that bypass the rebind
-carry paths rather than identities — `SingleFileResolvedReference` stores `source_path` and a
-`PathSyntaxId` (`file_reference_resolution.rs:777-795`) and is joined to the authoritative database
-by canonical path (`single_file.rs:631-710`), while discovery-time diagnostics
-(`source_preparation.rs:231-241`) carry path-based locations stamped during preparation.
-`validate_source_rebinding` and `validate_file_invariants` (`headers/types.rs:1411-1441`) enforce
-this at the boundary, so a future rebind hole is a test failure rather than silent drift.
-
-The other three clauses were already met. Directory and source-package candidates are registered
-serially before any parallel region: `prepare_module_file_chunk` is the single per-file entry point
-for the serial and both parallel strategies (`module_preparation.rs:709-765`) and receives a shared
-`&SourceDatabase`, so allocation there is a type error, pinned by
-`serial_and_parallel_file_preparation_preserve_source_id_assignments`. Authored `SourceId`s are
-reused for adaptor provenance: the Moth-template service consumes the caller's bundle database and
-rejects a bundle that omits its own source (`moth_template.rs:146-156`), and the bundle-free path
-builds a one-element inventory that is canonically ordered by construction.
-
-**Deferred to 1B4/1B5:** the traversal-local database remains a second identity domain that is
-allocated, populated and discarded on every single-file build. That is an allocation cost, not a
-determinism defect, and removing it requires deferring shell stamping until after registration —
-which is exactly the `PreparedSourceInput`-to-`SourceId`-set change 1B5 owns. Deleting it here
-would either duplicate that work or re-tokenize every discovered file.
 
 ### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
 
-Slice order note, recorded at activation: the encoding cannot be selected before byte offsets exist.
-The original order put selection (`1C1`) before the byte cursor (`1C3`), which would have forced a
-throwaway offset tracker duplicating the line-index builder. The byte cursor now comes first.
+The byte cursor and line index landed before the span census. The selected codec is the measured
+22/10 split (`LENGTH_BITS = 10`), with exact append-only overflow rows. The terminator experiment
+was deliberately deferred, not evaluated or rejected by measurement; its measured maximum prize
+was under 2 KB over the census corpus. Evidence and re-entry conditions remain in the layout
+authority and benchmark report.
 
-**Traversal correction, recorded at 1C1.** The clause asks that both the byte cursor and the
-line-index builder ride the existing traversal. That is right for the cursor and wrong for the
-line index, so the two are built in different places.
+`LocalSpan` and its option are four bytes; `SourceSpan` and its option are eight. Inline/extended
+resolution, capacity boundaries, exact joins, source ordering, overlap and containment have focused
+coverage. Empty spans overlap nothing; containment is the operation for insertion points.
 
-Token spans originate in `TokenStream`, so the byte cursor belongs there, threaded through its one
-consumption chokepoint. The line index does not. Three facts decide it. Preparation and
-tokenization hold `&SourceDatabase` (`module_preparation.rs:179-247`), so a worker cannot write a
-line table back into a record; carrying one out through `FileTokens`, the prepared output and the
-merge would thread it through exactly the types 3D and 3E1 delete. `PlainMarkdown` is never
-tokenized (`prepared_source.rs:49-55`), so traversal-threading needs a second mechanism for it
-anyway. And a `\n` byte cannot occur inside a multi-byte UTF-8 sequence, so a byte scan over text
-already in cache vectorises, where the traversal version adds a branch per character to the
-frontend's hottest loop.
+The line index is built once when a snapshot loads. Its line-break set matches tokenization:
+LF, CRLF and bare CR. Empty snapshots have no lines. EOF after a final terminator resolves to
+the preceding visible line end. Unicode scalar columns serve rendering; UTF-16 columns are
+reserved for tooling. The byte cursor remains authoritative while legacy line/column fields survive.
 
-The line index is therefore built at `SourceRecordState::retain_text`, the one point a snapshot
-becomes owned — single-threaded, `&mut`, and uniform across every source kind. That is a scan the
-clause's last sentence permits for the non-tokenized kind and that the tokenized kinds share
-rather than duplicate. Inside that builder the bytes are read twice: a counting reduction sizes
-the table exactly, then the fill writes it. Both passes are branchless reductions over text
-already in cache, and the count is what lets the fill run without a single reallocation.
+1F4 must consume `LineIndex` in both renderers, remove its module-wide dead-code allowance and
+cover code-token carets plus re-anchored tokens such as a discarded template body's closing
+bracket. Their old `CharPosition` columns or lines can be stale. The unused UTF-16 API may keep
+one narrowly documented allowance until the deferred tooling consumer exists.
 
-**Delivered as 1C1.** Byte offsets are exact: every token's range slices precisely the text its
-author wrote, including tokens the lexer returns while skipping trivia. `TokenStream` anchors a
-token's byte start at the character that begins it, separately from `CharPosition`, whose
-columns keep their off-by-one until 1D removes them. `Eof` is a zero-width insertion point.
-`SourceRecord` owns the line-start table; `line_count` and `line_byte_range` reconstruct
-`str::lines()` semantics, and the terminal/dev-server renderers read lines through it instead of
-rescanning the snapshot.
+The loaded-record/registration-slot split is delivered. Frozen-record span APIs exist, but
+production installation and builder retention remain 1D/1F work. Codec operations may keep only
+narrow allowances naming an actual remaining consumer, not blanket suppressions.
 
-**Delivered as 1C2.** `LENGTH_BITS = 10` — the 22/10 split — selected by measurement over 286,779
-exact token spans in 4,585 sources. Every candidate is start-overflow-free, so the rules decide on
-length overflow: rule 3 prefers 12, rule 4 admits 10, 11 and 12 as within 0.1% of it, and the
-largest inline start range among those wins. The terminator experiment was **not** run: the census
-bounds its entire prize at 1,992 bytes for the whole corpus, which does not justify the
-investigation, so it is recorded as a deliberate deferral with no gate evaluated — the clause below
-is amended to match what was actually decided. `just span-census` is the instrument; constants are
-frozen in `docs/compiler-data-layout-design.md` and the evidence is in
-`benchmarks/frontend-optimization-results.md`.
-
-One audit finding is deferred rather than fixed. `run_span_census_command` writes a
-`completed: false` report before it walks, so an interrupted run cannot leave the previous
-successful report looking like fresh evidence; no test would catch that write being deleted, and
-covering it means passing the measurement into a seam built for the test. The reason for accepting
-that is narrow: the JSON is regenerated on demand by `just span-census`, and the constants this
-slice froze live in the two authority documents rather than in the report, so a stale report cannot
-corrupt the delivered decision.
-
-**Delivered as 1C3.** `src/compiler_frontend/source/span.rs` owns the exact span API and
-`span_encoding.rs` owns the frozen 22/10 packing; no caller outside the `source` module sees a
-shift or a mask. Inline words hold an exact start and length, the sentinel length code marks a row
-in that source's append-only table, and no legal range can produce the reserved all-ones word. A
-throwaway probe confirmed the production codec agrees with 1C2's measured prototype bit for bit at
-`LENGTH_BITS = 10`, including the packed word, so the frozen constants and the evidence cannot have
-drifted apart.
-
-One resolver serves both forms: `ExtendedSpanBuilder` and `ExtendedSpanTable` hand out the same
-borrowed view, so a consumer inspects an existing span without freezing or copying a table, and
-resolution works while the builder is still appending. There is one decode path and no trait,
-because there is nothing for a second implementation to be.
-
-Overlap is the non-emptiness of the intersection, decided during the phase audit. The first
-implementation compared endpoints pairwise, which made a zero-length insertion point overlap a
-range when it sat strictly inside and not when it sat on either edge. An empty span now overlaps
-nothing and `contains` answers the question consumers actually ask of an insertion point.
-
-**The frozen-record half of this clause is deferred to 1D.** `SourceRecord` and `SourceDatabase`
-deliberately do not gain an extended-span field: nothing produces a table until tokenization
-migrates, and an unpopulated field would be scaffolding. The frozen side of the resolver is
-therefore `ExtendedSpanTable`, and the authority's `LocalSpan::resolve(&SourceRecord)`,
-`SourceSpan::byte_range`, `SourceSpan::start` and `SourceSpan::end` — every signature taking
-`&SourceDatabase` — land in 1D with their first real consumer rather than as thin delegates now.
-The endpoints are already reachable through `ResolvedByteRange`.
-
-The module carries `allow(dead_code)` until 1D, which the style guide permits for clearly
-identified planned work. **1D must remove the module-wide suppressions and the
-`allow(unused_imports)` on the re-export**; an operation whose consumer has genuinely not landed
-yet keeps an item-level allowance naming that slice, but a module-wide one hides the rest.
-
-**Delivered as 1C4.** `src/compiler_frontend/source/line_index.rs` owns every line and column
-conversion as a borrowed view over one retained snapshot and its line-start table. Nothing is
-precomputed or cached: line lookup is a binary search, and the column scan is linear in that one
-line, so a long line needs no special case. A line's visible text drops its terminator; an offset
-inside a terminator, and EOF after a final one, resolve to the visible end of the line that
-terminator ends, because both column counters walk the terminator-free text. An empty snapshot
-keeps its empty table and still resolves its zero-width EOF to line 0, column 0. Columns count
-Unicode scalar starts before the offset, so an offset inside a scalar counts that scalar and
-nothing slices on a non-boundary. The UTF-16 counter shares those rules and is reserved for an
-LSP-facing caller.
-
-**The line-break set is the tokenizer's, not `str::lines()`.** A bare `\r` starts a new line,
-because `normalize_consumed_carriage_return_newline` already treats one as a break and the lexer
-emits a Newline token for it, so a bare CR ends a statement in the authored language. 1C1's table
-split on `\n` alone, which would have put every diagnostic in a bare-CR file on the wrong line and
-rendered a whole CR-delimited chunk as one line. Aligning the tokenizer to the table instead would
-have changed the language's line-break set, which no data-layout slice may decide. Two tests that
-pinned the old rule were corrected rather than worked around, and `str::lines()` equivalence is now
-asserted only over the LF and CRLF subset where it genuinely holds.
-
-A tokenizer equivalence test pins the two models together: every token's byte-anchored start
-resolves to the line the tokenizer recorded, across LF, CRLF, a whitespace-tail CR, a CR inside a
-quoted string, a CR inside a template body, multi-byte and astral source. That equality now holds
-because `TokenStream::next` became the single owner of the authored line counter: two newline
-helpers were each incrementing it as well, so a CR reached through a whitespace tail, a discarded
-body or a character literal counted its break once while the same CR reached through a string body
-counted it twice. Column equality is deliberately not asserted; the test instead requires the line
-index's own reported column to round-trip back to the token's byte start. That is the evidence
-slice 1H needs before it deletes the older model.
-
-Three obligations follow from this slice:
-
-- The module carries one documented `allow(dead_code)`. `line_of_offset`, `position`,
-  `utf16_column` and `LinePosition` have tests but no production caller until **1F4** migrates the
-  renderers onto byte offsets. **1F4 must retire the module-wide suppression by consuming the
-  scalar API**; `utf16_column` keeps a narrowly scoped allowance until the LSP consumer the
-  architecture document defers actually arrives, because no renderer may use UTF-16 columns.
-- **1F4 must also fix a caret defect this slice exposed but did not touch.** `terminal.rs` and
-  `dev_server.rs` derive their underline column from `CharPosition::char_column`. For a code token
-  the lexer consumes the first character before recording the start, so that column is one scalar
-  right of the authored start and the caret points one column past the offending text.
-  `SourceLocation` has carried exact byte offsets since 1C1, and `LineIndex::position(start_byte)`
-  is the correct position. No existing renderer test asserts caret alignment, so 1F4 owns both the
-  fix and its first test.
-- **A token whose position is inherited rather than captured is a second, worse case for the same
-  migration.** Newline tokens, EOF and a discarded template body's closing bracket are re-anchored
-  by byte alone, so their `CharPosition` keeps whatever the stream held earlier: in
-  `[$note:one\rtwo]` the closing bracket carries line 0 while it is authored on line 1. The
-  byte-anchored line is the correct one, which a test now pins, and 1F4 removes the stale field
-  rather than repairing it.
-
-**Delivered as 1C5.** The invariants the earlier slices left unproven are now tests with
-independent oracles rather than restatements of the code: a deterministic sweep constructs 2,075
-ranges across both regimes, asserts each one chose the regime the architecture's rule requires and
-resolves it through both the live builder and the frozen table; the `u32` end boundary proves
-`EndUnrepresentable` instead of wrapping; and a reference oracle written from the authored
-line-break rule is compared against `LineIndex` at every char boundary of a source mixing LF,
-CRLF, bare CR, empty lines, two-, three- and four-byte scalars and no final newline.
-
-The reserved all-ones word needed a different test than the one first written. A sweep that
-constructed spans and asserted their logical word was not the reserved value could never fail:
-`load_logical` subtracts one from a `NonZeroU32`, so that word is unrepresentable at the span
-level, and `store_logical` panics before a span exists. The invariant lives in the codec's
-admissible domain, so the test now pins that domain and its reason — the last usable extended
-index encodes and decodes back, the next index leaves the domain, and that index is exactly the
-one whose encoding would be the reserved word. The audit that caught this also caught that the
-discarded sweep duplicated an existing 4,194,303-row table fill; the source tests' peak memory
-fell from 85 MB to 51 MB when it went.
-
-Three things the slice settled beyond adding tests:
-
-- Layout widths are asserted beside the type they constrain, not in one shared module. The
-  architecture document said "a dedicated layout test module"; the assertions already lived next to
-  `LocalSpan`, `SourceId` and `PathId`, which is where a width belongs, so the authority was
-  corrected to describe that instead.
-- `LocalSpan` gained a `pub(super)` `logical_word()`, which the generated sweep and the overflow
-  test use to name the chosen regime without the packing becoming public.
-- `live_builder_and_frozen_table_resolve_the_same_range` was deleted: the generated sweep asserts
-  exactly its contract over 2,075 ranges instead of one.
-
-The malformed-source coverage runs through the lexer's own end-of-source path rather than a
-hand-built scanner, and records what that path actually reports: an unfinished `[$` names the `$`
-it could not complete, not a zero-width point at the end of the file.
 
 - [x] **1C1 — byte cursor and line index:** thread one line-index builder and byte-offset cursor through each source kind's existing traversal; use byte-aware iteration such as `char_indices()`; do not add a second pre-scan unless a non-tokenized source kind has no existing traversal
 - [x] **1C2 — span census and encoding selection:** with real byte offsets available, record exact span start/length histograms with boundary buckets for the architecture document's 8–12 length-bit splits over the weighted corpus; implement benchmark-only candidate codecs, select by the accepted gates and record/freeze the constants in the architecture document and evidence report. The Phase 0 source-size census already proved every candidate is start-overflow-free on the current corpus, so this census decides the split on length overflow alone. **Amended at delivery:** the clause originally required running the bounded terminator experiment once. The census showed the experiment's whole prize is under 2 KB, so it was deferred undone and recorded as such in both authorities rather than run; the architecture's gates for it stay open, not failed.
@@ -1288,38 +704,14 @@ it could not complete, not a zero-width point at the end of the file.
   `Unreadable` variant from the record. Moved here from 1B4: the split pays once the three loaded
   boxes exist, and doing it earlier would re-split the same array twice.
 
-**Delivered as 1C6.** `SourceSlot` is the registration row for every candidate and owns the
-identity, path metadata, kind, provenance and load status; `SourceRecord` now exists only because a
-snapshot loaded, so it owns its text and line-start table with no absent or failed state. Both the
-loaded array's index and the failure array's index are private to the source database, so a
-consumer reaches source text, a line index, an excerpt or a read failure only through the
-`SourceId` its slot owns. The extended-span table is the one field the clause names that is not
-there yet: 1C3 deferred the frozen-record half to 1D, which already owns adding it.
-
-The clause's compactness had to be measured rather than assumed. A first split kept the boxed read
-failure inside the slot, which measured 72 bytes; with a 32-byte loaded record that is 104 bytes
-per loaded source against the old row's 96. It would have been a regression, because
-`load_registered_source_texts` attempts every registration row without filtering by kind, so a
-slot that stays unloaded through a completed preload is only the compilation root or a read
-failure. Moving the failure payload into a third cold array took the slot to 64 bytes: a loaded
-source costs exactly the 96 bytes of row storage it cost before, a candidate that never loads
-costs 32 less, and the failure lane leaves the dense array entirely. These are row widths, not
-total retained allocation; Phase 7A owns the retained-memory ledger.
-
-One observation for that ledger, outside this slice: `load_registered_source_texts` retains the
-text of provider-owned files, which exist only to hold an identity and are never compiled.
 
 ### Slice 1D — Migrate tokenization and source preparation
 
 - [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
   — **tokens carry exact spans as of 1D2a; the diagnostic half is 1D3**
-- [x] replace transitional `FileTokens::file_id` and every header/source identity field with final `SourceId`; any remaining path fields are display/migration data only and disappear in Phase 3
-  — **delivered across 1D2b1–1D2b4.** Five `Option<SourceId>` fields survive on purpose and are
-  not leftovers: `ExtendedSpanTable::source_identity` (twice, in `source/span.rs`) is the
-  producer-bug detector for a builder that was never installed, `source/tests.rs:27` asserts the
-  niche keeps the option free, `HeaderParseOptions::entry_file_id` asks whether a file is the entry
-  rather than naming an absent identity, and `module_preparation.rs:211` is a database lookup that
-  can legitimately miss.
+- [ ] keep every authored token stream and header/source identity keyed by its registered
+  `SourceId`; frozen generic syntax remains explicitly identity-free until 1F preserves or remaps
+  its owning context. The compilation root must never stand in for that missing identity.
 - [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
 - [x] give `SourceRecord` its extended-span table, add the authority's `&SourceRecord` and
   `&SourceDatabase` span signatures deferred by 1C3, and remove the `allow(dead_code)` and
@@ -1340,133 +732,19 @@ text of provider-owned files, which exist only to hold an identity and are never
 
 #### 1D sub-slices and the interval bridge
 
-1D's twelve clauses cross the tokenizer, file preparation, the parallel worker boundary and every
-preparation-owned record, so they are split into six accepted slices. Each one reaches green
-validation and is audited on its own:
+1D is split at source ownership boundaries:
 
-- **1D1 — frozen record spans:** give the loaded `SourceRecord` its extended-span table, add the
-  authority's `&SourceRecord` and `&SourceDatabase` span signatures deferred by 1C3, and define the
-  one-shot install that freezes a source's builder into its record.
-  **Delivered.** A loaded record holds `Option<ExtendedSpanTable>`, absent until installed: absence
-  is not "no extended spans", since a source with none installs an empty table. Install is fallible
-  and monotonic, rejecting an absent identity, the compilation root, an unloaded or failed source
-  and a second install. The authority's unqualified names went to the consumer forms that read a
-  frozen record or the database; the producer forms that hold a live builder took a `_with` suffix,
-  which puts the qualifier on the smaller call-site population and keeps the authority's spelling.
-  One `allow(dead_code)` remains on the install. Its caller cannot be the tokenizer: installation
-  needs `&mut SourceDatabase`, and file preparation runs in parallel workers holding `&SourceDatabase`
-  only. The mutable owners are the post-worker merge boundaries — `finalize_reachable_files`, the
-  HTML bundle's final database and `compile_directory_frontend` — which the builder reaches in 1D4,
-  so the allowance dies there.
-- **1D2 — tokenizer emits local spans.** Split in two: the span half and the identity half share
-  `FileTokens` and its seven constructors, but nothing else.
-  - **1D2a — token spans:** one `ExtendedSpanBuilder` per `TokenStream`, an exact `LocalSpan` on
-    every token, and the builder travelling beside the tokens it encoded. Retires the `span.rs` and
-    `span_encoding.rs` module suppressions.
-
-    **Delivered as 1D2a.** `return_token!` routes every authored token through one `mint_token`,
-    so a token's byte range is encoded once by the codec and its legacy `SourceLocation` range is
-    then read back out of that span. `tokenize` returns a `TokenizeOutput`: the tokens plus the
-    one builder whose rows they index. That pair travels as a pair through discovery, source
-    preparation, the parallel worker boundary and header parsing into
-    `FileFrontendPrepareOutput`, so no consumer can reach a source's tokens without the table
-    that resolves them. Borrowing the tokens stays free through `Deref`, which cannot separate
-    them; ownership is only available through `into_parts`.
-
-    Three things the clause did not predict. Tokens that stand in for an authored position — the
-    EOF terminators of declaration, function and loop sub-streams — copy both halves of that
-    position, while tokens with no authored text at all take a zero-width span at offset 0 under
-    a `debug_assert` that their location carries no bytes. A declaration shell can only name its
-    anchor as a `SourceLocation`, so `Token::terminator_at` pairs that anchor with a zero-width
-    span and dies in 1D5 when the shells carry spans of their own; anchoring those terminators on
-    the last initializer token instead moved `MOTH-RULE-0042` off the declaration it belongs to.
-    The `span_encoding.rs` suppression is retired, but `span.rs` keeps item-level allowances on
-    its consumer half — record-based resolution, global spans, joins and the frozen table — each
-    naming the slice that supplies its first caller. The module-wide suppression and the
-    `allow(unused_imports)` on the re-export are both gone: the re-export now lists exactly the
-    four names production uses, and the source tests reach the deferred types through
-    `super::span`.
-  - **1D2b — final token identity:** `FileTokens::file_id` becomes a final `SourceId`, which
-    removes the unregistered-path fallback in `source_identity_facts` and the `Option` unwrap
-    error paths in `export_projection`. Three lanes still produce a token stream with no identity,
-    so each is closed before the type changes.
-    - **1D2b1 — sub-streams keep their source identity:** the declaration initializer, signature
-      default and loop header streams took `None` while the source that authored their tokens was
-      known, and directory discovery tokenized with `None` immediately after resolving that
-      source's registered `SourceId`.
-
-      **Delivered.** Each sub-stream helper now takes the `ScopeContext` that owns the tokens and
-      reads `declaring_file_id` from it, so a call site can no longer choose an identity at all;
-      the identity is whichever one the owning scope carries. Directory discovery passes the
-      identity it already resolved, so a Moth token stream is minted with its final identity
-      rather than acquiring it at the later preparation rebind. The generated generic-body context
-      takes its stream's identity instead of a literal `None`.
-
-      One identity was deliberately **not** carried. A materialised generic body's tokens were
-      authored in the template's file, and freezing could retain that `SourceId` — but a package's
-      published `ModuleMaterialisationContext` is seeded into a consuming project's registry while
-      that project's database mints its own IDs, so the retained number would name the donor's
-      source in a domain where it means something else. Nothing resolves it today, because frozen
-      generic facts dispatch on `PathSyntaxId` alone; it is a wrong identity waiting for 1E's
-      resolvers. Materialisation cannot remap it either: no `SourceDatabase` reaches
-      `StableBodySyntax::materialise`. The artefact keeps carrying its provenance as canonical
-      strings until the frozen identity context of 1F can remap it, so **1D2b4 must keep an
-      identity-free frozen constructor** or supply that remap first.
-
-      Struct field defaults also evaluate in a context with no declaring identity, because
-      `TypeResolutionContext` carries none; their default *tokens* are parsed in a header scope
-      that does have one. That gap is 1D2b3's to close.
-
-      This slice adds no test. Both properties it establishes — a helper that cannot be handed an
-      identity, and a stream minted with the identity its producer already holds — are made
-      unrepresentable-wrong by 1D2b4's type cutover, and a test written now would be one 1D2b4
-      deletes.
-    - **1D2b2 — template bundle registers before preparing:** the HTML direct-template bundle
-      prepares `.mtf`/`.md` sources against an empty database and rebinds afterwards, so its
-      tokens are minted with no identity at all.
-
-      **Delivered.** Each candidate is registered into the traversal-local database immediately
-      before it is prepared, so no production lane tokenizes without an identity and the
-      fabricated-path fallback in `source_identity_facts` is deleted with its last caller: an
-      unregistered source is now a compiler invariant failure. Discovery mints traversal-local
-      IDs in BFS order; the final sorted registration still assigns canonical-logical-order IDs
-      once the candidate set is complete, and the end-of-bundle rebind rewrites them. The
-      provisional and final logical paths are identical — both come from the same resolver and
-      canonical path — so only the numeric identity moves.
-    - **1D2b3 — config and synthetic lane identity:** `ConfigCompilationRequest` and the remaining
-      synthetic producers carry an optional identity that the final type cannot accept.
-
-      **Delivered.** `SourceId::COMPILATION_ROOT` names the record every database already reserves
-      at index 0, and the CLI command-input lexer mints its stream with it: command text belongs to
-      the whole compilation, not to a file, and the root record owns no path or snapshot, so a
-      physical-source lookup still finds nothing. `ConfigCompilationRequest::file_id` is a plain
-      `SourceId`; `compile_project_config_file` takes `&mut SourceDatabase` and always registers,
-      and a config file reached without a database is now a compiler-invariant failure rather than
-      an unregistered compile. Directory bootstrap is the only production caller and always
-      supplies one. Synthetic discovery registers before it tokenizes, and struct field defaults
-      evaluate in a scope carrying the identity of the header that authored them, threaded through
-      a required `TypeResolutionContext` field so no call site can decline it.
-
-      No test added, on the 1D2b1 grounds. Mutating either identity back to `None` leaves the suite
-      green: frontend preparation rebinds the discovery identity before header parsing, and
-      field-default re-evaluation runs on resolved RPN that never reads the declaring file. Both
-      become unrepresentable-wrong at 1D2b4 and by construction respectively.
-    - **1D2b4 — final token identity type cutover:** the `Option` disappears from `FileTokens`,
-      `source_identity_facts` and the prepared-output identity fields.
-      **Delivered.** The cutover pulled the whole identity chain that feeds a token stream with
-      it: `ScopeShared::declaring_file_id`, `TypeResolutionContext::declaring_file_id`, the
-      emitter's scope input, `PreparedFileReference::source_file` and `Stage0ResolutionFacts::
-      lookup` are all plain `SourceId` now, because a sub-stream helper reading an optional
-      identity to build a non-optional one can only panic or fabricate. Five absence errors died
-      with the `Option`: two in `export_projection.rs`, the dependency-shell stamp, the ordinary
-      Stage 0 lookup and the file-reference resolver. `SourceModuleOriginTable::origin_for` still
-      rejects the compilation root, so an export-targeted header that names it is still an error —
-      the two export tests that covered the absent case now cover that one.
+- **1D1 — frozen record spans:** delivered codec and one-shot install API. Production installation
+  remains open until an exclusive owner can finalize the source after its last span producer.
+- **1D2 — tokenizer spans and identity:** delivered exact local spans and required registered
+  inputs for authored tokenization. `TokenizeOutput` carries the builder beside its tokens.
+  Frozen generic materialisation must retain honest identity absence until 1F supplies its context.
+- **1D4 — builder lifetime and source preparation delta:** comes next. Preserve each builder on
+  success and diagnosed paths, across file aggregation and all later span-producing stages.
+  File/chunk merges move source-local data; they do not freeze builders early or mutate shared
+  databases. Finalization happens under the outcome's exclusive owner.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
-- **1D4 — source preparation delta:** file workers return `SourcePreparationDelta` values keyed by
-  final `SourceId`, each owning its diagnostics, token/header preparation and span builder; the
-  prepared-source handoff drops its transitional key and its source-location string-ID remapping.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
   shells, source contracts, const fragments and source-kind adapters carry spans.
 - **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
@@ -1475,27 +753,24 @@ validation and is audited on its own:
 **Interval bridge.** A token cannot switch representation and migrate its consumers in the same
 slice: the tokenizer has hundreds of downstream location readers, and 1E exists precisely to move
 them. So from 1D2 until 1H a token carries both its exact span and the legacy `SourceLocation`. The
-span is the authority: the legacy value is derived from it at construction, never computed
-independently, so the two cannot disagree, and a test pins that every token's legacy byte range
-equals its span's resolved range. 1H deletes the legacy field once 1E has moved its readers.
+span is authoritative for tokenizer-minted tokens, and the legacy range is derived from it.
+The explicitly temporary `Token::terminator_at` is an exception: it carries the declaration's
+legacy anchor but a source-start local span. 1D5 must replace it with the shell's exact span,
+and 1H deletes the legacy field after all consumers have migrated.
 
-**1D3 sizing, recorded before starting it.** A read-only inventory of every diagnostic producer in
-the tokenizer and in file preparation found one structural fact that changes the slice order, and
-one that bounds the slice.
+**1D3 prerequisite.** `prepare_header_syntax` currently consumes the headers and drops the
+unmoved span builders. In addition, the directory and direct-template databases are already
+shared through `Arc` before preparation. Calling the existing `&mut SourceDatabase` installer
+at their file merge is therefore impossible without changing ownership.
 
-*The order fact.* A diagnostic can only claim an exact span while the span data it names is still
-resolvable. An inline `LocalSpan` needs nothing, but an extended one needs its
-`ExtendedSpanBuilder` or the frozen table. `prepare_header_syntax` moves each prepared file's
-headers out and drops that file's un-moved `span_builder`
-(`headers/parse_file_headers.rs:205-216`, and `PreparedHeaderSyntax` at `headers/types.rs:55-92`
-has no builder field). Every `bind_module_headers`, public-export and binding-environment
-diagnostic is produced after that drop, and `SourceRecord::install` for the frozen table is still
-the test-only, `allow(dead_code)` API 1D1 left behind, because installing needs
-`&mut SourceDatabase` and preparation workers hold `&SourceDatabase`. So the post-file half of 1D3
-cannot be exact until 1D4 gives the delta's builder to a mutable merge boundary that installs it.
-**Do 1D4 before 1D3, or split 1D3 into the pre-merge lane (tokenizer and in-file preparation, where
-the builder is live) and the post-merge lane (which consumes 1D4's installed table).** The
-pre-merge half is genuinely independent and can land first either way.
+1D4 must carry the live builders into module/direct-service ownership and keep one read-only
+resolver available before finalization. Later parsers still create joined or insertion spans, so
+file preparation is not the final span-producing boundary. Freeze each builder exactly once at
+the actual last producer, then assemble the source lookup context at 1F. Do not add a shared
+lock or `OnceLock` installation path to evade the exclusive-owner requirement.
+
+1D3's tokenizer/in-file lane can use the live builder. Its post-file lane depends on this retained
+resolver ownership, not on an early frozen table.
 
 *The bounding fact.* `SourceLocation` must not gain a required span field. Outside this lane there
 are hundreds of `CompilerDiagnostic::`/`CompilerError::` construction and adapter sites across AST,
@@ -1545,6 +820,7 @@ a public boundary supporting both location models.
 - [ ] **1F2 — pre-merge boundary cleanup:** make file stages return `SourcePreparationDelta` with a move-only diagnostic bag and make module stages return a move-only legacy diagnostic batch plus their local identity deltas; create a boundary message set only after the final canonical build/package merge instead of cloning `StringTable` through `from_*_ref` helpers
 - [ ] **1F3 — transitional message ownership:** only at the final build/package render boundary, make current `CompilerMessages` temporarily own diagnostics, existing type context and `Arc<FrozenIdentityContext>` rather than a mutable/deep-cloned string table; make it move-only and use an outer `Arc` only where a host genuinely shares it; module outcomes must not freeze or clone a context before their deltas merge; name this bridge and delete it in Slice 4I
 - [ ] **1F4 — renderer migration:** resolve paths, excerpts and line/column positions through retained source snapshots and remove filesystem rereads used only for excerpts. Both renderers must derive line and column from `SourceLocation`'s exact byte offsets through `LineIndex`, which fixes the `char_column` caret that currently points one scalar past the offending text and the stale line an inherited position can carry; add the first caret-alignment regression tests, covering both a captured code-token column and a re-anchored token such as a discarded template body's closing bracket. Consuming `line_of_offset`, `position` and `LinePosition` retires 1C4's module-wide `allow(dead_code)`; `utf16_column` keeps a narrowly scoped documented allowance until the LSP consumer the architecture document defers actually arrives
+- [ ] **1F5 — frozen generic source ownership:** preserve each retained generic body's real source identity with its owning frozen identity context, or canonically remap its exact source spans into the consuming context before publication. Materialised tokens, generated artefacts and their diagnostics must never expose detached donor IDs. Delete the identity-free frozen constructor and optional identity carrier introduced by the 1D interval correction, restoring required `SourceId` throughout the token/scope chain. Cover cross-module and independently compiled package materialisation, including extended spans after the donor's mutable builders have dropped.
 - [ ] preserve terminal, terse and dev-server code/span identity
 - [ ] define synthetic/compilation-root display and provenance explicitly
 - [ ] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
@@ -1598,9 +874,9 @@ Complete the common phase close, plus:
 
 ### Summary, reasoning and context
 
-The source database now uses `PathId`, but the rest of the compiler still owns vector-backed complete
-paths. This phase replaces those paths without adding a contended global interner or another
-scheduling system.
+Phase 2 begins only after 1A has migrated compiler source slots to `PathId` and Phase 1 has
+passed its exit gates. It replaces the remaining vector-backed complete compiler paths without
+adding a contended global interner or another scheduling system.
 
 ### Slice 2A — Extend the final path-table foundation beyond source registration
 
@@ -1681,8 +957,8 @@ Evaluate only these production candidates:
 
 - [ ] prototype both behind benchmark-only code or short-lived branches
 - [ ] measure parser iteration, cache behaviour, retained capacity and validation overhead
-- [ ] choose AoS when results are materially tied because consumers normally need shape and span together
-- [ ] choose SoA only for a repeatable material memory or throughput improvement
+- [ ] preserve the layout authority's SoA baseline when results are materially tied
+- [ ] choose compact AoS only for a repeatable material improvement over SoA, as the authority requires
 - [ ] record the decision in the architecture document and remove the rejected implementation
 
 ### Slice 3B — Introduce one token taxonomy and descriptor authority

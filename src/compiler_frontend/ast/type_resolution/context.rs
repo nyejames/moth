@@ -43,7 +43,8 @@ use std::sync::Arc;
 pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
     /// Authored source identity used when nested semantic scopes resolve file-owned references.
-    pub declaring_file_id: SourceId,
+    /// It is absent only for identity-free materialised generic bodies.
+    pub declaring_file_id: Option<SourceId>,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -77,7 +78,7 @@ pub(crate) struct TypeResolutionContext<'a> {
 ///       have to remember the field order of the context constructor.
 pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    pub declaring_file_id: SourceId,
+    pub declaring_file_id: Option<SourceId>,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -97,7 +98,7 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
 impl<'a> TypeResolutionContext<'a> {
     /// Construct a minimal context for isolated type-resolution tests.
     ///
-    /// A context built here has no authored file, so it resolves against the compilation root.
+    /// This test-only helper intentionally leaves the authored source identity absent.
     #[cfg(test)]
     pub(crate) fn from_declaration_table(
         declaration_table: &'a Rc<TopLevelDeclarationTable>,
@@ -105,7 +106,7 @@ impl<'a> TypeResolutionContext<'a> {
     ) -> Self {
         Self {
             declaration_table,
-            declaring_file_id: SourceId::COMPILATION_ROOT,
+            declaring_file_id: None,
             visible_declaration_ids: None,
             visible_external_symbols: None,
             visible_source_bindings: None,

@@ -8,7 +8,6 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
@@ -182,13 +181,7 @@ impl StableBodySyntax {
         // contexts can cross compilation databases. Phase 1F supplies the remapped consuming
         // identity.
         Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen_with_identity(
-                declaration_path,
-                SourceId::COMPILATION_ROOT,
-                None,
-                tokens,
-                path_syntax,
-            ),
+            file_tokens: FileTokens::new_frozen(declaration_path, None, tokens, path_syntax),
             resolution_facts,
         })
     }
