@@ -304,19 +304,7 @@ pub(super) fn prepare_owned_source_input(
         }
     };
     let tokens = if *source_kind == SourceFileKind::Moth {
-        let interned_path = InternedPath::try_from_filesystem_path(
-            record.canonical_path(),
-            string_table,
-        )
-        .map_err(|NonUtf8PathComponent { path }| {
-            SourceDiscoveryError::from(CompilerError::file_error(
-                &path,
-                format!(
-                    "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                ),
-                string_table,
-            ))
-        })?;
+        let interned_path = source_files.legacy_logical_path(source_id);
         Some(
             tokenize(
                 source_code,
@@ -561,7 +549,7 @@ fn finalize_reachable_files(
 
             prepared_output.rebind_source_identity(
                 final_source_id,
-                final_record.logical_path.clone(),
+                source_files.legacy_logical_path(final_source_id),
                 canonical_os_path,
             )?;
             prepared_output.freeze_path_syntax(string_table)?;

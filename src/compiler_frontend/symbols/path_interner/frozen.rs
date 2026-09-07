@@ -1,27 +1,52 @@
-//! Lookup-only path-table operations.
+//! Dense path-table storage and lookup-only operations.
 //!
 //! WHAT: resolves parents and components, then renders portable spellings from dense path nodes
 //!       while accepting caller-owned scratch storage for component walks.
-//! WHY:  frozen build identities must be inspectable without mutable interning or per-operation
-//!       component-vector ownership.
+//! WHY:  the mutable builder and frozen readers share one parent-linked table, while filesystem
+//!       `PathBuf` and source snapshot identity remain separate owners.
 
 use super::builder::PathNode;
 use super::id::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
-/// Immutable path trie produced by [`super::builder::PathInternerBuilder::freeze`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Immutable path trie storage shared by the mutable builder and frozen readers.
+///
+/// The table owns only parent links, component IDs and depths. The builder owns the reverse
+/// lookup while paths are being interned, then moves this table out when it freezes.
+#[derive(Debug, PartialEq, Eq)]
 pub struct PathTable {
     nodes: Vec<PathNode>,
     depths: Vec<u32>,
 }
 
 impl PathTable {
-    pub(super) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
-        debug_assert_eq!(nodes.len(), depths.len());
-        debug_assert!(!nodes.is_empty());
-        debug_assert!(nodes[PathId::ROOT.index()].parent.is_none());
-        Self { nodes, depths }
+    pub(super) fn new() -> Self {
+        // The root's absent parent is the table terminator. Its component is a valid-shaped
+        // placeholder that is never read.
+        let root = PathNode {
+            parent: None,
+            component: StringId::from_index(0),
+        };
+        Self {
+            nodes: vec![root],
+            depths: vec![0],
+        }
+    }
+
+    /// Append one child node and return its complete-path identity.
+    pub(super) fn append_child(&mut self, parent: PathId, component: StringId) -> PathId {
+        let parent_depth = self.depth(parent);
+        let child = PathId::from_index(self.nodes.len());
+        let child_depth = parent_depth
+            .checked_add(1)
+            .expect("path depth must fit in u32");
+
+        self.nodes.push(PathNode {
+            parent: Some(parent),
+            component,
+        });
+        self.depths.push(child_depth);
+        child
     }
 
     /// Return the parent path, or `None` for the root.

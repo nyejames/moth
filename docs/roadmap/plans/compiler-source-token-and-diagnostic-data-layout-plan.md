@@ -77,14 +77,13 @@ CURRENT_SLICE:
 - Non-goals: full semantic path migration, source loading policy and span-builder lifecycle changes.
 
 LAST_GOOD_COMMIT:
-- `be002c2d2` — branch-review corrections, audited and validated. Honest frozen identity,
-  strict ordinary header identity and recovered predecessor evidence are committed.
+- `696f22688` — immutable frontend service borrowing, validated and independently reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- 1B6 borrowing and its caller/test migrations are ready for the checkpoint commit.
+- Source-path implementation, focused checks, full validation and independent reviews are complete.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
-- 1A implementation starts after that checkpoint; its ownership contract is fixed below.
+- Main restored the removed source iterator and corrected traversal-order path interning.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -166,17 +165,18 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- 1B6 gate: `cargo fmt --all && just validate` passed.
-- Results: 5052 + 17 + 825 Rust tests, 1951/1951 integration cases, source audit of
-  1318 files with zero findings and all three scaling series within budget.
-- Focused checks: 10 frontend pipeline tests and 63 preparation tests passed.
-  An initial `module_preparation_tests` filter selected zero tests and is not coverage.
-- Actual CLI checks of `generic_fn_nested_generic_body_file_value_collision_success/input` and
-  `exported_generic_private_content_success/input` both completed without errors or warnings.
-- Independent production ownership and fixture migration reviews found no required corrections.
-- Main restored the handoff's accidentally removed `SortedHeaders` argument, fixed missed
-  borrowed callers and removed the test facade's redundant per-method forwarding layer.
-- No new pointer-identity test was added: Rust borrowing enforces this internal ownership contract.
+- Source-path focused checks passed: 56 source tests, 9 interner tests, 65 Stage 0 filesystem
+  tests, 63 preparation tests and the relocated duplicate-identity invariant test.
+- The strengthened ordering regression failed on the worker handoff with unequal `PathId`s
+  across reversed inputs, then passed after canonical sorting was moved before interning.
+- Both generic/content CLI smoke checks passed. A malformed dependency CLI check rendered
+  `MOTH-SYNTAX-0018`, logical `@page.moth` and the retained authored source excerpt.
+- Independent source-identity and external-consumer reviews accepted the implementation. Two stale
+  diagnostic path assertions were migrated from canonical OS paths to logical paths, preserving
+  their codes, source precision and structured reason checks.
+- Final `just validate` passed: 5053 + 17 + 825 Rust tests, 1951/1951 integration cases,
+  1319 source-audited files with zero findings, 82 benchmark preflights, all three scaling
+  budgets and clean timer erasure. Docs check completed without errors or warnings.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -185,7 +185,7 @@ DOCS_IMPACT:
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
 
-- next action: checkpoint 1B6, then implement the reopened source-path foundation
+- next action: implement and validate the reopened source-path foundation
 
 ---
 
@@ -591,21 +591,21 @@ green before later layout work proceeds.
 ### Slice 1A — Add the final path foundation required by source records
 
 - [x] introduce `PathId(NonZeroU32)` and a dense parent/component path table
-- [ ] intern source logical paths into the database-owned build base before string/path forks
-- [ ] use `PathId` in compiler source registration slots immediately; reuse the existing
+- [x] intern source logical paths into the database-owned build base before string/path forks
+- [x] use `PathId` in compiler source registration slots immediately; reuse the existing
   interner in `SourceDatabase` and remove the Stage 0 path table and fields retained only
   for its test-only entry-root-relative lookup
 - [x] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
 - [x] add layout, root, parent, append, equality and rendering tests
 - [x] defer the full compiler `InternedPath` migration to Phase 2
 
-`SourceLogicalIdentity` deliberately keeps its owned portable spelling as the `SourceId` sort key.
-`PathId` is assigned in interning order, so it can never be a sort key, and replacing the string
-forced a hand-rolled byte comparator that was rejected. The two representations converge in Phase 2.
+`SourceLogicalIdentity` keeps its owned portable spelling as the `SourceId` sort key.
+Canonical source order is established before path interning. Numeric `PathId` allocation order
+must never be used to sort source candidates.
 
-Interning is exactly as strict as the `FxHashMap<String, SourceId>` key it replaced: separators are
-never normalised away, and only the empty spelling denotes the root. The frozen table owns nodes and
-depths only; the child map lives and dies with the builder.
+Source paths preserve exact `Path::components()` semantics and strict UTF-8 validation, matching
+their predecessor. Portable semantic spellings preserve their component separators instead.
+The frozen table owns nodes and depths only; the child map lives and dies with the builder.
 
 ### Slice group 1B — Replace per-module source tables with build-lifetime registration
 
@@ -613,7 +613,7 @@ depths only; the child map lives and dies with the builder.
 - [x] **1B2 — registration barriers:** register config/bootstrap sources before config tokenization, then each project/package registration index before structural preparation; keep config and `ProjectGlobalsInterface` in the same project identity context; give separately compiled packages their own context; sort by canonical logical identity rather than reachability or completion order
 - [x] **1B3 — single-file, directory and synthetic sources:** build a bounded candidate inventory before the single-file entry scan; pre-register directory/source-package candidates before parallel work; reuse authored `SourceId`s for header/adaptor provenance; permit genuinely late synthetic sources only through deterministic deltas merged before an ID escapes
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
-- [x] **1B5 — module inputs and worker ownership:** replace `PreparedSourceInput` payloads with ordered `SourceId` sets; give `SourceRecord` the `kind` its readers stop deriving from extensions when those payloads go; make structural preparation/module work borrow registered identity/text and own per-source `SourcePreparationDelta`; place finalized records into preassigned slots at the existing canonical merge; validate every selected slot was loaded/prepared exactly once
+- [ ] **1B5 — module inputs and worker ownership:** ordered candidate `SourceId` sets and canonical file/chunk merge checks are delivered. The remaining per-source `SourcePreparationDelta`, live span-builder retention and final record installation belong to 1D4/1F; this item remains open until those ownership boundaries are implemented.
 - [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
@@ -647,11 +647,16 @@ finished mutable/frozen lifecycle. 1D4 must preserve the source builder through 
 1F owns the final lookup-only boundary. Shared interior mutation is not a substitute for that
 ownership split.
 
-The source path foundation is incomplete. Move the existing path interner into `SourceDatabase`
-as the one source identity base. Stage 0's retained path fields and table serve only a test lookup
-and must be deleted, preserving `SourceLogicalIdentity` ordering and authored source classification.
-The source `PathId`/legacy-path bridge is permitted only through 2D. It reconstructs transient
-components from the table for existing consumers, never from rendered text or a stored second path.
+The source path foundation is delivered. `SourceDatabase` owns the existing path interner as its
+one source identity base. Stage 0's test-only path table and fields are gone; its stable logical
+ordering and authored classification remain unchanged. The source `PathId`/legacy-path bridge
+ends at 2D and reconstructs transient components from table nodes, never rendered text.
+
+Current bridge callers are source discovery/rebinding, frontend identity and AST entry setup,
+content dependency targets, AST file-value scope, direct-template entry setup, HTML template
+bundle rebinding/owner diagnostics and the source-size error path. Test callers are source
+invariants, frontend pipeline, module dependencies, template heads, source snapshot rendering and
+Stage 0 preparation fixtures. No new consumer may adopt this migration bridge.
 
 `ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
 `FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1 respectively. Their existing

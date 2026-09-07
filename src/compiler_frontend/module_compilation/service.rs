@@ -375,6 +375,8 @@ fn run_semantic_stages(
     // module's complete owned candidates, including sources not reached by the header walk, and
     // therefore preserve the pre-slice per-module source-table scope for external imports.
     let source_logical_paths = if context.project_path_resolver.is_some() {
+        let path_table = compiler.source_files.paths();
+        let mut path_scratch = Vec::new();
         candidate_source_ids
             .iter()
             .map(|source_id| {
@@ -382,9 +384,11 @@ fn run_semantic_stages(
                     .source_files
                     .get(*source_id)
                     .map(|identity| {
-                        identity
-                            .logical_path
-                            .to_portable_string(&compiler.string_table)
+                        path_table.render_portable(
+                            identity.logical_path,
+                            &compiler.string_table,
+                            &mut path_scratch,
+                        )
                     })
                     .ok_or_else(|| {
                         CompilerMessages::from_error_ref(

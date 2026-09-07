@@ -612,17 +612,19 @@ fn synthetic_prepared_identity_snapshot(
     source_files: &SourceDatabase,
 ) -> Vec<SyntheticPreparedIdentitySnapshot> {
     let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
+    let path_table = source_files.paths();
+    let mut path_scratch = Vec::new();
     let mut snapshot = source_files
         .iter()
         .map(|identity| {
-            let logical_path = &identity.logical_path;
+            let logical_path = source_files.legacy_logical_path(identity.id);
             let file_id = identity.id;
             for header in prepared
                 .semantic
                 .prepared_header_syntax
                 .headers
                 .iter()
-                .filter(|header| header.source_file == *logical_path)
+                .filter(|header| header.source_file == logical_path)
             {
                 assert_eq!(header.tokens.file_id, Some(file_id));
                 assert_eq!(
@@ -634,7 +636,7 @@ fn synthetic_prepared_identity_snapshot(
                         .tokens
                         .tokens
                         .iter()
-                        .all(|token| token.location.scope == *logical_path),
+                        .all(|token| token.location.scope == logical_path),
                     "header token locations must use the final logical source scope"
                 );
                 assert!(
@@ -643,20 +645,20 @@ fn synthetic_prepared_identity_snapshot(
                         .path_syntax
                         .paths()
                         .iter()
-                        .all(|path| path.location.scope == *logical_path),
+                        .all(|path| path.location.scope == logical_path),
                     "header path locations must use the final logical source scope"
                 );
             }
             let clauses = module_symbols
                 .file_dependency_clauses_by_source
-                .get(logical_path)
+                .get(&logical_path)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             let shell_ids = clauses
                 .iter()
                 .map(|clause| {
-                    assert_eq!(clause.location.scope, *logical_path);
-                    assert_eq!(clause.dependency.location.scope, *logical_path);
+                    assert_eq!(clause.location.scope, logical_path);
+                    assert_eq!(clause.dependency.location.scope, logical_path);
                     assert_eq!(
                         clause.dependency.dependency_shell_id.source, file_id,
                         "rebased shell source must belong to its owning prepared file"
@@ -666,15 +668,15 @@ fn synthetic_prepared_identity_snapshot(
                 .collect::<Vec<_>>();
             let selections = module_symbols
                 .dependency_selections_by_source
-                .get(logical_path)
+                .get(&logical_path)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             let selected_source_names = selections
                 .iter()
                 .map(|selection| {
-                    assert_eq!(selection.source_location.scope, *logical_path);
+                    assert_eq!(selection.source_location.scope, logical_path);
                     if let Some(alias) = &selection.local_alias {
-                        assert_eq!(alias.location.scope, *logical_path);
+                        assert_eq!(alias.location.scope, logical_path);
                     }
                     prepared
                         .semantic
@@ -685,7 +687,11 @@ fn synthetic_prepared_identity_snapshot(
                 .collect::<Vec<_>>();
 
             SyntheticPreparedIdentitySnapshot {
-                logical_path: logical_path.to_portable_string(&prepared.semantic.string_table),
+                logical_path: path_table.render_portable(
+                    identity.logical_path,
+                    &prepared.semantic.string_table,
+                    &mut path_scratch,
+                ),
                 file_id,
                 shell_ids,
                 selected_source_names,
@@ -948,9 +954,13 @@ fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees(
     )
     .expect("indexed inventory should register");
 
+    let path_table = source_files.paths();
+    let mut path_scratch = Vec::new();
     let assigned_logical_paths = source_files
         .iter()
-        .map(|record| record.logical_path.to_portable_string(&string_table))
+        .map(|record| {
+            path_table.render_portable(record.logical_path, &string_table, &mut path_scratch)
+        })
         .collect::<Vec<_>>();
     let mut flat_portable_order = assigned_logical_paths.clone();
     flat_portable_order.sort();
@@ -2795,9 +2805,7 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
             .primary_location
             .scope
             .to_path_buf(&messages.string_table),
-        src.join("@page.moth")
-            .canonicalize()
-            .expect("entry path should canonicalize")
+        PathBuf::from("@page.moth")
     );
     assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
     assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);

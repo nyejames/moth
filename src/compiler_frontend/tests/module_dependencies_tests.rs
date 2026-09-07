@@ -1322,16 +1322,8 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         .get_by_canonical_path(&icon_template)
         .expect("icon identity")
         .id;
-    let root_logical = source_files
-        .get(root_file_id)
-        .expect("root identity")
-        .logical_path
-        .clone();
-    let icon_logical = source_files
-        .get(icon_file_id)
-        .expect("icon identity")
-        .logical_path
-        .clone();
+    let root_logical = source_files.legacy_logical_path(root_file_id);
+    let icon_logical = source_files.legacy_logical_path(icon_file_id);
 
     let entry_path_buf = root_logical.to_path_buf(&string_table);
     let mut prepared_outputs = Vec::new();

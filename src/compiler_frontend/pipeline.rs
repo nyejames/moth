@@ -50,7 +50,7 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizeOutput, TokenizerEntryMode};
@@ -234,7 +234,7 @@ fn source_identity_facts(
         })?;
 
     Ok((
-        record.logical_path.clone(),
+        source_files.legacy_logical_path(record.id),
         record.id,
         record.canonical_os_path.clone(),
     ))
@@ -402,23 +402,13 @@ impl<'a> CompilerFrontend<'a> {
         } = request;
 
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
-            Some(identity) => identity.logical_path.clone(),
-            None => match InternedPath::try_from_filesystem_path(
-                entry_file_path,
-                &mut self.string_table,
-            ) {
-                Ok(path) => path,
-                Err(NonUtf8PathComponent { path }) => {
-                    let error = CompilerError::file_error(
-                        &path,
-                        format!(
-                            "Entry file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                        ),
-                        &mut self.string_table,
-                    );
-                    return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                }
-            },
+            Some(identity) => self.source_files.legacy_logical_path(identity.id),
+            None => {
+                let error = CompilerError::compiler_error(format!(
+                    "entry file {entry_file_path:?} was not registered before AST construction"
+                ));
+                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+            }
         };
 
         let file_value_resolution = Some(Rc::new(FileValueResolutionServices {

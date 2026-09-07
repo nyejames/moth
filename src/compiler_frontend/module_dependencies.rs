@@ -94,10 +94,11 @@ impl ContentSourceTargets {
             let Some(identity) = source_files.get(*source) else {
                 continue;
             };
+            let logical_path = source_files.legacy_logical_path(identity.id);
 
             targets.insert(
                 (reference.source_file, reference.path_syntax),
-                content_constant_path(&identity.logical_path, string_table),
+                content_constant_path(&logical_path, string_table),
             );
         }
 

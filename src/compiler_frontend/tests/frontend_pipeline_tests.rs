@@ -131,11 +131,10 @@ impl FrontendProject {
         let logical_paths = canonical_files
             .iter()
             .map(|canonical_file| {
-                let logical_path = source_files
+                let identity = source_files
                     .get_by_canonical_path(canonical_file)
-                    .expect("source file identity should exist")
-                    .logical_path
-                    .clone();
+                    .expect("source file identity should exist");
+                let logical_path = source_files.legacy_logical_path(identity.id);
                 (canonical_file.clone(), logical_path)
             })
             .collect::<Vec<_>>();

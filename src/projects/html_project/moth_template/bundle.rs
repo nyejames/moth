@@ -292,7 +292,11 @@ pub(super) fn prepare_file_value_bundle(
             )
         })?;
         prepared
-            .rebind_source_identity(record.id, record.logical_path.clone(), canonical_os_path)
+            .rebind_source_identity(
+                record.id,
+                source_files.legacy_logical_path(record.id),
+                canonical_os_path,
+            )
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         prepared
             .freeze_path_syntax(string_table)
@@ -319,7 +323,7 @@ pub(super) fn prepare_file_value_bundle(
                 )
             })?;
         let owner_source_file = owner.id;
-        let owner_logical_path = owner.logical_path.clone();
+        let owner_logical_path = source_files.legacy_logical_path(owner_source_file);
         let path_syntax = resolved.path_syntax;
         let class = resolved.class;
         let mut outcome = resolved_outcome_from_physical(resolved, &source_files, string_table)?;

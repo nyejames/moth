@@ -151,13 +151,12 @@ fn insert_keeps_authored_kind_when_canonical_extension_disagrees() {
     );
 }
 
-/// The 64-byte registration row holds identity metadata plus a load status that is a discriminant
-/// and a four-byte index. The 48-byte loaded record owns snapshot payload, line starts and the
-/// optional frozen extended-span table. The third `Box` is niche-encoded, so an absent table costs
-/// no additional space. Failure payload lives in its own database array.
+/// The 48-byte registration row holds compact identity metadata plus a load status that is a
+/// discriminant and a four-byte index. The 48-byte loaded record owns snapshot payload, line starts
+/// and the optional frozen extended-span table. Failure payload lives in its own database array.
 #[test]
 fn source_record_identity_row_stays_within_its_measured_width() {
-    assert_eq!(size_of::<SourceSlot>(), 64);
+    assert_eq!(size_of::<SourceSlot>(), 48);
     assert_eq!(size_of::<SourceRecord>(), 48);
 }
 
@@ -325,14 +324,8 @@ fn source_database_build_orders_records_by_portable_logical_path() {
     let second = SourceDatabase::build(reversed_paths, entry_path, None, &mut second_strings)
         .expect("source identities should build in reverse input order");
 
-    let first_logical_paths = first
-        .iter()
-        .map(|record| record.logical_path.to_path_buf(&first_strings))
-        .collect::<Vec<_>>();
-    let second_logical_paths = second
-        .iter()
-        .map(|record| record.logical_path.to_path_buf(&second_strings))
-        .collect::<Vec<_>>();
+    let first_logical_paths = render_source_logical_paths(&first, &first_strings);
+    let second_logical_paths = render_source_logical_paths(&second, &second_strings);
     assert_eq!(first_logical_paths, second_logical_paths);
     assert_eq!(
         first_logical_paths,
@@ -342,6 +335,17 @@ fn source_database_build_orders_records_by_portable_logical_path() {
             PathBuf::from("zeta.moth"),
         ]
     );
+
+    for path in &input_paths {
+        let first_slot = first
+            .get_by_canonical_path(path)
+            .expect("registered source");
+        let second_slot = second
+            .get_by_canonical_path(path)
+            .expect("registered source");
+        assert_eq!(first_slot.id, second_slot.id);
+        assert_eq!(first_slot.logical_path, second_slot.logical_path);
+    }
 
     for (index, record) in first.iter().enumerate() {
         assert_eq!(record.id, SourceId::from_index(index + 1));
@@ -381,6 +385,8 @@ fn source_ids_are_distinct_and_same_module_sources_follow_portable_order() {
     assert_ne!(alpha_a, beta_root);
     assert_ne!(alpha_z, beta_root);
 
+    let path_table = database.paths();
+    let mut scratch = Vec::new();
     let alpha_logical_paths = database
         .iter()
         .filter(|record| {
@@ -389,7 +395,7 @@ fn source_ids_are_distinct_and_same_module_sources_follow_portable_order() {
                 .as_deref()
                 .is_some_and(|path| path.starts_with("/project/alpha"))
         })
-        .map(|record| record.logical_path.to_portable_string(&string_table))
+        .map(|record| path_table.render_portable(record.logical_path, &string_table, &mut scratch))
         .collect::<Vec<_>>();
     assert_eq!(alpha_logical_paths, vec!["a.moth", "z.moth"]);
 }
@@ -704,11 +710,7 @@ fn source_database_resolves_retained_text_by_logical_path() {
         .get_by_canonical_path(&source_path)
         .expect("source should be registered")
         .id;
-    let logical_path = database
-        .get(source_id)
-        .expect("source record should be addressable")
-        .logical_path
-        .clone();
+    let logical_path = database.legacy_logical_path(source_id);
 
     database
         .retain_text(source_id, "compiled snapshot\n".to_owned())
@@ -764,16 +766,8 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
         .get_by_canonical_path(&entry_config)
         .expect("entry config should be registered")
         .id;
-    let root_logical_path = database
-        .get(root_id)
-        .expect("root config record should be addressable")
-        .logical_path
-        .clone();
-    let entry_logical_path = database
-        .get(entry_id)
-        .expect("entry config record should be addressable")
-        .logical_path
-        .clone();
+    let root_logical_path = database.legacy_logical_path(root_id);
+    let entry_logical_path = database.legacy_logical_path(entry_id);
     assert_eq!(
         root_logical_path, entry_logical_path,
         "the project config and entry-root source should share config.moth's logical path"
@@ -1039,6 +1033,24 @@ fn line_index_keeps_long_lines_addressable_without_truncation() {
         line_index.position(text.len() as u32),
         Some(LinePosition { line: 1, column: 3 })
     );
+}
+
+fn render_source_logical_paths(
+    database: &SourceDatabase,
+    string_table: &StringTable,
+) -> Vec<PathBuf> {
+    let path_table = database.paths();
+    let mut scratch = Vec::new();
+    database
+        .iter()
+        .map(|record| {
+            PathBuf::from(path_table.render_portable(
+                record.logical_path,
+                string_table,
+                &mut scratch,
+            ))
+        })
+        .collect()
 }
 
 fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {

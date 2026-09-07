@@ -21,6 +21,23 @@ fn root_has_no_parent_and_zero_depth() {
 }
 
 #[test]
+fn builder_exposes_current_table_before_consuming_freeze() {
+    let mut string_table = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let path = builder.intern_portable_path("shared/prefix", &mut string_table);
+
+    assert_eq!(builder.paths().depth(path), 2);
+    let parent = builder
+        .paths()
+        .parent(path)
+        .expect("path should have a parent");
+    assert_eq!(builder.paths().depth(parent), 1);
+
+    let frozen = builder.freeze();
+    assert_eq!(frozen.depth(path), 2);
+}
+
+#[test]
 fn append_reuses_children_and_adds_distinct_components_once() {
     let mut string_table = StringTable::new();
     let first_component = string_table.intern("first");

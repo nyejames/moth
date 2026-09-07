@@ -17,6 +17,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -42,6 +43,7 @@ pub struct SourceDatabase {
     loaded: Vec<SourceRecord>,
     load_failures: Vec<CompilerError>,
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
+    path_interner: PathInternerBuilder,
 }
 impl Default for SourceDatabase {
     fn default() -> Self {
@@ -50,6 +52,7 @@ impl Default for SourceDatabase {
             loaded: Vec::new(),
             load_failures: Vec::new(),
             canonical_to_id: FxHashMap::default(),
+            path_interner: PathInternerBuilder::new(),
         }
     }
 }
@@ -107,6 +110,7 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerError> {
+        let mut database = Self::empty();
         let mut rows = logical_rows_for_registration_index(
             registration_index,
             entry_file_path,
@@ -116,7 +120,8 @@ impl SourceDatabase {
         rows.sort_by(|(_, _, left), (_, _, right)| {
             left.portable_sort_key.cmp(&right.portable_sort_key)
         });
-        Self::from_ordered_logical_rows(rows)
+        database.append_ordered_logical_rows(rows, string_table)?;
+        Ok(database)
     }
 
     /// Build source identities from the ordered candidates produced by Stage 0.
@@ -160,14 +165,29 @@ impl SourceDatabase {
             project_path_resolver,
             string_table,
         )?;
-        self.append_ordered_logical_rows(rows)
+        self.append_ordered_logical_rows(rows, string_table)
     }
 
-    fn append_ordered_logical_rows<I>(&mut self, rows: I) -> Result<(), CompilerError>
-    where
-        I: IntoIterator<Item = (PathBuf, SourceKind, LogicalSourcePath)>,
-    {
-        for (canonical, kind, logical) in rows {
+    fn append_ordered_logical_rows(
+        &mut self,
+        rows: Vec<(PathBuf, SourceKind, LogicalSourcePath)>,
+        string_table: &mut StringTable,
+    ) -> Result<(), CompilerError> {
+        // Canonical ordering precedes both path interning and source identity assignment.
+        let interned_rows = rows
+            .into_iter()
+            .map(|(canonical, kind, logical)| {
+                let path_id = self
+                    .path_interner
+                    .try_intern_filesystem_path(&logical.path, string_table)
+                    .map_err(|NonUtf8PathComponent { path }| {
+                        non_utf8_logical_path_error(&path, string_table)
+                    })?;
+                Ok((canonical, kind, path_id))
+            })
+            .collect::<Result<Vec<_>, CompilerError>>()?;
+
+        for (canonical, kind, path_id) in interned_rows {
             if self.canonical_to_id.contains_key(&canonical) {
                 return Err(CompilerError::compiler_error(format!(
                     "Source identity inventory registered canonical source path {} more than once",
@@ -175,24 +195,49 @@ impl SourceDatabase {
                 )));
             }
 
-            self.push_slot(canonical, logical.interned, kind);
+            self.push_slot(canonical, path_id, kind);
         }
 
         Ok(())
     }
 
-    fn from_ordered_logical_rows<I>(rows: I) -> Result<Self, CompilerError>
-    where
-        I: IntoIterator<Item = (PathBuf, SourceKind, LogicalSourcePath)>,
-    {
-        let mut database = Self::empty();
-        database.append_ordered_logical_rows(rows)?;
-        Ok(database)
+    pub fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
+        debug_assert_eq!(
+            self.slots.first().map(|slot| slot.provenance),
+            Some(SourceProvenance::CompilationRoot)
+        );
+        self.slots[1..].iter()
     }
 
     pub fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
         let id = self.canonical_to_id.get(canonical_path)?;
         self.get(*id)
+    }
+
+    /// Borrow the shared source-path table while this database remains mutable.
+    pub(crate) fn paths(&self) -> &PathTable {
+        self.path_interner.paths()
+    }
+
+    /// Reconstruct the legacy path view for a registered source identity.
+    ///
+    /// This is a temporary migration bridge. The source slot stores only its `PathId`, so the
+    /// component vector is rebuilt from parent links and is never retained by the database.
+    pub(crate) fn legacy_logical_path(&self, source: SourceId) -> InternedPath {
+        let path_id = self
+            .slots
+            .get(source.index())
+            .unwrap_or_else(|| {
+                panic!(
+                    "source identity {} is absent from the source database; this is a compiler bug",
+                    source.index()
+                )
+            })
+            .logical_path;
+        let table = self.paths();
+        let mut components = Vec::with_capacity(table.depth(path_id) as usize);
+        table.resolve_components(path_id, &mut components);
+        InternedPath::from_components(components)
     }
 
     /// Look up the exact source snapshot retained for a physical source identity.
@@ -225,7 +270,7 @@ impl SourceDatabase {
     /// size policy is applied only to a slot that can still accept one. Otherwise an oversized
     /// second snapshot would report the user's file instead of the compiler's own mistake.
     pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
-        {
+        let provenance = {
             let slot = self.source_slot_mut(id)?;
             if !matches!(slot.load, SourceLoadStatus::Pending) {
                 return Err(CompilerError::compiler_error(format!(
@@ -233,10 +278,20 @@ impl SourceDatabase {
                     id.index()
                 )));
             }
+            slot.provenance
+        };
+
+        // Construct the legacy path only on the rare oversized-snapshot error path. Normal loads
+        // carry the compact PathId without allocating a component vector.
+        if text.len() >= u32::MAX as usize {
+            let slot = self
+                .get(id)
+                .expect("source slot validated before retaining text");
+            let logical_path = self.legacy_logical_path(id);
             ensure_source_snapshot_fits(
                 text.len(),
-                slot.provenance,
-                &slot.logical_path,
+                provenance,
+                &logical_path,
                 slot.canonical_os_path.as_deref(),
             )?;
         }
@@ -423,21 +478,35 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<SourceId, CompilerError> {
-        let logical = interned_logical_path(
+        let logical = logical_source_path(
             &canonical_path,
             entry_file_path,
             project_path_resolver,
             string_table,
         )?;
+        let path_id = self
+            .path_interner
+            .try_intern_filesystem_path(&logical.path, string_table)
+            .map_err(|NonUtf8PathComponent { path }| {
+                non_utf8_logical_path_error(&path, string_table)
+            })?;
 
         if let Some(slot) = self.get_by_canonical_path(&canonical_path) {
-            if slot.logical_path != logical.interned {
+            if slot.logical_path != path_id {
+                let existing_path_id = slot.logical_path;
+                let mut scratch = Vec::new();
+                let existing_path =
+                    self.paths()
+                        .render_portable(existing_path_id, string_table, &mut scratch);
+                let requested_path =
+                    self.paths()
+                        .render_portable(path_id, string_table, &mut scratch);
                 return Err(CompilerError::compiler_error(format!(
                     "Source identity inventory registered canonical source path {} under \
                      conflicting logical paths {} and {}",
                     canonical_path.display(),
-                    slot.logical_path.to_portable_string(string_table),
-                    logical.interned.to_portable_string(string_table),
+                    existing_path,
+                    requested_path,
                 )));
             }
             if let Some(stored_kind) = slot.kind
@@ -453,14 +522,14 @@ impl SourceDatabase {
             }
             return Ok(slot.id);
         }
-        Ok(self.push_slot(canonical_path, logical.interned, kind))
+        Ok(self.push_slot(canonical_path, path_id, kind))
     }
 
     /// Append one slot and return the identity its position assigns.
     fn push_slot(
         &mut self,
         canonical_path: PathBuf,
-        logical_path: InternedPath,
+        logical_path: PathId,
         kind: SourceKind,
     ) -> SourceId {
         let id = SourceId::from_index(self.slots.len());
@@ -487,14 +556,6 @@ impl SourceDatabase {
         (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
-        debug_assert_eq!(
-            self.slots.first().map(|slot| slot.provenance),
-            Some(SourceProvenance::CompilationRoot)
-        );
-        self.slots[1..].iter()
-    }
-
     /// Resolve the unique physical slot for a logical path, if one exists.
     ///
     /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
@@ -508,9 +569,10 @@ impl SourceDatabase {
         &self,
         logical_path: &InternedPath,
     ) -> Option<&SourceSlot> {
+        let table = self.paths();
         let mut matches = self
             .iter()
-            .filter(|slot| slot.logical_path == *logical_path);
+            .filter(|slot| path_id_matches_components(table, slot.logical_path, logical_path));
         let slot = matches.next()?;
         if matches.next().is_some() {
             return None;
@@ -519,11 +581,34 @@ impl SourceDatabase {
     }
 }
 
+fn path_id_matches_components(
+    table: &PathTable,
+    path_id: PathId,
+    components: &InternedPath,
+) -> bool {
+    let components = components.as_components();
+    if table.depth(path_id) as usize != components.len() {
+        return false;
+    }
+
+    let mut current = path_id;
+    for expected_component in components.iter().rev() {
+        if table.component(current) != Some(*expected_component) {
+            return false;
+        }
+        current = table
+            .parent(current)
+            .expect("a non-root path must carry a parent");
+    }
+
+    current == PathId::ROOT
+}
+
 fn compilation_root_slot() -> SourceSlot {
     SourceSlot {
         id: SourceId::COMPILATION_ROOT,
         canonical_os_path: None,
-        logical_path: InternedPath::new(),
+        logical_path: PathId::ROOT,
         kind: None,
         provenance: SourceProvenance::CompilationRoot,
         load: SourceLoadStatus::Pending,
@@ -548,10 +633,9 @@ fn physical_source_kind(canonical_path: &Path) -> SourceKind {
     }
 }
 
-/// One source's logical path in both the interned form records keep and the portable spelling
-/// unsorted inventories order by.
+/// Temporary registration spelling, retained only until canonical ordering and interning finish.
 struct LogicalSourcePath {
-    interned: InternedPath,
+    path: PathBuf,
     portable_sort_key: String,
 }
 
@@ -565,7 +649,7 @@ fn logical_rows_for_registration_index(
     let mut rows = Vec::with_capacity(rows_iter.len());
 
     for (canonical, kind) in rows_iter {
-        let logical = interned_logical_path(
+        let logical = logical_source_path(
             canonical,
             entry_file_path,
             project_path_resolver,
@@ -577,10 +661,8 @@ fn logical_rows_for_registration_index(
     Ok(rows)
 }
 
-/// Resolve one canonical file's logical path and intern it.
-///
-/// Single-file mode has no project resolver, so it falls back to the entry file's directory.
-fn interned_logical_path(
+/// Resolve a canonical file's logical spelling before assigning compact identities.
+fn logical_source_path(
     canonical_file: &Path,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
@@ -601,12 +683,9 @@ fn interned_logical_path(
         .to_str()
         .ok_or_else(|| non_utf8_logical_path_error(&logical, string_table))?
         .replace('\\', "/");
-    let interned = InternedPath::try_from_filesystem_path(&logical, string_table).map_err(
-        |NonUtf8PathComponent { path }| non_utf8_logical_path_error(&path, string_table),
-    )?;
 
     Ok(LogicalSourcePath {
-        interned,
+        path: logical,
         portable_sort_key,
     })
 }

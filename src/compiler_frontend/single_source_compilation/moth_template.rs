@@ -228,7 +228,7 @@ pub(crate) fn compile_moth_template_source(
             )
         })?;
     let entry_file_id = source_identity.id;
-    let entry_scope = source_identity.logical_path.clone();
+    let entry_scope = source_files.legacy_logical_path(entry_file_id);
 
     // 1. Prepare the single source into retained syntax.
     let mut prepared = prepare_template_source(

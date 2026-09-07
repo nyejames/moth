@@ -1,10 +1,11 @@
 //! Dense identities for build-local logical paths.
 //!
-//! WHAT: owns the mutable parent-linked trie used during one build-base identity pass and its
-//!       lookup-only frozen table for complete-path operations.
+//! WHAT: owns the mutable parent-linked trie and its lookup-only table for complete-path
+//!       operations. `SourceDatabase` embeds the mutable builder so source slots and path nodes
+//!       share one build-lifetime identity base.
 //! WHY:  logical compiler identity needs compact shared prefixes, while filesystem `PathBuf` and
-//!       source snapshot identity remain separate owners. This slice intentionally does not migrate
-//!       the compiler's existing `InternedPath` representation or add parallel merge machinery.
+//!       source snapshot identity remain separate owners. Source consumers awaiting migration
+//!       reconstruct transient `InternedPath` views through the source database.
 //!
 //! The implementation is split by data lifetime:
 //!

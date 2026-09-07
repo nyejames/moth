@@ -9,9 +9,10 @@
 //! module inventory, and collision validators from repeating the same expensive walk.
 //!
 //! The traversal also inventories every compiler-recognized or provider-owned source file once
-//! into a central `SourceRecord` table addressed by dense `SourceId` values. Owned and unrooted collections
-//! store only `SourceId`s, so the index is the sole source inventory/ownership owner and later
-//! consumers resolve source data through it rather than through duplicated per-module records.
+//! into a central `SourceRecord` table addressed by dense `SourceRecordIndex` handles. Owned and
+//! unrooted collections store only those handles, so the index is the sole source
+//! inventory/ownership owner and later consumers resolve source data through it rather than
+//! through duplicated per-module records.
 use super::module_identity::{
     ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
 };
@@ -32,7 +33,6 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_SUFFIX};
@@ -298,11 +298,6 @@ fn source_kind_from_classification(classification: &SourceClassification) -> Sou
 /// compiler `SourceId`; the boundary `SourceDatabase` assigns the latter from registration rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceRecord {
-    /// Entry-root-relative logical identity, when this source has a portable entry-root spelling.
-    ///
-    /// A facade outside the entry root has no such identity and keeps `None`; its stable source
-    /// identity and canonical filesystem path remain separate fields.
-    logical_path: Option<PathId>,
     canonical_path: PathBuf,
     classification: SourceClassification,
     supported: bool,
@@ -348,15 +343,14 @@ impl SourceRecord {
 
 /// One classified source awaiting compiler-boundary registration.
 ///
-/// The stable logical identity is the portable sort key, while the entry-root-relative `PathId`
-/// records the dense path-table handle. No compiler `SourceId` is assigned in this Stage 0 pass.
+/// The stable logical identity is the portable sort key. No compiler `SourceId` is assigned in
+/// this Stage 0 pass.
 struct ClassifiedSource {
     canonical_path: PathBuf,
     classification: SourceClassification,
     supported: bool,
     logical_identity: SourceLogicalIdentity,
     ownership: SourceOwnership,
-    entry_root_relative_logical_path: Option<PathId>,
 }
 
 /// Completed central source inventory produced after classification and deterministic sorting.
@@ -380,19 +374,14 @@ struct SourceInventory {
 ///
 /// `sources` is the central source-row table addressed by [`SourceRecordIndex`]. It is the sole
 /// Stage 0 source inventory/ownership owner. The compiler-facing [`SourceRegistrationIndex`] is
-/// assembled from its already-sorted canonical rows when a boundary constructs its
+/// assembled from its already-sorted canonical rows when a boundary constructs the
 /// [`crate::compiler_frontend::source::SourceDatabase`].
-///
-/// `path_table` backs the logical `PathId` stored on each source record and is used for rendering
-/// that identity when needed. Canonical paths remain IO handles, and logical path identities never
-/// merge with filesystem handles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
     package_identity: StablePackageIdentity,
     module_identities: ModuleIdentityTable,
     module_roots: ModuleRootTable,
-    path_table: PathTable,
     sources: Vec<SourceRecord>,
     owned_source_indices: Vec<Vec<SourceRecordIndex>>,
     unrooted_source_indices: Vec<SourceRecordIndex>,
@@ -891,18 +880,14 @@ impl SourceTreeIndex {
         let module_identities = ModuleIdentityTable::from_records(records);
         let module_roots = module_identities.derive_module_root_table();
         let module_count = module_identities.module_ids().count();
-        let mut path_interner = PathInternerBuilder::new();
 
         let classified = classify_owned_sources(
             &module_identities,
             recognized_candidates,
             facade_file_for_inventory,
-            &entry_root,
-            &mut path_interner,
             string_table,
         )?;
-        let path_table = path_interner.freeze();
-        validate_unique_source_logical_identities(&classified, &path_table, string_table)
+        validate_unique_source_logical_identities(&classified)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
         let SourceInventory {
@@ -918,7 +903,6 @@ impl SourceTreeIndex {
             package_identity: boundary_package,
             module_identities,
             module_roots,
-            path_table,
             sources,
             owned_source_indices,
             unrooted_source_indices,
@@ -1055,23 +1039,6 @@ impl SourceTreeIndex {
     #[cfg(test)]
     pub(crate) fn unrooted_source_indices(&self) -> &[SourceRecordIndex] {
         &self.unrooted_source_indices
-    }
-
-    /// Resolve one source-row handle by its entry-root-relative portable logical path.
-    #[cfg(test)]
-    pub(crate) fn source_index_for_entry_root_relative_logical_path(
-        &self,
-        logical_path: &str,
-        string_table: &StringTable,
-    ) -> Option<SourceRecordIndex> {
-        let mut scratch = Vec::new();
-        self.sources.iter().enumerate().find_map(|(index, record)| {
-            let path_id = record.logical_path?;
-            let rendered = self
-                .path_table
-                .render_portable(path_id, string_table, &mut scratch);
-            (rendered == logical_path).then_some(SourceRecordIndex::from_index(index))
-        })
     }
 
     /// Resolve one source-row handle by its canonical physical path.
@@ -1445,56 +1412,36 @@ fn entry_root_relative_logical_path(
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
-/// Compute the entry-root-relative portable logical path for the optional facade file.
-///
-/// The facade lives beside `config.moth` at the project root. When the project root equals the
-/// entry root, the facade is under the entry root and receives a
-/// logical path entry. The accepted future strict-entry-root design places the facade outside
-/// entry-root containment, so the strip then fails and `None` is returned rather than erroring;
-/// the facade still enters the canonical-path lookup map because its canonical path is always
-/// available.
-fn entry_root_relative_logical_path_for_facade(
-    facade_file: &Path,
-    entry_root: &Path,
-) -> Option<String> {
-    let relative_path = facade_file.strip_prefix(entry_root).ok()?;
-    portable_relative_logical_path_from(relative_path).ok()
-}
-
 /// Classify every recognized candidate discovered during traversal and assign its portable logical
-/// identity, dense entry-root-relative `PathId` where available and explicit ownership, ready for
-/// deterministic `SourceId` assignment.
+/// identity and explicit ownership, ready for deterministic `SourceId` assignment.
 ///
 /// WHAT: classifies every recognized candidate under its nearest containing normal or support
 /// root by walking parent directories through the identity table. A nested module root and all
 /// files beneath it transfer to the nested module because the nearest-module walk finds it
 /// first. Unrooted internal subdirectories stay owned by their nearest ancestor module. The
 /// optional project facade owns its root file even though it sits outside entry-root
-/// containment, so it is added directly as a classified owned source. Recognized candidates
-/// with no enclosing module root become explicit deterministic unrooted classified sources.
-/// WHY: one authoritative classification feeds later Phase 3 semantic-source-set and
-/// check-only slices. Each classified source carries its portable logical identity and explicit
-/// ownership, while classification interns each discovered spelling into the build path table
-/// before `SourceId`s are assigned. Source ordering uses the stable identity's explicit ordering.
+/// containment, so it is added directly as a classified owned source. Recognized candidates with
+/// no enclosing module root become explicit deterministic unrooted classified sources.
+/// WHY: one authoritative classification feeds later Phase 3 semantic-source-set and check-only
+/// slices. Each classified source carries its portable logical identity and explicit ownership.
+/// Source ordering uses the stable identity's explicit ordering.
 fn classify_owned_sources(
     module_identities: &ModuleIdentityTable,
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
     facade_file_for_inventory: Option<PathBuf>,
-    entry_root: &Path,
-    path_interner: &mut PathInternerBuilder,
     string_table: &mut StringTable,
 ) -> Result<Vec<ClassifiedSource>, CompilerMessages> {
     let mut classified = Vec::new();
 
     for candidate in recognized_candidates {
         let Some(parent_directory) = candidate.canonical_path.parent() else {
-            classified.push(unrooted_classified(candidate, path_interner, string_table));
+            classified.push(unrooted_classified(candidate));
             continue;
         };
 
         let Some(module_id) = module_identities.nearest_module_for_directory(parent_directory)
         else {
-            classified.push(unrooted_classified(candidate, path_interner, string_table));
+            classified.push(unrooted_classified(candidate));
             continue;
         };
 
@@ -1510,15 +1457,12 @@ fn classify_owned_sources(
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-        let logical_path =
-            path_interner.intern_portable_path(&candidate.logical_candidate_path, string_table);
         classified.push(ClassifiedSource {
             canonical_path: candidate.canonical_path,
             classification: candidate.classification,
             supported: candidate.supported,
             logical_identity: SourceLogicalIdentity::Owned(stable_identity),
             ownership: SourceOwnership::Owned(module_id),
-            entry_root_relative_logical_path: Some(logical_path),
         });
     }
 
@@ -1550,17 +1494,12 @@ fn classify_owned_sources(
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-        let entry_root_relative_logical_path =
-            entry_root_relative_logical_path_for_facade(&facade_file, entry_root).map(
-                |logical_path| path_interner.intern_portable_path(&logical_path, string_table),
-            );
         classified.push(ClassifiedSource {
             canonical_path: facade_file,
             classification: SourceClassification::CompilerSemantic(SourceFileKind::Moth),
             supported: true,
             logical_identity: SourceLogicalIdentity::Owned(stable_identity),
             ownership: SourceOwnership::Owned(facade_module_id),
-            entry_root_relative_logical_path,
         });
     }
 
@@ -1569,32 +1508,23 @@ fn classify_owned_sources(
 
 /// Build one classified unrooted source from a traversal candidate that has no enclosing module
 /// root.
-fn unrooted_classified(
-    candidate: DiscoveredSourceCandidate,
-    path_interner: &mut PathInternerBuilder,
-    string_table: &mut StringTable,
-) -> ClassifiedSource {
+fn unrooted_classified(candidate: DiscoveredSourceCandidate) -> ClassifiedSource {
     let logical_path = UnrootedSourceLogicalPath::from_portable(candidate.logical_candidate_path);
-    let path_id = path_interner.intern_portable_path(logical_path.as_str(), string_table);
     ClassifiedSource {
         canonical_path: candidate.canonical_path,
         classification: candidate.classification,
         supported: candidate.supported,
         logical_identity: SourceLogicalIdentity::Unrooted(logical_path),
         ownership: SourceOwnership::Unrooted,
-        entry_root_relative_logical_path: Some(path_id),
     }
 }
 
 /// Reject duplicate logical identities before assigning dense `SourceId`s.
 ///
-/// A source with an entry-root-relative path renders that identity through the frozen path table.
-/// Facade records outside the entry root have no such path, so their canonical paths remain the
-/// identifying fallback in the diagnostic.
+/// The duplicate key and both canonical physical paths stay in the invariant error so the
+/// diagnostic retains useful identity and filesystem context without a separate path table.
 fn validate_unique_source_logical_identities(
     classified: &[ClassifiedSource],
-    path_table: &PathTable,
-    string_table: &StringTable,
 ) -> Result<(), CompilerError> {
     let mut seen: FxHashMap<&SourceLogicalIdentity, &ClassifiedSource> = FxHashMap::default();
     for source in classified {
@@ -1602,28 +1532,13 @@ fn validate_unique_source_logical_identities(
             continue;
         };
         let right = source;
-        let message = if let Some(logical_path) = left
-            .entry_root_relative_logical_path
-            .or(right.entry_root_relative_logical_path)
-        {
-            let mut render_scratch = Vec::new();
-            let rendered_path =
-                path_table.render_portable(logical_path, string_table, &mut render_scratch);
-            format!(
-                "Source tree index classified two physical sources with the same portable logical \
-                 identity {rendered_path:?}: {} and {}; source identity must be unique before \
-                 SourceId assignment",
-                left.canonical_path.display(),
-                right.canonical_path.display(),
-            )
-        } else {
-            format!(
-                "Source tree index classified duplicate logical identities for physical sources {} \
-                 and {}; source identity must be unique before SourceId assignment",
-                left.canonical_path.display(),
-                right.canonical_path.display(),
-            )
-        };
+        let message = format!(
+            "Source tree index classified duplicate logical identity {:?} for physical sources {} \
+             and {}; source identity must be unique before SourceId assignment",
+            left.logical_identity,
+            left.canonical_path.display(),
+            right.canonical_path.display(),
+        );
         return Err(CompilerError::compiler_error(message));
     }
     Ok(())
@@ -1669,7 +1584,6 @@ fn build_source_inventory(
             }
         }
         sources.push(SourceRecord {
-            logical_path: source.entry_root_relative_logical_path,
             canonical_path: source.canonical_path,
             classification: source.classification,
             supported: source.supported,
@@ -1720,36 +1634,5 @@ fn record_discovery_metrics(stats: &SourceTreeDiscoveryStats) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn duplicate_logical_identity_is_rejected_with_rendered_path() {
-        let mut string_table = StringTable::new();
-        let mut path_builder = PathInternerBuilder::new();
-        let path_id = path_builder.intern_portable_path("duplicate.moth", &mut string_table);
-        let path_table = path_builder.freeze();
-
-        let classified_source = |canonical_path: &str| ClassifiedSource {
-            canonical_path: PathBuf::from(canonical_path),
-            classification: SourceClassification::CompilerSemantic(SourceFileKind::Moth),
-            supported: true,
-            logical_identity: SourceLogicalIdentity::Unrooted(
-                UnrootedSourceLogicalPath::from_portable("duplicate.moth".to_owned()),
-            ),
-            ownership: SourceOwnership::Unrooted,
-            entry_root_relative_logical_path: Some(path_id),
-        };
-        let classified = vec![
-            classified_source("/first/duplicate.moth"),
-            classified_source("/second/duplicate.moth"),
-        ];
-
-        let error =
-            validate_unique_source_logical_identities(&classified, &path_table, &string_table)
-                .expect_err("duplicate logical identities must be rejected");
-        assert!(error.msg.contains("duplicate.moth"));
-        assert!(error.msg.contains("/first/duplicate.moth"));
-        assert!(error.msg.contains("/second/duplicate.moth"));
-    }
-}
+#[path = "../tests/source_tree_index_tests.rs"]
+mod tests;

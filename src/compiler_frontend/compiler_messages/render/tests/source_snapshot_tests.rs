@@ -29,11 +29,7 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     source_database
         .retain_text(source_id, "compiled snapshot\n".to_owned())
         .expect("compiled source should be retained");
-    let logical_path = source_database
-        .get(source_id)
-        .expect("source record should be addressable")
-        .logical_path
-        .clone();
+    let logical_path = source_database.legacy_logical_path(source_id);
 
     fs::write(&source_path, "newer disk version\n").expect("should mutate source on disk");
 
@@ -93,11 +89,7 @@ fn retained_source_database(
     source_database
         .retain_text(source_id, text.to_owned())
         .expect("compiled source should be retained");
-    let logical_path = source_database
-        .get(source_id)
-        .expect("source record should be addressable")
-        .logical_path
-        .clone();
+    let logical_path = source_database.legacy_logical_path(source_id);
 
     let location = SourceLocation::new(
         logical_path,

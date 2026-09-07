@@ -119,7 +119,7 @@ pub(crate) fn resolve_file_value(
                     ));
                 }
 
-                let logical_path = logical_path.ok_or_else(|| {
+                let logical_path = logical_path.as_ref().ok_or_else(|| {
                     CompilerError::compiler_error(
                         "ordinary content file reference had no logical source path",
                     )

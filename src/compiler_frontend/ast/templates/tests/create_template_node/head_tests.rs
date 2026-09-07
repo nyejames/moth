@@ -232,13 +232,8 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         .get_by_canonical_path(&target_path)
         .expect("content source identity should be present")
         .id;
-    let content_path = content_constant_path(
-        &source_files
-            .get(source_file)
-            .expect("content source identity should be indexed")
-            .logical_path,
-        &mut string_table,
-    );
+    let content_logical_path = source_files.legacy_logical_path(source_file);
+    let content_path = content_constant_path(&content_logical_path, &mut string_table);
     let content_string = string_table.intern("resolved head content");
     let content_declaration = Declaration {
         id: content_path,

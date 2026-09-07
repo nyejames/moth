@@ -157,8 +157,8 @@ pub(crate) enum FrozenResolvedFileReferenceOutcome {
 /// One reader-facing resolved file-reference view.
 ///
 /// Ordinary and frozen generic backings both project into this vocabulary. Ordinary content rows
-/// expose their logical path for declaration lookup, while frozen rows expose the captured value
-/// and no longer retain a donor declaration path.
+/// expose an ephemeral logical path for declaration lookup, while frozen rows expose the captured
+/// value and no longer retain a donor declaration path.
 pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: Stage0ResolvedFileReferenceOutcome<'a>,
@@ -167,7 +167,7 @@ pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
 pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
     NoPhysicalTarget,
     Content {
-        logical_path: Option<&'a InternedPath>,
+        logical_path: Option<InternedPath>,
         value: Option<&'a OwnedFoldedString>,
     },
     Resource {
@@ -259,7 +259,7 @@ fn ordinary_reference_view<'a>(
                 )
             })?;
             Stage0ResolvedFileReferenceOutcome::Content {
-                logical_path: Some(&source_identity.logical_path),
+                logical_path: Some(source_files.legacy_logical_path(source_identity.id)),
                 value: None,
             }
         }

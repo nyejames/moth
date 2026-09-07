@@ -9,6 +9,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use std::path::{Path, PathBuf};
 
 /// Describes how a source record entered the compiler's identity context.
@@ -100,7 +101,8 @@ pub(super) enum SourceLoadStatus {
 pub struct SourceSlot {
     pub id: super::SourceId,
     pub canonical_os_path: Option<PathBuf>,
-    pub logical_path: InternedPath,
+    /// Complete logical path in the owning source database's path table.
+    pub logical_path: PathId,
     pub kind: Option<SourceKind>,
     pub provenance: SourceProvenance,
     pub(super) load: SourceLoadStatus,
@@ -145,7 +147,7 @@ pub(super) fn ensure_source_snapshot_fits(
                 canonical_os_path.unwrap_or(Path::new("<unknown>")).display(),
             ))
             .with_error_type(ErrorType::File);
-            // The record's own interned identity is the location, so no path is reinterned here.
+            // The caller materializes this legacy view only on the oversized-snapshot failure path.
             error.location = SourceLocation::new(
                 logical_path.clone(),
                 CharPosition::default(),
