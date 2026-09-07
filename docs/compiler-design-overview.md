@@ -753,7 +753,14 @@ A recognised source kind unsupported by the active builder is rejected with a ty
 
 The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` dependencies. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
 
-This service is a narrow compiler entry point, not a second Moth template parser or compiler mode. The compiler owns the whole stage sequence behind it. Project tooling supplies the source and receives the folded `content` result and warnings; it does not prepare, bind, order or fold the template itself.
+This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
+For a standalone source, it owns preparation through folding. For a Stage 0 file-value bundle, it
+consumes the retained entry and content-source preparations without tokenizing or preparing them
+again. Stage 0 asks the compiler to prepare each selected source once while discovering the content
+closure, as in the general prepared-source orchestration contract.
+
+Project tooling receives folded `content` and warnings. It never implements preparation semantics,
+binds symbols, orders declarations or folds templates itself.
 
 #### Project config compilation service
 

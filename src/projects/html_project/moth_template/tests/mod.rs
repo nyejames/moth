@@ -509,14 +509,19 @@ fn files_input_markdown_content_value_is_inlined() {
 
 #[test]
 fn files_input_repeated_markdown_content_value_is_inlined_twice() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
     let temp_dir = temp_project(&[
         ("page.mtf", "About\n\n[@docs/legal.md]\n\n[@docs/legal.md]"),
         ("docs/legal.md", "Plain legal text."),
     ]);
+    let entry_path =
+        fs::canonicalize(temp_dir.path().join("page.mtf")).expect("entry should canonicalize");
+    let content_path = fs::canonicalize(temp_dir.path().join("docs/legal.md"))
+        .expect("content should canonicalize");
+    let tracked_root = fs::canonicalize(temp_dir.path()).expect("fixture root should canonicalize");
+    crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&tracked_root);
 
-    let output = compile_ok(MothTemplateInput::Files(vec![
-        temp_dir.path().join("page.mtf"),
-    ]));
+    let output = compile_ok(MothTemplateInput::Files(vec![entry_path.clone()]));
 
     // Both references resolve to one source identity, so the source is registered and loaded
     // once and its retained snapshot is reused. Loading it a second time fails the slot's
@@ -530,6 +535,16 @@ fn files_input_repeated_markdown_content_value_is_inlined_twice() {
         2,
         "a source referenced twice should inline twice: {}",
         output.documents[0].content
+    );
+    assert_eq!(
+        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&entry_path),
+        1,
+        "the direct entry should be prepared once across bundle construction and folding",
+    );
+    assert_eq!(
+        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&content_path),
+        1,
+        "a repeated content source should be prepared once and reused",
     );
 }
 

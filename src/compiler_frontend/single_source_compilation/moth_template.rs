@@ -7,14 +7,14 @@
 //!
 //! WHY:  tooling needs template content without artifact planning, HIR, borrow validation or
 //!       output writing. That shorter path is a named compiler service rather than a
-//!       project-owned stage sequence: project code supplies one source and receives one folded
-//!       result, and never prepares, binds, orders or folds the template itself.
+//!       project-owned stage sequence. Project code supplies source or a compiler-prepared bundle;
+//!       it never implements preparation semantics, binds, orders or folds the template itself.
 //!
 //! This is not a second Moth template parser or compiler mode. It uses the same owners as an
 //! integrated `.mtf` dependency and must never grow a parallel Markdown or template renderer.
-//! Physical file-reference resolution stays with the calling project: it supplies a prepared
-//! file-value bundle and this service folds settled Stage 0 facts without probing the
-//! filesystem. Source collection, scope policy and output packaging also stay with the caller.
+//! Physical file-reference resolution stays with the calling project. Its Stage 0 bundle retains
+//! the entry and content-source preparations, which this service consumes without preparing again
+//! or probing the filesystem. Source collection, scope policy and output packaging stay with the caller.
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
@@ -63,7 +63,7 @@ use std::sync::Arc;
 pub(crate) struct MothTemplateCompilationRequest<'a> {
     /// The canonical path of the template source, used for its file identity.
     pub(crate) source_path: &'a Path,
-    /// Optional direct-request text. Bundle-bearing requests borrow their retained database text.
+    /// Optional direct-request text. Bundle-bearing requests use retained database text.
     pub(crate) source_code: Option<String>,
     /// The calling project's style directives, already merged.
     ///
@@ -76,14 +76,16 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
 
 /// Prepared file-value inputs one direct Moth template folds against.
 ///
-/// WHAT: the calling project's Stage 0 bundle for one template — its prepared content
+/// WHAT: the calling project's Stage 0 bundle for one template — its prepared entry and content
 ///       dependencies, the settled physical outcome of every prepared file-reference occurrence,
 ///       and the source identities of the template with all its dependencies.
 /// WHY:  physical file-reference resolution stays build-owned. The service consumes settled facts
 ///       and never probes the filesystem, while route and output placement stay out of the
 ///       compiler service entirely.
 pub(crate) struct MothTemplateFileValueBundle {
-    /// Prepared content dependencies named by the template's file values, in discovery order.
+    /// Prepared entry source with its final identity and frozen path syntax.
+    pub(crate) prepared_entry: FileFrontendPrepareOutput,
+    /// Prepared content dependencies with frozen path syntax, in discovery order.
     pub(crate) prepared_content_sources: Vec<FileFrontendPrepareOutput>,
     /// One settled outcome per prepared file-reference occurrence across the template and its
     /// content dependencies, keyed by `source_files` identities.
@@ -139,78 +141,84 @@ pub(crate) fn compile_moth_template_source(
     let mut request = request;
     let mut direct_source_code = request.source_code.take();
     let file_value_resolution = request.file_value_resolution.take();
-    let (mut prepared_content_sources, resolved_references, source_files, module_origin) =
-        match file_value_resolution {
-            Some(MothTemplateFileValueBundle {
+    let (
+        prepared_entry,
+        prepared_content_sources,
+        resolved_references,
+        source_files,
+        module_origin,
+    ) = match file_value_resolution {
+        Some(MothTemplateFileValueBundle {
+            prepared_entry,
+            prepared_content_sources,
+            resolved_file_references,
+            source_files,
+            module_origin,
+        }) => {
+            if direct_source_code.is_some() {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Moth template file-value bundle must own the retained source text",
+                    ),
+                    string_table,
+                ));
+            }
+            if source_files
+                .get_by_canonical_path(request.source_path)
+                .is_none()
+            {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Moth template file-value bundle does not contain its own source",
+                    ),
+                    string_table,
+                ));
+            }
+            (
+                Some(prepared_entry),
                 prepared_content_sources,
-                resolved_file_references,
+                Some(resolved_file_references),
                 source_files,
                 module_origin,
-            }) => {
-                if direct_source_code.is_some() {
-                    return Err(CompilerMessages::from_error_ref(
+            )
+        }
+        None => {
+            // A request without a Stage 0 bundle compiles one in-memory source. The one-row
+            // inventory is registered here so this arm assigns `SourceId` through the same
+            // canonical-order constructor as the bundle-bearing arm, which registered its
+            // whole closure before this match. Only `single_source_compilation`'s own tests
+            // reach here today: the sole production caller, the HTML direct-template API,
+            // always supplies a bundle.
+            let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
+                request.source_path,
+                SourceKind::Compiler(SourceFileKind::MothTemplate),
+            )));
+            let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+                &registration_index,
+                request.source_path,
+                Some(&path_resolver),
+                string_table,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let source_id = source_files
+                .get_by_canonical_path(request.source_path)
+                .map(|identity| identity.id)
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
                         CompilerError::compiler_error(
-                            "Moth template file-value bundle must own the retained source text",
+                            "standalone Moth template source identity was not registered",
                         ),
-                        string_table,
-                    ));
-                }
-                if source_files
-                    .get_by_canonical_path(request.source_path)
-                    .is_none()
-                {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Moth template file-value bundle does not contain its own source",
-                        ),
-                        string_table,
-                    ));
-                }
-                (
-                    prepared_content_sources,
-                    Some(resolved_file_references),
-                    source_files,
-                    module_origin,
-                )
-            }
-            None => {
-                // A request without a Stage 0 bundle compiles one in-memory source. The one-row
-                // inventory is registered here so this arm assigns `SourceId` through the same
-                // canonical-order constructor as the bundle-bearing arm, which registered its
-                // whole closure before this match. Only `single_source_compilation`'s own tests
-                // reach here today: the sole production caller, the HTML direct-template API,
-                // always supplies a bundle.
-                let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
-                    request.source_path,
-                    SourceKind::Compiler(SourceFileKind::MothTemplate),
-                )));
-                let mut source_files =
-                    SourceDatabase::from_registration_index_sorted_by_logical_path(
-                        &registration_index,
-                        request.source_path,
-                        Some(&path_resolver),
                         string_table,
                     )
+                })?;
+            if let Some(source_code) = direct_source_code.take() {
+                source_files
+                    .retain_text(source_id, source_code)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                let source_id = source_files
-                    .get_by_canonical_path(request.source_path)
-                    .map(|identity| identity.id)
-                    .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(
-                                "standalone Moth template source identity was not registered",
-                            ),
-                            string_table,
-                        )
-                    })?;
-                if let Some(source_code) = direct_source_code.take() {
-                    source_files
-                        .retain_text(source_id, source_code)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                }
-                (Vec::new(), None, Arc::new(source_files), None)
             }
-        };
+            (None, Vec::new(), None, Arc::new(source_files), None)
+        }
+    };
     let Some(source_identity) = source_files.get_by_canonical_path(request.source_path) else {
         return Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error(
@@ -219,43 +227,57 @@ pub(crate) fn compile_moth_template_source(
             string_table,
         ));
     };
-    let source_code = source_files
-        .retained_text(source_identity.id)
-        .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error("Moth template source has no retained source text"),
-                string_table,
-            )
-        })?;
     let entry_file_id = source_identity.id;
+    if let Some(prepared_entry) = &prepared_entry
+        && prepared_entry.file_id != entry_file_id
+    {
+        return Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "Moth template bundle entry does not match its registered source identity",
+            ),
+            string_table,
+        ));
+    }
+    let source_code = source_files.retained_text(entry_file_id).ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("Moth template source has no retained source text"),
+            string_table,
+        )
+    })?;
     let entry_scope = source_files.legacy_logical_path(entry_file_id);
 
-    // 1. Prepare the single source into retained syntax.
-    let mut prepared = prepare_template_source(
-        &source_files,
-        &path_resolver,
-        &request,
-        source_code,
-        entry_file_id,
-        string_table,
-    )?;
-
-    // This service has one final string domain and one final source per file. Freeze every
-    // file-owned path table before header aggregation so AST parsing sees the same immutable
-    // prepared-file contract as directory and synthetic module compilation.
-    for content_source in &mut prepared_content_sources {
-        content_source
-            .freeze_path_syntax(string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    }
-    prepared
-        .freeze_path_syntax(string_table)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // 1. Consume Stage 0's retained entry syntax, or prepare the standalone source once.
+    let prepared_entry = match prepared_entry {
+        Some(prepared_entry) => prepared_entry,
+        None => {
+            let mut prepared = prepare_template_source(
+                &source_files,
+                &path_resolver,
+                &request,
+                source_code,
+                entry_file_id,
+                string_table,
+            )?;
+            prepared
+                .freeze_path_syntax(string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            prepared
+        }
+    };
 
     // 2. Aggregate retained syntax and bind it. A direct template resolves no provider.
     let mut all_prepared = Vec::with_capacity(1 + prepared_content_sources.len());
-    all_prepared.push(prepared);
+    all_prepared.push(prepared_entry);
     all_prepared.extend(prepared_content_sources);
+
+    // Bundle sources already passed whole-file validation before their final path tables froze.
+    // Check that boundary without traversing all retained tokens and path rows again.
+    for prepared_source in &all_prepared {
+        prepared_source
+            .require_frozen_path_syntax()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    }
+
     let bound_headers = prepare_header_syntax(all_prepared, string_table)
         .and_then(|prepared_syntax| {
             bind_module_headers(

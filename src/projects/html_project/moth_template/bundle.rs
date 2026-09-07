@@ -269,11 +269,9 @@ pub(super) fn prepare_file_value_bundle(
         }
     }
 
+    let mut prepared_entry = None;
     let mut prepared_content_sources = Vec::new();
     for (path, mut prepared) in prepared_sources {
-        if path == unit.source_path {
-            continue;
-        }
         let record = source_files.get_by_canonical_path(&path).ok_or_else(|| {
             CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(format!(
@@ -291,6 +289,7 @@ pub(super) fn prepare_file_value_bundle(
                 string_table,
             )
         })?;
+
         prepared
             .rebind_source_identity(
                 record.id,
@@ -301,8 +300,21 @@ pub(super) fn prepare_file_value_bundle(
         prepared
             .freeze_path_syntax(string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        prepared_content_sources.push(prepared);
+
+        if path == unit.source_path {
+            prepared_entry = Some(prepared);
+        } else {
+            prepared_content_sources.push(prepared);
+        }
     }
+    let prepared_entry = prepared_entry.ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error(
+                "direct-template walk completed without a prepared entry source",
+            ),
+            string_table,
+        )
+    })?;
 
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
     for resolved in pending_references {
@@ -341,6 +353,7 @@ pub(super) fn prepare_file_value_bundle(
     }
 
     Ok(MothTemplateFileValueBundle {
+        prepared_entry,
         prepared_content_sources,
         resolved_file_references,
         source_files: Arc::new(source_files),

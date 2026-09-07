@@ -69,19 +69,20 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D4a, tokenizer and file-preparation failure ownership.
-- Goal: retain the existing source-local span builder on diagnosed tokenizer and header outcomes.
-- Source-path foundation is accepted in `cff3b0a1c`.
-- Non-goals: diagnostic span migration, module aggregation, final source freeze and token layout.
-- 1D4b must carry these builders through aggregation and module/direct-service outcomes. This
-  first producer-boundary slice does not claim the complete builder lifecycle.
+- Phase: 1D4b, aggregation and outcome source ownership.
+- Goal: preserve successful and diagnosed preparation deltas and their live builders through
+  aggregation and later producers, then install each table under the exclusive source owner.
+- The direct-template entry reuse prerequisite is accepted at this checkpoint. It brings that
+  obligation forward from 3E without claiming source-owned token storage.
+- Producer-local failure retention is accepted in `5a1415ce9`. Aggregate builder retention,
+  diagnosed discovery finalization and exclusive source-database installation remain open.
 
 LAST_GOOD_COMMIT:
-- `cff3b0a1c` — database-owned source paths, validated and independently reviewed.
+- `5a1415ce9` — diagnosed producer builder retention, validated and independently reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Producer-local failure ownership is implemented, validated and independently reviewed.
+- The direct-template entry reuse candidate passed the full gate and independent reviews.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 - Tokenizer and header failures retain their existing builders. Later aggregation remains 1D4b.
 
@@ -165,15 +166,16 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- Both producer-retention regressions passed, including exact long-span resolution after a
-  diagnosed tokenizer or header failure.
-- Independent tokenizer/caller and header/failure-path reviews accepted 1D4a. Their lexer
-  identity test gap was corrected: the fixture now uses a registered physical source instead
-  of the compilation root, and the strengthened regression passed.
-- `just validate` passed: 5055 + 17 + 825 Rust tests, 1951/1951 integration cases,
-  1319 source-audited files with zero findings, 82 benchmark preflights, all three scaling
-  budgets and clean timer erasure. Docs check completed without errors or warnings.
-- The full gate preceded the test-only physical-identity strengthening; its focused rerun passed.
+- The direct-entry reuse regression passed. Restoring the old re-preparation behaviour temporarily
+  made it fail with two entry preparations instead of one; restoring reuse made it pass.
+- Both compiler-service tests and all 30 HTML direct-template tests passed, including after
+  replacing repeated whole-file path validation with the existing frozen-state check.
+- Independent ownership and regression/isolation reviews accepted the candidate. The stale
+  service module comment was aligned with the compiler authority.
+- `cargo fmt --all && just validate` passed after correcting Clippy's collapsible identity guard:
+  5,055 + 17 + 825 Rust tests, all 1,951 integration tests, clean docs and 1,319-file source audit,
+  all 82 benchmark preflights, all three scaling budgets and timer erasure.
+  No validation failure is waived.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -181,7 +183,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint 1D4a, then retain builders through aggregation and outcomes in 1D4b
+- next action: checkpoint accepted direct-entry reuse, then continue 1D4b source ownership
 
 ---
 
@@ -752,6 +754,10 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
     deltas through existing file/chunk merges, header aggregation and module/direct-service
     outcomes. Keep builders separate from generic diagnostic bags and retain one live resolver
     through every later span producer. The final exclusive source owner installs each table once.
+  - [x] **1D4b prerequisite — direct-template entry reuse:** preserve the entry's original
+    preparation and builder through final identity rebinding and bundle consumption. The compiler
+    service prepares only standalone raw-source inputs, not bundle entries. This brings forward
+    the direct-entry portion of 3E without claiming its source-owned token storage migration.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration

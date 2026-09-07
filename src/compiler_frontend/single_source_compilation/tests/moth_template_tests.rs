@@ -160,6 +160,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 
     let module_origin = direct_test_module_origin();
     let bundle = MothTemplateFileValueBundle {
+        prepared_entry: prepared_template,
         prepared_content_sources: vec![prepared_markdown],
         resolved_file_references,
         source_files: Arc::clone(&source_files),
@@ -238,8 +239,6 @@ fn prepare_bundle_source(
         },
     };
 
-    // Bundle construction only needs the shared per-file preparation owner; the service
-    // re-prepares its own source from the same identity facts.
     let options = HeaderParseOptions::default();
     let context = FrontendFilePrepareContext {
         source_files,
@@ -252,8 +251,12 @@ fn prepare_bundle_source(
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
-    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
-        .expect("bundle source preparation should succeed")
+    let mut prepared = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
+        .expect("bundle source preparation should succeed");
+    prepared
+        .freeze_path_syntax(string_table)
+        .expect("bundle source should freeze its path syntax");
+    prepared
 }
 
 fn direct_test_module_origin() -> StableModuleOriginIdentity {
