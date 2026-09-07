@@ -14,13 +14,16 @@
 
 use crate::build_system::build::DeferredResourceOutput;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, RenderSourceContext,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::single_source_compilation::{
     MothTemplateCompilationRequest, compile_moth_template_source,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::bundle::{
@@ -38,6 +41,7 @@ use crate::projects::html_project::resource_output_plan::{
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::path::Path;
+use std::sync::Arc;
 
 pub(crate) fn compile_moth_template(
     request: MothTemplateCompileRequest,
@@ -52,6 +56,7 @@ pub(crate) fn compile_moth_template(
         resources: compiled.resources,
         resource_inputs,
         warnings: compiled.warnings,
+        warning_source_contexts: compiled.warning_source_contexts,
     })
 }
 
@@ -61,6 +66,7 @@ pub(crate) struct DirectTemplateRegistryCompile {
     documents: Vec<CompiledMothTemplateDocument>,
     resources: Vec<DeferredResourceOutput>,
     warnings: Vec<CompilerDiagnostic>,
+    warning_source_contexts: Vec<RenderSourceContext>,
 }
 
 /// Compile one request against a caller-owned registry so a failed plan still leaves its
@@ -79,21 +85,20 @@ pub(crate) fn compile_moth_template_with_registry(
 
     let mut documents = Vec::with_capacity(sources.len());
     let mut warnings = Vec::new();
+    let mut warning_source_contexts = Vec::new();
     let mut resource_plan = HtmlResourceOutputPlan::new(DIRECT_TEMPLATE_PROJECT_NAME);
 
     for mut unit in sources {
         let source_path = unit.source_path.clone();
         let relative_path = unit.relative_path.clone();
 
-        // Every warning gathered so far belongs to the report in source order: earlier documents
-        // first, then this one's.
-        let step_warnings = warnings.clone();
-
         // Physical file-reference resolution and the content closure are build policy; the
         // compiler service folds the prepared bundle without touching the filesystem.
         let file_value_bundle = report_with_prior_warnings(
             prepare_file_value_bundle(&mut unit, &style_directives, string_table, resource_inputs),
-            &step_warnings,
+            &mut warnings,
+            &mut warning_source_contexts,
+            None,
         )?;
 
         let folded = report_with_prior_warnings(
@@ -106,53 +111,72 @@ pub(crate) fn compile_moth_template_with_registry(
                 },
                 string_table,
             ),
-            &step_warnings,
+            &mut warnings,
+            &mut warning_source_contexts,
+            None,
         )?;
+        let content = folded.content;
+        let module_resources = folded.module_resources;
         let folded_warnings = folded.warnings;
+        let source_database = folded.source_database;
+
+        let warning_start = warnings.len();
+        warnings.extend(folded_warnings);
+        let warning_end = warnings.len();
+        if warning_start != warning_end {
+            warning_source_contexts.push(RenderSourceContext {
+                diagnostic_range: warning_start..warning_end,
+                source_database: Arc::clone(&source_database),
+            });
+        }
 
         // The fold's compiler-produced associations name sources this same registry issued, so
         // publication must resolve; a missing attachment would silently drop the resource.
         report_with_prior_warnings(
-            publish_module_resource_associations(
-                resource_inputs,
-                &folded.module_resources,
-                string_table,
-            ),
-            &step_warnings,
+            publish_module_resource_associations(resource_inputs, &module_resources, string_table),
+            &mut warnings,
+            &mut warning_source_contexts,
+            Some(&source_database),
         )?;
 
         let document_path = report_with_prior_warnings(
             document_url_context(relative_path.as_deref(), &source_path, string_table),
-            &documents_step_warnings(&step_warnings, &folded_warnings),
+            &mut warnings,
+            &mut warning_source_contexts,
+            Some(&source_database),
         )?;
         let content = report_with_prior_warnings(
             render_document_content(
-                &folded.content,
-                &folded.module_resources,
+                &content,
+                &module_resources,
                 &document_path,
                 &mut resource_plan,
                 string_table,
             ),
-            &documents_step_warnings(&step_warnings, &folded_warnings),
+            &mut warnings,
+            &mut warning_source_contexts,
+            Some(&source_database),
         )?;
 
-        warnings.extend(folded_warnings);
         documents.push(CompiledMothTemplateDocument {
-            source_path: source_path.clone(),
-            relative_path: relative_path.clone(),
+            source_path,
+            relative_path,
             content,
         });
     }
 
     let resources = report_with_prior_warnings(
         deferred_resource_outputs(resource_inputs, resource_plan.into_records(), string_table),
-        &warnings,
+        &mut warnings,
+        &mut warning_source_contexts,
+        None,
     )?;
 
     Ok(DirectTemplateRegistryCompile {
         documents,
         resources,
         warnings,
+        warning_source_contexts,
     })
 }
 
@@ -211,25 +235,26 @@ fn deferred_resource_outputs(
     Ok(deferred_resources)
 }
 
-/// The warnings that precede one step of this document in source order.
-fn documents_step_warnings<'a>(
-    step_warnings: &'a [CompilerDiagnostic],
-    folded_warnings: &'a [CompilerDiagnostic],
-) -> Vec<CompilerDiagnostic> {
-    step_warnings
-        .iter()
-        .chain(folded_warnings)
-        .cloned()
-        .collect()
-}
-
-/// Prepend the warnings gathered for earlier documents to any failure of this step.
+/// Prepend warnings and their source contexts to a failed project step without cloning them.
+///
+/// The successful path keeps the accumulated vectors in place. Only an error consumes them, so
+/// an early document's warning range remains paired with its own source database even when a later
+/// document fails.
 fn report_with_prior_warnings<T>(
     step: Result<T, CompilerMessages>,
-    prior_warnings: &[CompilerDiagnostic],
+    warnings: &mut Vec<CompilerDiagnostic>,
+    warning_source_contexts: &mut Vec<RenderSourceContext>,
+    current_source_database: Option<&Arc<SourceDatabase>>,
 ) -> Result<T, CompilerMessages> {
     step.map_err(|mut messages| {
-        messages.prepend_diagnostics_preserving_context(prior_warnings.iter().cloned());
+        if let Some(source_database) = current_source_database {
+            messages.set_source_database(Arc::clone(source_database));
+        }
+
+        let prior_warnings = std::mem::take(warnings);
+        messages.prepend_diagnostics_preserving_context(prior_warnings);
+        let prior_source_contexts = std::mem::take(warning_source_contexts);
+        messages.install_source_contexts(prior_source_contexts, 0);
         messages
     })
 }

@@ -572,7 +572,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Moth template <code>.mtf</code> content assets</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API source snapshots and cross-document warning contexts, diagnostics and integration coverage.</td>
  <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
  <td style="padding: 0.1em 0.5em; "> <code>.mtf</code> files are builder-supported source assets that synthesize one private compile-time <code>content #String</code> constant from an implicit <code>$md</code> template body. Nested templates with no explicit directive also default to <code>$md</code>, and any explicit nested directive overrides that default. They bind extensionlessly into <code>.moth</code>, can be re-exported through a module root's <code>export:</code> block, and must fully fold. Same-directory constants and builder constants remain visible when their names are unique. A collision reports both source locations where available, and neither source shadows the other.</td>
         </tr>

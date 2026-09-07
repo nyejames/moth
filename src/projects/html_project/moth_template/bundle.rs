@@ -107,12 +107,14 @@ pub(super) fn prepare_file_value_bundle(
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    // 1. Walk the content fixed point with traversal-local identities. Nested `.mtf`/`.md`
-    //    targets join the candidate set in BFS order; final identities wait until that set is
-    //    complete.
+    // ------------------------
+    //  Discover the source closure
+    // ------------------------
+    //
+    // Discovery identities are private until the complete content closure is known. Every
+    // diagnostic exit below retains the known snapshots and builders through the same finalizer
+    // used by the successful handoff.
     let mut discovery_files = SourceDatabase::empty();
-    // The request owner's registry receives every source this resolver issues. Watch and
-    // missing-target interests remain this lane's physical facts for the caller to use.
     let mut resolver =
         SingleFileReferenceResolver::new(module_root.clone(), &source_file_kinds, resource_inputs);
 
@@ -134,20 +136,16 @@ pub(super) fn prepare_file_value_bundle(
         active_root_role: ModuleRootRole::Normal,
     };
 
-    let mut candidates: FxHashMap<PathBuf, SourceFileKind> = FxHashMap::default();
-    candidates.insert(unit.source_path.clone(), SourceFileKind::MothTemplate);
-
-    let mut loaded: FxHashMap<PathBuf, Result<String, CompilerError>> = FxHashMap::default();
-    loaded.insert(
+    let mut sources = DiscoveredTemplateSources::default();
+    sources
+        .candidates
+        .insert(unit.source_path.clone(), SourceFileKind::MothTemplate);
+    sources.loaded.insert(
         unit.source_path.clone(),
         Ok(std::mem::take(&mut unit.source_text)),
     );
     let mut queue = VecDeque::new();
     queue.push_back(QueuedSource::Entry);
-    // One row per visited source, in discovery order. Pairing the path with its own prepared
-    // output here keeps the identity rebinding below from depending on two vectors staying
-    // the same length.
-    let mut prepared_sources: Vec<(PathBuf, FileFrontendPrepareOutput)> = Vec::new();
     let mut pending_references = Vec::new();
     let mut visited = FxHashSet::default();
 
@@ -160,153 +158,131 @@ pub(super) fn prepare_file_value_bundle(
             continue;
         }
 
-        let prepared = {
-            let source_code = match loaded.get(&path) {
-                Some(Ok(source_code)) => source_code.as_str(),
-                Some(Err(error)) => {
-                    // Loading moved earlier than preparation, so a recorded read failure is
-                    // reported here instead: this is the point at which the read failed before.
-                    return Err(CompilerMessages::from_error_ref(
-                        error.clone(),
-                        string_table,
-                    ));
-                }
-                None => {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "content source {path:?} has no retained source text"
-                        )),
-                        string_table,
-                    ));
-                }
-            };
-
-            // Register immediately before preparation so every token stream receives a
-            // traversal-local identity.
-            discovery_files
-                .insert(
-                    path.clone(),
-                    SourceKind::Compiler(kind),
+        let source_code = match sources.loaded.get(&path) {
+            Some(Ok(source_code)) => source_code.as_str(),
+            Some(Err(error)) => {
+                return Err(finalize_discovery_failure(
+                    path,
+                    FileFrontendPrepareFailure::Infrastructure(error.clone()),
+                    sources,
                     &unit.source_path,
-                    Some(&path_resolver),
-                    string_table,
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-            prepare_one_source(
-                &discovery_files,
-                &path,
-                kind,
-                source_code,
-                &discovery_options,
-                style_directives,
-                string_table,
-            )?
-        };
-        let path_syntax_table = prepared.path_syntax.table();
-        let structural_references = prepared.structural_file_references.references();
-
-        for reference in structural_references {
-            let resolved = resolver
-                .resolve(&path, path_syntax_table, reference, string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            collect_content_candidate(
-                &resolved,
-                &mut candidates,
-                &mut loaded,
-                &mut queue,
-                &source_file_kinds,
-                string_table,
-            )?;
-            pending_references.push(resolved);
-        }
-        prepared_sources.push((path, prepared));
-    }
-
-    // 2. Assign identities from the complete candidate set in canonical logical order, rebind
-    //    each discovery-prepared output onto those finished SourceIds, and join physical
-    //    outcomes onto the classified table.
-    let mut source_files = {
-        let classified_rows = candidates
-            .into_iter()
-            .map(|(path, kind)| (path, SourceKind::Compiler(kind)))
-            .collect::<Vec<_>>();
-        let registration_index = SourceRegistrationIndex::from_rows(
-            classified_rows
-                .iter()
-                .map(|(path, kind)| (path.as_path(), *kind)),
-        );
-        // The database copies each canonical path into its record, so the classified rows and the
-        // index they back are dead once registration returns.
-        SourceDatabase::from_registration_index_sorted_by_logical_path(
-            &registration_index,
-            &unit.source_path,
-            Some(&path_resolver),
-            string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
-    };
-
-    for (path, snapshot) in loaded {
-        let source_id = source_id_for_path(
-            &source_files,
-            &path,
-            string_table,
-            "has no identity after classified registration",
-        )?;
-        match snapshot {
-            Ok(source_code) => source_files
-                .retain_text(source_id, source_code)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-            Err(_) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "content source {path:?} kept a read failure past preparation"
-                    )),
+                    &path_resolver,
                     string_table,
                 ));
             }
+            None => {
+                return Err(finalize_discovery_failure(
+                    path.clone(),
+                    FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(
+                        format!("content source {path:?} has no retained source text"),
+                    )),
+                    sources,
+                    &unit.source_path,
+                    &path_resolver,
+                    string_table,
+                ));
+            }
+        };
+
+        // Register immediately before preparation so every token stream receives a
+        // traversal-local identity.
+        if let Err(error) = discovery_files.insert(
+            path.clone(),
+            SourceKind::Compiler(kind),
+            &unit.source_path,
+            Some(&path_resolver),
+            string_table,
+        ) {
+            return Err(finalize_discovery_failure(
+                path,
+                FileFrontendPrepareFailure::Infrastructure(error),
+                sources,
+                &unit.source_path,
+                &path_resolver,
+                string_table,
+            ));
         }
+
+        let prepared = match prepare_one_source(
+            &discovery_files,
+            &path,
+            kind,
+            source_code,
+            &discovery_options,
+            style_directives,
+            string_table,
+        ) {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                return Err(finalize_discovery_failure(
+                    path,
+                    failure,
+                    sources,
+                    &unit.source_path,
+                    &path_resolver,
+                    string_table,
+                ));
+            }
+        };
+        let resolved_references = {
+            let path_syntax_table = prepared.path_syntax.table();
+            let structural_references = prepared.structural_file_references.references();
+            let mut resolved_references = Vec::with_capacity(structural_references.len());
+            let mut failure = None;
+
+            for reference in structural_references {
+                let resolved =
+                    match resolver.resolve(&path, path_syntax_table, reference, string_table) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            failure = Some(error);
+                            break;
+                        }
+                    };
+                if let Err(error) = collect_content_candidate(
+                    &resolved,
+                    &mut sources.candidates,
+                    &mut sources.loaded,
+                    &mut queue,
+                    &source_file_kinds,
+                    string_table,
+                ) {
+                    failure = Some(error);
+                    break;
+                }
+                resolved_references.push(resolved);
+            }
+
+            match failure {
+                Some(error) => Err(error),
+                None => Ok(resolved_references),
+            }
+        };
+        let resolved_references = match resolved_references {
+            Ok(resolved_references) => resolved_references,
+            Err(error) => {
+                sources.prepared.push((path.clone(), prepared));
+                return Err(finalize_discovery_failure(
+                    path,
+                    FileFrontendPrepareFailure::Infrastructure(error),
+                    sources,
+                    &unit.source_path,
+                    &path_resolver,
+                    string_table,
+                ));
+            }
+        };
+        pending_references.extend(resolved_references);
+        sources.prepared.push((path, prepared));
     }
 
-    let mut prepared_entry = None;
-    let mut prepared_content_sources = Vec::new();
-    for (path, mut prepared) in prepared_sources {
-        let record = source_files.get_by_canonical_path(&path).ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "source {path:?} has no identity before rebinding"
-                )),
-                string_table,
-            )
-        })?;
-        let canonical_os_path = record.canonical_os_path.clone().ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "final source identity {} has no canonical path",
-                    record.id.index()
-                )),
-                string_table,
-            )
-        })?;
-
-        prepared
-            .rebind_source_identity(
-                record.id,
-                source_files.legacy_logical_path(record.id),
-                canonical_os_path,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        prepared
-            .freeze_path_syntax(string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-        if path == unit.source_path {
-            prepared_entry = Some(prepared);
-        } else {
-            prepared_content_sources.push(prepared);
-        }
-    }
+    // The source database owns the final canonical identities. Prepared outputs stay live and
+    // retain their original span builders for the compiler service to install after folding.
+    let FinalizedTemplateSources {
+        source_files,
+        prepared_entry,
+        prepared_content_sources,
+    } = finalize_known_sources(sources, &unit.source_path, &path_resolver, string_table)?;
     let prepared_entry = prepared_entry.ok_or_else(|| {
         CompilerMessages::from_error_ref(
             CompilerError::compiler_error(
@@ -356,9 +332,231 @@ pub(super) fn prepare_file_value_bundle(
         prepared_entry,
         prepared_content_sources,
         resolved_file_references,
-        source_files: Arc::new(source_files),
+        source_files,
         module_origin: Some(module_origin),
     })
+}
+
+/// The final source database and prepared outputs after canonical identity rebinding.
+///
+/// Success requires the entry output and hands it to the compiler with its original span builder
+/// still live. Diagnosed discovery may have no entry output when the entry producer itself failed,
+/// so it installs the failed producer's builder separately.
+struct FinalizedTemplateSources {
+    source_files: SourceDatabase,
+    prepared_entry: Option<FileFrontendPrepareOutput>,
+    prepared_content_sources: Vec<FileFrontendPrepareOutput>,
+}
+
+/// Discovery owns the known snapshots and their original preparations until one terminal handoff.
+#[derive(Default)]
+struct DiscoveredTemplateSources {
+    candidates: FxHashMap<PathBuf, SourceFileKind>,
+    loaded: FxHashMap<PathBuf, Result<String, CompilerError>>,
+    prepared: Vec<(PathBuf, FileFrontendPrepareOutput)>,
+}
+
+/// Finalize all source candidates known at a discovery boundary.
+///
+/// The same path is used after a complete walk and after an aborted walk. It moves every retained
+/// snapshot into the final identity table and rebinds every prepared output exactly once; it does
+/// not install span builders because successful compiler folding remains their last producer.
+fn finalize_known_sources(
+    sources: DiscoveredTemplateSources,
+    entry_file_path: &Path,
+    path_resolver: &ProjectPathResolver,
+    string_table: &mut StringTable,
+) -> Result<FinalizedTemplateSources, CompilerMessages> {
+    let DiscoveredTemplateSources {
+        candidates,
+        loaded,
+        prepared,
+    } = sources;
+    let registration_index = SourceRegistrationIndex::from_rows(
+        candidates
+            .iter()
+            .map(|(path, kind)| (path.as_path(), SourceKind::Compiler(*kind))),
+    );
+    let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
+        entry_file_path,
+        Some(path_resolver),
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    for (path, snapshot) in loaded {
+        let source_id = source_id_for_path(
+            &source_files,
+            &path,
+            string_table,
+            "has no identity after classified registration",
+        )?;
+        match snapshot {
+            Ok(source_code) => source_files
+                .retain_text(source_id, source_code)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+            Err(mut error) => {
+                error
+                    .location
+                    .rebind_source_identity(&source_files.legacy_logical_path(source_id));
+                source_files
+                    .record_source_load_error(source_id, error)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+            }
+        }
+    }
+
+    let mut prepared_entry = None;
+    let mut prepared_content_sources = Vec::new();
+    for (path, mut prepared) in prepared {
+        let record = source_files.get_by_canonical_path(&path).ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "source {path:?} has no identity before rebinding"
+                )),
+                string_table,
+            )
+        })?;
+        let canonical_os_path = record.canonical_os_path.clone().ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(format!(
+                    "final source identity {} has no canonical path",
+                    record.id.index()
+                )),
+                string_table,
+            )
+        })?;
+
+        prepared
+            .rebind_source_identity(
+                record.id,
+                source_files.legacy_logical_path(record.id),
+                canonical_os_path,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        prepared
+            .freeze_path_syntax(string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+        if path == entry_file_path {
+            prepared_entry = Some(prepared);
+        } else {
+            prepared_content_sources.push(prepared);
+        }
+    }
+    Ok(FinalizedTemplateSources {
+        source_files,
+        prepared_entry,
+        prepared_content_sources,
+    })
+}
+
+/// Install one prepared source's original span builder after aborted discovery.
+fn install_prepared_span_builder(
+    source_files: &mut SourceDatabase,
+    prepared: &mut FileFrontendPrepareOutput,
+) -> Result<(), CompilerError> {
+    let span_builder = std::mem::take(&mut prepared.span_builder);
+    source_files.install_extended_spans(prepared.file_id, span_builder.freeze())
+}
+
+/// Finish an aborted discovery walk without dropping known source ownership.
+///
+/// Diagnosed preparation keeps the producer's typed warning, diagnostic and span builder until
+/// this boundary. Once no later producer can append a row, every known source is finalized, the
+/// original builders are installed, and the finalized database is attached to the message set.
+fn finalize_discovery_failure(
+    failed_path: PathBuf,
+    failure: FileFrontendPrepareFailure,
+    sources: DiscoveredTemplateSources,
+    entry_file_path: &Path,
+    path_resolver: &ProjectPathResolver,
+    string_table: &mut StringTable,
+) -> CompilerMessages {
+    let finalized =
+        match finalize_known_sources(sources, entry_file_path, path_resolver, string_table) {
+            Ok(finalized) => finalized,
+            Err(messages) => return messages,
+        };
+    let FinalizedTemplateSources {
+        mut source_files,
+        mut prepared_entry,
+        mut prepared_content_sources,
+    } = finalized;
+
+    // Final identity rebinding updates warning locations along with the prepared output. Move
+    // those warnings only after rebinding so a diagnosed boundary never carries traversal-local
+    // source scopes into its finalized database.
+    let mut prior_warnings = Vec::new();
+    if let Some(prepared_entry) = &mut prepared_entry {
+        prior_warnings.append(&mut prepared_entry.warnings);
+    }
+    for prepared in &mut prepared_content_sources {
+        prior_warnings.append(&mut prepared.warnings);
+    }
+
+    if let Some(prepared_entry) = &mut prepared_entry
+        && let Err(error) = install_prepared_span_builder(&mut source_files, prepared_entry)
+    {
+        let mut messages =
+            CompilerMessages::from_error_with_warnings(error, prior_warnings, string_table);
+        messages.set_source_database(Arc::new(source_files));
+        return messages;
+    }
+    for prepared in &mut prepared_content_sources {
+        if let Err(error) = install_prepared_span_builder(&mut source_files, prepared) {
+            let mut messages =
+                CompilerMessages::from_error_with_warnings(error, prior_warnings, string_table);
+            messages.set_source_database(Arc::new(source_files));
+            return messages;
+        }
+    }
+
+    let source_id = match source_id_for_path(
+        &source_files,
+        &failed_path,
+        string_table,
+        "has no finalized identity for its preparation failure",
+    ) {
+        Ok(source_id) => source_id,
+        Err(messages) => return messages,
+    };
+    let logical_path = source_files.legacy_logical_path(source_id);
+
+    let mut messages = match failure {
+        FileFrontendPrepareFailure::Diagnosed(mut error) => {
+            for warning in &mut error.warnings {
+                warning.rebind_source_identity(&logical_path);
+            }
+            error.diagnostic.rebind_source_identity(&logical_path);
+            prior_warnings.extend(error.warnings);
+
+            if let Err(install_error) =
+                source_files.install_extended_spans(source_id, error.span_builder.freeze())
+            {
+                let mut messages = CompilerMessages::from_error_with_warnings(
+                    install_error,
+                    prior_warnings,
+                    string_table,
+                );
+                messages.set_source_database(Arc::new(source_files));
+                return messages;
+            }
+
+            CompilerMessages::from_diagnostic_with_warnings(
+                *error.diagnostic,
+                prior_warnings,
+                string_table,
+            )
+        }
+        FileFrontendPrepareFailure::Infrastructure(mut error) => {
+            error.location.rebind_source_identity(&logical_path);
+            CompilerMessages::from_error_with_warnings(error, prior_warnings, string_table)
+        }
+    };
+    messages.set_source_database(Arc::new(source_files));
+    messages
 }
 
 /// Record one physically resolved content target in the candidate set and queue it.
@@ -366,8 +564,8 @@ pub(super) fn prepare_file_value_bundle(
 /// Loading happens here, before the caller's visited check, so it must dedupe on the loaded
 /// snapshot rather than on the queue. A path already collected keeps the kind its own producer
 /// authored. Only a genuinely new path is classified here, because a lexical spelling can resolve
-/// onto a target whose extension names another kind, and asserting a second kind for one
-/// canonical path is the conflict the source database rejects.
+/// onto a target whose extension names another kind, and asserting a second kind for one path
+/// would make the source registration ambiguous.
 fn collect_content_candidate(
     resolved: &SingleFileResolvedReference,
     candidates: &mut FxHashMap<PathBuf, SourceFileKind>,
@@ -375,17 +573,17 @@ fn collect_content_candidate(
     queue: &mut VecDeque<QueuedSource>,
     source_file_kinds: &SourceFileKindRegistry,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     match &resolved.outcome {
         SingleFileReferenceOutcome::IdentifiedSourceKind => {
             if resolved.class != PreparedFileReferenceClass::SourceKindNoFileValue {
-                return Err(incompatible_class_messages(string_table));
+                return Err(incompatible_class_error());
             }
             Ok(())
         }
         SingleFileReferenceOutcome::Source { canonical } => {
             if resolved.class != PreparedFileReferenceClass::ContentSource {
-                return Err(incompatible_class_messages(string_table));
+                return Err(incompatible_class_error());
             }
 
             let kind = if let Some(&kind) = candidates.get(canonical) {
@@ -396,11 +594,8 @@ fn collect_content_candidate(
                     .and_then(|extension| extension.to_str())
                     .unwrap_or_default();
                 let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "resolved supported content target has no registered source kind",
-                        ),
-                        string_table,
+                    return Err(CompilerError::compiler_error(
+                        "resolved supported content target has no registered source kind",
                     ));
                 };
                 candidates.insert(canonical.clone(), kind);
@@ -410,7 +605,6 @@ fn collect_content_candidate(
             if !loaded.contains_key(canonical) {
                 // A read failure is recorded against the snapshot rather than returned here. The
                 // reference is still queued so the failure surfaces when this source is popped
-                // for preparation, which is where it surfaced before loading moved earlier.
                 let snapshot = extract_source_code(canonical, string_table);
                 loaded.insert(canonical.clone(), snapshot);
             }
@@ -491,7 +685,7 @@ fn prepare_one_source(
     options: &HeaderParseOptions<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let context = FrontendFilePrepareContext {
         source_files,
         style_directives,
@@ -508,11 +702,10 @@ fn prepare_one_source(
             source_path: source_path.to_path_buf(),
         },
         SourceFileKind::Moth => {
-            return Err(CompilerMessages::from_error_ref(
+            return Err(FileFrontendPrepareFailure::Infrastructure(
                 CompilerError::compiler_error(
-                    "direct template content closure reached a Moth module source",
+                    "direct template content closure reached a Moth module",
                 ),
-                string_table,
             ));
         }
     };
@@ -522,19 +715,7 @@ fn prepare_one_source(
         runtime_fragment_offset: 0,
     };
 
-    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table).map_err(|error| {
-        match error {
-            FileFrontendPrepareFailure::Diagnosed(error) => {
-                let mut messages =
-                    CompilerMessages::from_diagnostic(*error.diagnostic, string_table.clone());
-                messages.prepend_diagnostics_preserving_context(error.warnings);
-                messages
-            }
-            FileFrontendPrepareFailure::Infrastructure(error) => {
-                CompilerMessages::from_error(error, string_table.clone())
-            }
-        }
-    })
+    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
 }
 
 fn recognised_source_file_kinds() -> SourceFileKindRegistry {
@@ -545,11 +726,8 @@ fn recognised_source_file_kinds() -> SourceFileKindRegistry {
     registry
 }
 
-fn incompatible_class_messages(string_table: &mut StringTable) -> CompilerMessages {
-    CompilerMessages::from_error_ref(
-        CompilerError::compiler_error(
-            "direct template content closure retained an incompatible physical outcome class",
-        ),
-        string_table,
+fn incompatible_class_error() -> CompilerError {
+    CompilerError::compiler_error(
+        "direct template content closure retained an incompatible physical outcome class",
     )
 }

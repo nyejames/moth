@@ -71,8 +71,7 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) authored_path: &'a Path,
     /// The canonical filesystem path the authored config resolved to.
     pub(crate) canonical_path: &'a Path,
-    /// The source identity carried by this config's token stream. Standalone callers use the
-    /// compilation-root identity because their source text belongs to the whole compilation.
+    /// The registered authored source identity carried by this config's token stream.
     pub(crate) file_id: SourceId,
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,

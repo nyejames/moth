@@ -762,6 +762,15 @@ closure, as in the general prepared-source orchestration contract.
 Project tooling receives folded `content` and warnings. It never implements preparation semantics,
 binds symbols, orders declarations or folds templates itself.
 
+The bundle transfers its source database and live source-local span builders into the service.
+The service retains those builders through folding and extraction, then installs their tables
+under exclusive ownership after all AST readers have ended. Folded results and diagnosed service
+outcomes retain the source context needed by their resource facts and warnings.
+
+If bundle discovery diagnoses a source before folding can begin, its owning preparation boundary
+retains the known snapshots and builders and finalizes them there. The request owner preserves each
+document's source context with its warnings, including when a later document fails.
+
 #### Project config compilation service
 
 Build-system config bootstrap is the other sanctioned short compiler path. The compiler owns one named service that runs tokenization, synthetic-free declaration-shell preparation, interface binding for the single authored config source, local declaration ordering and AST semantic checking, then stops at folded AST values.

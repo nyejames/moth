@@ -679,6 +679,12 @@ Stage 0 produces structure, resolved build-input contracts and compiler inputs. 
 
 Provider-independent source preparation is Stage 0's only reach into the compiler before a module is ready. Stage 0 decides which source candidate to prepare, when to prepare it and how to schedule preparation work across threads. Tokenization and header-preparation semantics stay compiler-owned behind one preparation call, and the exception ends at prepared syntax: Stage 0 consumes structural provider and file references and does not parse expressions, bind source symbols, order declarations or enter AST, HIR or borrow stages.
 
+Direct-template discovery follows the same ownership split. A successful bundle moves its source
+database and live span builders into the named compiler service, which finalizes the tables after
+folding. A diagnosed discovery keeps the known source snapshots and finalizes at that terminal
+preparation boundary instead. Request aggregation keeps earlier documents' warning source contexts
+when a later document fails, without copying their warning vectors.
+
 ## Project and package topology
 
 Terminology is strict:

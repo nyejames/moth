@@ -12,6 +12,7 @@ use crate::build_system::create_project_modules::resource_inputs::{
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidConfigReason,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -57,6 +58,70 @@ fn compile_ok(input: MothTemplateInput) -> MothTemplateCompileOutput {
     let mut string_table = StringTable::new();
     compile_moth_template(request(input), &mut string_table)
         .expect("Moth template input should compile")
+}
+
+#[test]
+fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
+    let first_source = "[$html: <script>first_snapshot()</script>]";
+    let second_source = "[$html: <script>second_snapshot()</script>]";
+    let temp_dir = temp_project(&[
+        ("a/page.mtf", first_source),
+        ("b/page.mtf", second_source),
+        ("c/page.mtf", "]"),
+    ]);
+
+    for include_failure in [false, true] {
+        let mut inputs = vec![
+            temp_dir.path().join("a/page.mtf"),
+            temp_dir.path().join("b/page.mtf"),
+        ];
+        if include_failure {
+            inputs.push(temp_dir.path().join("c/page.mtf"));
+        }
+        let mut string_table = StringTable::new();
+        let result =
+            compile_moth_template(request(MothTemplateInput::Files(inputs)), &mut string_table);
+        let messages = if include_failure {
+            result.expect_err("the third document should fail preparation")
+        } else {
+            let output = result.expect("both HTML documents should fold with warnings");
+            let mut messages = CompilerMessages::from_diagnostics(output.warnings, string_table);
+            messages.install_source_contexts(output.warning_source_contexts, 0);
+            messages
+        };
+
+        let mut expected_kinds = vec![
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
+        ];
+        let mut expected_sources = vec![first_source, second_source];
+        if include_failure {
+            expected_kinds.push(DiagnosticKind::Syntax(
+                SyntaxDiagnosticKind::UnescapedImplicitTemplateClose,
+            ));
+            expected_sources.push("]");
+        }
+        assert_eq!(
+            messages
+                .diagnostics()
+                .map(|diagnostic| diagnostic.kind)
+                .collect::<Vec<_>>(),
+            expected_kinds,
+        );
+
+        // Every document has the same logical filename in a separate source domain. A missing
+        // range shift or a substituted current-document context would show the wrong snapshot.
+        for (index, (diagnostic, expected_source)) in
+            messages.diagnostics().zip(expected_sources).enumerate()
+        {
+            assert_eq!(
+                messages
+                    .diagnostic_render_context(index)
+                    .retained_source_line(&diagnostic.primary_location.scope, 0),
+                Some(expected_source),
+            );
+        }
+    }
 }
 
 #[test]
@@ -630,8 +695,8 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
 }
 
 /// A content source is registered before it is prepared, so a failure raised during its
-/// preparation names the source the way the project spells it. Nothing rebinds that diagnostic:
-/// preparation failures leave the walk immediately, carrying the scope the tokenizer stamped.
+/// preparation must retain both its exact source snapshot and final logical identity. The
+/// diagnosed boundary owns the finalized source database after the walk stops.
 #[test]
 fn content_source_preparation_failures_name_the_logical_source() {
     let temp_dir = temp_project(&[
@@ -661,6 +726,22 @@ fn content_source_preparation_failures_name_the_logical_source() {
         .diagnostics()
         .map(|diagnostic| diagnostic.primary_location.scope.to_path_buf(&string_table))
         .collect::<Vec<_>>();
+
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("the preparation diagnostic should be present");
+    let source_database = messages
+        .source_database_for_diagnostic(0)
+        .expect("preparation diagnostics should retain their source database");
+    let source_slot = source_database
+        .unique_record_for_logical_path(&diagnostic.primary_location.scope)
+        .expect("the diagnosed logical source should identify one retained slot");
+    assert_eq!(
+        source_database.retained_text(source_slot.id),
+        Some("# Broken\n\n[$insert(\"unterminated]\n"),
+        "the diagnosed boundary should retain the exact content snapshot",
+    );
     assert!(
         scopes
             .iter()

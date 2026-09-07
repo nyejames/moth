@@ -24,7 +24,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
@@ -57,6 +57,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         content,
         module_resources,
         warnings,
+        mut source_database,
     } = folded;
     assert_eq!(
         content,
@@ -72,6 +73,55 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         "a plain request has no file values, so no resource origin is interned"
     );
     assert!(warnings.is_empty());
+
+    let source_id = source_database
+        .get_by_canonical_path(Path::new("/templates/intro.mtf"))
+        .expect("standalone source identity should remain retained")
+        .id;
+    assert_eq!(
+        source_database.retained_text(source_id),
+        Some("# Intro"),
+        "the folded result should retain the exact standalone source snapshot",
+    );
+
+    Arc::get_mut(&mut source_database)
+        .expect("the folded result should own its source database uniquely")
+        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
+        .expect_err("the service should install each source span table exactly once");
+}
+
+#[test]
+fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
+    let mut string_table = StringTable::new();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let source_path = Path::new("/templates/broken.mtf");
+    let source_code = "]";
+
+    let messages = match compile_moth_template_source(
+        MothTemplateCompilationRequest {
+            source_path,
+            source_code: Some(source_code.to_owned()),
+            style_directives: &style_directives,
+            file_value_resolution: None,
+        },
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("an unescaped template close should be diagnosed during preparation"),
+        Err(messages) => messages,
+    };
+
+    let source_database = messages
+        .source_database_for_diagnostic(0)
+        .expect("preparation diagnostics should retain their source database");
+    let source_id = source_database
+        .get_by_canonical_path(source_path)
+        .expect("diagnosed source identity should remain registered")
+        .id;
+    assert_eq!(
+        source_database.retained_text(source_id),
+        Some(source_code),
+        "diagnosed preparation must retain the exact authored snapshot",
+    );
 }
 
 #[test]
@@ -104,7 +154,6 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     source_files
         .retain_text(markdown_id, "Nested intro body.".to_owned())
         .expect("markdown source should retain its text");
-    let source_files = Arc::new(source_files);
     let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
@@ -163,7 +212,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         prepared_entry: prepared_template,
         prepared_content_sources: vec![prepared_markdown],
         resolved_file_references,
-        source_files: Arc::clone(&source_files),
+        source_files,
         module_origin: Some(module_origin.clone()),
     };
 
@@ -171,6 +220,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         content,
         module_resources,
         warnings,
+        source_database,
     } = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: template_path,
@@ -219,6 +269,25 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         "the folded module's resource table must report the resolved origin as a source fact"
     );
     assert!(warnings.is_empty());
+
+    let template_id = source_database
+        .get_by_canonical_path(template_path)
+        .expect("folded bundle should retain the template source identity")
+        .id;
+    let markdown_id = source_database
+        .get_by_canonical_path(markdown_path)
+        .expect("folded bundle should retain the content source identity")
+        .id;
+    assert_eq!(
+        source_database.retained_text(template_id),
+        Some(template_source),
+        "bundle folding must preserve the exact template snapshot",
+    );
+    assert_eq!(
+        source_database.retained_text(markdown_id),
+        Some("Nested intro body."),
+        "bundle folding must preserve the exact dependency snapshot",
+    );
 }
 
 fn prepare_bundle_source(

@@ -69,24 +69,23 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D4b, config source-span retention and finalization.
-- Goal: retain the original config builder across header aggregation, semantic compilation and
-  build-owned config/output validation, then install its table under the mutable source owner.
-- Header aggregation borrows prepared-file values and moves their declaration/dependency facts,
-  leaving live builders with the caller on success and diagnosis.
-- The compiler service returns a config-specific outcome containing the semantic result, source
-  identity and original builder. Generic diagnostic bags and messages never own builders.
-- General source-preparation deltas, module/direct-template finalization and later span migration
-  remain open.
+- Phase: 1D4b, direct-template source finalization and warning context retention.
+- Goal: move the bundle's source database into the compiler service, keep original builders
+  through folding and finalize under exclusive ownership before source contexts escape.
+- Diagnosed bundle discovery finalizes the known source set after its last producer, preserving
+  original snapshots and builders. Successful bundles keep their builders live for compilation.
+- Request aggregation preserves each document's finalized source context with its warnings,
+  including when a later document fails, without cloning accumulated warning vectors.
+- General source-preparation deltas, module finalization and later span migration remain open.
 
 LAST_GOOD_COMMIT:
-- `a425042d4` — direct-template entry reuse, validated and independently reviewed.
+- `63fd6d467` — config source-span finalization, validated and independently reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- The config candidate is integrated, independently reviewed and full-gate green.
+- The config checkpoint is committed and the worktree was clean before this slice.
+- Compiler-service and project/request ownership reviews are accepted; the full gate passed.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
-- Tokenizer/header failures and direct-template entry reuse are accepted; 1D4b remains incomplete.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -167,11 +166,26 @@ BLOCKERS / RISKS:
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
-  Preserve them in the remaining 1D4b/1F2 outcome migration; this config-span slice does not
-  claim to repair that existing warning loss.
+  Preserve them in the remaining 1D4b/1F2 outcome migration; the accepted config-span checkpoint
+  did not claim to repair that existing warning loss.
+- The delivered traversal-only registration policy below uses one local-to-canonical identity
+  rebind. Reconcile that explicit policy with the physical authority's unqualified
+  pre-tokenization-final-ID wording before 1D3 publishes source spans from those lanes.
 
 VALIDATION_STATE:
-- Current config candidate: 26 compiler config tests, 41 build config tests and the focused
+- Direct-template implementation passed all 92 focused tests after formatting. The added
+  two-document warning regression exercises successful output and a later preparation failure,
+  resolving each diagnostic against its own snapshot despite colliding logical filenames.
+  Deliberately dropping prior warning contexts made that regression fail; restoring them passed.
+- Independent compiler-service ownership review found no required correction. Project review
+  required consolidating the new eight-argument abort helper. Its candidate, snapshot and
+  prepared-output owners now travel together as narrow discovery state, without a lint allowance.
+  The settled `just validate` gate passed: 5,058 compiler, 17 CLI and 825 xtask tests,
+  all 1,951 integration cases, clean docs and a 1,319-file source audit, all 82 benchmark
+  preflights, all three scaling budgets and timer erasure. No failure is waived.
+- Diagnosed-table contents, content-source one-shot installation and cross-document collision
+  secondary-site rendering remain coverage gaps for the upcoming source-span/render migration.
+- Accepted config checkpoint `63fd6d467`: 26 compiler config tests, 41 build config tests and the focused
   build-finalization and successful/diagnosed aggregation regressions passed after cleanup.
   A controlled restoration of dropping the config builder made the finalization regression
   fail because a second table installation succeeded; restoring finalization made it pass.
@@ -188,7 +202,8 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint config finalization, then continue source-delta and direct/module outcome ownership
+- next action: checkpoint direct-template finalization, then continue module source-preparation
+  deltas and exclusive finalization.
 
 ---
 
@@ -668,7 +683,7 @@ agreement checks stay until the duplicated fields are removed.
 Renderers already use retained snapshots rather than reopening files. Until 1F migrates them to
 source identity, per-diagnostic-range source contexts preserve package ownership and ambiguous
 display-path matches omit a frame rather than selecting the wrong file. The direct-template API
-still needs its source context attached at its result boundary.
+now retains its finalized per-document source context with warnings and diagnosed outcomes.
 
 1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy.
 1B6 is delivered: the facade and module semantic context borrow immutable services.
@@ -765,6 +780,8 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
     the direct-entry portion of 3E without claiming its source-owned token storage migration.
   - [x] **1D4b config finalization:** retain the original builder through compiler and build-owned
     config validation, then install it once before source database sharing.
+  - [x] **1D4b direct-template finalization:** preserve builders and snapshots through bundle
+    diagnosis or compiler folding, then retain finalized per-document contexts with warnings.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
