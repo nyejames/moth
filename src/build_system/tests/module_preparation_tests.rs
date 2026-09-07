@@ -362,7 +362,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     // Aggregate the remapped outputs. Preparation is where Stage 0's merge finishes, so every
     // assertion below reads the prepared syntax directly: binding against provider interfaces
     // would add a provider-dependent stage that cannot change a string identity.
-    let headers = prepare_header_syntax(vec![output_a, output_b], &mut frontend.string_table)
+    let headers = prepare_header_syntax(&mut [output_a, output_b], &mut frontend.string_table)
         .expect("header syntax preparation should succeed");
 
     // Verify source text string "beta" resolves through the module table in file B headers.

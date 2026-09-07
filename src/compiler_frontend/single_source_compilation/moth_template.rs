@@ -278,7 +278,7 @@ pub(crate) fn compile_moth_template_source(
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
 
-    let bound_headers = prepare_header_syntax(all_prepared, string_table)
+    let bound_headers = prepare_header_syntax(&mut all_prepared, string_table)
         .and_then(|prepared_syntax| {
             bind_module_headers(
                 prepared_syntax,

@@ -69,22 +69,24 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D4b, aggregation and outcome source ownership.
-- Goal: preserve successful and diagnosed preparation deltas and their live builders through
-  aggregation and later producers, then install each table under the exclusive source owner.
-- The direct-template entry reuse prerequisite is accepted at this checkpoint. It brings that
-  obligation forward from 3E without claiming source-owned token storage.
-- Producer-local failure retention is accepted in `5a1415ce9`. Aggregate builder retention,
-  diagnosed discovery finalization and exclusive source-database installation remain open.
+- Phase: 1D4b, config source-span retention and finalization.
+- Goal: retain the original config builder across header aggregation, semantic compilation and
+  build-owned config/output validation, then install its table under the mutable source owner.
+- Header aggregation borrows prepared-file values and moves their declaration/dependency facts,
+  leaving live builders with the caller on success and diagnosis.
+- The compiler service returns a config-specific outcome containing the semantic result, source
+  identity and original builder. Generic diagnostic bags and messages never own builders.
+- General source-preparation deltas, module/direct-template finalization and later span migration
+  remain open.
 
 LAST_GOOD_COMMIT:
-- `5a1415ce9` — diagnosed producer builder retention, validated and independently reviewed.
+- `a425042d4` — direct-template entry reuse, validated and independently reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- The direct-template entry reuse candidate passed the full gate and independent reviews.
+- The config candidate is integrated, independently reviewed and full-gate green.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
-- Tokenizer and header failures retain their existing builders. Later aggregation remains 1D4b.
+- Tokenizer/header failures and direct-template entry reuse are accepted; 1D4b remains incomplete.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -164,18 +166,21 @@ BLOCKERS / RISKS:
 - current boxed diagnostic aliases and style-guide advice are already present and must be removed
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
+- Config preparation and AST success warnings still lack a complete build-boundary handoff.
+  Preserve them in the remaining 1D4b/1F2 outcome migration; this config-span slice does not
+  claim to repair that existing warning loss.
 
 VALIDATION_STATE:
-- The direct-entry reuse regression passed. Restoring the old re-preparation behaviour temporarily
-  made it fail with two entry preparations instead of one; restoring reuse made it pass.
-- Both compiler-service tests and all 30 HTML direct-template tests passed, including after
-  replacing repeated whole-file path validation with the existing frozen-state check.
-- Independent ownership and regression/isolation reviews accepted the candidate. The stale
-  service module comment was aligned with the compiler authority.
-- `cargo fmt --all && just validate` passed after correcting Clippy's collapsible identity guard:
-  5,055 + 17 + 825 Rust tests, all 1,951 integration tests, clean docs and 1,319-file source audit,
-  all 82 benchmark preflights, all three scaling budgets and timer erasure.
-  No validation failure is waived.
+- Current config candidate: 26 compiler config tests, 41 build config tests and the focused
+  build-finalization and successful/diagnosed aggregation regressions passed after cleanup.
+  A controlled restoration of dropping the config builder made the finalization regression
+  fail because a second table installation succeeded; restoring finalization made it pass.
+- Independent compiler/header ownership and build finalization reviews accepted the candidate
+  without required corrections. They did not claim coverage of every config exit or installed
+  table-content rendering, which remains part of the later source-span consumer migration.
+- `cargo fmt --all && just validate` passed: 5,056 + 17 + 825 Rust tests, all 1,951 integration
+  tests, clean docs and 1,319-file source audit, all 82 benchmark preflights, all three scaling
+  budgets and timer erasure. No validation failure is waived.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -183,7 +188,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint accepted direct-entry reuse, then continue 1D4b source ownership
+- next action: checkpoint config finalization, then continue source-delta and direct/module outcome ownership
 
 ---
 
@@ -758,6 +763,8 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
     preparation and builder through final identity rebinding and bundle consumption. The compiler
     service prepares only standalone raw-source inputs, not bundle entries. This brings forward
     the direct-entry portion of 3E without claiming its source-owned token storage migration.
+  - [x] **1D4b config finalization:** retain the original builder through compiler and build-owned
+    config validation, then install it once before source database sharing.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration

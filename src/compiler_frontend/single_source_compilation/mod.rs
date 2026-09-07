@@ -5,11 +5,12 @@
 //! WHY:  both callers legitimately need less than canonical module compilation. Neither exists so
 //!       that build or project code may reach raw stage functions: the compiler sequences
 //!       tokenization, declaration-shell preparation, interface binding, local declaration ordering
-//!       and AST semantics, and hands back only the folded result its caller consumes.
+//!       and AST semantics. Config also returns its live source span builder so the build owner
+//!       can finish config validation before freezing the source.
 //!
 //! # What this module owns
 //! - [`config`]: the `config.moth` stage sequence, its dialect surface rules and its folded
-//!   declaration output
+//!   declaration output and source-span ownership handoff
 //! - [`moth_template`]: the direct `.mtf` stage sequence and the folded `content` constant
 //!
 //! # What this module does NOT own
@@ -25,7 +26,8 @@ mod config;
 mod moth_template;
 
 pub(crate) use config::{
-    CompiledConfigSource, ConfigCompilationRequest, FoldedConfigDeclaration, compile_config_source,
+    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest,
+    FoldedConfigDeclaration, compile_config_source,
 };
 pub(crate) use moth_template::{
     MothTemplateCompilationRequest, MothTemplateFileValueBundle, compile_moth_template_source,

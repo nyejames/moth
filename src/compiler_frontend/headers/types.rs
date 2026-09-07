@@ -1075,12 +1075,8 @@ pub struct FileFrontendPrepareOutput {
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
     pub file_id: SourceId,
-    /// The one mutable source-local span table encoded by this file's token stream.
-    ///
-    /// The reader arrives with slice 1D4: the source preparation delta installs this table into
-    /// its record, and resolution begins there. It travels through file preparation now so the
-    /// tokenizer's rows are never separated from the spans that index them.
-    #[allow(dead_code)]
+    /// The source-local span table remains live across aggregation until the owning boundary
+    /// finishes every span-producing stage.
     pub(crate) span_builder: ExtendedSpanBuilder,
     /// The sole file-owned table while source preparation remains mutable, then the immutable
     /// table shared by every retained header stream from this file.
@@ -1217,10 +1213,6 @@ pub struct FileFrontendPrepareError {
     pub(crate) file_id: SourceId,
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: Box<CompilerDiagnostic>,
-    #[allow(
-        dead_code,
-        reason = "the 1D4b aggregation boundary will consume the diagnosed source builder"
-    )]
     pub(crate) span_builder: ExtendedSpanBuilder,
 }
 

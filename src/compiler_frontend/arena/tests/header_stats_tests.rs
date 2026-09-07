@@ -63,7 +63,7 @@ fn multi_file_declarations_are_aggregated() {
     );
 
     let prepared_syntax =
-        prepare_header_syntax(vec![entry_output, helper_output], &mut string_table)
+        prepare_header_syntax(&mut [entry_output, helper_output], &mut string_table)
             .expect("header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,

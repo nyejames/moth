@@ -1165,6 +1165,7 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored html section should compile to folded declarations");
 
     let mut config = Config::new(PathBuf::from("project"));
@@ -1433,6 +1434,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         },
         &mut string_table,
     )
+    .result
     .expect("grouped project metadata should compile");
 
     let project = compiled
@@ -1516,6 +1518,7 @@ fn applies_direct_project_config_global_through_validation() {
         },
         &mut string_table,
     )
+    .result
     .expect("builder global should fold before validation");
     let mut config = Config::new(PathBuf::from("project"));
     apply_result(validate_and_apply_config_declarations(
@@ -1552,6 +1555,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
         },
         &mut string_table,
     )
+    .result
     .expect("optional config absence should compile");
 
     let author_record = compiled

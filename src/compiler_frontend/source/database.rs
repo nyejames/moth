@@ -317,10 +317,7 @@ impl SourceDatabase {
     ///
     /// Installation is monotonic: a pending or failed source never receives a table, and a
     /// loaded source can transition from absent to installed only once.
-    // Installing needs a mutable database, which parallel file workers never hold. The caller is
-    // therefore a post-worker merge boundary, reached once the source preparation delta of slice
-    // 1D4 carries each source's builder there.
-    #[allow(dead_code)]
+    // The exclusive source owner installs the table after its final span-producing stage.
     pub(crate) fn install_extended_spans(
         &mut self,
         id: SourceId,

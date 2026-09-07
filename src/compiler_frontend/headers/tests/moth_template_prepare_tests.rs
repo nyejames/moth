@@ -230,7 +230,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         .freeze_path_syntax(&string_table)
         .expect("single-file Moth template output should satisfy the prepared-file invariant gate");
 
-    let prepared_syntax = prepare_header_syntax(vec![prepared_file], &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut [prepared_file], &mut string_table)
         .expect("Moth template header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,
@@ -665,7 +665,7 @@ impl MothTemplateScopeFixture {
             prepared_files.push(output);
         }
 
-        let prepared_syntax = prepare_header_syntax(prepared_files, &mut string_table)
+        let prepared_syntax = prepare_header_syntax(&mut prepared_files, &mut string_table)
             .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
         let headers = bind_module_headers(
             prepared_syntax,
@@ -1854,7 +1854,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     )
     .expect("test project path resolver should build");
 
-    let prepared_syntax = prepare_header_syntax(vec![prepared_file], &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut [prepared_file], &mut string_table)
         .expect("authored md header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,

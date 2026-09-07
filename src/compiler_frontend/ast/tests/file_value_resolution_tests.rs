@@ -460,7 +460,7 @@ fn compile_fixture(
         }
     }
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
         .expect("header syntax preparation should succeed");
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let headers = bind_module_headers(

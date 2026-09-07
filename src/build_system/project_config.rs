@@ -18,7 +18,7 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::single_source_compilation::{
-    ConfigCompilationRequest, compile_config_source,
+    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -169,7 +169,11 @@ pub(crate) fn compile_project_config_file(
                 string_table.clone(),
             )
         })?;
-    let compiled_config = compile_config_source(
+    let ConfigCompilationOutcome {
+        result,
+        file_id: outcome_file_id,
+        span_builder,
+    } = compile_config_source(
         ConfigCompilationRequest {
             authored_path: config_path,
             canonical_path: &canonical_config_path,
@@ -186,13 +190,39 @@ pub(crate) fn compile_project_config_file(
                 .project_field_config_policies(),
         },
         string_table,
-    )?;
+    );
+    let validated_config = match result {
+        Ok(compiled_config) => {
+            validate_and_apply_compiled_config(config, &compiled_config, services, string_table)
+                .map(|settings| (compiled_config, settings))
+        }
+        Err(messages) => Err(messages),
+    };
 
+    // Both compiler and build-owned diagnostics are complete before the source becomes immutable.
+    if let Some(span_builder) = span_builder {
+        project_source_files
+            .install_extended_spans(outcome_file_id, span_builder.freeze())
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    }
+
+    let (compiled_config, validated_output_settings) = validated_config?;
+    // Retain provenance until the build boundary projects source providers and `@project`.
+    config.config_resolution_records = compiled_config.resolution_records;
+    config.project_config_loaded = true;
+    Ok(validated_output_settings)
+}
+
+fn validate_and_apply_compiled_config(
+    config: &mut Config,
+    compiled_config: &CompiledConfigSource,
+    services: &ProjectConfigParseServices<'_>,
+    string_table: &mut StringTable,
+) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     let mut errors = Vec::new();
-    // 2. Validate and apply the folded declarations to the live Config object.
     match validation::validate_and_apply_config_declarations(
         config,
-        &compiled_config,
+        compiled_config,
         &services.frontend_surface.config_schemas,
         string_table,
     ) {
@@ -201,11 +231,11 @@ pub(crate) fn compile_project_config_file(
             errors.append(&mut validation_errors);
         }
         Err(ConfigApplyError::Compiler(error)) => {
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+            return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     }
 
-    // 3. Validate directory output settings after all config values are applied.
+    // Output policy needs the completed config values, even when another field was diagnosed.
     let validated_output_settings = if config.entry_dir.is_dir() {
         match validate_directory_output_settings(config, string_table) {
             Ok(settings) => Some(settings),
@@ -218,13 +248,7 @@ pub(crate) fn compile_project_config_file(
         None
     };
 
-    // 4. Aggregate all errors into one CompilerMessages payload.
     if errors.is_empty() {
-        // Keep compiler-owned resolution provenance with the live bootstrap config until the
-        // build boundary projects source providers and `@project`. Successful build results clear
-        // this transient handoff after frontend compilation.
-        config.config_resolution_records = compiled_config.resolution_records;
-        config.project_config_loaded = true;
         Ok(validated_output_settings)
     } else {
         Err(CompilerMessages::from_diagnostics(

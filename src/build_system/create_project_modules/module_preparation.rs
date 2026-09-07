@@ -725,7 +725,7 @@ impl ModulePreparationContext<'_> {
         }
 
         record_successful_prepared_outputs(&filled_outputs);
-        let prepared = prepare_header_syntax(filled_outputs, string_table).map_err(|bag| {
+        let prepared = prepare_header_syntax(&mut filled_outputs, string_table).map_err(|bag| {
             let mut messages =
                 CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
             messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
@@ -1123,7 +1123,7 @@ impl ModuleSyntaxDiscovery<'_> {
         let prepared_header_syntax = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
-            prepare_header_syntax(prepared_outputs, &mut self.string_table),
+            prepare_header_syntax(&mut prepared_outputs, &mut self.string_table),
         )
         .map_err(|bag| {
             let mut messages = CompilerMessages::from_diagnostics(

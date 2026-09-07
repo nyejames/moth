@@ -48,6 +48,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenizeOutput};
+use std::mem;
 use std::path::Path;
 
 /// Parse one tokenized file using the supplied string table.
@@ -172,20 +173,19 @@ pub(crate) fn prepare_file_from_tokens(
 /// Aggregate per-file frontend preparation outputs into provider-independent
 /// `PreparedHeaderSyntax`.
 ///
-/// WHAT: consumes already-remapped `FileFrontendPrepareOutput` values, builds the module-wide
-/// symbol package, and collects retained header/dependency shells, root-activity/fragment metadata,
-/// and token/header statistics.
+/// WHAT: moves declaration and dependency facts out of already-remapped per-file outputs to build
+/// the module-wide symbol package, retained headers, fragments and statistics. The caller keeps
+/// each source's live span builder, including when aggregation returns diagnostics.
 /// WHY: this is the only phase that discovers module-wide top-level declaration syntax. It must
 /// complete before provider interfaces are available so binding can consume retained syntax
 /// without retokenizing or reparsing source.
 pub fn prepare_header_syntax(
-    prepared_files: Vec<FileFrontendPrepareOutput>,
+    prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
 ) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let source_build_config_contracts =
-        collect_source_build_config_contracts(&prepared_files, string_table)?;
-    let mut prepared_files = prepared_files;
-    let module_symbols = build_module_symbols(&mut prepared_files, string_table)?;
+        collect_source_build_config_contracts(prepared_files, string_table)?;
+    let module_symbols = build_module_symbols(prepared_files, string_table)?;
 
     let mut headers: Vec<Header> = Vec::new();
     let mut top_level_const_fragments = Vec::new();
@@ -193,13 +193,10 @@ pub fn prepare_header_syntax(
     let mut has_non_trivial_root_body = false;
     let mut token_stats = TokenStats::default();
 
-    for output in &prepared_files {
-        token_stats.add(&output.token_stats);
-    }
-
     for output in prepared_files {
-        headers.extend(output.headers);
-        top_level_const_fragments.extend(output.top_level_const_fragments);
+        token_stats.add(&output.token_stats);
+        headers.extend(mem::take(&mut output.headers));
+        top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
         runtime_fragment_count += output.runtime_fragment_count;
         has_non_trivial_root_body |= output.has_non_trivial_root_body;
     }

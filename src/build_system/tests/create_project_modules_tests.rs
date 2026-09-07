@@ -58,7 +58,7 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -2029,6 +2029,93 @@ fn parses_config_constant_declarations() {
         Some("release")
     );
     assert_eq!(config.template_const_loop_iteration_limit, 10001);
+}
+
+#[test]
+fn config_span_tables_finalize_for_success_and_diagnosed_results() {
+    let cases = [
+        (
+            "successful",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            false,
+        ),
+        (
+            "diagnosed",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    release_output = \"src/out\",\n|\n",
+            true,
+        ),
+    ];
+
+    for (label, source, diagnosed) in cases {
+        let _temp = tempfile::tempdir().expect("should create temporary project");
+        let root = _temp.path().to_path_buf();
+        fs::create_dir(root.join("src")).expect("should create the source directory");
+        let config_path = root.join(settings::CONFIG_FILE_NAME);
+        fs::write(&config_path, source).expect("should write config");
+
+        let mut config = Config::new(root);
+        let style_directives = test_style_directives();
+        let frontend_surface =
+            crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
+                .frontend_surface();
+        let build_config_inputs =
+            crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+        let services = ProjectConfigParseServices {
+            style_directives: &style_directives,
+            frontend_surface: &frontend_surface,
+            build_config_inputs: &build_config_inputs,
+        };
+        let mut string_table = StringTable::new();
+        let mut source_files = SourceDatabase::empty();
+
+        let result = compile_project_config_file(
+            &mut config,
+            &config_path,
+            &services,
+            &mut source_files,
+            &mut string_table,
+        );
+        if diagnosed {
+            let messages = result.expect_err("invalid output settings should diagnose");
+            assert!(
+                messages.error_diagnostics().any(|diagnostic| {
+                    matches!(
+                        &diagnostic.payload,
+                        DiagnosticPayload::InvalidConfig {
+                            reason: InvalidConfigReason::InvalidOutputFolder {
+                                reason: InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+                                ..
+                            },
+                            ..
+                        }
+                    )
+                }),
+                "{label} config should retain its typed output diagnostic",
+            );
+        } else {
+            result.expect("valid config should compile and apply");
+        }
+
+        let canonical_config_path =
+            fs::canonicalize(&config_path).expect("config path should canonicalize");
+        let config_file_id = source_files
+            .get_by_canonical_path(&canonical_config_path)
+            .expect("compiled config should have a registered source slot")
+            .id;
+        assert!(
+            source_files.retained_text(config_file_id).is_some(),
+            "{label} config should retain the compiled snapshot",
+        );
+
+        let installation_error = source_files
+            .install_extended_spans(config_file_id, ExtendedSpanBuilder::default().freeze())
+            .expect_err("the config span table should already be installed");
+        assert_eq!(
+            installation_error.error_type,
+            ErrorType::Compiler,
+            "{label} config should reject a second span-table installation",
+        );
+    }
 }
 
 #[test]

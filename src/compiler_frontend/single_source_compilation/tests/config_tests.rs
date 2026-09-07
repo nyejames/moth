@@ -1,7 +1,7 @@
 //! Project config compilation service tests.
 //!
-//! WHAT: the service's standalone contract — one authored source in, owned folded declarations
-//!       and authored key-name spans out.
+//! WHAT: the service's standalone contract — one authored source in, owned folded declarations,
+//!       authored key-name spans and the live source-span builder out.
 //! WHY:  the config dialect's rejections are owned by the `config_*` integration cases, which run a
 //!       whole build and assert exact diagnostic codes. What those cases cannot show is that config
 //!       compilation is a compiler entry point at all: that it needs no `Config`, no build-system
@@ -9,17 +9,19 @@
 //!       dialect rejections happen inside the service before any declaration is handed back.
 
 use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
-use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, InvalidExpressionReason,
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use std::path::Path;
 
 fn compile_project_source(
@@ -30,7 +32,7 @@ fn compile_project_source(
     let mut string_table = StringTable::new();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let compiled = compile_config_source(
+    let outcome = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
@@ -46,8 +48,8 @@ fn compile_project_source(
                 .project_field_config_policies(),
         },
         &mut string_table,
-    )?;
-    Ok((compiled, string_table))
+    );
+    Ok((outcome.result?, string_table))
 }
 
 #[test]
@@ -73,6 +75,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored config source should compile to folded declarations");
 
     let expected_scope =
@@ -125,6 +128,7 @@ fn projects_authored_anonymous_const_records() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored anonymous const record should project at the config boundary");
 
     let labels = compiled
@@ -140,6 +144,97 @@ fn projects_authored_anonymous_const_records() {
     assert_eq!(
         fields[0].value,
         PublicFoldedValue::String(OwnedFoldedString::Text("a".to_owned()))
+    );
+}
+
+#[test]
+fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
+    let long_value = "x".repeat(1500);
+    let source_code = format!("value #= \"{long_value}\"\nentry_root = \"src\"\n");
+    let mut string_table = StringTable::new();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let authored_path = Path::new("project/config.moth");
+    let canonical_path = Path::new("/project/config.moth");
+    let mut source_files = SourceDatabase::empty();
+    let file_id = source_files
+        .insert(
+            canonical_path.to_path_buf(),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            canonical_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the config source should register");
+    source_files
+        .retain_text(file_id, source_code)
+        .expect("the snapshot should load");
+    let source_code = source_files
+        .retained_text(file_id)
+        .expect("the snapshot should remain owned");
+    let authored_scope = InternedPath::try_from_filesystem_path(authored_path, &mut string_table)
+        .expect("the authored path should be UTF-8");
+
+    // A reference lexer pass captures the real handle whose append-only prefix the service keeps.
+    let reference_tokens = tokenize(
+        source_code,
+        &authored_scope,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        file_id,
+    )
+    .expect("the config should tokenize before its later dialect rejection");
+    let literal_span = reference_tokens
+        .file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the reference lexer should produce the long literal")
+        .span;
+    drop(reference_tokens);
+
+    let outcome = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path,
+            canonical_path,
+            file_id,
+            source_code,
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    );
+
+    let messages = outcome
+        .result
+        .err()
+        .expect("a later config dialect rejection should produce diagnostics");
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::PlainBindingUnsupported,
+                ..
+            }
+        )
+    }));
+    assert_eq!(outcome.file_id, file_id);
+    let builder = outcome
+        .span_builder
+        .expect("the diagnosed source should retain its builder");
+    let literal_range = literal_span.resolve_with(builder.resolver());
+    assert_eq!(
+        source_code.get(literal_range.start() as usize..literal_range.end() as usize),
+        Some(format!("\"{long_value}\"").as_str())
     );
 }
 
@@ -166,6 +261,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("config-local nominal values should not become CompilerError");
 
@@ -208,6 +304,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("a plain config binding should be rejected by the compiler service");
 
@@ -250,6 +347,7 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("a nested record literal should be rejected by the compiler service");
 
@@ -291,6 +389,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("an implicit sibling field reference should be rejected by the compiler service");
 
@@ -331,6 +430,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect(
         "a #Config qualifier on a builder section field should be rejected by the compiler service",

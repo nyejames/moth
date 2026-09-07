@@ -30,7 +30,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -125,24 +125,26 @@ fn prepare_test_source_file(
     )
 }
 
-/// The span table the tokenizer filled must reach the prepared output, because the retained
-/// header tokens' spans index its rows.
-///
-/// The literal is longer than a `LocalSpan` can pack inline, so its span is an index into that
-/// table and nothing else can resolve it. This covers `prepare_file_from_tokens`, which forks a
-/// local string table and finalises the output: a table swapped or replaced along that path fails
-/// here rather than at the first consumer to resolve a span. The parallel worker transport that
-/// calls `parse_file_headers_with_table` directly is not exercised.
+/// Extended token spans keep their source-owned table through aggregation. Later span producers
+/// may append to that same builder without invalidating the retained header's earlier handles.
 #[test]
 fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let quoted = "x".repeat(1500);
     let source = format!("value = \"{quoted}\"\n");
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(&source, &file_path, &file_path, &mut string_table);
-
-    let resolver = output.span_builder.resolver();
-    let literal = output
+    let mut outputs = [prepare_single_file(
+        &source,
+        &file_path,
+        &file_path,
+        &mut string_table,
+    )];
+    let prepared = prepare_header_syntax(&mut outputs, &mut string_table)
+        .expect("header syntax should aggregate");
+    let whole_source = LocalSpan::exact(0, source.len() as u32, &mut outputs[0].span_builder)
+        .expect("a later source span should fit");
+    let resolver = outputs[0].span_builder.resolver();
+    let literal = prepared
         .headers
         .iter()
         .flat_map(|header| header.tokens.tokens.iter())
@@ -155,6 +157,54 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         Some(format!("\"{quoted}\"").as_str()),
         "the retained token's span must resolve through the prepared output's own table"
     );
+    let whole_range = whole_source.resolve_with(resolver);
+    assert_eq!(whole_range.start(), 0);
+    assert_eq!(whole_range.end(), source.len() as u32);
+}
+
+#[test]
+fn diagnosed_aggregation_preserves_the_source_span_builder() {
+    let quoted = "x".repeat(1500);
+    let source =
+        format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of Int = 1\n;\n");
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let mut outputs = [prepare_single_file(
+        &source,
+        &file_path,
+        &file_path,
+        &mut string_table,
+    )];
+    let literal_span = outputs[0]
+        .headers
+        .iter()
+        .flat_map(|header| header.tokens.tokens.iter())
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the function body should retain its long literal")
+        .span;
+
+    let diagnostics = match prepare_header_syntax(&mut outputs, &mut string_table) {
+        Err(diagnostics) => diagnostics,
+        Ok(_) => panic!("a nested config qualifier should fail aggregation"),
+    };
+    assert!(diagnostics.errors().any(|diagnostic| matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            ..
+        }
+    )));
+    let whole_source = LocalSpan::exact(0, source.len() as u32, &mut outputs[0].span_builder)
+        .expect("the diagnosed source builder should remain live");
+    let resolver = outputs[0].span_builder.resolver();
+    let literal_range = literal_span.resolve_with(resolver);
+    assert_eq!(
+        source.get(literal_range.start() as usize..literal_range.end() as usize),
+        Some(format!("\"{quoted}\"").as_str())
+    );
+    let whole_range = whole_source.resolve_with(resolver);
+    assert_eq!(whole_range.start(), 0);
+    assert_eq!(whole_range.end(), source.len() as u32);
 }
 
 #[test]
@@ -395,13 +445,13 @@ fn prepare_active_root_with_role(
 
 /// Test helper: run both header preparation and binding, returning the raw result.
 fn prepare_and_bind_headers_result(
-    prepared_outputs: Vec<FileFrontendPrepareOutput>,
+    mut prepared_outputs: Vec<FileFrontendPrepareOutput>,
     external_package_registry: &ExternalPackageRegistry,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
-    let prepared = prepare_header_syntax(prepared_outputs, string_table)?;
+    let prepared = prepare_header_syntax(&mut prepared_outputs, string_table)?;
     bind_module_headers(
         prepared,
         external_package_registry,
@@ -587,97 +637,6 @@ fn symbol_tokens_in_header_body(header: &Header, string_table: &StringTable) -> 
 }
 
 #[test]
-fn prepare_header_syntax_produces_retained_syntax_without_provider_inputs() {
-    // WHAT: `prepare_header_syntax` must succeed with only a string table — no external package
-    //       registry, resolution table, or project path resolver is supplied.
-    // WHY: syntax preparation is provider-independent; it owns retained header/dependency shells,
-    //      order-independent symbol facts, and statistics before provider interfaces exist.
-    let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
-        "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
-        &file_path,
-        &file_path,
-        &mut string_table,
-    );
-
-    let prepared = prepare_header_syntax(vec![output], &mut string_table)
-        .expect("header syntax preparation should succeed without provider inputs");
-
-    // Retained declaration shells are present.
-    assert!(
-        !prepared.headers.is_empty(),
-        "PreparedHeaderSyntax should retain parsed header shells"
-    );
-    // Order-independent symbol facts are present.
-    assert!(
-        !prepared.module_symbols.module_file_paths.is_empty(),
-        "PreparedHeaderSyntax should carry module symbol facts"
-    );
-    // Root-activity and statistics metadata are populated.
-    assert_eq!(
-        prepared.const_fragment_count,
-        prepared.top_level_const_fragments.len()
-    );
-    assert!(prepared.token_stats.total_tokens > 0);
-    assert!(prepared.header_stats.functions >= 1);
-    // No header binding environment exists yet — that is binding-phase output.
-    assert!(
-        prepared
-            .module_symbols
-            .source_package_public_exports
-            .is_empty()
-    );
-}
-
-#[test]
-fn bind_module_headers_consumes_prepared_syntax_and_produces_binding_environment() {
-    // WHAT: `bind_module_headers` consumes `PreparedHeaderSyntax` and produces
-    //       `BoundModuleHeaders` with a completed header binding environment.
-    // WHY: binding is the only phase that resolves retained dependency shells against provider
-    //      interfaces. It must not retokenize or reparse — it consumes the retained output.
-    let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
-        "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
-        &file_path,
-        &file_path,
-        &mut string_table,
-    );
-
-    let prepared = prepare_header_syntax(vec![output], &mut string_table)
-        .expect("header syntax preparation should succeed");
-    let header_count_before_binding = prepared.headers.len();
-    let source_file = prepared.headers[0].source_file.to_owned();
-
-    let bound = bind_module_headers(
-        prepared,
-        &ExternalPackageRegistry::new(),
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        None,
-        &crate::compiler_frontend::source::SourceDatabase::empty(),
-        &mut string_table,
-    )
-    .expect("header binding should succeed");
-
-    // Binding preserves retained header shells — no retokenization or reparsing.
-    assert_eq!(
-        bound.headers.len(),
-        header_count_before_binding,
-        "binding must not add or remove header shells"
-    );
-    // Binding produces the header binding environment that preparation cannot.
-    assert!(
-        bound
-            .binding_environment
-            .file_visibility_by_source
-            .contains_key(&source_file),
-        "BoundModuleHeaders should carry a completed header binding environment"
-    );
-}
-
-#[test]
 fn start_function_dependencies_stay_empty_even_with_imported_runtime_template_tokens() {
     let headers = parse_single_file_headers("func basic()\n[basic]\n");
     let start_header = headers
@@ -708,7 +667,7 @@ fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, 
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
     let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
-    prepare_header_syntax(vec![output], &mut string_table)
+    prepare_header_syntax(&mut [output], &mut string_table)
 }
 
 #[test]

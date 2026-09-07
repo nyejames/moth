@@ -409,22 +409,6 @@ impl ExtendedSpanBuilder {
             source_identity: None,
         }
     }
-}
-
-/// Row counts and the freeze that ends a source's production.
-///
-/// WHY: `freeze` is called by slice 1D4, which installs the finished table on the loaded record.
-/// The counts are how this module's tests and the tokenizer's tests state how many rows a source
-/// needed.
-#[allow(dead_code)]
-impl ExtendedSpanBuilder {
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
 
     pub fn freeze(self) -> ExtendedSpanTable {
         ExtendedSpanTable {
@@ -433,7 +417,18 @@ impl ExtendedSpanBuilder {
     }
 }
 
-/// A frozen table is only read once slice 1D4 installs it on a loaded record.
+#[cfg(test)]
+impl ExtendedSpanBuilder {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+// Frozen-table readers switch over with the source-span migration in slices 1D3/1E.
 #[allow(dead_code)]
 impl ExtendedSpanTable {
     pub fn len(&self) -> usize {

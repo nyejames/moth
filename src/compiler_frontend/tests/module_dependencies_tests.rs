@@ -86,7 +86,7 @@ fn parse_module_headers(
         prepared_outputs.push(output);
     }
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
         .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
@@ -429,7 +429,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
             .expect("preparation should succeed");
 
-    let prepared_syntax = prepare_header_syntax(vec![output], &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut [output], &mut string_table)
         .expect("header syntax preparation should succeed");
     let result = bind_module_headers(
         prepared_syntax,
@@ -1123,7 +1123,7 @@ fn parse_module_headers_with_content_sources(
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
         .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
@@ -1390,7 +1390,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
+    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
         .expect("nested header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,

@@ -230,7 +230,7 @@ impl FrontendProject {
         }
 
         let prepared_syntax =
-            prepare_header_syntax(prepared_outputs, &mut self.frontend.string_table)
+            prepare_header_syntax(&mut prepared_outputs, &mut self.frontend.string_table)
                 .expect("header syntax preparation should succeed");
         bind_module_headers(
             prepared_syntax,

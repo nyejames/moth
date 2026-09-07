@@ -159,7 +159,7 @@ pub(crate) fn parse_single_file_ast_build_result(
     );
 
     let prepared_syntax =
-        prepare_header_syntax(vec![output], &mut string_table).map_err(|bag| {
+        prepare_header_syntax(&mut [output], &mut string_table).map_err(|bag| {
             Box::new(
                 bag.into_diagnostics()
                     .into_iter()

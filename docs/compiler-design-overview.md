@@ -768,6 +768,11 @@ Build-system config bootstrap is the other sanctioned short compiler path. The c
 
 It produces no HIR, borrow facts, link facts or public interface. Config-specific diagnostics, authored key locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
 
+The config outcome also returns the original live source-local span builder, including on diagnosed
+paths. The build owner keeps it through config application and output validation, then installs its
+frozen table under exclusive source-database ownership. Semantic compilation alone is too early to
+freeze a config source whose build-owned validation can still produce spans.
+
 Both services stop earlier than canonical module compilation. Neither exists so that build or project code may reach raw stage functions.
 
 ### Stage 3: local declaration ordering

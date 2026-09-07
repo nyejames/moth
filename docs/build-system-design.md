@@ -137,6 +137,11 @@ Config stops after the folded AST boundary. It produces no HIR or borrow facts.
 
 That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded values, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Config schema definition, validation policy and application to the project record stay build-owned. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
 
+The compiler service returns the config source's live span builder with its outcome. Bootstrap retains
+it through schema application and output validation on successful and diagnosed paths, then installs
+the finished table once before sharing the source database. This handoff moves source data and does
+not give build code access to the compiler's semantic stages.
+
 Allowed source includes:
 
 - one required open `project` const record
