@@ -22,8 +22,8 @@ use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind,
+    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
@@ -618,9 +618,10 @@ impl MothTemplateScopeFixture {
                         &mut string_table,
                     )
                     .map_err(|error| match error {
-                        FileFrontendPrepareFailure::Diagnosed(error) => {
-                            (error.diagnostic, string_table.clone())
-                        }
+                        FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                            diagnostic,
+                            ..
+                        }) => (diagnostic, string_table.clone()),
                         FileFrontendPrepareFailure::Infrastructure(error) => {
                             panic!("fixture tokenization hit infrastructure failure: {error:?}")
                         }
@@ -650,9 +651,10 @@ impl MothTemplateScopeFixture {
             let mut output =
                 CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table)
                     .map_err(|error| match error {
-                    FileFrontendPrepareFailure::Diagnosed(error) => {
-                        (error.diagnostic, string_table.clone())
-                    }
+                    FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                        diagnostic,
+                        ..
+                    }) => (diagnostic, string_table.clone()),
                     FileFrontendPrepareFailure::Infrastructure(error) => {
                         panic!("fixture preparation hit infrastructure failure: {error:?}")
                     }
@@ -1001,17 +1003,22 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
     let Err(error) = prepare_via_pipeline("]") else {
         panic!("unescaped implicit Moth template close should fail during preparation");
     };
-    let FileFrontendPrepareFailure::Diagnosed(error) = error else {
+    let FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+        warnings,
+        diagnostic,
+        ..
+    }) = error
+    else {
         panic!("unescaped template close must be a source diagnostic");
     };
 
-    assert!(error.warnings.is_empty());
+    assert!(warnings.is_empty());
     assert_eq!(
-        error.diagnostic.kind,
+        diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
     );
     assert!(matches!(
-        &error.diagnostic.payload,
+        &diagnostic.payload,
         DiagnosticPayload::UnescapedImplicitTemplateClose {
             source_kind: SourceFileKind::MothTemplate
         }

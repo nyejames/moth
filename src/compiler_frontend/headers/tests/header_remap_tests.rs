@@ -1783,8 +1783,10 @@ fn file_frontend_prepare_error_remaps_warnings_and_diagnostic() {
     let diagnostic = make_unknown_name_diagnostic("error_name", &mut local);
 
     let mut error = FileFrontendPrepareError {
+        file_id: SourceId::COMPILATION_ROOT,
         warnings: vec![warning_a, warning_b],
         diagnostic: Box::new(diagnostic),
+        span_builder: ExtendedSpanBuilder::new(),
     };
 
     let remap = global.merge_from(&local);
@@ -1825,8 +1827,10 @@ fn file_frontend_prepare_error_identity_remap_preserves_payload() {
     let diagnostic = make_unknown_name_diagnostic("error_name", &mut local);
 
     let mut error = FileFrontendPrepareError {
+        file_id: SourceId::COMPILATION_ROOT,
         warnings: vec![warning],
         diagnostic: Box::new(diagnostic),
+        span_builder: ExtendedSpanBuilder::new(),
     };
 
     let remap = global.merge_from(&local);

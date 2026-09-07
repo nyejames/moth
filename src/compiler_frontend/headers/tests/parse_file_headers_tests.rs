@@ -37,7 +37,8 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind, TokenizerEntryMode,
+    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind, TokenizeFailure,
+    TokenizerEntryMode,
 };
 use crate::compiler_frontend::traits::syntax::TraitThisUsage;
 use std::path::{Path, PathBuf};
@@ -98,11 +99,17 @@ fn prepare_test_source_file(
         SourceId::COMPILATION_ROOT,
     ) {
         Ok(file_tokens) => file_tokens,
-        Err(diagnostic) => {
+        Err(TokenizeFailure {
+            file_id,
+            diagnostic,
+            span_builder,
+        }) => {
             return Err(FileFrontendPrepareFailure::Diagnosed(
                 FileFrontendPrepareError {
+                    file_id,
                     warnings: Vec::new(),
                     diagnostic,
+                    span_builder,
                 },
             ));
         }
@@ -147,6 +154,60 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         source.get(resolved.start() as usize..resolved.end() as usize),
         Some(format!("\"{quoted}\"").as_str()),
         "the retained token's span must resolve through the prepared output's own table"
+    );
+}
+
+#[test]
+fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"\nexport:\n;\n");
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let source_id = SourceId::from_index(7);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let tokenized = tokenize(
+        &source,
+        &interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        source_id,
+    )
+    .expect("source should tokenize");
+    let (mut file_tokens, span_builder) = tokenized.into_parts();
+    let long_span = file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("tokenized source should retain the long string literal")
+        .span;
+    let expected_range = long_span.resolve_with(span_builder.resolver());
+
+    let error = match parse_file_headers_with_table(
+        &mut file_tokens,
+        span_builder,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+    ) {
+        Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
+        Ok(_) => panic!("an empty export block should diagnose during header preparation"),
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("header syntax should diagnose, not fail infrastructure: {error:?}")
+        }
+    };
+
+    assert_eq!(error.file_id, source_id);
+    let retained_range = long_span.resolve_with(error.span_builder.resolver());
+    assert_eq!(retained_range, expected_range);
+    assert_eq!(
+        source.get(retained_range.start() as usize..retained_range.end() as usize),
+        Some(format!("\"{quoted}\"").as_str()),
+        "the diagnosed header must retain the builder that owns its extended token span"
     );
 }
 
@@ -227,10 +288,12 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
 fn expect_prepare_infrastructure(error: FileFrontendPrepareFailure, case: &str) {
     match error {
         FileFrontendPrepareFailure::Infrastructure(_) => {}
-        FileFrontendPrepareFailure::Diagnosed(error) => panic!(
-            "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
-            error.diagnostic.payload
-        ),
+        FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError { diagnostic, .. }) => {
+            panic!(
+                "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
+                diagnostic.payload
+            )
+        }
     }
 }
 
@@ -441,9 +504,11 @@ fn parse_single_file_headers_with_entry(
 
     let output = match prepare_result {
         Ok(output) => output,
-        Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+        Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+            diagnostic, ..
+        })) => {
             return Err(HeaderTestDiagnostics {
-                diagnostics: vec![*error.diagnostic],
+                diagnostics: vec![*diagnostic],
                 string_table,
             });
         }
@@ -3210,9 +3275,13 @@ fn parse_multi_file_headers_with_result(
                 warnings.extend(output.warnings.clone());
                 prepared_outputs.push(output);
             }
-            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                warnings.extend(error.warnings);
-                diagnostic_bag.push(*error.diagnostic);
+            Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                warnings: file_warnings,
+                diagnostic,
+                ..
+            })) => {
+                warnings.extend(file_warnings);
+                diagnostic_bag.push(*diagnostic);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 panic!("multi-file header test hit infrastructure failure: {error:?}")
@@ -3567,11 +3636,12 @@ fn dependency_clause_is_rejected_in_config_source() {
         Ok(_) => panic!("config dependency clause should be rejected"),
         Err(error) => error,
     };
-    let FileFrontendPrepareFailure::Diagnosed(error) = error else {
+    let FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError { diagnostic, .. }) = error
+    else {
         panic!("config dependency rejection must use a source diagnostic");
     };
     assert!(matches!(
-        error.diagnostic.payload,
+        &diagnostic.payload,
         DiagnosticPayload::InvalidDependencyClause {
             reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
             ..
@@ -3749,14 +3819,17 @@ fn api_only_active_roots_reject_every_root_activity_form() {
         for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
             let mut string_table = StringTable::new();
             let file_path = PathBuf::from("src/styles/+package.moth");
-            let error = match prepare_active_root_with_role(
+            let diagnostic = match prepare_active_root_with_role(
                 source,
                 &file_path,
                 root_role,
                 &mut string_table,
             ) {
                 Ok(_) => panic!("API-only root activity should be rejected"),
-                Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
+                Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    diagnostic,
+                    ..
+                })) => diagnostic,
                 Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                     panic!(
                         "API-only root source rejection became infrastructure failure: {error:?}"
@@ -3765,7 +3838,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
             };
 
             assert_eq!(
-                error.diagnostic.kind,
+                diagnostic.kind,
                 DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement)
             );
         }
@@ -4749,10 +4822,13 @@ fn assert_generic_dependency_name_collision(source: &str) {
         options: &options,
         style_directives: &style_directives,
     };
-    let error =
+    let diagnostic =
         match prepare_test_source_file(source, &file_path, &context, &mut string_table, 0, 0) {
             Ok(_) => panic!("dependency names must reserve matching generic parameter names"),
-            Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
+            Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                diagnostic,
+                ..
+            })) => diagnostic,
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 panic!("generic-name collision became infrastructure failure: {error:?}")
             }
@@ -4760,14 +4836,14 @@ fn assert_generic_dependency_name_collision(source: &str) {
 
     assert!(
         matches!(
-            &error.diagnostic.payload,
+            &diagnostic.payload,
             DiagnosticPayload::InvalidDeclaration {
                 reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
                 ..
             }
         ),
         "unexpected dependency-name diagnostic: {:?}",
-        error.diagnostic.payload
+        diagnostic.payload
     );
 }
 

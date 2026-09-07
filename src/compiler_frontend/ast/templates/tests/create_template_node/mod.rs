@@ -343,8 +343,10 @@ fn template_parse_rendered_error_with_style_directives(
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     ) {
         Ok(tokens) => tokens,
-        Err(error) => {
-            return render_test_diagnostic(&error, &string_table);
+        Err(crate::compiler_frontend::tokenizer::tokens::TokenizeFailure {
+            diagnostic, ..
+        }) => {
+            return render_test_diagnostic(&diagnostic, &string_table);
         }
     };
     token_stream.index = token_stream

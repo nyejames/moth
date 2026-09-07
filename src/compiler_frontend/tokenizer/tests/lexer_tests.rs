@@ -10,8 +10,8 @@ use crate::compiler_frontend::compiler_messages::{
     SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
-use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
 
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
@@ -19,6 +19,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tokenizer::tokens::TokenizeFailure;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 
@@ -41,7 +42,7 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let diagnostic = tokenize(
+    let TokenizeFailure { diagnostic, .. } = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
@@ -115,7 +116,7 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
     let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
-    let diagnostic = tokenize(
+    let TokenizeFailure { diagnostic, .. } = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -1588,7 +1589,7 @@ fn rejects_legacy_reset_style_directive_name() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let error = tokenize(
+    let TokenizeFailure { diagnostic, .. } = tokenize(
         "[$reset: body]",
         &source_path,
         TokenizerEntryMode::SourceFile,
@@ -1597,6 +1598,7 @@ fn rejects_legacy_reset_style_directive_name() {
         SourceId::COMPILATION_ROOT,
     )
     .expect_err("legacy reset directive should be rejected");
+    let error = *diagnostic;
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -1758,7 +1760,9 @@ fn unknown_style_directives_fail_under_strict_registry() {
         &mut string_table,
         SourceId::COMPILATION_ROOT,
     );
-    let error = result.expect_err("unknown directive should fail during tokenization");
+    let TokenizeFailure { diagnostic, .. } =
+        result.expect_err("unknown directive should fail during tokenization");
+    let error = *diagnostic;
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -2580,6 +2584,57 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
         resolved.end() - resolved.start(),
         u32::try_from(quoted.len() + 2).expect("fixture length fits in u32")
     );
+}
+
+#[test]
+fn lexical_failure_retains_extended_token_span_builder_rows() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"'");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("failed-long-token.moth", &mut string_table);
+    let canonical_path = source_path.to_path_buf(&string_table);
+    let sources =
+        SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
+            .expect("the physical fixture should register");
+    let expected_file_id = sources
+        .get_by_canonical_path(&canonical_path)
+        .expect("the fixture should have a source identity")
+        .id;
+
+    let TokenizeFailure {
+        file_id,
+        diagnostic,
+        span_builder,
+    } = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        expected_file_id,
+    )
+    .expect_err("the malformed trailing character should abort tokenization");
+
+    assert_eq!(file_id, expected_file_id);
+    assert_eq!(
+        diagnostic.primary_location.start_byte,
+        (source.len() - 1) as u32
+    );
+    assert_eq!(
+        span_builder.len(),
+        1,
+        "the already-emitted long string token must retain its extended row on failure"
+    );
+
+    // Encode the expected long range at index zero in an independent builder, then resolve that
+    // handle through the failure's retained builder. This checks the row's exact range rather than
+    // only proving that some capacity was retained.
+    let mut probe_builder = ExtendedSpanBuilder::new();
+    let expected_span = LocalSpan::exact(8, (quoted.len() + 2) as u32, &mut probe_builder)
+        .expect("the expected long string range should be representable");
+    let resolved = expected_span.resolve_with(span_builder.resolver());
+    assert_eq!(resolved.start(), 8);
+    assert_eq!(resolved.end(), (8 + quoted.len() + 2) as u32);
 }
 
 #[test]

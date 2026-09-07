@@ -494,7 +494,11 @@ pub(super) fn tokenize_source(
         &mut string_table,
         SourceId::COMPILATION_ROOT,
     )
-    .map_err(|diagnostic| format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind))?;
+    .map_err(
+        |crate::compiler_frontend::tokenizer::tokens::TokenizeFailure { diagnostic, .. }| {
+            format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind)
+        },
+    )?;
 
     let mut spans = Vec::with_capacity(file_tokens.tokens.len());
 

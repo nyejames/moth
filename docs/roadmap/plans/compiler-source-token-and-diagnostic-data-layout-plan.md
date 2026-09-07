@@ -69,21 +69,21 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: reopened Phase 1 foundation, 1A source path ownership.
-- Goal: compiler source slots use one database-owned path identity base.
-- 1B6 service borrowing is implemented, validated and independently reviewed.
-- Remove Stage 0's retained path table and path fields, which serve only a test lookup,
-  rather than adding context layers to preserve redundant ownership.
-- Non-goals: full semantic path migration, source loading policy and span-builder lifecycle changes.
+- Phase: 1D4a, tokenizer and file-preparation failure ownership.
+- Goal: retain the existing source-local span builder on diagnosed tokenizer and header outcomes.
+- Source-path foundation is accepted in `cff3b0a1c`.
+- Non-goals: diagnostic span migration, module aggregation, final source freeze and token layout.
+- 1D4b must carry these builders through aggregation and module/direct-service outcomes. This
+  first producer-boundary slice does not claim the complete builder lifecycle.
 
 LAST_GOOD_COMMIT:
-- `696f22688` — immutable frontend service borrowing, validated and independently reviewed.
+- `cff3b0a1c` — database-owned source paths, validated and independently reviewed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Source-path implementation, focused checks, full validation and independent reviews are complete.
+- Producer-local failure ownership is implemented, validated and independently reviewed.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
-- Main restored the removed source iterator and corrected traversal-order path interning.
+- Tokenizer and header failures retain their existing builders. Later aggregation remains 1D4b.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -165,18 +165,15 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 
 VALIDATION_STATE:
-- Source-path focused checks passed: 56 source tests, 9 interner tests, 65 Stage 0 filesystem
-  tests, 63 preparation tests and the relocated duplicate-identity invariant test.
-- The strengthened ordering regression failed on the worker handoff with unequal `PathId`s
-  across reversed inputs, then passed after canonical sorting was moved before interning.
-- Both generic/content CLI smoke checks passed. A malformed dependency CLI check rendered
-  `MOTH-SYNTAX-0018`, logical `@page.moth` and the retained authored source excerpt.
-- Independent source-identity and external-consumer reviews accepted the implementation. Two stale
-  diagnostic path assertions were migrated from canonical OS paths to logical paths, preserving
-  their codes, source precision and structured reason checks.
-- Final `just validate` passed: 5053 + 17 + 825 Rust tests, 1951/1951 integration cases,
+- Both producer-retention regressions passed, including exact long-span resolution after a
+  diagnosed tokenizer or header failure.
+- Independent tokenizer/caller and header/failure-path reviews accepted 1D4a. Their lexer
+  identity test gap was corrected: the fixture now uses a registered physical source instead
+  of the compilation root, and the strengthened regression passed.
+- `just validate` passed: 5055 + 17 + 825 Rust tests, 1951/1951 integration cases,
   1319 source-audited files with zero findings, 82 benchmark preflights, all three scaling
   budgets and clean timer erasure. Docs check completed without errors or warnings.
+- The full gate preceded the test-only physical-identity strengthening; its focused rerun passed.
 - gate hygiene, learned the hard way three times in this phase: `just validate` diffs tracked files during its benchmark stage and fails with "tracked files changed during benchmark run" if anything is edited while it runs. Start the gate only on a settled tree, and do doc or comment edits either before it starts or after it exits.
 - `cargo test -p moth --lib` does not compile every test target. The featured Clippy lane does, and it caught a `tokenize(..., None)` call site in `create_project_modules_tests.rs` that the plain `--lib` build never saw. Before calling a slice green, run: `cargo clippy -p moth --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks`.
 
@@ -184,8 +181,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-
-- next action: implement and validate the reopened source-path foundation
+- next action: checkpoint 1D4a, then retain builders through aggregation and outcomes in 1D4b
 
 ---
 
@@ -749,6 +745,13 @@ narrow allowances naming an actual remaining consumer, not blanket suppressions.
   success and diagnosed paths, across file aggregation and all later span-producing stages.
   File/chunk merges move source-local data; they do not freeze builders early or mutate shared
   databases. Finalization happens under the outcome's exclusive owner.
+  - [x] **1D4a — diagnosed producer ownership:** return the existing span builder and real
+    source identity on tokenizer and file-header failures, retaining warnings and diagnostic facts.
+    This closes producer-local drops only, not later aggregation.
+  - [ ] **1D4b — aggregation and outcome ownership:** move successful and diagnosed source
+    deltas through existing file/chunk merges, header aggregation and module/direct-service
+    outcomes. Keep builders separate from generic diagnostic bags and retain one live resolver
+    through every later span producer. The final exclusive source owner installs each table once.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration

@@ -53,7 +53,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizeOutput, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    FileTokens, TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
+};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -258,10 +260,16 @@ impl CompilerFrontend<'static> {
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
     ) -> Result<TokenizeOutput, FileFrontendPrepareFailure> {
-        let map_tokenize_error = |diagnostic| {
+        let map_tokenize_error = |TokenizeFailure {
+                                      file_id,
+                                      diagnostic,
+                                      span_builder,
+                                  }| {
             FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                file_id,
                 warnings: Vec::new(),
                 diagnostic,
+                span_builder,
             })
         };
 

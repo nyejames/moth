@@ -12,7 +12,7 @@ use crate::compiler_frontend::headers::types::{
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
     TopLevelConstFragment,
 };
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::projects::settings::{
@@ -209,10 +209,17 @@ impl HeaderFileParseState {
         })
     }
 
-    pub(super) fn into_error(self, diagnostic: CompilerDiagnostic) -> FileFrontendPrepareError {
+    pub(super) fn into_error(
+        self,
+        file_id: SourceId,
+        span_builder: ExtendedSpanBuilder,
+        diagnostic: CompilerDiagnostic,
+    ) -> FileFrontendPrepareError {
         FileFrontendPrepareError {
+            file_id,
             warnings: self.warnings,
             diagnostic: Box::new(diagnostic),
+            span_builder,
         }
     }
 }

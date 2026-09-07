@@ -1202,14 +1202,26 @@ impl PreparedFilePathSyntax {
     }
 }
 
-/// Failed per-file header preparation plus warnings emitted before the failure.
+/// Failed per-file header preparation plus the source data needed to resolve its diagnostics.
 ///
-/// WHY: warnings are produced while parsing declarations before a later token in the same file can
-/// fail. The module parser must keep those warnings even when the file contributes no headers.
+/// WHAT: retains the real source identity and the live source-local span builder alongside
+///       warnings emitted before the failure and the primary diagnostic.
+/// WHY: the header producer remains the exclusive owner of every span row until a later
+///      preparation boundary takes over, including when parsing rejects the authored source.
 #[derive(Debug)]
 pub struct FileFrontendPrepareError {
+    #[allow(
+        dead_code,
+        reason = "the 1D4b aggregation boundary will consume diagnosed source identity"
+    )]
+    pub(crate) file_id: SourceId,
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: Box<CompilerDiagnostic>,
+    #[allow(
+        dead_code,
+        reason = "the 1D4b aggregation boundary will consume the diagnosed source builder"
+    )]
+    pub(crate) span_builder: ExtendedSpanBuilder,
 }
 
 /// Per-file preparation outcome that preserves the diagnostic and infrastructure lanes.
@@ -1935,8 +1947,10 @@ impl FileFrontendPrepareError {
     /// string table.
     ///
     /// WHAT: remaps warnings and the primary diagnostic.
-    /// WHY: per-file frontend preparation uses local string tables; even failed files may have
-    ///      emitted warnings before the error, and those strings must resolve through the global table.
+    /// WHY: per-file frontend preparation uses local string tables. Even failed files may have
+    ///      emitted warnings before the error, and those strings must resolve through the global
+    ///      table. The source identity and span-builder ownership are source-local and do not
+    ///      participate in string-ID remapping.
     // Called when merging per-file frontend outputs into the module-wide compilation.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         // Keep failed-file diagnostics on the same identity fast path as successful outputs.

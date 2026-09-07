@@ -13,8 +13,8 @@
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, HeaderParseOptions,
-    PreparedHeaderSyntax, prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
+    HeaderParseOptions, PreparedHeaderSyntax, prepare_header_syntax,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
@@ -677,8 +677,13 @@ impl ModulePreparationContext<'_> {
                             );
                             error.remap_string_ids(&remap);
                         }
-                        warnings.extend(error.warnings);
-                        diagnostics.push(*error.diagnostic);
+                        let FileFrontendPrepareError {
+                            warnings: file_warnings,
+                            diagnostic,
+                            ..
+                        } = error;
+                        warnings.extend(file_warnings);
+                        diagnostics.push(*diagnostic);
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                         return Err(CompilerMessages::from_error_ref(error, string_table));
@@ -1049,11 +1054,16 @@ impl ModuleSyntaxDiscovery<'_> {
         ) {
             Ok(output) => output,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+                let FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                    ..
+                } = error;
                 let mut messages = CompilerMessages::from_diagnostics(
-                    vec![*error.diagnostic],
+                    vec![*diagnostic],
                     self.string_table.clone(),
                 );
-                messages.prepend_diagnostics_preserving_context(error.warnings);
+                messages.prepend_diagnostics_preserving_context(warnings);
                 return Err(messages);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {

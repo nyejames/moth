@@ -6,7 +6,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeFailure, TokenizerEntryMode};
 
 fn tokenize_source(
     source: &str,
@@ -136,7 +136,7 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
     for source in ["@ docs\n", "@docs/ my\n"] {
         let mut strings = StringTable::new();
         let source_path = InternedPath::from_single_str("test.moth", &mut strings);
-        let error = tokenize(
+        let TokenizeFailure { diagnostic, .. } = tokenize(
             source,
             &source_path,
             TokenizerEntryMode::SourceFile,
@@ -145,6 +145,7 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
             SourceId::COMPILATION_ROOT,
         )
         .expect_err("whitespace cannot separate a path introducer or separator from its component");
+        let error = *diagnostic;
         assert!(matches!(
             error.payload,
             DiagnosticPayload::InvalidPath { .. }
@@ -156,7 +157,7 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
 fn path_errors_remain_structured() {
     let mut strings = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut strings);
-    let error = tokenize(
+    let TokenizeFailure { diagnostic, .. } = tokenize(
         "@/child",
         &source_path,
         TokenizerEntryMode::SourceFile,
@@ -165,6 +166,7 @@ fn path_errors_remain_structured() {
         SourceId::COMPILATION_ROOT,
     )
     .expect_err("public root suffix should fail");
+    let error = *diagnostic;
     assert!(matches!(
         error.payload,
         DiagnosticPayload::InvalidPath {

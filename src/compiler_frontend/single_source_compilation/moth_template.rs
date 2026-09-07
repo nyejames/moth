@@ -29,8 +29,8 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions, bind_module_headers,
-    prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    HeaderParseOptions, bind_module_headers, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::module_compilation::FrontendOptions;
@@ -365,9 +365,14 @@ fn prepare_template_source(
     CompilerFrontend::prepare_file_frontend_local(&context, input, string_table).map_err(|error| {
         match error {
             FileFrontendPrepareFailure::Diagnosed(error) => {
+                let FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                    ..
+                } = error;
                 let mut messages =
-                    CompilerMessages::from_diagnostic(*error.diagnostic, string_table.clone());
-                messages.prepend_diagnostics_preserving_context(error.warnings);
+                    CompilerMessages::from_diagnostic(*diagnostic, string_table.clone());
+                messages.prepend_diagnostics_preserving_context(warnings);
                 messages
             }
             FileFrontendPrepareFailure::Infrastructure(error) => {

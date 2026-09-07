@@ -43,7 +43,7 @@ use crate::compiler_frontend::symbols::string_interning::{
     StringIdRemap, StringTable, StringTableForkSource,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
+use crate::compiler_frontend::tokenizer::tokens::{TokenizeFailure, TokenizerEntryMode};
 use crate::counter_observation;
 
 use rayon::prelude::*;
@@ -314,7 +314,9 @@ pub(super) fn prepare_owned_source_input(
                 string_table,
                 source_id,
             )
-            .map_err(SourceDiscoveryError::Diagnostic)?,
+            .map_err(|TokenizeFailure { diagnostic, .. }| {
+                SourceDiscoveryError::Diagnostic(diagnostic)
+            })?,
         )
     } else {
         None

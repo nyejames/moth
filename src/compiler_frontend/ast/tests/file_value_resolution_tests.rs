@@ -53,7 +53,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeFailure, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
@@ -166,7 +166,7 @@ fn moth_file_value_reports_typed_no_value_diagnostic() {
 fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let error = tokenize(
+    let TokenizeFailure { diagnostic, .. } = tokenize(
         "@/logo.svg",
         &source_path,
         TokenizerEntryMode::SourceFile,
@@ -175,6 +175,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
     )
     .expect_err("a public root path cannot have a suffix");
+    let error = *diagnostic;
 
     assert_eq!(
         error.kind,

@@ -41,8 +41,9 @@ use crate::compiler_frontend::folded_value::{
     convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions,
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header,
+    HeaderKind, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
@@ -55,7 +56,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
+use crate::compiler_frontend::tokenizer::tokens::{TokenizeFailure, TokenizerEntryMode};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 use std::collections::HashMap;
@@ -520,8 +521,8 @@ fn prepare_config_file(
         request.file_id,
     ) {
         Ok(output) => output,
-        Err(error) => {
-            errors.push(*error);
+        Err(TokenizeFailure { diagnostic, .. }) => {
+            errors.push(*diagnostic);
             return Ok(None);
         }
     };
@@ -537,15 +538,20 @@ fn prepare_config_file(
     ) {
         Ok(output) => output,
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-            errors.extend(error.warnings);
-            if is_duplicate_config_header_error(&error.diagnostic) {
+            let FileFrontendPrepareError {
+                warnings,
+                diagnostic,
+                ..
+            } = error;
+            errors.extend(warnings);
+            if is_duplicate_config_header_error(&diagnostic) {
                 errors.push(config_diagnostic(
                     None,
                     InvalidConfigReason::DuplicateKey,
-                    error.diagnostic.primary_location.clone(),
+                    diagnostic.primary_location.clone(),
                 ));
             } else {
-                errors.push(*error.diagnostic);
+                errors.push(*diagnostic);
             }
             return Ok(None);
         }

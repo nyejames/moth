@@ -28,8 +28,8 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode,
-    TokenizeOutput, TokenizerEntryMode,
+    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeFailure,
+    TokenizeMode, TokenizeOutput, TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -38,11 +38,11 @@ use std::str::Chars;
 
 pub const END_SCOPE_CHAR: char = ';';
 
-/// Boxed diagnostic result shared by every lexer result boundary in this file.
+/// Boxed diagnostic result shared by every private lexer helper boundary in this file.
 ///
 /// WHAT: one file-local alias for the boxed `CompilerDiagnostic` error variant returned by
-/// `tokenize`, `get_token_kind`, `require_symbolic_spacing`, `tokenize_style_directive`
-/// and `tokenize_identifier_or_keyword`.
+/// `get_token_kind`, `require_symbolic_spacing`, `tokenize_style_directive` and
+/// `tokenize_identifier_or_keyword`.
 /// WHY: lexer dispatch propagates one diagnostic through several nested mode helpers and the
 /// production callers already own boxed diagnostic boundaries. Numeric and text-mode helpers
 /// remain separate owners, so their plain results are adapted only where they enter this family.
@@ -481,7 +481,7 @@ pub fn tokenize(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     file_id: SourceId,
-) -> LexerResult<TokenizeOutput> {
+) -> Result<TokenizeOutput, TokenizeFailure> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
@@ -522,7 +522,16 @@ pub fn tokenize(
             last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
             meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
         };
-        token = get_token_kind(&mut stream, style_directives, string_table, context)?;
+        token = match get_token_kind(&mut stream, style_directives, string_table, context) {
+            Ok(token) => token,
+            Err(diagnostic) => {
+                return Err(TokenizeFailure {
+                    file_id,
+                    diagnostic,
+                    span_builder: std::mem::take(&mut stream.extended_span_builder),
+                });
+            }
+        };
     }
 
     tokens.push(token);

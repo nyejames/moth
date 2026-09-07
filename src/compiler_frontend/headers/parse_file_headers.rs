@@ -8,6 +8,7 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
     InvalidDeclarationReason,
@@ -63,11 +64,14 @@ pub fn parse_file_headers_with_table(
     const_template_offset: usize,
     runtime_fragment_offset: usize,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    let file_id = file_tokens.file_id.ok_or_else(|| {
+        CompilerError::compiler_error("header parsing requires a retained source file identity")
+    })?;
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
         || file_tokens.src_path.to_path_buf(string_table) == entry_file_path,
-        |expected_id| Some(expected_id) == file_tokens.file_id,
+        |expected_id| expected_id == file_id,
     );
 
     let source_path = file_tokens
@@ -112,8 +116,7 @@ pub fn parse_file_headers_with_table(
         const_template_offset,
         runtime_fragment_offset,
     };
-
-    parse_headers_in_file(file_tokens, span_builder, &mut parse_context)
+    parse_headers_in_file(file_tokens, file_id, span_builder, &mut parse_context)
 }
 
 /// Parse headers from an already-tokenized file against a local string-table fork, then merge
@@ -121,8 +124,9 @@ pub fn parse_file_headers_with_table(
 ///
 /// WHAT: this is the per-file header-parsing half of preparation for callers that already ran
 ///       tokenization, such as config parsing that runs token-level validation first.
-/// WHY:  the tokenize output is taken whole because its span builder owns every row the tokens'
-///       spans index. Accepting bare `FileTokens` here would pair them with an empty table.
+/// WHY: the tokenize output is taken whole because its span builder owns every row the tokens'
+///      spans index. Accepting bare `FileTokens` here would pair them with an empty table, while
+///      a diagnosed result returns that same builder with the file identity for later resolution.
 pub(crate) fn prepare_file_from_tokens(
     tokenized: TokenizeOutput,
     entry_file_path: &Path,

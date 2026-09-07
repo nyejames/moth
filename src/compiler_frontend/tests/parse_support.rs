@@ -36,7 +36,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenizeOutput, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -134,14 +136,17 @@ pub(crate) fn parse_single_file_ast_build_result(
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    )?;
+    )
+    .map_err(|TokenizeFailure { diagnostic, .. }| diagnostic)?;
 
     let output =
         prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0)
             .map_err(|error| match error {
                 crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
-                    error,
-                ) => error.diagnostic,
+                    crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
+                        diagnostic, ..
+                    },
+                ) => diagnostic,
                 crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
                     error,
                 ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
@@ -281,8 +286,10 @@ pub(crate) fn tokenize_source_for_test(
     )
     .map_err(|error| match error {
         crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
-            error,
-        ) => error.diagnostic,
+            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
+                diagnostic, ..
+            },
+        ) => diagnostic,
         crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
             error,
         ) => panic!("tokenization test hit infrastructure failure: {error:?}"),

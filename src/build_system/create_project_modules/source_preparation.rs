@@ -7,7 +7,8 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    HeaderParseOptions,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -16,7 +17,9 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenizeOutput, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
+};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -106,7 +109,7 @@ pub(super) fn prepare_discovery_source_text(
         string_table,
         source_id,
     )
-    .map_err(SourceDiscoveryError::Diagnostic)?;
+    .map_err(|TokenizeFailure { diagnostic, .. }| SourceDiscoveryError::Diagnostic(diagnostic))?;
 
     let prepared_output = prepare_discovery_file(
         file_path,
@@ -238,9 +241,14 @@ fn prepare_discovery_output(
         Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
             let remap = string_table.merge_delta_from(&local_table, base_len);
             error.remap_string_ids(&remap);
+            let FileFrontendPrepareError {
+                warnings,
+                diagnostic,
+                ..
+            } = error;
             let mut messages =
-                CompilerMessages::from_diagnostics(vec![*error.diagnostic], string_table.clone());
-            messages.prepend_diagnostics_preserving_context(error.warnings);
+                CompilerMessages::from_diagnostics(vec![*diagnostic], string_table.clone());
+            messages.prepend_diagnostics_preserving_context(warnings);
             return Err(SourceDiscoveryError::Messages(messages));
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {

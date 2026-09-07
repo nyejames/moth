@@ -36,7 +36,9 @@ use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_unde
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{
+    CharPosition, TokenKind, TokenizeFailure, TokenizerEntryMode,
+};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use std::cell::RefCell;
@@ -447,9 +449,11 @@ fn parse_ordinary_quoted_literal(
         &mut string_table,
         SourceId::COMPILATION_ROOT,
     )
-    .map_err(|diagnostic| QuotedLiteralRejection {
-        reason: diagnostic.kind.descriptor().title,
-    })?
+    .map_err(
+        |TokenizeFailure { diagnostic, .. }| QuotedLiteralRejection {
+            reason: diagnostic.kind.descriptor().title,
+        },
+    )?
     .file_tokens;
 
     let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {

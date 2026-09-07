@@ -6,6 +6,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 pub use crate::compiler_frontend::compiler_messages::source_location::{
     CharPosition, SourceLocation,
 };
@@ -667,6 +668,20 @@ impl TokenizeOutput {
     pub(crate) fn into_parts(self) -> (FileTokens, ExtendedSpanBuilder) {
         (self.file_tokens, self.span_builder)
     }
+}
+
+/// A diagnosed lexical pass that retains the source identity and every extended span encoded
+/// before the failure.
+///
+/// The tokenizer owns the builder while it is producing tokens. If a lexical diagnostic aborts
+/// that pass, this value moves the same builder out of the stream rather than dropping it or
+/// replacing it with an empty table. Later preparation boundaries can then decide whether and how
+/// to retain the partial source data.
+#[derive(Debug)]
+pub(crate) struct TokenizeFailure {
+    pub(crate) file_id: SourceId,
+    pub(crate) diagnostic: Box<CompilerDiagnostic>,
+    pub(crate) span_builder: ExtendedSpanBuilder,
 }
 
 /// Borrowing the token stream is free; separating it from its builder is not.
