@@ -516,7 +516,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Structured diagnostics</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions. Synthetic discovery failures retain earlier and failed source snapshots under final identities without repeating preparation.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend</td>
  <td style="padding: 0.1em 0.5em; "> User-facing failures use typed <code>CompilerDiagnostic</code> payloads with stable codes and optional qualified reason keys. Integration expectations consume that identity and fixture-relative source locations without reconstructing payload taxonomy. Infrastructure and invariant failures use <code>CompilerError</code>. Type diagnostics are <code>TypeId</code>-first at semantic boundaries.</td>
         </tr>

@@ -25,6 +25,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::headers::dependency_target::{
     DependencyTargetKind, decode_dependency_target,
 };
+use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_normalization::{
@@ -36,7 +37,9 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceRegistrationIndex};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{
@@ -52,6 +55,7 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileReferenceResolver, SingleFileResolvedReference,
@@ -141,18 +145,31 @@ pub(super) struct ReachableSourceFile {
     pub(super) kind: SourceFileKind,
 }
 
-/// Stage 0 inventory for synthetic single-file compilation.
-///
-/// WHAT: owns the deterministic source closure and the complete retained file output for each
-///       reachable tokenized source when no directory-project `SourceTreeIndex` ownership
-///       inventory is used.
-/// WHY: the traversal must keep provisional identities private until the complete closure can be
-///      registered in final logical order. This inventory is consumed by that one remap before
-///      any prepared input leaves discovery.
-pub(super) struct ReachableSourceInventory {
-    pub(super) files: Vec<ReachableSourceFile>,
+/// Private source ownership retained across every discovery exit.
+struct ReachableSourceInventory {
+    reachable: BTreeSet<ReachableSourceFile>,
+    queue: VecDeque<ReachableSourceFile>,
     local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
-    pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
+    traversal_source_files: SourceDatabase,
+    resolved_file_references: Vec<SingleFileResolvedReference>,
+    active_source: Option<SourceId>,
+}
+
+struct DiscoveryWalkContext<'a> {
+    canonical_entry_path: &'a Path,
+    project_path_resolver: &'a ProjectPathResolver,
+    style_directives: &'a StyleDirectiveRegistry,
+    source_file_kinds: &'a SourceFileKindRegistry,
+}
+
+enum DiscoveryWalkOutcome {
+    Complete,
+    PreparationFailed,
+}
+
+struct TraversalFailure {
+    error: SourceDiscoveryError,
+    source_path: Option<PathBuf>,
 }
 
 /// Collected reachable inputs for one entry plus the finished source identity database.
@@ -461,6 +478,81 @@ fn remap_source_discovery_error(
     }
 }
 
+/// Finish only retained work on an aborted walk. Queued sources remain unloaded.
+fn finalize_failed_discovery(
+    mut files: Vec<ReachableSourceFile>,
+    mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
+    mut source_files: SourceDatabase,
+    failure: Option<TraversalFailure>,
+    string_table: &StringTable,
+) -> Result<CompilerMessages, CompilerError> {
+    files.sort_by_key(|file| {
+        source_files
+            .get_by_canonical_path(&file.path)
+            .expect("known discovery source has a final registration")
+            .id
+    });
+    let mut warnings = Vec::new();
+    let mut preparation_failure = None;
+
+    for file in files {
+        let Some(prepared) = source_cache.remove(&file.path) else {
+            continue;
+        };
+        let source_id = source_files
+            .get_by_canonical_path(&file.path)
+            .expect("retained discovery source has a final registration")
+            .id;
+        let logical_path = source_files.legacy_logical_path(source_id);
+        source_files.retain_text(source_id, prepared.source_code)?;
+        match prepared.prepared_output {
+            Ok(mut output) => {
+                output.rebind_source_identity(source_id, logical_path, file.path)?;
+                warnings.append(&mut output.warnings);
+                source_files.install_extended_spans(source_id, output.span_builder.freeze())?;
+            }
+
+            Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
+                for warning in &mut error.warnings {
+                    warning.rebind_source_identity(&logical_path);
+                }
+                error.diagnostic.rebind_source_identity(&logical_path);
+                warnings.append(&mut error.warnings);
+                source_files.install_extended_spans(source_id, error.span_builder.freeze())?;
+                preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
+            }
+
+            Err(FileFrontendPrepareFailure::Infrastructure(mut error)) => {
+                error.location.rebind_source_identity(&logical_path);
+                preparation_failure = Some(SourceDiscoveryError::Infrastructure(error));
+            }
+        }
+    }
+
+    let mut messages = if let Some(failure) = failure {
+        let mut messages = failure.error.into_messages(string_table);
+        if let Some(source_id) = failure
+            .source_path
+            .as_ref()
+            .and_then(|path| source_files.get_by_canonical_path(path))
+            .map(|source| source.id)
+        {
+            let logical_path = source_files.legacy_logical_path(source_id);
+            for diagnostic in &mut messages.diagnostics {
+                diagnostic.rebind_source_identity(&logical_path);
+            }
+        }
+        messages
+    } else {
+        preparation_failure
+            .expect("an aborted discovery owns its terminal preparation failure")
+            .into_messages(string_table)
+    };
+    messages.prepend_diagnostics_preserving_context(warnings);
+    messages.set_source_database(Arc::new(source_files));
+    Ok(messages)
+}
+
 /// Build the final source database and remap every synthetic prepared output before returning it.
 ///
 /// WHAT: registers the complete reachable closure in canonical logical order, moves retained
@@ -473,6 +565,7 @@ fn finalize_reachable_files(
     entry_file_path: &Path,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
+    failure: Option<TraversalFailure>,
 ) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), SourceDiscoveryError> {
     let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
         (
@@ -486,6 +579,16 @@ fn finalize_reachable_files(
         Some(project_path_resolver),
         string_table,
     )?;
+
+    if failure.is_some()
+        || source_cache
+            .values()
+            .any(|source| source.prepared_output.is_err())
+    {
+        let messages =
+            finalize_failed_discovery(files, source_cache, source_files, failure, string_table)?;
+        return Err(SourceDiscoveryError::Messages(messages));
+    }
 
     let missing_sources = files
         .iter()
@@ -538,10 +641,12 @@ fn finalize_reachable_files(
 
         if let Some(scanned_source) = source_cache.remove(&source_file.path) {
             let PreparedDiscoverySource {
-                mut prepared_output,
+                prepared_output,
                 source_code,
                 ..
             } = scanned_source;
+            let mut prepared_output = prepared_output
+                .expect("diagnosed preparation exits through failed discovery finalization");
             let canonical_os_path = final_record.canonical_os_path.clone().ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "final source identity {} has no canonical path",
@@ -783,18 +888,6 @@ fn traverse_reachable_source_files(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
-    let mut reachable = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    let mut local_source_cache = FxHashMap::default();
-    // Traversal-local source identities are needed while header preparation stamps retained
-    // shells. The table is consumed by `finalize_reachable_files` once the closure is complete;
-    // only the final database and final-domain inputs leave this function.
-    let mut traversal_source_files = SourceDatabase::empty();
-    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let mut dependency_clauses_scanned: usize = 0;
-
-    // The entry identity table keys on canonical paths; canonicalize the entry once so
-    // header preparation recognises the active root by SourceId instead of path text.
     let canonical_entry_path = fs::canonicalize(&entry_paths[0]).map_err(|error| {
         CompilerError::file_error(
             &entry_paths[0],
@@ -803,26 +896,104 @@ fn traverse_reachable_source_files(
         )
     })?;
     let root_directory = canonical_entry_path.parent().ok_or_else(|| {
-        SourceDiscoveryError::from(CompilerError::compiler_error(
+        CompilerError::compiler_error(
             "canonical synthetic entry path has no containing module root",
-        ))
+        )
     })?;
     let mut file_reference_resolver = SingleFileReferenceResolver::new(
         root_directory.to_path_buf(),
         source_file_kinds,
         resource_inputs,
     );
-    let mut resolved_file_references = Vec::new();
+    let context = DiscoveryWalkContext {
+        canonical_entry_path: &canonical_entry_path,
+        project_path_resolver,
+        style_directives,
+        source_file_kinds,
+    };
+    let mut inventory = ReachableSourceInventory {
+        reachable: BTreeSet::new(),
+        queue: entry_paths
+            .iter()
+            .map(|path| ReachableSourceFile {
+                path: path.clone(),
+                kind: SourceFileKind::Moth,
+            })
+            .collect(),
+        local_source_cache: FxHashMap::default(),
+        traversal_source_files: SourceDatabase::empty(),
+        resolved_file_references: Vec::new(),
+        active_source: None,
+    };
 
-    // Seed with entry points in deterministic order.
-    for entry_path in entry_paths {
-        queue.push_back(ReachableSourceFile {
-            path: entry_path.clone(),
-            kind: SourceFileKind::Moth,
-        });
-    }
+    // The walk only borrows source ownership, so every terminal path reaches this barrier.
+    let outcome = walk_reachable_sources(
+        &mut inventory,
+        &context,
+        policy,
+        &mut file_reference_resolver,
+        string_table,
+    );
+    let failure = match outcome {
+        Ok(DiscoveryWalkOutcome::Complete | DiscoveryWalkOutcome::PreparationFailed) => None,
+        Err(error) => Some(TraversalFailure {
+            error,
+            source_path: inventory
+                .active_source
+                .and_then(|id| inventory.traversal_source_files.get(id))
+                .and_then(|source| source.canonical_os_path.clone()),
+        }),
+    };
+    let ReachableSourceInventory {
+        mut reachable,
+        queue,
+        local_source_cache,
+        traversal_source_files,
+        resolved_file_references,
+        ..
+    } = inventory;
+    reachable.extend(queue);
+    drop(traversal_source_files);
+    let (source_files, input_files) = finalize_reachable_files(
+        reachable.into_iter().collect(),
+        local_source_cache,
+        &canonical_entry_path,
+        project_path_resolver,
+        string_table,
+        failure,
+    )?;
+    Ok(ReachableTraversalOutcome {
+        source_files,
+        input_files,
+        resolved_file_references,
+    })
+}
 
+fn walk_reachable_sources(
+    inventory: &mut ReachableSourceInventory,
+    context: &DiscoveryWalkContext<'_>,
+    policy: &mut DependencyPolicy<'_, '_>,
+    file_reference_resolver: &mut SingleFileReferenceResolver<'_>,
+    string_table: &mut StringTable,
+) -> Result<DiscoveryWalkOutcome, SourceDiscoveryError> {
+    let ReachableSourceInventory {
+        reachable,
+        queue,
+        local_source_cache,
+        traversal_source_files,
+        resolved_file_references,
+        active_source,
+    } = inventory;
+    let DiscoveryWalkContext {
+        canonical_entry_path,
+        project_path_resolver,
+        style_directives,
+        source_file_kinds,
+    } = *context;
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let mut dependency_clauses_scanned: usize = 0;
     while let Some(next_file) = queue.pop_front() {
+        *active_source = None;
         let canonical_file = fs::canonicalize(&next_file.path).map_err(|error| {
             CompilerError::file_error(
                 &next_file.path,
@@ -847,8 +1018,8 @@ fn traverse_reachable_source_files(
             queue_same_directory_root_for_moth_template(
                 &canonical_file,
                 project_path_resolver,
-                &reachable,
-                &mut queue,
+                reachable,
+                queue,
             );
         } else if next_file.kind == SourceFileKind::PlainMarkdown {
             // Markdown files are importless content assets. They are carried forward for
@@ -861,18 +1032,18 @@ fn traverse_reachable_source_files(
                 &canonical_file,
                 style_directives,
                 project_path_resolver,
-                &canonical_entry_path,
-                &mut traversal_source_files,
-                &mut local_source_cache,
+                canonical_entry_path,
+                traversal_source_files,
+                local_source_cache,
                 string_table,
             ),
             SourceFileKind::MothTemplate => scan_and_cache_local_moth_template_source(
                 &canonical_file,
                 style_directives,
                 project_path_resolver,
-                &canonical_entry_path,
-                &mut traversal_source_files,
-                &mut local_source_cache,
+                canonical_entry_path,
+                traversal_source_files,
+                local_source_cache,
                 string_table,
             ),
             SourceFileKind::PlainMarkdown => unreachable!(),
@@ -891,11 +1062,17 @@ fn traverse_reachable_source_files(
             );
         }
 
-        let dependency_clauses = &local_source_cache
+        *active_source = traversal_source_files
+            .get_by_canonical_path(&canonical_file)
+            .map(|source| source.id);
+        let prepared = &local_source_cache
             .get(&canonical_file)
-            .expect("fresh or cached Moth source must remain in the complete source cache")
-            .prepared_output
-            .file_dependency_clauses;
+            .expect("scanned source remains owned by traversal")
+            .prepared_output;
+        let Ok(prepared) = prepared else {
+            return Ok(DiscoveryWalkOutcome::PreparationFailed);
+        };
+        let dependency_clauses = &prepared.file_dependency_clauses;
         #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
         {
             dependency_clauses_scanned += dependency_clauses.len();
@@ -921,10 +1098,7 @@ fn traverse_reachable_source_files(
             match action {
                 DependencyPolicyAction::Skip => continue,
                 DependencyPolicyAction::QueueLocal => {
-                    let mut reachable_queue = ReachableQueue {
-                        reachable: &reachable,
-                        queue: &mut queue,
-                    };
+                    let mut reachable_queue = ReachableQueue { reachable, queue };
                     let result = resolve_and_queue_local_dependency(
                         provider,
                         &canonical_file,
@@ -940,24 +1114,14 @@ fn traverse_reachable_source_files(
         // Structural file references are already classified by preparation. Resolve every
         // occurrence through the same physical resolver used by directory modules, then queue
         // supported content targets so discovery reaches the complete content closure.
-        let prepared_path_syntax = &local_source_cache
-            .get(&canonical_file)
-            .expect("fresh or cached Moth source must remain in the complete source cache")
-            .prepared_output
-            .path_syntax;
-        let structural_file_references = local_source_cache
-            .get(&canonical_file)
-            .expect("fresh or cached Moth source must remain in the complete source cache")
-            .prepared_output
-            .structural_file_references
-            .references()
-            .to_vec();
+        let prepared_path_syntax = &prepared.path_syntax;
+        let structural_file_references = prepared.structural_file_references.references();
         for reference in structural_file_references {
             let resolved = file_reference_resolver
                 .resolve(
                     &canonical_file,
                     prepared_path_syntax.table(),
-                    &reference,
+                    reference,
                     string_table,
                 )
                 .map_err(SourceDiscoveryError::from)?;
@@ -997,29 +1161,7 @@ fn traverse_reachable_source_files(
         dependency_clauses_scanned as f64,
     );
 
-    let inventory = ReachableSourceInventory {
-        files: reachable.into_iter().collect(),
-        local_source_cache,
-        resolved_file_references,
-    };
-    let ReachableSourceInventory {
-        files,
-        local_source_cache,
-        resolved_file_references,
-    } = inventory;
-    let (source_files, input_files) = finalize_reachable_files(
-        files,
-        local_source_cache,
-        &canonical_entry_path,
-        project_path_resolver,
-        string_table,
-    )?;
-
-    Ok(ReachableTraversalOutcome {
-        source_files,
-        input_files,
-        resolved_file_references,
-    })
+    Ok(DiscoveryWalkOutcome::Complete)
 }
 
 /// BFS over dependency clauses starting from `entry_point`, preserving source kind.

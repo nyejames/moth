@@ -1201,6 +1201,29 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         diagnostics[0].payload,
         DiagnosticPayload::InvalidDependencyClause { .. }
     ));
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("diagnosed discovery must publish its finalized source context");
+    let entry_id = source_files
+        .get_by_canonical_path(&entry_file_path)
+        .expect("the previously prepared entry must remain in the diagnosed context")
+        .id;
+    let helper_id = source_files
+        .get_by_canonical_path(&helper_file_path)
+        .expect("the failed source must remain in the diagnosed context")
+        .id;
+    assert_eq!(helper_id, SourceId::from_index(1));
+    assert_eq!(entry_id, SourceId::from_index(2));
+    assert_eq!(
+        diagnostics[0].primary_location.scope,
+        source_files.legacy_logical_path(helper_id)
+    );
+    assert_eq!(source_files.retained_text(entry_id), Some("@helper\n"));
+    assert_eq!(
+        source_files.retained_text(helper_id),
+        Some("@core/math sin,\n")
+    );
     assert_eq!(
         super::source_loading::source_read_count_for_path_for_test(&entry_file_path),
         1,

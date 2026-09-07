@@ -72,17 +72,17 @@ CURRENT_SLICE:
 - Phase: 1D4b, module source-preparation and finalization ownership.
 - Goal: retain original source builders through discovery, file/chunk aggregation and semantic
   outcomes, then install each table under exclusive source ownership after its last producer.
-- Encode the approved private discovery-finalization contract and slim completed history.
-  Then repair diagnosed discovery ownership and prove the success/failure barrier.
+- Synthetic success/failure finalization is reviewed and validated. Checkpoint it, then retain
+  original builders across canonical and check-only module consumers.
 - Canonical/check-only duplicate preparation, general module deltas and the final lookup-only
   boundary remain open.
 
 LAST_GOOD_COMMIT:
-- `5a25914ec` — direct-template source finalization and warning contexts, validated and reviewed.
+- `756fb424a` — approved private discovery identity contract, plan cleanup and insertion visibility.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Uncommitted: plan cleanup, approved authority updates and narrower source insertion visibility.
+- Synthetic discovery candidate, regression and coverage docs are uncommitted; reviews and gates passed.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -166,21 +166,18 @@ BLOCKERS / RISKS:
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
   Preserve them in the remaining 1D4b/1F2 outcome migration; the accepted config-span checkpoint
   did not claim to repair that existing warning loss.
-- Proven remaining ownership/proof gap inside the approved contract: the synthetic
-  `source_discovery` traversal returns its preparation `Err` directly (provider/resolution
-  failures included) before any finalizer, and `source_preparation` drops the failed tokenizer
-  or header builder and snapshot. 1D4b must retain them and prove an early preparation failure
-  after prior prepared sources leaks no provisional diagnostic or context; the approved policy
-  alone does not settle this.
+- Canonical and check-only jobs can prepare the same source under different root options.
+  One final source table cannot accept independent builders for those jobs. Preserve one original
+  builder through their producers without locks, early freezing or rejecting legitimate jobs.
 
 VALIDATION_STATE:
-- Accepted `5a25914ec`: independent reviews, 92 direct-template tests and `just validate` passed
-  (5,058 compiler, 17 CLI, 825 xtask, 1,951 integration, docs, 1,319-file audit, 82 preflights,
-  three scaling budgets and timer erasure). Warning-context mutation proof passed.
-- Config checkpoint `63fd6d467` passed its focused tests, mutation proof, reviews and full gate.
-  Exact historical commands and output remain in the checkpoint history.
-- Current contract/visibility candidate: `cargo fmt --all && just validate` passed with the same
-  suite counts. Independent review required one success-only wording correction, now applied.
+- Synthetic candidate: baseline regression failed on missing source context; all 33 focused
+  synthetic tests now pass. CLI preserves `MOTH-SYNTAX-0019` at `helper.moth:1:16`.
+- Two independent reviews accepted ownership and coverage. `cargo fmt --all && just validate`
+  passed: 5,058 compiler, 17 CLI, 825 xtask, 1,951 integration, docs, 1,319-file source audit,
+  82 preflights, three scaling budgets and timer erasure. Documentation release: 74 outputs.
+- Quick benchmark checks reported +1 ms average with changed docs workloads excluded. This is
+  bounded gate evidence, not a five-run performance claim. Earlier checkpoint details remain in Git.
 - Coverage gaps for the upcoming source-span/render migration: diagnosed-table contents,
   content-source one-shot installation, cross-document collision secondary-site rendering.
 - Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
@@ -359,9 +356,9 @@ once before success or diagnosed publication. The authority owns ordering, dispo
 and context rules. This exception adds neither an eager inventory scan nor a second ID type.
 
 Required acceptance:
-- [ ] prove a traversal whose provisional and final numeric IDs differ normalizes retained facts
-- [ ] prove different discovery orders yield identical final identity and source-shell facts
-- [ ] prove early preparation failure after a prior prepared source leaves only final-domain
+- [x] prove a traversal whose provisional and final numeric IDs differ normalizes retained facts
+- [x] prove different discovery orders yield identical final identity and source-shell facts
+- [x] prove early preparation failure after a prior prepared source leaves only final-domain
   diagnostics and attached source context
 
 ### At activation
@@ -559,7 +556,6 @@ The frozen table owns nodes and depths only; the child map lives and dies with t
 - [x] **1B3 — traversal and synthetic sources:** directory/packages pre-register inventory IDs.
   Synthetic single-file and recursive direct-template traversal normalize private provisional
   identities once before publication. Authored provenance and deterministic late deltas remain.
-  Diagnosed-exit ownership and its required proof remain open in 1D4b.
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
 - [ ] **1B5 — module inputs and worker ownership:** ordered candidate `SourceId` sets and canonical file/chunk merge checks are delivered. The remaining per-source `SourcePreparationDelta`, live span-builder retention and final record installation belong to 1D4/1F; this item remains open until those ownership boundaries are implemented.
 - [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
@@ -573,9 +569,8 @@ and remains in the project identity domain; independently compiled packages keep
 Stage 0's `SourceRegistrationIndex` preserves its module-origin order; traversal-only single-file
 and direct-template lanes use canonical logical-path order because they have no module inventory,
 and their provisional identities stay in a private, disposable discovery-local domain, rebound
-exactly once before successful publication. The approved contract also requires the known-source
-barrier on diagnosed exits, still open in 1D4b. A flat display-path sort must not replace either
-lane's canonical ordering policy.
+exactly once before success or diagnosed publication. A flat display-path sort must not replace
+either lane's canonical ordering policy.
 Loaded text moves into its slot once; a second retain is an invariant failure. Re-registration of
 one canonical source rejects conflicting logical identity or supplied kind. Different physical
 sources may share a display path (bootstrap `config.moth` vs `src/config.moth`); display-path
@@ -710,6 +705,8 @@ actual remaining consumer, not blanket suppressions.
     warnings.
   - [x] **1D4b config finalization:** delivered; retains the original builder through compiler and
     build-owned config validation, then installs it once before source database sharing.
+  - [x] **1D4b synthetic discovery finalization:** retain prior and failed snapshots/builders
+    through the borrowed traversal, normalize the known set on abort and publish final context.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
