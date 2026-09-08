@@ -1437,14 +1437,10 @@ impl CompilerDiagnostic {
         first_location: SourceLocation,
         duplicate_location: SourceLocation,
     ) -> Self {
-        let payload_first_location = first_location.clone();
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
             duplicate_location.clone(),
-            DiagnosticPayload::ShadowedName {
-                name,
-                first_location: payload_first_location,
-            },
+            DiagnosticPayload::ShadowedName { name },
         )
         .with_labels(vec![
             DiagnosticLabel::primary(duplicate_location),

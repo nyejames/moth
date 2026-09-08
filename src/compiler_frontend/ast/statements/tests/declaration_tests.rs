@@ -8,7 +8,8 @@ use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ReservedNameOwner, RuleDiagnosticKind, TypeMismatchContext,
+    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, ReservedNameOwner,
+    RuleDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
@@ -142,7 +143,7 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
 
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::ShadowedName { .. }
+        DiagnosticPayload::ShadowedName { name: _ }
     ));
 
     let duplicate_start = source
@@ -166,6 +167,10 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
     assert_eq!(
         diagnostic.labels[0].location, diagnostic.primary_location,
         "the primary legacy label must remain the duplicate declaration"
+    );
+    assert_eq!(
+        diagnostic.labels[1].message,
+        Some(DiagnosticLabelMessage::PreviousDeclaration)
     );
 }
 

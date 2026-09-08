@@ -294,12 +294,8 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::ShadowedName {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::ShadowedName { name } => {
                 *name = remap.get(*name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::ReservedNameCollision { name, .. } => {
@@ -704,8 +700,7 @@ impl DiagnosticPayload {
                 rebind_optional_location(first_location, logical_path)
             }
 
-            DiagnosticPayload::ShadowedName { first_location, .. }
-            | DiagnosticPayload::DuplicatePublicExport { first_location, .. }
+            DiagnosticPayload::DuplicatePublicExport { first_location, .. }
             | DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
                 first_location.rebind_source_identity(logical_path)
             }
@@ -754,6 +749,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
             | DiagnosticPayload::UnknownName { .. }
             | DiagnosticPayload::TypeMismatch { .. }
+            | DiagnosticPayload::ShadowedName { .. }
             | DiagnosticPayload::MissingImportTarget { .. }
             | DiagnosticPayload::ImportNameCollision { .. }
             | DiagnosticPayload::AmbiguousImportTarget { .. }

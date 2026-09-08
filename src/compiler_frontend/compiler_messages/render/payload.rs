@@ -390,7 +390,7 @@ fn render_payload_message(
         DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
             trait_name_used_as_type_message(*trait_name, context)
         }
-        DiagnosticPayload::ShadowedName { name, .. } => {
+        DiagnosticPayload::ShadowedName { name } => {
             format!("Shadowed name '{}'", string_table.resolve(*name))
         }
         DiagnosticPayload::ReservedNameCollision { name, reserved_by } => {

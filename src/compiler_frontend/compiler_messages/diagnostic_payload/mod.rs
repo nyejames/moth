@@ -371,7 +371,6 @@ pub enum DiagnosticPayload {
 
     ShadowedName {
         name: StringId,
-        first_location: SourceLocation,
     },
 
     ReservedNameCollision {
