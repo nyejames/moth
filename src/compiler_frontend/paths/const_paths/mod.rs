@@ -1,8 +1,8 @@
 //! Moth path syntax parsing for path literals.
 //!
 //! This parser sits directly on tokenizer tokens and returns typed `CompilerDiagnostic` values for
-//! user-authored path mistakes. Connected helpers and the public `parse_file_path` entry point
-//! share one boxed diagnostic shape that flows directly into the tokenizer's result family.
+//! user-authored path mistakes. The lexical entry point also propagates token span infrastructure
+//! failures through the shared tokenizer result; component grammar helpers own only diagnostics.
 //!
 //! Path tokens are terminated by unquoted whitespace. Dependency selections are ordinary
 //! identifier and punctuation tokens parsed by the header-owned dependency-clause parser,
@@ -11,6 +11,7 @@
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
 use crate::compiler_frontend::tokenizer::tokens::{
     CharPosition, SourceLocation, Token, TokenKind, TokenStream,
 };
@@ -34,7 +35,7 @@ struct ParsedPathPrefix {
 pub fn parse_file_path(
     stream: &mut TokenStream,
     string_table: &mut StringTable,
-) -> Result<Token, Box<CompilerDiagnostic>> {
+) -> TokenizeResult<Token> {
     // Path syntax accepted by the tokenizer.
     //
     // Canonical examples:
@@ -81,7 +82,8 @@ pub fn parse_file_path(
                 return Err(Box::new(CompilerDiagnostic::invalid_path(
                     PathKind::OnlyRootSlashSupported,
                     stream.new_location(),
-                )));
+                ))
+                .into());
             }
         }
     }
@@ -92,14 +94,16 @@ pub fn parse_file_path(
         return Err(Box::new(CompilerDiagnostic::invalid_path(
             PathKind::Empty,
             stream.new_location(),
-        )));
+        ))
+        .into());
     }
 
     if parsed_prefix.ended_with_separator {
         return Err(Box::new(CompilerDiagnostic::invalid_path(
             PathKind::TrailingSeparator,
             stream.new_location(),
-        )));
+        ))
+        .into());
     }
 
     let root = InternedPath::from_components(parsed_prefix.components);

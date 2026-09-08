@@ -112,6 +112,7 @@ pub(crate) fn with_generic_instantiation_context(
     // Primary call-site label.
     new_labels.push(DiagnosticLabel {
         location: call_location,
+        span: None,
         style: DiagnosticLabelStyle::Primary,
         message: Some(DiagnosticLabelMessage::GenericInstantiationCallSite),
     });

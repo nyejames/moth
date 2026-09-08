@@ -19,7 +19,7 @@ use super::{
     UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, merge_stage_messages,
+    CompilerError, CompilerMessages, ErrorType, merge_stage_messages,
 };
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
@@ -29,6 +29,7 @@ use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -3024,4 +3025,162 @@ fn symbolic_spacing_renders_exact_construct_and_side() {
             "expected message '{expected_message}' in rendered output {rendered:?} for {construct:?} {missing:?}"
         );
     }
+}
+
+#[test]
+fn preparation_capture_reuses_extended_primary_and_related_spans() {
+    let mut strings = StringTable::new();
+    let path = InternedPath::from_single_str("main.moth", &mut strings);
+    let source = SourceId::from_index(1);
+    let mut builder = ExtendedSpanBuilder::new();
+    let primary = SourceLocation::with_byte_range(
+        path.clone(),
+        Default::default(),
+        Default::default(),
+        10,
+        2410,
+    );
+    let related =
+        SourceLocation::with_byte_range(path, Default::default(), Default::default(), 3000, 5400);
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(primary);
+    diagnostic
+        .labels
+        .push(DiagnosticLabel::secondary(related, None));
+    diagnostic
+        .capture_preparation_span(source, &mut builder)
+        .unwrap();
+    let primary_span = diagnostic.primary_span.unwrap();
+    let related_span = diagnostic.labels[1].span.unwrap();
+    assert_eq!(
+        builder.len(),
+        2,
+        "the primary label must reuse its diagnostic's row"
+    );
+
+    diagnostic
+        .capture_preparation_span(source, &mut builder)
+        .unwrap();
+    assert_eq!(
+        builder.len(),
+        2,
+        "repeated capture must not append duplicate ranges"
+    );
+    assert_eq!(diagnostic.primary_span, Some(primary_span));
+    assert_eq!(diagnostic.labels[0].span, Some(primary_span));
+    assert_eq!(diagnostic.labels[1].span, Some(related_span));
+    for (span, start, end) in [(primary_span, 10, 2410), (related_span, 3000, 5400)] {
+        let range = span.resolve_with(builder.resolver());
+        assert_eq!((range.start(), range.end()), (start, end));
+    }
+}
+
+#[test]
+fn preparation_capture_rejects_reversed_primary_and_related_ranges() {
+    let mut strings = StringTable::new();
+    let path = InternedPath::from_single_str("main.moth", &mut strings);
+    let source = SourceId::from_index(1);
+    let reversed = SourceLocation::with_byte_range(
+        path.clone(),
+        Default::default(),
+        Default::default(),
+        20,
+        10,
+    );
+    let primary = CompilerDiagnostic::unterminated_string_literal(reversed.clone());
+    let mut related = CompilerDiagnostic::unterminated_string_literal(location(path));
+    related
+        .labels
+        .push(DiagnosticLabel::secondary(reversed.clone(), None));
+
+    for mut diagnostic in [primary, related] {
+        let mut builder = ExtendedSpanBuilder::new();
+        let error = diagnostic
+            .capture_preparation_span(source, &mut builder)
+            .expect_err("a reversed producer range must not be masked");
+        assert_eq!(error.error_type, ErrorType::Compiler);
+        assert_eq!(error.location, reversed);
+        assert_eq!(builder.len(), 0);
+    }
+}
+
+#[test]
+fn preparation_capture_rejects_a_changed_primary_source_domain() {
+    let mut strings = StringTable::new();
+    let path = InternedPath::from_single_str("main.moth", &mut strings);
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(location(path));
+    let mut builder = ExtendedSpanBuilder::new();
+    diagnostic
+        .capture_preparation_span(SourceId::from_index(1), &mut builder)
+        .unwrap();
+    let original = diagnostic.primary_span;
+
+    let error = diagnostic
+        .capture_preparation_span(SourceId::from_index(2), &mut builder)
+        .expect_err("source identities change only through explicit discovery rebinding");
+    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(diagnostic.primary_span, original);
+    assert_eq!(builder.len(), 0);
+}
+
+#[test]
+fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
+    let mut strings = StringTable::new();
+    let path = InternedPath::from_single_str("main.moth", &mut strings);
+    let foreign_path = InternedPath::from_single_str("other.moth", &mut strings);
+    let rebound_path = InternedPath::from_single_str("final.moth", &mut strings);
+    let source = SourceId::from_index(1);
+    let foreign_source = SourceId::from_index(2);
+    let final_source = SourceId::from_index(3);
+    let foreign_location = SourceLocation::with_byte_range(
+        foreign_path,
+        Default::default(),
+        Default::default(),
+        100,
+        2500,
+    );
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(location(path));
+    diagnostic
+        .labels
+        .push(DiagnosticLabel::secondary(foreign_location.clone(), None));
+    let mut builder = ExtendedSpanBuilder::new();
+    let error = diagnostic
+        .capture_preparation_span(source, &mut builder)
+        .expect_err("foreign source identity cannot be inferred from the primary");
+    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.location, foreign_location);
+    assert_eq!(diagnostic.labels[1].span, None);
+
+    let mut foreign_builder = ExtendedSpanBuilder::new();
+    let foreign_span = SourceSpan::new(
+        foreign_source,
+        LocalSpan::exact(100, 2400, &mut foreign_builder).unwrap(),
+    );
+    diagnostic.labels[1].span = Some(foreign_span);
+    diagnostic
+        .capture_preparation_span(source, &mut builder)
+        .unwrap();
+    diagnostic.rebind_source_identity(Some(source), final_source, &rebound_path);
+    assert_eq!(diagnostic.primary_span.unwrap().source(), final_source);
+    assert_eq!(diagnostic.labels[0].span.unwrap().source(), final_source);
+    assert_eq!(diagnostic.labels[1].span, Some(foreign_span));
+    assert_eq!(diagnostic.labels[1].location, foreign_location);
+
+    // Exhaustion can leave the primary uncaptured while a related range still fits inline.
+    // Discovery must use the file owner's identity even when that primary carrier is absent.
+    diagnostic.primary_span = None;
+    diagnostic.rebind_source_identity(Some(final_source), source, &rebound_path);
+    assert_eq!(diagnostic.primary_span, None);
+    assert_eq!(diagnostic.labels[0].span.unwrap().source(), source);
+    assert_eq!(diagnostic.labels[1].span, Some(foreign_span));
+    assert_eq!(
+        builder.len(),
+        0,
+        "foreign spans stay in their original source table"
+    );
+    let frozen_foreign = foreign_builder.freeze();
+    let range = diagnostic.labels[1]
+        .span
+        .unwrap()
+        .resolve_with(frozen_foreign.resolver());
+    assert_eq!((range.start(), range.end()), (100, 2500));
 }

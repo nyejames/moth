@@ -3337,3 +3337,22 @@ The existing preparation-to-semantics regression now resolves a tokenizer-create
 identifier span through the finalized database and checks the return-site offset and exact text.
 Source-unit coverage separately proves repeated preparation preserves distinct original overflow
 rows. Neither test claims semantic stages already append compact spans; that migration follows.
+
+## Data Layout Migration - Preparation Diagnostic Spans - 2026-09-08
+
+Phase 1D3 retains exact primary and related preparation spans in the original source tables.
+This checkpoint preserves lexical infrastructure failures separately from source diagnoses and
+checks real extended-table exhaustion through the preparation boundary. The legacy location
+bridge remains until 1H, so this slice claims no aggregate retained-memory reduction.
+
+Machine: Apple M1 Pro, aarch64 macOS; Rust/Clippy 1.97.1. The final
+`cargo fmt --all && just validate` passed native featured all-target Clippy, 5,069 compiler tests,
+17 CLI tests, 825 xtask tests, 1,951 integration cases, docs check and the 1,319-file source audit.
+All 82 shared benchmark preflights passed. The three-iteration quick comparison against recorded
+history reported +3 ms CLI averages and 0 ms frontend averages, with changed docs workloads
+excluded. These bounded checks do not establish five-run medians or a phase-wide memory result.
+
+Scaling fits passed at nominal members \(n^{0.98}\), constant chains \(n^{0.79}\) and generic
+instantiation \(n^{1.62}\). Timer erasure passed with a 9,043,728-byte no-timer binary.
+Independent span-ownership and failure-lane reviews and focused correction verification were
+clean before acceptance. The accepted commit is the commit containing this checkpoint section.

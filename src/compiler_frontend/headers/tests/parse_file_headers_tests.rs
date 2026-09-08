@@ -50,6 +50,7 @@ struct HeaderTestDiagnostics {
 }
 
 struct HeaderTestPrepareContext<'a> {
+    source_id: SourceId,
     entry_file_path: &'a Path,
     options: &'a HeaderParseOptions<'a>,
     style_directives: &'a StyleDirectiveRegistry,
@@ -77,9 +78,16 @@ pub(crate) fn prepare_single_file(
     )
     .expect("tokenization should succeed");
 
-    let output =
-        prepare_file_from_tokens(file_tokens, entry_file_path, &options, string_table, 0, 0)
-            .expect("preparation should succeed");
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        entry_file_path,
+        &options,
+        string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed");
     (output, span_builder)
 }
 
@@ -94,26 +102,16 @@ fn prepare_test_source_file(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let interned_path = InternedPath::try_from_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
-    let file_tokens = match tokenize(
+    let file_tokens = tokenize(
         source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         context.style_directives,
         string_table,
-        SourceId::COMPILATION_ROOT,
+        context.source_id,
         span_builder,
-    ) {
-        Ok(file_tokens) => file_tokens,
-        Err(diagnostic) => {
-            return Err(FileFrontendPrepareFailure::Diagnosed(
-                FileFrontendPrepareError {
-                    file_id: SourceId::COMPILATION_ROOT,
-                    warnings: Vec::new(),
-                    diagnostic,
-                },
-            ));
-        }
-    };
+    )
+    .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure, context.source_id))?;
 
     prepare_file_from_tokens(
         file_tokens,
@@ -122,6 +120,7 @@ fn prepare_test_source_file(
         string_table,
         const_template_offset,
         runtime_fragment_offset,
+        span_builder,
     )
 }
 
@@ -148,13 +147,22 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let mut outputs =
-        [
-            prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0)
-                .expect("preparation should succeed"),
-        ];
-    let prepared = prepare_header_syntax(&mut outputs, &mut string_table)
-        .expect("header syntax should aggregate");
+    let mut outputs = [prepare_file_from_tokens(
+        file_tokens,
+        &file_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed")];
+    let prepared = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+    )
+    .expect("header syntax should aggregate");
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("a later source span should fit");
     let resolver = span_builder.resolver();
@@ -178,7 +186,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
 
 #[test]
 fn diagnosed_aggregation_preserves_the_source_span_builder() {
-    let quoted = "x".repeat(1500);
+    let quoted = "é".repeat(2 * 1024 * 1024);
     let source =
         format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of Int = 1\n;\n");
     let mut string_table = StringTable::new();
@@ -204,6 +212,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     )
     .expect("preparation should succeed")];
     let literal_span = outputs[0]
@@ -214,8 +223,12 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         .expect("the function body should retain its long literal")
         .span;
 
-    let diagnostics = match prepare_header_syntax(&mut outputs, &mut string_table) {
-        Err(diagnostics) => diagnostics,
+    let diagnostics = match prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+    ) {
+        Err(failure) => expect_aggregation_diagnostics(failure),
         Ok(_) => panic!("a nested config qualifier should fail aggregation"),
     };
     assert!(diagnostics.errors().any(|diagnostic| matches!(
@@ -225,6 +238,19 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
             ..
         }
     )));
+    let primary_span = diagnostics
+        .errors()
+        .next()
+        .expect("config placement diagnostic")
+        .primary_span
+        .expect("aggregation captures its primary span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let marker_range = primary_span.resolve_with(span_builder.resolver());
+    assert!(marker_range.start() >= 4 * 1024 * 1024);
+    assert_eq!(
+        &source[marker_range.start() as usize..marker_range.end() as usize],
+        "#"
+    );
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("the diagnosed source builder should remain live");
     let resolver = span_builder.resolver();
@@ -236,6 +262,147 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let whole_range = whole_source.resolve_with(resolver);
     assert_eq!(whole_range.start(), 0);
     assert_eq!(whole_range.end(), source.len() as u32);
+}
+
+#[test]
+fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
+    let sources = [
+        "helper ||:\n setting #Config of Int = 1\n;\n",
+        "other ||:\n setting #Config of Int = 2\n;\n",
+    ];
+    let mut string_table = StringTable::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let entry = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        entry_file_path: entry,
+        options: &options,
+        style_directives: &styles,
+    };
+    let mut builders = [ExtendedSpanBuilder::new(), ExtendedSpanBuilder::new()];
+    let mut outputs = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        outputs.push(
+            prepare_test_source_file(
+                source,
+                Path::new(if index == 0 {
+                    "src/@page.moth"
+                } else {
+                    "src/helper.moth"
+                }),
+                &HeaderTestPrepareContext {
+                    source_id: SourceId::from_index(index + 1),
+                    ..context
+                },
+                &mut string_table,
+                0,
+                0,
+                &mut builders[index],
+            )
+            .expect("declaration shells prepare"),
+        );
+    }
+    let failure = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            diagnostic.capture_preparation_span(source, &mut builders[source.index() - 1])
+        },
+    )
+    .err()
+    .expect("nested qualifiers fail aggregation");
+    let diagnostics = expect_aggregation_diagnostics(failure).into_diagnostics();
+    assert_eq!(diagnostics.len(), 2);
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        let span = diagnostic
+            .primary_span
+            .expect("aggregation retains primary source span");
+        assert_eq!(span.source(), SourceId::from_index(index + 1));
+        let range = span.resolve_with(builders[index].resolver());
+        assert_eq!(
+            &sources[index][range.start() as usize..range.end() as usize],
+            "#"
+        );
+    }
+}
+
+#[test]
+fn preparation_related_labels_keep_the_continuation_comma_and_name() {
+    let source = "-- é🦋\n@core/math sin,\nvalue = 1\n";
+    let mut strings = StringTable::new();
+    let mut spans = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let path = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::from_index(4),
+        entry_file_path: path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let failure = prepare_test_source_file(source, path, &context, &mut strings, 0, 0, &mut spans)
+        .err()
+        .expect("continued clause must diagnose statement");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected source diagnostic");
+    };
+    assert_eq!(error.diagnostic.labels.len(), 2);
+    for (label, expected) in error.diagnostic.labels.iter().zip(["value", ","]) {
+        let span = label
+            .span
+            .expect("per-file preparation captures related labels");
+        assert_eq!(span.source(), context.source_id);
+        let range = span.resolve_with(spans.resolver());
+        assert_eq!(
+            &source[range.start() as usize..range.end() as usize],
+            expected
+        );
+    }
+}
+
+#[test]
+fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
+    let comment = "é".repeat(700);
+    let source = format!("-- 🦋\nimport -- {comment}\n    @core/math {{ sin }}\n");
+    let mut strings = StringTable::new();
+    let mut spans = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let path = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        entry_file_path: path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let failure = prepare_test_source_file(
+        &source,
+        path,
+        &HeaderTestPrepareContext {
+            source_id: SourceId::from_index(3),
+            ..context
+        },
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .err()
+    .expect("legacy joined clause is diagnosed");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected source diagnostic");
+    };
+    let span = error
+        .diagnostic
+        .primary_span
+        .expect("per-file producer captures joined clause");
+    let range = span.resolve_with(spans.resolver());
+    assert_eq!(span.source(), SourceId::from_index(3));
+    assert_eq!(range.start() as usize, source.find("import").unwrap());
+    assert_eq!(range.end() as usize, source.find('}').unwrap() + 1);
+    assert!(range.end() - range.start() > 1022);
+    assert_eq!(error.diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -274,6 +441,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     ) {
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
         Ok(_) => panic!("an empty export block should diagnose during header preparation"),
@@ -318,6 +486,7 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     )
     .expect("a dependency shell with a compilation-root identity should prepare");
 
@@ -364,6 +533,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     ) {
         Ok(_) => panic!("a tampered path handle must fail preparation"),
         Err(error) => error,
@@ -448,6 +618,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
             &mut string_table,
             0,
             0,
+            &mut span_builder,
         ) {
             Ok(_) => panic!("a wrong file-owned path table must fail preparation"),
             Err(error) => error,
@@ -471,6 +642,7 @@ fn prepare_active_root_with_role(
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
@@ -487,15 +659,32 @@ fn prepare_active_root_with_role(
     )
 }
 
+fn expect_aggregation_diagnostics(failure: HeaderPreparationFailure) -> DiagnosticBag {
+    match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => bag,
+        HeaderPreparationFailure::Infrastructure(error) => {
+            panic!("aggregation fixture infrastructure failure: {error:?}")
+        }
+    }
+}
+
 /// Test helper: run both header preparation and binding, returning the raw result.
 fn prepare_and_bind_headers_result(
     mut prepared_outputs: Vec<FileFrontendPrepareOutput>,
+    span_builders: &mut [ExtendedSpanBuilder],
     external_package_registry: &ExternalPackageRegistry,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
-    let prepared = prepare_header_syntax(&mut prepared_outputs, string_table)?;
+    let prepared = prepare_header_syntax(
+        &mut prepared_outputs,
+        string_table,
+        &mut |source, diagnostic| {
+            diagnostic.capture_preparation_span(source, &mut span_builders[source.index()])
+        },
+    )
+    .map_err(expect_aggregation_diagnostics)?;
     bind_module_headers(
         prepared,
         external_package_registry,
@@ -510,11 +699,12 @@ fn prepare_and_bind_headers_result(
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) =
+    let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -531,12 +721,13 @@ fn parse_single_file_headers_with_warnings(
 ) {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) =
+    let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
     let warnings = output.warnings.clone();
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -552,11 +743,12 @@ pub(crate) fn parse_single_file_headers_with_table(
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) =
+    let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -599,6 +791,7 @@ fn parse_single_file_headers_with_entry(
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     );
 
     let output = match prepare_result {
@@ -618,6 +811,7 @@ fn parse_single_file_headers_with_entry(
 
     prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         options.project_path_resolver,
@@ -715,9 +909,14 @@ fn compile_time_constant_headers_are_parsed() {
 fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) =
+    let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
-    prepare_header_syntax(&mut [output], &mut string_table)
+    prepare_header_syntax(
+        &mut [output],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+    )
+    .map_err(expect_aggregation_diagnostics)
 }
 
 #[test]
@@ -3164,6 +3363,7 @@ pub(crate) fn parse_multi_file_headers(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
@@ -3180,7 +3380,10 @@ pub(crate) fn parse_multi_file_headers(
         let output = prepare_test_source_file(
             source,
             &file_path,
-            &prepare_context,
+            &HeaderTestPrepareContext {
+                source_id: SourceId::from_index(span_builders.len()),
+                ..prepare_context
+            },
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
@@ -3196,6 +3399,7 @@ pub(crate) fn parse_multi_file_headers(
 
     prepare_and_bind_headers_result(
         prepared_outputs,
+        &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         options.project_path_resolver,
@@ -3261,6 +3465,7 @@ fn parse_multi_file_headers_with_result(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
@@ -3279,7 +3484,10 @@ fn parse_multi_file_headers_with_result(
         match prepare_test_source_file(
             source,
             &file_path,
-            &prepare_context,
+            &HeaderTestPrepareContext {
+                source_id: SourceId::from_index(span_builders.len()),
+                ..prepare_context
+            },
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
@@ -3312,6 +3520,7 @@ fn parse_multi_file_headers_with_result(
 
     let result = prepare_and_bind_headers_result(
         prepared_outputs,
+        &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         options.project_path_resolver,
@@ -3510,23 +3719,47 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let (helper_output, _span_builder) = prepare_single_file(
+    let (helper_output, mut helper_spans) = prepare_single_file(
         "@core/math\n",
         &file_path,
         &entry_file_path,
         &mut string_table,
     );
 
-    let (page_output, _span_builder) = prepare_single_file(
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::from_index(1),
+        entry_file_path: &entry_file_path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let mut page_spans = ExtendedSpanBuilder::new();
+    let page_output = prepare_test_source_file(
         "value #= 1\n",
-        &PathBuf::from("src/@page.moth"),
         &entry_file_path,
+        &context,
         &mut string_table,
-    );
+        0,
+        0,
+        &mut page_spans,
+    )
+    .expect("entry source should prepare");
 
     let mut prepared_files = vec![helper_output, page_output];
-    let module_symbols = build_module_symbols(&mut prepared_files, &mut string_table)
-        .expect("module symbols should build");
+    let module_symbols = build_module_symbols(
+        &mut prepared_files,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            let builder = if source.index() == 0 {
+                &mut helper_spans
+            } else {
+                &mut page_spans
+            };
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("module symbols should build");
 
     let helper_path = InternedPath::try_from_filesystem_path(
         &PathBuf::from("src/helper.moth"),
@@ -3638,6 +3871,7 @@ fn dependency_clause_is_rejected_in_config_source() {
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
@@ -4340,11 +4574,12 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
     return 1
 ;
 ";
-    let (output, _span_builder) =
+    let (output, mut span_builder) =
         prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -4693,7 +4928,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
     let file_path = PathBuf::from("src/@page.moth");
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
-    let (output, _span_builder) = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file(
         "prelude_fn |x Int| -> Int:\n    return x\n;\n",
         &file_path,
         &file_path,
@@ -4717,6 +4952,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
     let registry = registry_with_prelude_function_symbol("prelude_fn");
     let result = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &registry,
         &ExternalImportResolutionTable::default(),
         None,
@@ -4746,7 +4982,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
     let file_path = PathBuf::from("src/@page.moth");
     // A generic parameter reusing a prelude type name parses during provider-independent
     // preparation; the collision is provider-dependent and is validated during binding.
-    let (output, _span_builder) = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file(
         "Box type PreludeType = |\n    value PreludeType,\n|\n",
         &file_path,
         &file_path,
@@ -4763,6 +4999,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
     let registry = registry_with_prelude_type_symbol("PreludeType");
     let result = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &registry,
         &ExternalImportResolutionTable::default(),
         None,
@@ -4842,6 +5079,7 @@ fn assert_generic_dependency_name_collision(source: &str) {
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,

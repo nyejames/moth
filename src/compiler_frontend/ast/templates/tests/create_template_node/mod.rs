@@ -22,7 +22,7 @@ use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
     CharPosition, FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind,
 };
@@ -363,8 +363,11 @@ fn template_parse_rendered_error_with_style_directives(
         &mut span_builder,
     ) {
         Ok(tokens) => tokens,
-        Err(diagnostic) => {
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => {
             return render_test_diagnostic(&diagnostic, &string_table);
+        }
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            panic!("template fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
     token_stream.index = token_stream

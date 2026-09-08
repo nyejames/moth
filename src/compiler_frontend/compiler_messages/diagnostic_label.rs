@@ -6,12 +6,14 @@
 
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagnosticLabel {
     pub location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub style: DiagnosticLabelStyle,
     pub message: Option<DiagnosticLabelMessage>,
 }
@@ -20,6 +22,7 @@ impl DiagnosticLabel {
     pub(crate) fn primary(location: SourceLocation) -> Self {
         Self {
             location,
+            span: None,
             style: DiagnosticLabelStyle::Primary,
             message: None,
         }
@@ -31,6 +34,7 @@ impl DiagnosticLabel {
     ) -> Self {
         Self {
             location,
+            span: None,
             style: DiagnosticLabelStyle::Secondary,
             message,
         }
@@ -44,7 +48,10 @@ impl DiagnosticLabel {
         }
     }
 
-    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+    pub(crate) fn rebind_source_identity(&mut self, source: SourceId, logical_path: &InternedPath) {
+        if let Some(span) = &mut self.span {
+            *span = SourceSpan::new(source, span.local());
+        }
         self.location.rebind_source_identity(logical_path);
     }
 }

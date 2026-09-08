@@ -83,7 +83,7 @@ use crate::compiler_frontend::compiler_messages::{
     InfrastructureDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SpanCapacityError, SpanCapacityReason};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
@@ -653,6 +653,31 @@ impl CompilerError {
             metadata: HashMap::new(),
             render_context: None,
         }
+    }
+
+    /// Span exhaustion shares the existing source-size failure lane until Phase 5 reclassifies it.
+    pub(crate) fn source_span_capacity(error: SpanCapacityError, location: SourceLocation) -> Self {
+        let (message, error_type) = match error.reason() {
+            SpanCapacityReason::ExtendedTableFull => (
+                format!(
+                    "this source needs an exact span at byte offset {} with length {}, but \
+                     its span table cannot hold another long or late range",
+                    error.start(),
+                    error.length(),
+                ),
+                ErrorType::File,
+            ),
+            SpanCapacityReason::EndUnrepresentable => (
+                format!(
+                    "span at byte offset {} with length {} ends past u32::MAX in a source \
+                     that was accepted as addressable; this is a compiler bug",
+                    error.start(),
+                    error.length(),
+                ),
+                ErrorType::Compiler,
+            ),
+        };
+        Self::new(message, location, error_type)
     }
 
     /// Attach structured guidance metadata to this error and return it for chaining.

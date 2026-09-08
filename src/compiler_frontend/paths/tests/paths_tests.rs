@@ -6,7 +6,7 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 
 fn tokenize_source(
@@ -155,7 +155,10 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
             Ok(_) => panic!(
                 "whitespace cannot separate a path introducer or separator from its component"
             ),
-            Err(diagnostic) => *diagnostic,
+            Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+            Err(TokenizeFailure::Infrastructure(error)) => {
+                panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
+            }
         };
         assert!(matches!(
             error.payload,
@@ -179,7 +182,10 @@ fn path_errors_remain_structured() {
         &mut span_builder,
     ) {
         Ok(_) => panic!("public root suffix should fail"),
-        Err(diagnostic) => *diagnostic,
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
+        }
     };
     assert!(matches!(
         error.payload,

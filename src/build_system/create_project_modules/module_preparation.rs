@@ -14,7 +14,8 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
-    HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta, prepare_header_syntax,
+    HeaderParseOptions, HeaderPreparationFailure, PreparedHeaderSyntax, SourcePreparationDelta,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
@@ -575,6 +576,7 @@ impl ModulePreparationContext<'_> {
         Self::merge_file_preparation_chunks(
             string_table,
             preparation_chunks,
+            source_spans,
             module_file_count,
             base_len,
         )
@@ -590,6 +592,7 @@ impl ModulePreparationContext<'_> {
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
         mut preparation_chunks: Vec<FilePreparationChunk>,
+        source_spans: &mut SourceSpanBuilders<'_>,
         module_file_count: usize,
         base_len: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
@@ -742,9 +745,25 @@ impl ModulePreparationContext<'_> {
         }
 
         record_successful_prepared_outputs(&filled_outputs);
-        let prepared = prepare_header_syntax(&mut filled_outputs, string_table).map_err(|bag| {
-            let mut messages =
-                CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
+        let prepared = prepare_header_syntax(
+            &mut filled_outputs,
+            string_table,
+            &mut |source, diagnostic| {
+                let mut builder = source_spans.take_span_builder(source);
+                let result = diagnostic.capture_preparation_span(source, &mut builder);
+                source_spans.retain_span_builder(source, builder);
+                result
+            },
+        )
+        .map_err(|bag| {
+            let mut messages = match bag {
+                HeaderPreparationFailure::Diagnosed(bag) => {
+                    CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
+                }
+                HeaderPreparationFailure::Infrastructure(error) => {
+                    CompilerMessages::from_error_ref(error, string_table)
+                }
+            };
             messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
             messages
         })?;
@@ -1056,7 +1075,10 @@ impl ModuleSyntaxDiscovery<'_> {
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
-    pub(super) fn finish(mut self) -> Result<PreparedModule, CompilerMessages> {
+    pub(super) fn finish(
+        mut self,
+        source_spans: &mut SourceSpanBuilders<'_>,
+    ) -> Result<PreparedModule, CompilerMessages> {
         let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
@@ -1072,13 +1094,27 @@ impl ModuleSyntaxDiscovery<'_> {
         let prepared_header_syntax = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
-            prepare_header_syntax(&mut prepared_outputs, &mut self.string_table),
+            prepare_header_syntax(
+                &mut prepared_outputs,
+                &mut self.string_table,
+                &mut |source, diagnostic| {
+                    let mut builder = source_spans.take_span_builder(source);
+                    let result = diagnostic.capture_preparation_span(source, &mut builder);
+                    source_spans.retain_span_builder(source, builder);
+                    result
+                }
+            ),
         )
         .map_err(|bag| {
-            let mut messages = CompilerMessages::from_diagnostics(
-                bag.into_diagnostics(),
-                self.string_table.clone(),
-            );
+            let mut messages = match bag {
+                HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
+                    bag.into_diagnostics(),
+                    self.string_table.clone(),
+                ),
+                HeaderPreparationFailure::Infrastructure(error) => {
+                    CompilerMessages::from_error_ref(error, &self.string_table)
+                }
+            };
             messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
             messages
         })?;

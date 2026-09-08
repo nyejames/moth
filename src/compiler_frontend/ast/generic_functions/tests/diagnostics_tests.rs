@@ -227,6 +227,7 @@ fn with_generic_instantiation_context_drops_original_primary_label() {
     )
     .with_labels(vec![DiagnosticLabel {
         location: body_location.clone(),
+        span: None,
         style: DiagnosticLabelStyle::Primary,
         message: Some(DiagnosticLabelMessage::PreviousDeclaration),
     }]);

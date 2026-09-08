@@ -10,6 +10,7 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, register_builtin_error_types,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, ReservedNameOwner,
 };
@@ -19,9 +20,11 @@ use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSig
 use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols, register_declared_symbol,
 };
+use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -34,7 +37,8 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 pub(super) fn build_module_symbols(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-) -> Result<ModuleSymbols, DiagnosticBag> {
+    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+) -> Result<ModuleSymbols, HeaderPreparationFailure> {
     let mut module_symbols = ModuleSymbols::empty();
     let mut diagnostic_bag = DiagnosticBag::new();
 
@@ -50,7 +54,10 @@ pub(super) fn build_module_symbols(
             .insert(file_output.source_file.to_owned(), file_output.file_id);
 
         for header in &file_output.headers {
-            if !validate_declared_name(header, string_table, &mut diagnostic_bag) {
+            if let Some(mut diagnostic) = validate_declared_name(header, string_table) {
+                capture(file_output.file_id, &mut diagnostic)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                diagnostic_bag.push(diagnostic);
                 continue;
             }
 
@@ -70,7 +77,7 @@ pub(super) fn build_module_symbols(
     }
 
     if diagnostic_bag.has_errors() {
-        return Err(diagnostic_bag);
+        return Err(HeaderPreparationFailure::Diagnosed(diagnostic_bag));
     }
 
     // The retained clause and selection tables have completed validation above. Move them into
@@ -99,11 +106,8 @@ pub(super) fn build_module_symbols(
 fn validate_declared_name(
     header: &Header,
     string_table: &StringTable,
-    diagnostic_bag: &mut DiagnosticBag,
-) -> bool {
-    let Some(symbol_name) = header.tokens.src_path.name() else {
-        return true;
-    };
+) -> Option<CompilerDiagnostic> {
+    let symbol_name = header.tokens.src_path.name()?;
 
     let symbol_name_text = string_table.resolve(symbol_name).to_owned();
 
@@ -112,28 +116,25 @@ fn validate_declared_name(
         header.name_location.to_owned(),
         string_table,
     ) {
-        diagnostic_bag.push(*diagnostic);
-        return false;
+        return Some(*diagnostic);
     }
 
     if is_reserved_builtin_symbol(&symbol_name_text) {
-        diagnostic_bag.push(CompilerDiagnostic::reserved_builtin_name(
+        return Some(CompilerDiagnostic::reserved_builtin_name(
             symbol_name,
             header.name_location.to_owned(),
         ));
-        return false;
     }
 
     if is_core_cast_trait_name(&symbol_name_text) {
-        diagnostic_bag.push(CompilerDiagnostic::reserved_name_collision(
+        return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
             header.name_location.to_owned(),
         ));
-        return false;
     }
 
-    true
+    None
 }
 
 /// Detect whether a parsed function signature is a receiver method candidate.

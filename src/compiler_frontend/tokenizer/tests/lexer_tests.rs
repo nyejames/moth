@@ -11,7 +11,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
+};
 
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
@@ -37,6 +39,15 @@ fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
     tokenize_source_with_registry(source, &style_directives)
 }
 
+fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompilerDiagnostic {
+    match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => *diagnostic,
+        TokenizeFailure::Infrastructure(error) => {
+            panic!("lexical diagnosis fixture encountered infrastructure failure: {error:?}")
+        }
+    }
+}
+
 fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -53,7 +64,7 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     ) else {
         panic!("tokenization should fail");
     };
-    (*diagnostic, string_table)
+    (expect_lexical_diagnostic(diagnostic), string_table)
 }
 
 fn tokenize_source_with_registry(
@@ -134,7 +145,7 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
     ) else {
         panic!("Moth template tokenization should fail");
     };
-    (*diagnostic, string_table)
+    (expect_lexical_diagnostic(diagnostic), string_table)
 }
 
 fn find_token_index(tokens: &[Token], predicate: impl Fn(&TokenKind) -> bool) -> usize {
@@ -1609,7 +1620,7 @@ fn rejects_legacy_reset_style_directive_name() {
     ) else {
         panic!("legacy reset directive should be rejected");
     };
-    let error = *diagnostic;
+    let error = expect_lexical_diagnostic(diagnostic);
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -1777,7 +1788,7 @@ fn unknown_style_directives_fail_under_strict_registry() {
     ) else {
         panic!("unknown directive should fail during tokenization");
     };
-    let error = *diagnostic;
+    let error = expect_lexical_diagnostic(diagnostic);
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -2630,6 +2641,7 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
     ) else {
         panic!("the malformed trailing character should abort tokenization");
     };
+    let diagnostic = expect_lexical_diagnostic(diagnostic);
 
     assert_eq!(
         diagnostic.primary_location.start_byte,
@@ -2689,5 +2701,81 @@ fn diagnostic_location_does_not_append_an_extended_span_row() {
         stream.extended_span_builder.len(),
         1,
         "a diagnostic location over another long range must not append an extended row"
+    );
+}
+
+/// The returned diagnostic keeps exact UTF-8 bounds after a long token has used the original table.
+#[test]
+fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
+    let quoted = "😀".repeat(600);
+    let source = format!("value = \"{quoted}\"\nx = \"\\🦋");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("diagnosed-long-token.moth", &mut string_table);
+    let canonical_path = source_path.to_path_buf(&string_table);
+    let sources =
+        SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
+            .expect("the physical fixture should register");
+    let file_id = sources
+        .get_by_canonical_path(&canonical_path)
+        .expect("the fixture should have a source identity")
+        .id;
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let diagnostic = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        file_id,
+        &mut span_builder,
+    )
+    .expect_err("the unsupported escape should abort tokenization");
+    let diagnostic = expect_lexical_diagnostic(diagnostic);
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidStringEscape {
+            reason: InvalidStringEscapeReason::UnsupportedEscape { escaped: '🦋' }
+        }
+    ));
+    assert_eq!(
+        span_builder.len(),
+        1,
+        "the preceding long token uses an extended row"
+    );
+
+    let expected_start = source
+        .find("\\🦋")
+        .expect("fixture should contain the escape") as u32;
+    let expected_end = expected_start + "\\🦋".len() as u32;
+    assert_eq!(
+        (
+            diagnostic.primary_location.start_byte,
+            diagnostic.primary_location.end_byte
+        ),
+        (expected_start, expected_end),
+    );
+    let span = diagnostic
+        .primary_span
+        .expect("tokenize must capture its diagnosed range");
+    assert_eq!(span.source(), file_id);
+
+    let mut database_builder = SourceDatabaseBuilder::new(sources);
+    database_builder
+        .sources_mut()
+        .retain_text(file_id, source.clone())
+        .expect("the diagnosed source should retain its snapshot");
+    database_builder.retain_span_builder(file_id, span_builder);
+    let installed = database_builder
+        .finish()
+        .expect("the original builder should install once");
+    let resolved = span.byte_range(&installed);
+    assert_eq!(
+        (resolved.start(), resolved.end()),
+        (expected_start, expected_end)
+    );
+    assert_eq!(
+        &source[resolved.start() as usize..resolved.end() as usize],
+        "\\🦋"
     );
 }

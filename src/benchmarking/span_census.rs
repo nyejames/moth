@@ -15,7 +15,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fmt;
@@ -493,7 +493,14 @@ pub(super) fn tokenize_source(
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
     )
-    .map_err(|diagnostic| format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind))?;
+    .map_err(|failure| match failure {
+        lexer::TokenizeFailure::Diagnosed(diagnostic) => {
+            format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind)
+        }
+        lexer::TokenizeFailure::Infrastructure(error) => {
+            format!("tokenization infrastructure failure: {error:?}")
+        }
+    })?;
 
     let mut spans = Vec::with_capacity(file_tokens.tokens.len());
 

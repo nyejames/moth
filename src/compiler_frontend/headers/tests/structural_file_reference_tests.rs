@@ -41,6 +41,7 @@ fn prepare_source(
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     )
     .expect("preparation should succeed");
     (output, string_table, span_builder)

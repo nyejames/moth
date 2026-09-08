@@ -10,8 +10,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
-    SourcePreparationDelta,
+    FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -115,17 +114,13 @@ pub(super) fn prepare_discovery_source_text(
         &mut span_builder,
     ) {
         Ok(output) => output,
-        Err(diagnostic) => {
+        Err(failure) => {
             return Ok(PreparedDiscoverySource {
                 prepared_output: SourcePreparationDelta {
                     file_id: source_id,
                     span_builder,
-                    result: Err(FileFrontendPrepareFailure::Diagnosed(
-                        FileFrontendPrepareError {
-                            file_id: source_id,
-                            warnings: Vec::new(),
-                            diagnostic,
-                        },
+                    result: Err(FileFrontendPrepareFailure::from_tokenization(
+                        failure, source_id,
                     )),
                 },
                 source_byte_len: source.len(),

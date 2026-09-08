@@ -24,14 +24,15 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
-    HeaderParseOptions, SourcePreparationDelta, bind_module_headers, prepare_header_syntax,
+    HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::module_compilation::FrontendOptions;
@@ -361,15 +362,21 @@ pub(crate) fn compile_moth_template_source(
 
     let sorted = match order_template_headers(
         &mut all_prepared,
-        source_builder.sources(),
+        &mut source_builder,
         &path_resolver,
         resolved_references.as_ref(),
         string_table,
     ) {
         Ok(sorted) => sorted,
         Err(bag) => {
-            let mut messages =
-                CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
+            let mut messages = match bag {
+                HeaderPreparationFailure::Diagnosed(bag) => {
+                    CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
+                }
+                HeaderPreparationFailure::Infrastructure(error) => {
+                    CompilerMessages::from_error_ref(error, string_table)
+                }
+            };
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
             return Err(attach_finalized_source_database(
                 messages,
@@ -447,12 +454,19 @@ enum TemplateSemanticOutcome {
 /// Bind and order retained syntax without consuming the preparation owner's span builders.
 fn order_template_headers(
     prepared_sources: &mut [FileFrontendPrepareOutput],
-    source_files: &SourceDatabase,
+    source_builder: &mut SourceDatabaseBuilder,
     path_resolver: &ProjectPathResolver,
     resolved_references: Option<&ResolvedFileReferenceTable>,
     string_table: &mut StringTable,
-) -> Result<SortedHeaders, DiagnosticBag> {
-    let prepared_syntax = prepare_header_syntax(prepared_sources, string_table)?;
+) -> Result<SortedHeaders, HeaderPreparationFailure> {
+    let (source_files, mut source_spans) = source_builder.split();
+    let prepared_syntax =
+        prepare_header_syntax(prepared_sources, string_table, &mut |source, diagnostic| {
+            let mut builder = source_spans.take_span_builder(source);
+            let result = diagnostic.capture_preparation_span(source, &mut builder);
+            source_spans.retain_span_builder(source, builder);
+            result
+        })?;
     let bound_headers = bind_module_headers(
         prepared_syntax,
         &ExternalPackageRegistry::new(),
@@ -471,6 +485,7 @@ fn order_template_headers(
         None => ContentSourceTargets::empty(),
     };
     resolve_module_dependencies(bound_headers, &content_source_targets, string_table)
+        .map_err(HeaderPreparationFailure::Diagnosed)
 }
 
 fn fold_template_semantics(

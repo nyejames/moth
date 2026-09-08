@@ -52,7 +52,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -177,7 +177,10 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         &mut span_builder,
     ) {
         Ok(_) => panic!("a public root path cannot have a suffix"),
-        Err(diagnostic) => *diagnostic,
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            panic!("file-value fixture tokenization encountered infrastructure failure: {error:?}")
+        }
     };
 
     assert_eq!(
@@ -364,14 +367,21 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth tokenization should succeed");
+        let output = prepare_file_from_tokens(
+            file_tokens,
+            &entry_path,
+            &options,
+            &mut string_table,
+            0,
+            0,
+            &mut span_builder,
+        )
+        .expect("Moth header preparation should succeed");
+
         // Prepared outputs keep their identity, but their token spans still index this
         // builder's table; keep every builder alive through the binding assertions below.
-        retained_span_builders.push(span_builder);
-
-        prepared_outputs.push(
-            prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
-                .expect("Moth header preparation should succeed"),
-        );
+        retained_span_builders.push((file_id_for(path), span_builder));
+        prepared_outputs.push(output);
     }
 
     for (path, source) in templates {
@@ -391,7 +401,7 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth template tokenization should succeed");
-        retained_span_builders.push(span_builder);
+        retained_span_builders.push((file_id_for(path), span_builder));
 
         let mut output = prepare_moth_template_file(file_tokens, &mut string_table)
             .expect("Moth template preparation should succeed");
@@ -472,8 +482,18 @@ fn compile_fixture(
         }
     }
 
-    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            let (_, builder) = retained_span_builders
+                .iter_mut()
+                .find(|(file_id, _)| *file_id == source)
+                .expect("prepared source retains its original span builder");
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("header syntax preparation should succeed");
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let headers = bind_module_headers(
         prepared_syntax,

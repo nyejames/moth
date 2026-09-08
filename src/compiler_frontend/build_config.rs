@@ -35,7 +35,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenKind, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
@@ -308,12 +308,7 @@ impl PrimitiveBuildValue {
         }
 
         if value.starts_with('\'') || value.starts_with('"') {
-            let literal = match parse_ordinary_quoted_literal(value) {
-                Ok(literal) => literal,
-                Err(rejection) => {
-                    return Err(malformed_quoted_literal_error(value, rejection));
-                }
-            };
+            let literal = parse_ordinary_quoted_literal(value)?;
 
             return Ok(match literal {
                 OrdinaryCommandLiteral::String(text) => Self::String(text),
@@ -341,24 +336,39 @@ impl PrimitiveBuildValue {
 /// WHAT: one rejection vocabulary for immediate command-input inference. Whole-number Int
 ///       overflow and non-finite Float materialisation are diagnostics; a quote-leading value
 ///       that is not one complete ordinary Moth literal is rejected with the ordinary
-///       tokenizer's stable diagnostic title.
+///       tokenizer's stable diagnostic title. Infrastructure failures retain their separate
+///       carrier until the command boundary renders them.
 /// WHY:  every command variant renders the same concrete rejection without a second wording
 ///       owner, and the compiler owns the inference semantics behind the message.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum BuildInputValueError {
+    Infrastructure(Box<CompilerError>),
     /// A whole-number-shaped value is outside the Int range.
-    IntOutOfRange { text: String },
+    IntOutOfRange {
+        text: String,
+    },
     /// A decimal-point or exponent-shaped value did not materialise as a finite Float.
-    NonFiniteFloat { text: String },
+    NonFiniteFloat {
+        text: String,
+    },
     /// A single-quote-leading value is not one complete ordinary Moth Char literal.
-    MalformedCharLiteral { text: String, reason: &'static str },
+    MalformedCharLiteral {
+        text: String,
+        reason: &'static str,
+    },
     /// A double-quote-leading value is not one complete ordinary Moth String literal.
-    MalformedStringLiteral { text: String, reason: &'static str },
+    MalformedStringLiteral {
+        text: String,
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for BuildInputValueError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Infrastructure(error) => {
+                write!(formatter, "input tokenization failed: {}", error.msg)
+            }
             Self::IntOutOfRange { text } => {
                 write!(
                     formatter,
@@ -390,11 +400,6 @@ enum OrdinaryCommandLiteral {
     Char(char),
 }
 
-/// Why a quote-leading command value is not one complete ordinary literal.
-struct QuotedLiteralRejection {
-    reason: &'static str,
-}
-
 /// Reason text for a value that tokenizes but carries text past its complete literal.
 const QUOTED_LITERAL_TRAILING_TEXT: &str = "text follows the literal";
 
@@ -407,19 +412,16 @@ const QUOTED_LITERAL_TRAILING_TEXT: &str = "text follows the literal";
 const COMMAND_INPUT_TOKENIZER_PATH: &str = "command-input";
 
 /// Map a quoted-literal rejection to the typed error for the authored leading quote.
-fn malformed_quoted_literal_error(
-    value: &str,
-    rejection: QuotedLiteralRejection,
-) -> BuildInputValueError {
+fn malformed_quoted_literal_error(value: &str, reason: &'static str) -> BuildInputValueError {
     if value.starts_with('\'') {
         BuildInputValueError::MalformedCharLiteral {
             text: value.to_owned(),
-            reason: rejection.reason,
+            reason,
         }
     } else {
         BuildInputValueError::MalformedStringLiteral {
             text: value.to_owned(),
-            reason: rejection.reason,
+            reason,
         }
     }
 }
@@ -439,7 +441,7 @@ fn malformed_quoted_literal_error(
 ///       discarding an authored command-value suffix.
 fn parse_ordinary_quoted_literal(
     value: &str,
-) -> Result<OrdinaryCommandLiteral, QuotedLiteralRejection> {
+) -> Result<OrdinaryCommandLiteral, BuildInputValueError> {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str(COMMAND_INPUT_TOKENIZER_PATH, &mut string_table);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -452,14 +454,20 @@ fn parse_ordinary_quoted_literal(
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
     )
-    .map_err(|diagnostic| QuotedLiteralRejection {
-        reason: diagnostic.kind.descriptor().title,
+    .map_err(|failure| match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => {
+            malformed_quoted_literal_error(value, diagnostic.kind.descriptor().title)
+        }
+        TokenizeFailure::Infrastructure(error) => {
+            BuildInputValueError::Infrastructure(Box::new(error))
+        }
     })?;
 
     let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {
-        return Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        });
+        return Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        ));
     };
 
     if !matches!(module_start.kind, TokenKind::ModuleStart)
@@ -471,9 +479,10 @@ fn parse_ordinary_quoted_literal(
             })
         || literal.location.end_pos != eof.location.end_pos
     {
-        return Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        });
+        return Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        ));
     }
 
     match &literal.kind {
@@ -481,9 +490,10 @@ fn parse_ordinary_quoted_literal(
             string_table.resolve(*id).to_owned(),
         )),
         TokenKind::CharLiteral(character) => Ok(OrdinaryCommandLiteral::Char(*character)),
-        _ => Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        }),
+        _ => Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        )),
     }
 }
 

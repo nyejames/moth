@@ -48,7 +48,7 @@ use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8Path
 use crate::compiler_frontend::symbols::string_interning::{
     StringIdRemap, StringTable, StringTableForkSource,
 };
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::counter_observation;
 
@@ -366,7 +366,14 @@ fn prepare_owned_source_text(
                 source_id,
                 builder,
             )
-            .map_err(SourceDiscoveryError::Diagnostic)?;
+            .map_err(|failure| match failure {
+                TokenizeFailure::Diagnosed(diagnostic) => {
+                    SourceDiscoveryError::Diagnostic(diagnostic)
+                }
+                TokenizeFailure::Infrastructure(error) => {
+                    SourceDiscoveryError::Infrastructure(error)
+                }
+            })?;
             PreparedSourceKind::Moth {
                 tokens: Box::new(tokens),
             }
@@ -564,9 +571,9 @@ fn finalize_failed_discovery(
         };
         let logical_path = source_builder.sources().legacy_logical_path(source_id);
         let SourcePreparationDelta {
+            file_id: provisional_file_id,
             span_builder: _,
             result,
-            ..
         } = prepared.prepared_output;
         match result {
             Ok(mut output) => {
@@ -578,7 +585,11 @@ fn finalize_failed_discovery(
                     Some(canonical_os_path) => canonical_os_path,
                     None => {
                         for warning in &mut output.warnings {
-                            warning.rebind_source_identity(&logical_path);
+                            warning.rebind_source_identity(
+                                Some(provisional_file_id),
+                                source_id,
+                                &logical_path,
+                            );
                         }
                         warnings.append(&mut output.warnings);
                         let error = CompilerError::compiler_error(format!(
@@ -604,7 +615,11 @@ fn finalize_failed_discovery(
                     canonical_os_path,
                 ) {
                     for warning in &mut output.warnings {
-                        warning.rebind_source_identity(&logical_path);
+                        warning.rebind_source_identity(
+                            Some(provisional_file_id),
+                            source_id,
+                            &logical_path,
+                        );
                     }
                     warnings.append(&mut output.warnings);
                     let messages =
@@ -616,9 +631,17 @@ fn finalize_failed_discovery(
 
             Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
                 for warning in &mut error.warnings {
-                    warning.rebind_source_identity(&logical_path);
+                    warning.rebind_source_identity(
+                        Some(provisional_file_id),
+                        source_id,
+                        &logical_path,
+                    );
                 }
-                error.diagnostic.rebind_source_identity(&logical_path);
+                error.diagnostic.rebind_source_identity(
+                    Some(provisional_file_id),
+                    source_id,
+                    &logical_path,
+                );
                 warnings.append(&mut error.warnings);
                 preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
             }
@@ -640,7 +663,7 @@ fn finalize_failed_discovery(
         {
             let logical_path = source_builder.sources().legacy_logical_path(source_id);
             for diagnostic in &mut messages.diagnostics {
-                diagnostic.rebind_source_identity(&logical_path);
+                diagnostic.rebind_source_identity(None, source_id, &logical_path);
             }
         }
         messages

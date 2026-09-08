@@ -4,6 +4,7 @@
 //! WHY: frontend stages should emit facts; renderers at the boundary decide final prose.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
@@ -29,6 +30,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityReason,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -37,6 +41,8 @@ pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
     pub severity: DiagnosticSeverity,
     pub primary_location: SourceLocation,
+    /// Preparation's exact primary range; the legacy location bridge ends in slice 1H.
+    pub(crate) primary_span: Option<SourceSpan>,
     pub labels: Vec<DiagnosticLabel>,
     pub payload: DiagnosticPayload,
 }
@@ -65,6 +71,7 @@ impl CompilerDiagnostic {
             severity,
             labels: vec![DiagnosticLabel::primary(primary_location.clone())],
             primary_location,
+            primary_span: None,
             payload,
         }
     }
@@ -1883,6 +1890,46 @@ impl CompilerDiagnostic {
     //  Supporting Methods
     // ------------------------------------------------------------------
 
+    /// Capture one file's preparation diagnostics while its original builder is live.
+    /// Related ranges from another source must already carry their own explicit span.
+    /// This private interval bridge ends with `SourceLocation` in slice 1H.
+    pub(crate) fn capture_preparation_span(
+        &mut self,
+        source: SourceId,
+        builder: &mut ExtendedSpanBuilder,
+    ) -> Result<(), CompilerError> {
+        if let Some(span) = self.primary_span {
+            if span.source() != source {
+                return Err(CompilerError::new(
+                    "preparation diagnostic changed source domains",
+                    self.primary_location.clone(),
+                    ErrorType::Compiler,
+                ));
+            }
+        } else {
+            self.primary_span = encode_preparation_span(&self.primary_location, source, builder)?;
+        }
+
+        for label in &mut self.labels {
+            if label.span.is_some() {
+                continue;
+            }
+            if label.location.scope != self.primary_location.scope {
+                return Err(CompilerError::new(
+                    "preparation label from another source requires its own source span",
+                    label.location.clone(),
+                    ErrorType::Compiler,
+                ));
+            }
+            label.span = if label.location == self.primary_location {
+                self.primary_span
+            } else {
+                encode_preparation_span(&label.location, source, builder)?
+            };
+        }
+        Ok(())
+    }
+
     /// Return the compiler-owned identity used by tests and tooling.
     ///
     /// The descriptor remains the sole code authority and `severity` is the actual severity on
@@ -1901,14 +1948,51 @@ impl CompilerDiagnostic {
         self.payload.remap_string_ids(remap);
     }
 
-    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+    pub(crate) fn rebind_source_identity(
+        &mut self,
+        previous_source: Option<SourceId>,
+        source: SourceId,
+        logical_path: &InternedPath,
+    ) {
+        for label in &mut self.labels {
+            let belongs_to_source = match label.span {
+                Some(span) => Some(span.source()) == previous_source,
+                None => label.location.scope == self.primary_location.scope,
+            };
+            if belongs_to_source {
+                label.rebind_source_identity(source, logical_path);
+            }
+        }
+        if let Some(span) = &mut self.primary_span {
+            *span = SourceSpan::new(source, span.local());
+        }
         self.primary_location.rebind_source_identity(logical_path);
 
-        for label in &mut self.labels {
-            label.rebind_source_identity(logical_path);
-        }
-
         self.payload.rebind_source_identity(logical_path);
+    }
+}
+
+/// Encode retained producer bounds without guessing an end or replacing an existing diagnosis
+/// when the source's extended table is exhausted.
+fn encode_preparation_span(
+    location: &SourceLocation,
+    source: SourceId,
+    builder: &mut ExtendedSpanBuilder,
+) -> Result<Option<SourceSpan>, CompilerError> {
+    let length = location
+        .end_byte
+        .checked_sub(location.start_byte)
+        .ok_or_else(|| {
+            CompilerError::new(
+                "preparation diagnostic byte range ends before its start",
+                location.clone(),
+                ErrorType::Compiler,
+            )
+        })?;
+    match LocalSpan::exact(location.start_byte, length, builder) {
+        Ok(local) => Ok(Some(SourceSpan::new(source, local))),
+        Err(error) if error.reason() == SpanCapacityReason::ExtendedTableFull => Ok(None),
+        Err(error) => Err(CompilerError::source_span_capacity(error, location.clone())),
     }
 }
 

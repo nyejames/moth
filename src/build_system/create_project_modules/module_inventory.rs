@@ -919,7 +919,7 @@ fn prepare_check_only_module(
             .map_err(|error| CompilerMessages::from_error_ref(error, syntax.string_table_mut()))?;
     }
 
-    let prepared = syntax.finish()?;
+    let prepared = syntax.finish(source_spans)?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
         string_table_base_len,
@@ -1384,7 +1384,7 @@ fn discover_modules_serial_provider_capable(
         } else {
             Vec::new()
         };
-        let prepared = syntax.finish()?;
+        let prepared = syntax.finish(source_spans)?;
         add_frontend_counter(FrontendCounter::ModuleCount, 1);
         add_frontend_counter(
             FrontendCounter::SourceFileCount,

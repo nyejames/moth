@@ -69,22 +69,35 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D4b, module source-preparation and finalization ownership.
-- Goal: retain original source builders through discovery, file/chunk aggregation and semantic
-  outcomes, then install each table under exclusive source ownership after its last producer.
-- Implemented and audit-accepted: `SourceDatabaseBuilder` owns original live tables; tokenizer
-  borrows them; `SourcePreparationDelta` keeps ownership outside every preparation result.
-- Full validation and the installed-overflow-row regression pass. Record the checkpoint, then
-  continue with 1D3 preparation diagnostics; broader exact-span and frozen-context work remains open.
+- Phase: 1D3, exact source spans on preparation diagnostics.
+- Goal: retain the producer's exact `SourceSpan` on tokenizer and preparation diagnostics,
+  normalizing private discovery identities before publication without changing `SourceLocation`.
+- Non-goals: downstream AST/HIR migration, diagnostic storage redesign and token-store migration.
+- The source ownership prerequisite is committed and audit-accepted in `4ca3a018c`.
+- Current implementation encodes producer-owned exact byte bounds at lexical/file-preparation
+  boundaries while the original builder is live. Escape byte anchors and legacy-clause byte ends
+  are corrected at their producers; no source rescanning or end inference is permitted.
+- `CompilerDiagnostic::primary_span` and `DiagnosticLabel::span` carry exact ranges. Their private
+  `capture_preparation_span` bridge ends with `SourceLocation` in 1H. Non-preparation diagnostics
+  remain unmigrated. Existing discovery rebinding also normalizes the compact source identity.
 - Repeated directory/check-only sources are Normal: namespace entries exclude root files.
   Preserve check-only semantic isolation. No-reparse source syntax ownership remains open.
 
 LAST_GOOD_COMMIT:
-- `939845c90` — synthetic diagnosed-source finalization, regression, coverage and full validation.
+- `4ca3a018c` — original source/span ownership through frontend outcomes; full validation and independent audits passed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Source ownership candidate is validated and audit-accepted, awaiting its checkpoint commit.
+- Continuation order: finish and accept 1D3, then 1D5/1D6 and remaining Phase 1,
+  accept Phase 2, accept Phase 3, run final review and pause. Phases 4–7 stay pending.
+- 1D3 is implemented, independently reviewed and fully validated, ready for its checkpoint.
+  Lexical, per-file and aggregation diagnostics retain exact primary and related ranges through
+  the original source builder. Joined-clause and multibyte escape bounds are checked at production
+  boundaries. Cross-source labels retain explicit ownership during discovery normalization.
+- Independent review required separate tokenizer failure lanes and a real exhaustion regression.
+  Both corrections passed focused verification. Token minting infrastructure failures stay in
+  that lane; exhaustion during diagnostic capture preserves the original diagnosis.
+- No required 1D3 review finding remains. The legacy location bridge ends in 1H.
 - Untracked `librust_out.rmeta` has unknown ownership and is excluded from the checkpoint.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
@@ -172,28 +185,26 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
-- `cargo fmt --all && just validate` passes: native featured all-target Clippy; 5,060 compiler,
-  17 CLI and 825 xtask tests; 1,951 integration cases; docs check; 1,319-file source audit;
-  82 benchmark preflights; three scaling budgets; timer erasure.
-- Focused source, preparation, service, synthetic and package tests pass. The strengthened semantic
-  boundary regression resolves an original 1,506-byte return-site span after final installation.
-- CLI long-literal success, diagnosed discovery, check-only semantic failure and Boracle pass.
-  Boracle all-target checking and both corrected fixture-path regressions pass.
-- Outcome/render-domain audit and both fresh correction-verification lanes are clean. Restoring a
-  field-forwarding source-count assertion was rejected under the test policy; observable installed
-  span resolution replaced the real coverage gap.
-- Quick CLI/frontend benchmark averages show no measurable change (0 ms), excluding changed docs
-  workloads. This is bounded gate evidence, not a five-run performance claim.
-- Documentation release: 74 outputs. Unrelated generated-only CSS drift was restored.
+- Current 1D3 candidate: `cargo fmt --all && just validate` passed after the final corrections.
+  Native featured all-target Clippy, 5,069 compiler tests, 17 CLI tests, 825 xtask tests,
+  1,951 integration cases, docs check and the 1,319-file source audit passed.
+- All 82 benchmark preflights, three scaling budgets and timer erasure passed.
+  Quick CLI averages were +3 ms and frontend averages 0 ms against recorded history, excluding
+  changed docs workloads. This is bounded gate evidence, not a five-run median or memory claim.
+- Focused tokenizer, header, config, module-preparation, diagnostic-carrier and synthetic
+  diagnosed-discovery coverage passed. The real exhausted-table test exercises both production
+  failure paths; ordinary lexical coverage separately proves capture is reached.
+- Independent carrier/failure-lane and aggregation reviews, plus focused correction verification,
+  are clean. No new structured-audit coverage is claimed.
 - Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
-  it starts or after it exits. `cargo test -p moth --lib` misses test targets; before calling a
-  slice green, run `cargo clippy -p moth --all-targets` with the featured feature set.
+  it starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
+  all-target Clippy gate before accepting a slice.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: commit 1D4b, then carry exact source spans on preparation diagnostics in 1D3.
+- next action: commit the accepted 1D3 candidate, then scope preparation-record migration in 1D5.
 
 ---
 
@@ -655,8 +666,8 @@ actual remaining consumer, not blanket suppressions.
 
 ### Slice 1D — Migrate tokenization and source preparation
 
-- [ ] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
-  — **tokens carry exact spans as of 1D2a; the diagnostic half is 1D3**
+- [x] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
+  — **tokens delivered in 1D2a; preparation diagnostics delivered in 1D3**
 - [ ] keep every authored token stream and header/source identity keyed by its registered
   `SourceId`; frozen generic syntax remains explicitly identity-free until 1F preserves or remaps
   its owning context. The compilation root must never stand in for that missing identity.
@@ -710,6 +721,11 @@ actual remaining consumer, not blanket suppressions.
     through the borrowed traversal, normalize the known set on abort and publish final context.
 - **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
   retain exact final `SourceId` plus local span data owned by the same producer.
+  - [x] **1D3a — lexical and per-file primary spans:** encode exact producer-owned byte bounds
+    before the original builder leaves preparation; normalize the carrier at discovery publication.
+  - [x] **1D3b — aggregation and related ranges:** capture source-contract/symbol aggregation
+    diagnostics and related preparation labels with explicit source ownership. Per-file primary
+    capture alone does not complete 1D3.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
   shells, source contracts, const fragments and source-kind adapters carry spans.
 - **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the

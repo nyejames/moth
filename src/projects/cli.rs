@@ -17,7 +17,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
+    BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
@@ -76,8 +76,13 @@ fn parse_command_input_argument(
     let name = BuildInputName::new(name_text).map_err(|_| {
         format!("Invalid --input name '{name_text}': input names must be lower_snake_case.")
     })?;
-    let value = PrimitiveBuildValue::from_command_text(value_text)
-        .map_err(|error| format!("Invalid value for --input '{name_text}': {error}."))?;
+    let value =
+        PrimitiveBuildValue::from_command_text(value_text).map_err(|error| match error {
+            BuildInputValueError::Infrastructure(error) => {
+                format!("Failed to process --input '{name_text}': {}.", error.msg)
+            }
+            error => format!("Invalid value for --input '{name_text}': {error}."),
+        })?;
 
     let entry = BuildConfigInputEntry::new(
         name,

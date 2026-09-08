@@ -29,8 +29,8 @@ use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
-    SourcePreparationDelta, parse_file_headers_with_table,
+    BoundModuleHeaders, FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
+    parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -272,13 +272,7 @@ impl CompilerFrontend<'static> {
             source_id,
             span_builder,
         )
-        .map_err(|diagnostic| {
-            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                file_id: source_id,
-                warnings: Vec::new(),
-                diagnostic,
-            })
-        })?;
+        .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure, source_id))?;
         tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }
@@ -338,6 +332,7 @@ impl CompilerFrontend<'static> {
                     local_string_table,
                     input.const_template_offset,
                     input.runtime_fragment_offset,
+                    &mut span_builder,
                 )
             }
             FrontendFilePrepareSource::MothTemplate {

@@ -17,7 +17,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
@@ -35,7 +36,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, Sour
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -136,7 +137,13 @@ pub(crate) fn parse_single_file_ast_build_result(
         &mut string_table,
         SourceId::COMPILATION_ROOT,
         &mut span_builder,
-    )?;
+    )
+    .map_err(|failure| match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
+        TokenizeFailure::Infrastructure(error) => {
+            panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
+        }
+    })?;
 
     let output = prepare_file_from_tokens(
         file_tokens,
@@ -145,6 +152,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     )
     .map_err(|error| match error {
                 crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
@@ -163,19 +171,32 @@ pub(crate) fn parse_single_file_ast_build_result(
         output.path_syntax.table(),
     );
 
-    let prepared_syntax =
-        prepare_header_syntax(&mut [output], &mut string_table).map_err(|bag| {
-            Box::new(
-                bag.into_diagnostics()
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| {
-                        compiler_error_to_diagnostic(&CompilerError::compiler_error(
-                            "unknown header syntax preparation error",
-                        ))
-                    }),
-            )
-        })?;
+    let prepared_syntax = prepare_header_syntax(
+        &mut [output],
+        &mut string_table,
+        &mut |source, diagnostic| {
+            assert_eq!(source, source_file_id);
+            diagnostic.capture_preparation_span(source, &mut span_builder)
+        },
+    )
+    .map_err(|failure| {
+        let bag = match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => bag,
+            HeaderPreparationFailure::Infrastructure(error) => {
+                panic!("single-file test aggregation hit infrastructure failure: {error:?}")
+            }
+        };
+        Box::new(
+            bag.into_diagnostics()
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| {
+                    compiler_error_to_diagnostic(&CompilerError::compiler_error(
+                        "unknown header syntax preparation error",
+                    ))
+                }),
+        )
+    })?;
 
     let headers = bind_module_headers(
         prepared_syntax,

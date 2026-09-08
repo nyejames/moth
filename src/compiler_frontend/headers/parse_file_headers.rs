@@ -43,7 +43,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
@@ -57,6 +57,9 @@ use std::path::Path;
 /// WHAT: computes the file role, builds the header parse context, and delegates to the file parser.
 /// WHY: fused frontend preparation owns local-table creation and merging in the pipeline layer,
 /// while the header stage owns only header parsing against whichever table the caller provides.
+///
+/// The caller lends the source's original live span builder so per-file diagnostics and warnings
+/// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
 pub fn parse_file_headers_with_table(
     file_tokens: &mut FileTokens,
     entry_file_path: &Path,
@@ -64,6 +67,7 @@ pub fn parse_file_headers_with_table(
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let file_id = file_tokens.file_id.ok_or_else(|| {
         CompilerError::compiler_error("header parsing requires a retained source file identity")
@@ -117,7 +121,45 @@ pub fn parse_file_headers_with_table(
         const_template_offset,
         runtime_fragment_offset,
     };
-    parse_headers_in_file(file_tokens, file_id, &mut parse_context)
+    let file_output = parse_headers_in_file(file_tokens, file_id, &mut parse_context);
+    capture_preparation_spans(file_output, file_id, span_builder)
+}
+
+/// Attach exact primary and related spans to warnings and diagnostics emitted for one source file.
+///
+/// WHAT: encodes the already-produced byte bounds at the header entry boundary, where the
+///       caller still owns the source's original span builder.
+/// WHY: this covers direct, pipeline and config preparation without threading span state through
+///       shared declaration parsers. Infrastructure capture failures stay on the existing
+///       preparation lane and cannot invent a range end.
+fn capture_preparation_spans(
+    mut file_output: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
+    file_id: SourceId,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    match &mut file_output {
+        Ok(output) => {
+            for warning in &mut output.warnings {
+                warning
+                    .capture_preparation_span(file_id, span_builder)
+                    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            }
+        }
+        Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+            for warning in &mut error.warnings {
+                warning
+                    .capture_preparation_span(file_id, span_builder)
+                    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+            }
+            error
+                .diagnostic
+                .capture_preparation_span(file_id, span_builder)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        }
+        Err(FileFrontendPrepareFailure::Infrastructure(_)) => {}
+    }
+
+    file_output
 }
 
 /// Parse headers from an already-tokenized file against a local string-table fork, then merge
@@ -125,8 +167,8 @@ pub fn parse_file_headers_with_table(
 ///
 /// WHAT: this is the per-file header-parsing half of preparation for callers that already ran
 ///       tokenization, such as config parsing that runs token-level validation first.
-/// WHY: the caller retains the source's span builder; header parsing only consumes the token
-///      stream and leaves span resolution with the enclosing preparation owner on every exit.
+/// WHY: the caller lends the original source span builder so this boundary can capture diagnostic
+///      ranges, then retains that same builder for later retained-token span resolution.
 pub(crate) fn prepare_file_from_tokens(
     mut file_tokens: FileTokens,
     entry_file_path: &Path,
@@ -134,6 +176,7 @@ pub(crate) fn prepare_file_from_tokens(
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let fork_source = string_table.fork_source();
     let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
@@ -145,6 +188,7 @@ pub(crate) fn prepare_file_from_tokens(
         &mut local_string_table,
         const_template_offset,
         runtime_fragment_offset,
+        span_builder,
     );
 
     let remap = string_table.merge_delta_from(&local_string_table, base_len);
@@ -167,6 +211,19 @@ pub(crate) fn prepare_file_from_tokens(
     }
 }
 
+/// Failure lanes for aggregation while source span storage remains live.
+#[derive(Debug)]
+pub(crate) enum HeaderPreparationFailure {
+    Diagnosed(DiagnosticBag),
+    Infrastructure(CompilerError),
+}
+
+impl From<DiagnosticBag> for HeaderPreparationFailure {
+    fn from(diagnostics: DiagnosticBag) -> Self {
+        Self::Diagnosed(diagnostics)
+    }
+}
+
 /// Aggregate per-file frontend preparation outputs into provider-independent
 /// `PreparedHeaderSyntax`.
 ///
@@ -179,10 +236,11 @@ pub(crate) fn prepare_file_from_tokens(
 pub fn prepare_header_syntax(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
+    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+) -> Result<PreparedHeaderSyntax, HeaderPreparationFailure> {
     let source_build_config_contracts =
-        collect_source_build_config_contracts(prepared_files, string_table)?;
-    let module_symbols = build_module_symbols(prepared_files, string_table)?;
+        collect_source_build_config_contracts(prepared_files, string_table, capture)?;
+    let module_symbols = build_module_symbols(prepared_files, string_table, capture)?;
 
     let mut headers: Vec<Header> = Vec::new();
     let mut top_level_const_fragments = Vec::new();
@@ -270,7 +328,8 @@ pub(crate) fn find_config_qualifier_marker_in_header(
 fn collect_source_build_config_contracts(
     prepared_files: &[FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-) -> Result<Vec<SourceBuildConfigContract>, DiagnosticBag> {
+    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+) -> Result<Vec<SourceBuildConfigContract>, HeaderPreparationFailure> {
     let mut contracts = Vec::new();
     let mut diagnostics = DiagnosticBag::new();
 
@@ -304,7 +363,10 @@ fn collect_source_build_config_contracts(
             if let Some((location, adjacent)) =
                 find_config_qualifier_marker_in_header(header, string_table)
             {
-                diagnostics.push(report_marker(location, adjacent));
+                let mut diagnostic = report_marker(location, adjacent);
+                capture(output.file_id, &mut diagnostic)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                diagnostics.push(diagnostic);
                 continue;
             }
 
@@ -315,11 +377,14 @@ fn collect_source_build_config_contracts(
                 continue;
             };
             let Some(name) = header.tokens.src_path.name() else {
-                diagnostics.push(CompilerDiagnostic::invalid_config_reason(
+                let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
                     header.name_location.clone(),
-                ));
+                );
+                capture(output.file_id, &mut diagnostic)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                diagnostics.push(diagnostic);
                 continue;
             };
 
@@ -331,13 +396,17 @@ fn collect_source_build_config_contracts(
                 string_table,
             ) {
                 Ok(contract) => contracts.push(contract),
-                Err(diagnostic) => diagnostics.push(*diagnostic),
+                Err(mut diagnostic) => {
+                    capture(output.file_id, &mut diagnostic)
+                        .map_err(HeaderPreparationFailure::Infrastructure)?;
+                    diagnostics.push(*diagnostic);
+                }
             }
         }
     }
 
     if diagnostics.has_errors() {
-        return Err(diagnostics);
+        return Err(HeaderPreparationFailure::Diagnosed(diagnostics));
     }
     Ok(contracts)
 }

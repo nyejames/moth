@@ -23,8 +23,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind,
-    HeaderParseOptions, SourcePreparationDelta, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
+    prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode};
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
@@ -228,7 +228,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     };
     let SourcePreparationDelta {
         result,
-        span_builder: _span_builder,
+        mut span_builder,
         ..
     } = CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
     let mut prepared_file = result.expect("Moth template source should prepare");
@@ -240,8 +240,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         .freeze_path_syntax(&string_table)
         .expect("single-file Moth template output should satisfy the prepared-file invariant gate");
 
-    let prepared_syntax = prepare_header_syntax(&mut [prepared_file], &mut string_table)
-        .expect("Moth template header syntax should prepare");
+    let prepared_syntax = prepare_header_syntax(
+        &mut [prepared_file],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+    )
+    .expect("Moth template header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
@@ -668,7 +672,7 @@ impl MothTemplateScopeFixture {
                 span_builder,
                 ..
             } = CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
-            span_builders.push(span_builder);
+            span_builders.push((source_id, span_builder));
             let mut output = result.map_err(|error| match error {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     diagnostic,
@@ -684,8 +688,25 @@ impl MothTemplateScopeFixture {
             prepared_files.push(output);
         }
 
-        let prepared_syntax = prepare_header_syntax(&mut prepared_files, &mut string_table)
-            .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
+        let prepared_syntax = prepare_header_syntax(
+            &mut prepared_files,
+            &mut string_table,
+            &mut |source, diagnostic| {
+                let (_, builder) = span_builders
+                    .iter_mut()
+                    .find(|(id, _)| *id == source)
+                    .expect("prepared source retains its original span builder");
+                diagnostic.capture_preparation_span(source, builder)
+            },
+        )
+        .map_err(|failure| match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => {
+                (first_diagnostic_from_bag(bag), string_table.clone())
+            }
+            HeaderPreparationFailure::Infrastructure(error) => {
+                panic!("aggregation fixture infrastructure failure: {error:?}")
+            }
+        })?;
         let headers = bind_module_headers(
             prepared_syntax,
             &external_package_registry,
@@ -802,6 +823,7 @@ fn prepare_moth_source(
         string_table,
         0,
         0,
+        &mut span_builder,
     )
     .expect("Moth header preparation should succeed");
     (output, span_builder)
@@ -1865,7 +1887,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/content.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let (prepared_file, _span_builder) = prepare_moth_source(
+    let (prepared_file, mut span_builder) = prepare_moth_source(
         &format!("content #= [$md: {source}]"),
         &file_path,
         &entry_file_path,
@@ -1882,8 +1904,12 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     )
     .expect("test project path resolver should build");
 
-    let prepared_syntax = prepare_header_syntax(&mut [prepared_file], &mut string_table)
-        .expect("authored md header syntax should prepare");
+    let prepared_syntax = prepare_header_syntax(
+        &mut [prepared_file],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+    )
+    .expect("authored md header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,

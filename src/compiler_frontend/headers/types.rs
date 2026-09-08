@@ -31,6 +31,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
 use crate::compiler_frontend::traits::syntax::{
     TraitConformanceSyntax, TraitDeclarationSyntax, TraitIncompatibilitySyntax,
@@ -1210,10 +1211,6 @@ pub(crate) struct SourcePreparationDelta {
 /// Its source's live span builder belongs to the enclosing preparation owner.
 #[derive(Debug)]
 pub struct FileFrontendPrepareError {
-    #[allow(
-        dead_code,
-        reason = "the 1D4b aggregation boundary will consume diagnosed source identity"
-    )]
     pub(crate) file_id: SourceId,
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: Box<CompilerDiagnostic>,
@@ -1230,6 +1227,19 @@ pub struct FileFrontendPrepareError {
 pub enum FileFrontendPrepareFailure {
     Diagnosed(FileFrontendPrepareError),
     Infrastructure(CompilerError),
+}
+
+impl FileFrontendPrepareFailure {
+    pub(crate) fn from_tokenization(failure: TokenizeFailure, file_id: SourceId) -> Self {
+        match failure {
+            TokenizeFailure::Diagnosed(diagnostic) => Self::Diagnosed(FileFrontendPrepareError {
+                file_id,
+                warnings: Vec::new(),
+                diagnostic,
+            }),
+            TokenizeFailure::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
 }
 
 /// Header-parser local error lane before file-level warnings are attached.
@@ -1340,6 +1350,7 @@ impl FileFrontendPrepareOutput {
         canonical_os_path: std::path::PathBuf,
     ) -> Result<(), CompilerError> {
         let provisional_source_file = self.source_file.clone();
+        let provisional_file_id = self.file_id;
         // Validate all required source-owned paths and the mutable lifecycle before any retained
         // output is changed. A failed rebinding must never leave a partially finalised file.
         self.path_syntax.table_mut()?;
@@ -1367,7 +1378,11 @@ impl FileFrontendPrepareOutput {
             fragment.rebind_source_identity(&provisional_source_file, &final_logical_path)?;
         }
         for warning in &mut self.warnings {
-            warning.rebind_source_identity(&final_logical_path);
+            warning.rebind_source_identity(
+                Some(provisional_file_id),
+                final_file_id,
+                &final_logical_path,
+            );
         }
 
         // The table remains private to this output until every retained header stream has had

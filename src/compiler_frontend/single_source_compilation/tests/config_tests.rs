@@ -64,11 +64,14 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            source_code:
+                "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
-            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
-            builder_config_globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
             project_field_config_policies: surface
                 .config_schemas
                 .project()
@@ -991,4 +994,94 @@ fn direct_project_config_qualifier_accepts_folded_optional_default() {
                 PublicFoldedValue::String(OwnedFoldedString::Text(text)) if text == "fallback"
             )
     ));
+}
+
+#[test]
+fn preparation_config_diagnostics_retain_their_original_source_spans() {
+    let cases = [
+        (
+            "value #= 1\nvalue #= 2\n",
+            "invalid_config.duplicate_key",
+            "value",
+        ),
+        (
+            "@core/math sin\n",
+            "invalid_dependency_clause.dependency_clause_not_allowed",
+            "@core/math",
+        ),
+        (
+            "logo #= @assets/logo.svg\n",
+            "invalid_config.file_value_path_unsupported",
+            "@assets/logo.svg",
+        ),
+        (
+            "helper ||:\n;\n",
+            "invalid_config.function_unsupported",
+            "helper",
+        ),
+    ];
+    let long_value = "🦋".repeat(600);
+    for (suffix, expected_reason, expected_text) in cases {
+        let source = format!("padding #= \"{long_value}\"\n{suffix}");
+        let mut strings = StringTable::new();
+        let surface = BuilderSurface::with_mandatory_core();
+        let directives = StyleDirectiveRegistry::built_ins();
+        let authored_path = Path::new("project/config.moth");
+        let canonical_path = Path::new("/project/config.moth");
+        let sources = SourceDatabase::build([canonical_path], canonical_path, None, &mut strings)
+            .expect("the config source registers before compilation");
+        let file_id = sources.get_by_canonical_path(canonical_path).unwrap().id;
+        let outcome = compile_config_source(
+            ConfigCompilationRequest {
+                authored_path,
+                canonical_path,
+                file_id,
+                source_code: &source,
+                style_directives: &directives,
+                binding_packages: &surface.binding_packages,
+                build_config_inputs:
+                    &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+                builder_config_globals:
+                    &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+                project_field_config_policies: surface
+                    .config_schemas
+                    .project()
+                    .project_field_config_policies(),
+            },
+            &mut strings,
+        );
+        let messages = outcome
+            .result
+            .err()
+            .expect("preparation must reject this config surface");
+        let diagnostics = messages.diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "fixture {suffix:?}");
+        let diagnostic = diagnostics[0];
+        assert_eq!(
+            diagnostic.identity().reason_key,
+            Some(expected_reason),
+            "fixture {suffix:?}"
+        );
+        let span = diagnostic
+            .primary_span
+            .expect("preparation must retain the primary source span");
+        assert_eq!(span.source(), file_id);
+        let range = span.resolve_with(outcome.span_builder.resolver());
+        let expected_start = source.rfind(expected_text).unwrap() as u32;
+        assert_eq!(
+            (range.start(), range.end()),
+            (expected_start, expected_start + expected_text.len() as u32),
+            "fixture {suffix:?}"
+        );
+        assert_eq!(
+            diagnostic.labels.len(),
+            1,
+            "config retains its one-primary-label presentation"
+        );
+        assert_eq!(diagnostic.labels[0].span, Some(span));
+        assert!(
+            !outcome.span_builder.is_empty(),
+            "the original table must retain the long token"
+        );
+    }
 }

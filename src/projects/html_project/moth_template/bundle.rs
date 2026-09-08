@@ -372,7 +372,7 @@ pub(super) fn prepare_file_value_bundle(
             }
         };
         if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
-            diagnostic.rebind_source_identity(&owner_logical_path);
+            diagnostic.rebind_source_identity(None, owner_source_file, &owner_logical_path);
         }
         if let Err(error) = resolved_file_references.push(ResolvedFileReference {
             source_file: owner_source_file,
@@ -662,9 +662,11 @@ fn finalize_discovery_failure(
     match &mut failure {
         FileFrontendPrepareFailure::Diagnosed(error) => {
             for warning in &mut error.warnings {
-                warning.rebind_source_identity(&logical_path);
+                warning.rebind_source_identity(Some(error.file_id), source_id, &logical_path);
             }
-            error.diagnostic.rebind_source_identity(&logical_path);
+            error
+                .diagnostic
+                .rebind_source_identity(Some(error.file_id), source_id, &logical_path);
             prior_warnings.append(&mut error.warnings);
         }
         FileFrontendPrepareFailure::Infrastructure(error) => {

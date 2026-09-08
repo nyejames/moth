@@ -431,10 +431,12 @@ fn legacy_dependency_clause_diagnostic(
         .get(start.import_index)
         .map(|token| token.location.clone())
         .unwrap_or(current_location);
-    let clause_end = legacy_dependency_clause_end(&token_stream.tokens, start.path_index)
+    if let Some(end_token) = legacy_dependency_clause_end(&token_stream.tokens, start.path_index)
         .and_then(|index| token_stream.tokens.get(index))
-        .map_or(clause_location.end_pos, |token| token.location.end_pos);
-    clause_location.end_pos = clause_end;
+    {
+        clause_location.end_pos = end_token.location.end_pos;
+        clause_location.end_byte = end_token.location.end_byte;
+    }
 
     let replacement = if is_config_file {
         None

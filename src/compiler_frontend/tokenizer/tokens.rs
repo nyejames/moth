@@ -5,14 +5,14 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 pub use crate::compiler_frontend::compiler_messages::source_location::{
     CharPosition, SourceLocation,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceId, SpanCapacityError, SpanCapacityReason,
+    ExtendedSpanBuilder, LocalSpan, SourceId, SpanCapacityError,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -840,42 +840,17 @@ impl<'a> TokenStream<'a> {
         Ok(Token::with_span(kind, location, span))
     }
 
-    /// Convert a span-capacity failure into the tokenizer's boundary error.
+    /// The known-source start anchor for diagnostics that cannot name their authored range.
     ///
-    /// The error's location carries this source's identity, so the message names only the
-    /// offending interval. The extended-table limit is reported in the file lane today, beside
-    /// the source-size limit in `source::record`; Phase 5 owns reclassifying both. An
-    /// unrepresentable `u32` end is a compiler bug instead, because slice 1C6 already rejects
-    /// any snapshot whose offsets a `u32` cannot address.
-    pub fn span_capacity_error(&self, error: SpanCapacityError) -> CompilerError {
-        let (message, error_type) = match error.reason() {
-            SpanCapacityReason::ExtendedTableFull => (
-                format!(
-                    "this source needs an exact token span at byte offset {} with length {}, but \
-                     its span table cannot hold another long or late range",
-                    error.start(),
-                    error.length(),
-                ),
-                ErrorType::File,
-            ),
-            SpanCapacityReason::EndUnrepresentable => (
-                format!(
-                    "token span at byte offset {} with length {} ends past u32::MAX in a source \
-                     that was accepted as addressable; this is a compiler bug",
-                    error.start(),
-                    error.length(),
-                ),
-                ErrorType::Compiler,
-            ),
-        };
-
-        let mut compiler_error = CompilerError::compiler_error(message).with_error_type(error_type);
-        compiler_error.location = SourceLocation::new(
+    /// A capacity failure aborts tokenization before any authored interval survives, so the
+    /// error anchors at this stream's own file start (`0..0`) instead of a guessed range. The
+    /// exact interval is named in the message text.
+    pub fn file_start_anchor(&self) -> SourceLocation {
+        SourceLocation::new(
             self.file_path.clone(),
             CharPosition::default(),
             CharPosition::default(),
-        );
-        compiler_error
+        )
     }
 
     /// Anchor the next token's character columns at the cursor.

@@ -81,19 +81,30 @@ fn parse_module_headers(
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
+            &mut span_builder,
         )
         .expect("preparation should succeed");
         // Keep every source's span builder alive for the whole fixture so retained header
         // spans keep their owner table across the binding stage.
-        retained_span_builders.push(span_builder);
+        retained_span_builders.push((file_id_for(path), span_builder));
 
         const_template_offset += output.const_template_count;
         runtime_fragment_offset += output.runtime_fragment_count;
         prepared_outputs.push(output);
     }
 
-    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            let (_, builder) = retained_span_builders
+                .iter_mut()
+                .find(|(file_id, _)| *file_id == source)
+                .expect("prepared source retains its original span builder");
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
@@ -433,11 +444,25 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     )
     .expect("tokenization should succeed");
 
-    let output =
-        prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
-            .expect("preparation should succeed");
-    let prepared_syntax = prepare_header_syntax(&mut [output], &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        &entry_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut [output],
+        &mut string_table,
+        &mut |source, diagnostic| {
+            assert_eq!(source, file_id);
+            diagnostic.capture_preparation_span(source, &mut span_builder)
+        },
+    )
+    .expect("header syntax preparation should succeed");
     let result = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
@@ -1038,20 +1063,20 @@ fn parse_module_headers_with_content_sources(
             &mut span_builder,
         )
         .expect("tokenization should succeed");
-        // Keep every source's builder alive through the sorting and binding assertions below.
-        retained_span_builders.push(span_builder);
+        let output = prepare_file_from_tokens(
+            file_tokens,
+            &entry_path_buf,
+            &options,
+            &mut string_table,
+            0,
+            0,
+            &mut span_builder,
+        )
+        .expect("preparation should succeed");
 
-        prepared_outputs.push(
-            prepare_file_from_tokens(
-                file_tokens,
-                &entry_path_buf,
-                &options,
-                &mut string_table,
-                0,
-                0,
-            )
-            .expect("preparation should succeed"),
-        );
+        // Keep every source's builder alive through the sorting and binding assertions below.
+        retained_span_builders.push((file_id_for(path), span_builder));
+        prepared_outputs.push(output);
     }
 
     for (path, source) in templates {
@@ -1073,7 +1098,7 @@ fn parse_module_headers_with_content_sources(
         .expect("template tokenization should succeed");
         // The template's retained tokens index the builder's table; keep it alive with the
         // other prepared sources for the remainder of this fixture.
-        retained_span_builders.push(span_builder);
+        retained_span_builders.push((file_id_for(path), span_builder));
 
         prepared_outputs.push(
             prepare_moth_template_file(file_tokens, &mut string_table)
@@ -1140,8 +1165,18 @@ fn parse_module_headers_with_content_sources(
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            let (_, builder) = retained_span_builders
+                .iter_mut()
+                .find(|(file_id, _)| *file_id == source)
+                .expect("prepared source retains its original span builder");
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
@@ -1357,20 +1392,21 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut root_span_builder,
     )
     .expect("root file should tokenize");
+    let root_output = prepare_file_from_tokens(
+        root_tokens,
+        &entry_path_buf,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut root_span_builder,
+    )
+    .expect("root file should prepare");
+
     // The prepared root file keeps its source identity, but its retained tokens still index
     // this builder's table; keep it alive through the binding assertions below.
-    retained_span_builders.push(root_span_builder);
-    prepared_outputs.push(
-        prepare_file_from_tokens(
-            root_tokens,
-            &entry_path_buf,
-            &options,
-            &mut string_table,
-            0,
-            0,
-        )
-        .expect("root file should prepare"),
-    );
+    retained_span_builders.push((root_file_id, root_span_builder));
+    prepared_outputs.push(root_output);
 
     let mut icon_span_builder = ExtendedSpanBuilder::new();
     let icon_tokens = tokenize(
@@ -1384,7 +1420,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut icon_span_builder,
     )
     .expect("icon template should tokenize");
-    retained_span_builders.push(icon_span_builder);
+    retained_span_builders.push((icon_file_id, icon_span_builder));
     prepared_outputs.push(
         prepare_moth_template_file(icon_tokens, &mut string_table)
             .expect("icon template should prepare"),
@@ -1416,8 +1452,18 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(&mut prepared_outputs, &mut string_table)
-        .expect("nested header syntax should prepare");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| {
+            let (_, builder) = retained_span_builders
+                .iter_mut()
+                .find(|(file_id, _)| *file_id == source)
+                .expect("prepared source retains its original span builder");
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("nested header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,

@@ -11,10 +11,15 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages,
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
+use crate::compiler_frontend::compiler_messages::{DiagnosticKind, SyntaxDiagnosticKind};
+use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::pipeline::CompilerFrontend;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::fs;
 use std::mem::{align_of, size_of};
 use std::path::{Path, PathBuf};
@@ -1475,6 +1480,71 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     assert_eq!(error.start(), 0);
     assert_eq!(error.length(), 1023);
     assert_eq!(error.reason(), SpanCapacityReason::ExtendedTableFull);
+
+    // The real exhausted table must keep token construction failures in preparation's
+    // infrastructure lane, while capture cannot replace an already-produced diagnosis.
+    let source = format!("\"{}\"", "x".repeat(1023));
+    let path = Path::new("capacity.moth");
+    let mut strings = StringTable::new();
+    let malformed_path = Path::new("unterminated.moth");
+    let malformed_source = source[..source.len() - 1].to_owned();
+    let mut sources =
+        SourceDatabase::build([path, malformed_path], path, None, &mut strings).unwrap();
+    let source_id = sources.get_by_canonical_path(path).unwrap().id;
+    let malformed_id = sources.get_by_canonical_path(malformed_path).unwrap().id;
+    sources.retain_text(source_id, source.clone()).unwrap();
+    sources
+        .retain_text(malformed_id, malformed_source.clone())
+        .unwrap();
+    let failure = CompilerFrontend::tokenize_source(
+        &sources,
+        &StyleDirectiveRegistry::built_ins(),
+        &source,
+        path,
+        TokenizerEntryMode::SourceFile,
+        &mut strings,
+        &mut builder,
+    )
+    .expect_err("minting a long token must report exhausted source storage");
+    let FileFrontendPrepareFailure::Infrastructure(error) = failure else {
+        panic!("token storage failure must not become an authored-source diagnosis");
+    };
+    assert_eq!(error.error_type, ErrorType::File);
+
+    assert_eq!(builder.len(), last_usable_index as usize + 1);
+    let mut malformed_builder = ExtendedSpanBuilder::new();
+    for _ in 0..=last_usable_index {
+        LocalSpan::exact(0, 1023, &mut malformed_builder).unwrap();
+    }
+    let failure = CompilerFrontend::tokenize_source(
+        &sources,
+        &StyleDirectiveRegistry::built_ins(),
+        &malformed_source,
+        malformed_path,
+        TokenizerEntryMode::SourceFile,
+        &mut strings,
+        &mut malformed_builder,
+    )
+    .expect_err("the unterminated literal diagnoses before token construction");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("capture exhaustion must preserve the original diagnosis");
+    };
+    assert_eq!(error.file_id, malformed_id);
+    assert_eq!(
+        error.diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
+    );
+    assert_eq!(
+        error.diagnostic.primary_location.scope,
+        sources.legacy_logical_path(malformed_id)
+    );
+    assert_eq!(error.diagnostic.primary_location.start_byte, 0);
+    assert_eq!(
+        error.diagnostic.primary_location.end_byte,
+        malformed_source.len() as u32
+    );
+    assert_eq!(error.diagnostic.primary_span, None);
+    assert_eq!(malformed_builder.len(), last_usable_index as usize + 1);
 }
 
 #[test]

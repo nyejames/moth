@@ -42,8 +42,8 @@ use crate::compiler_frontend::folded_value::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header,
-    HeaderKind, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
+    prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
@@ -55,7 +55,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, Sour
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -157,8 +157,13 @@ pub(crate) fn compile_config_source(
     let mut span_builder = ExtendedSpanBuilder::new();
     match prepare_config_file(&request, &authored_scope, string_table, &mut span_builder) {
         Ok(mut file) => {
-            let result =
-                compile_prepared_config_source(&request, &authored_scope, &mut file, string_table);
+            let result = compile_prepared_config_source(
+                &request,
+                &authored_scope,
+                &mut file,
+                string_table,
+                &mut span_builder,
+            );
             ConfigCompilationOutcome {
                 result,
                 file_id,
@@ -191,34 +196,44 @@ fn compile_prepared_config_source(
     authored_scope: &InternedPath,
     prepared_file: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<CompiledConfigSource, CompilerMessages> {
-    // Aggregate retained syntax and bind it against the builder's provider interfaces.
-    //
-    // WHY: syntax preparation is provider-independent and binding resolves retained shells against
-    //      provider interfaces. Both phases share the same duplicate-key diagnostic routing, so
-    //      the error path is classified once.
-    let bound_headers =
-        match prepare_header_syntax(std::slice::from_mut(prepared_file), string_table).and_then(
-            |prepared| {
-                bind_module_headers(
-                    prepared,
-                    request.binding_packages,
-                    &ExternalImportResolutionTable::default(),
-                    &SourceProviderDependencySet::default(),
-                    None,
-                    &SourceDatabase::empty(),
-                    string_table,
-                )
-            },
-        ) {
-            Ok(headers) => headers,
-            Err(bag) => {
-                return Err(CompilerMessages::from_diagnostics(
-                    classify_header_diagnostics(bag, authored_scope),
-                    string_table.clone(),
+    let prepared = prepare_header_syntax(
+        std::slice::from_mut(prepared_file),
+        string_table,
+        &mut |source, diagnostic| {
+            if source != request.file_id {
+                return Err(CompilerError::compiler_error(
+                    "config aggregation used a different source owner".to_owned(),
                 ));
             }
-        };
+            diagnostic.capture_preparation_span(source, span_builder)
+        },
+    )
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
+            classify_header_diagnostics(bag, authored_scope),
+            string_table.clone(),
+        ),
+        HeaderPreparationFailure::Infrastructure(error) => {
+            CompilerMessages::from_error_ref(error, string_table)
+        }
+    })?;
+    let bound_headers = bind_module_headers(
+        prepared,
+        request.binding_packages,
+        &ExternalImportResolutionTable::default(),
+        &SourceProviderDependencySet::default(),
+        None,
+        &SourceDatabase::empty(),
+        string_table,
+    )
+    .map_err(|bag| {
+        CompilerMessages::from_diagnostics(
+            classify_header_diagnostics(bag, authored_scope),
+            string_table.clone(),
+        )
+    })?;
 
     // Order local declarations.
     let sorted =
@@ -577,9 +592,12 @@ fn prepare_config_file(
         span_builder,
     ) {
         Ok(output) => output,
-        Err(diagnostic) => {
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => {
             diagnostics.push(*diagnostic);
             return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
+        }
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            return Err(ConfigPreparationFailure::Infrastructure(error));
         }
     };
     file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
@@ -591,6 +609,7 @@ fn prepare_config_file(
         string_table,
         0,
         0,
+        span_builder,
     ) {
         Ok(output) => output,
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
@@ -601,11 +620,7 @@ fn prepare_config_file(
             } = error;
             diagnostics.extend(warnings);
             if is_duplicate_config_header_error(&diagnostic) {
-                diagnostics.push(config_diagnostic(
-                    None,
-                    InvalidConfigReason::DuplicateKey,
-                    diagnostic.primary_location.clone(),
-                ));
+                diagnostics.push(config_duplicate_diagnostic(*diagnostic));
             } else {
                 diagnostics.push(*diagnostic);
             }
@@ -631,6 +646,11 @@ fn prepare_config_file(
         ));
     }
     diagnostics.extend(validate_authored_config_surface(&output.headers));
+    for diagnostic in &mut diagnostics {
+        diagnostic
+            .capture_preparation_span(request.file_id, span_builder)
+            .map_err(ConfigPreparationFailure::Infrastructure)?;
+    }
 
     if diagnostics.is_empty() {
         Ok(output)
@@ -731,16 +751,26 @@ fn classify_header_diagnostics(
         .into_iter()
         .map(|diagnostic| {
             if is_authored_config_duplicate(&diagnostic, authored_scope) {
-                config_diagnostic(
-                    None,
-                    InvalidConfigReason::DuplicateKey,
-                    diagnostic.primary_location.clone(),
-                )
+                config_duplicate_diagnostic(diagnostic)
             } else {
                 diagnostic
             }
         })
         .collect()
+}
+
+/// Config displays one key label for duplicates, retaining its captured authored range.
+fn config_duplicate_diagnostic(diagnostic: CompilerDiagnostic) -> CompilerDiagnostic {
+    let mut replacement = config_diagnostic(
+        None,
+        InvalidConfigReason::DuplicateKey,
+        diagnostic.primary_location,
+    );
+    replacement.primary_span = diagnostic.primary_span;
+    for label in &mut replacement.labels {
+        label.span = diagnostic.primary_span;
+    }
+    replacement
 }
 
 fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {

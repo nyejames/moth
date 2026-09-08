@@ -45,8 +45,6 @@ pub(crate) use database::{SourceDatabase, SourceDatabaseBuilder, SourceSpanBuild
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
-pub(crate) use span::{ExtendedSpanBuilder, LocalSpan, SpanCapacityError, SpanCapacityReason};
-
-// The first cross-module frozen-span consumer is the source-finalization regression.
-#[cfg(test)]
-pub(crate) use span::SourceSpan;
+pub(crate) use span::{
+    ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanCapacityReason,
+};

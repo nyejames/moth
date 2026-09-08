@@ -294,37 +294,19 @@ fn command_text_infers_decimal_and_exponent_literals_as_float() {
 #[test]
 fn command_text_rejects_int_overflow_and_non_finite_floats_as_diagnostics() {
     // Integer-shaped out-of-range values diagnose rather than fall through to Float or String.
-    assert_eq!(
-        infer_error("2147483648"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("2147483648"),
-        }
-    );
-    assert_eq!(
-        infer_error("-2147483649"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("-2147483649"),
-        }
-    );
-    assert_eq!(
-        infer_error("99999999999999999999"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("99999999999999999999"),
-        }
-    );
-    // Exponent-shaped non-finite values reject.
-    assert_eq!(
-        infer_error("1e400"),
-        BuildInputValueError::NonFiniteFloat {
-            text: String::from("1e400"),
-        }
-    );
-    assert_eq!(
-        infer_error("-1e400"),
-        BuildInputValueError::NonFiniteFloat {
-            text: String::from("-1e400"),
-        }
-    );
+    for value in ["2147483648", "-2147483649", "99999999999999999999"] {
+        let BuildInputValueError::IntOutOfRange { text } = infer_error(value) else {
+            panic!("expected an out-of-range Int diagnostic");
+        };
+        assert_eq!(text, value);
+    }
+
+    for value in ["1e400", "-1e400"] {
+        let BuildInputValueError::NonFiniteFloat { text } = infer_error(value) else {
+            panic!("expected a non-finite Float diagnostic");
+        };
+        assert_eq!(text, value);
+    }
 }
 
 #[test]

@@ -332,7 +332,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 &mut local_string_table,
             )
         };
-        retained_span_builders.push(span_builder);
+        retained_span_builders.push((source_id, span_builder));
 
         let remap = frontend
             .string_table
@@ -387,8 +387,18 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     // Aggregate the remapped outputs. Preparation is where Stage 0's merge finishes, so every
     // assertion below reads the prepared syntax directly: binding against provider interfaces
     // would add a provider-dependent stage that cannot change a string identity.
-    let headers = prepare_header_syntax(&mut [output_a, output_b], &mut frontend.string_table)
-        .expect("header syntax preparation should succeed");
+    let headers = prepare_header_syntax(
+        &mut [output_a, output_b],
+        &mut frontend.string_table,
+        &mut |source, diagnostic| {
+            let (_, builder) = retained_span_builders
+                .iter_mut()
+                .find(|(id, _)| *id == source)
+                .expect("prepared source owns original spans");
+            diagnostic.capture_preparation_span(source, builder)
+        },
+    )
+    .expect("header syntax preparation should succeed");
 
     // Verify source text string "beta" resolves through the module table in file B headers.
     let beta_header = headers
@@ -1409,6 +1419,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut fixture.frontend.string_table,
         chunks,
+        &mut fixture.span_builders.split().1,
         input_file_count,
         base_len,
     )
@@ -1655,6 +1666,7 @@ fn parsed_prepared_output(
     source_code: &str,
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
+    source_id: SourceId,
 ) -> FileFrontendPrepareOutput {
     let source_path = PathBuf::from(source_name);
     let source_identity =
@@ -1670,7 +1682,7 @@ fn parsed_prepared_output(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        SourceId::COMPILATION_ROOT,
+        source_id,
         span_builder,
     )
     .expect("test source should tokenize");
@@ -1682,6 +1694,7 @@ fn parsed_prepared_output(
         string_table,
         0,
         0,
+        span_builder,
     )
     .expect("test source should prepare")
 }
@@ -1702,6 +1715,7 @@ fn dummy_preparation_chunk(
                 "x #= 1\n",
                 &mut local_string_table,
                 &mut builder,
+                SourceId::COMPILATION_ROOT,
             );
             span_builders.push((SourceId::COMPILATION_ROOT, builder));
             super::PreparedFileResult {
@@ -1727,10 +1741,12 @@ fn assert_malformed_chunks_rejected(
     expected_fragment: &str,
 ) {
     let mut string_table = StringTable::new();
+    let mut source_owner = SourceDatabaseBuilder::new(Arc::new(SourceDatabase::empty()));
 
     let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         chunks,
+        &mut source_owner.split().1,
         module_file_count,
         0,
     ) {
@@ -1815,12 +1831,45 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::build(
+        [
+            PathBuf::from("synthetic.moth"),
+            PathBuf::from("first.moth"),
+            PathBuf::from("second.moth"),
+        ],
+        Path::new("synthetic.moth"),
+        None,
+        &mut string_table,
+    )
+    .expect("merge fixture source identities should register");
+    let synthetic_id = source_files
+        .get_by_canonical_path(Path::new("synthetic.moth"))
+        .unwrap()
+        .id;
+    let first_id = source_files
+        .get_by_canonical_path(Path::new("first.moth"))
+        .unwrap()
+        .id;
+    let second_id = source_files
+        .get_by_canonical_path(Path::new("second.moth"))
+        .unwrap()
+        .id;
+    source_files
+        .retain_text(
+            synthetic_id,
+            "io.line([: [@docs/synthetic.md]])\n".to_owned(),
+        )
+        .unwrap();
+    source_files.retain_text(first_id, String::new()).unwrap();
+    source_files.retain_text(second_id, String::new()).unwrap();
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut synthetic_spans = ExtendedSpanBuilder::new();
     let mut synthetic_output = parsed_prepared_output(
         "synthetic.moth",
         "io.line([: [@docs/synthetic.md]])\n",
         &mut string_table,
         &mut synthetic_spans,
+        synthetic_id,
     );
     synthetic_output
         .freeze_path_syntax(&string_table)
@@ -1835,13 +1884,19 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let (mut second_local_table, _) = fork_source.fork_for_module().into_parts();
     let mut first_spans = ExtendedSpanBuilder::new();
     let mut second_spans = ExtendedSpanBuilder::new();
-    let first_output =
-        parsed_prepared_output("first.moth", "", &mut first_local_table, &mut first_spans);
+    let first_output = parsed_prepared_output(
+        "first.moth",
+        "",
+        &mut first_local_table,
+        &mut first_spans,
+        first_id,
+    );
     let second_output = parsed_prepared_output(
         "second.moth",
         "",
         &mut second_local_table,
         &mut second_spans,
+        second_id,
     );
 
     let first_chunk = super::FilePreparationChunk {
@@ -1872,9 +1927,13 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         span_builders: Vec::new(),
     };
 
+    source_owner.retain_span_builder(synthetic_id, synthetic_spans);
+    source_owner.retain_span_builder(first_id, first_spans);
+    source_owner.retain_span_builder(second_id, second_spans);
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         vec![first_chunk, second_chunk],
+        &mut source_owner.split().1,
         3,
         base_len,
     )

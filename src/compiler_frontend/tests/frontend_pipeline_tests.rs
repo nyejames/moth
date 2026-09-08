@@ -217,7 +217,7 @@ impl FrontendProject {
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
         let mut retained_span_builders = Vec::with_capacity(tokenized_files.len());
-        for (file_tokens, span_builder) in tokenized_files {
+        for (file_tokens, mut span_builder) in tokenized_files {
             let output = prepare_file_from_tokens(
                 file_tokens,
                 &self.entry_file,
@@ -225,21 +225,32 @@ impl FrontendProject {
                 &mut self.frontend.string_table,
                 const_template_offset,
                 runtime_fragment_offset,
+                &mut span_builder,
             )
             .expect("header parsing should succeed");
 
             const_template_offset += output.const_template_count;
             runtime_fragment_offset += output.runtime_fragment_count;
+            let file_id = output.file_id;
             prepared_outputs.push(output);
             // Retained token spans may be consumed by preparation and binding; keep each
             // source's builder alive through those fixture stages instead of dropping it at the
             // loop binding.
-            retained_span_builders.push(span_builder);
+            retained_span_builders.push((file_id, span_builder));
         }
 
-        let prepared_syntax =
-            prepare_header_syntax(&mut prepared_outputs, &mut self.frontend.string_table)
-                .expect("header syntax preparation should succeed");
+        let prepared_syntax = prepare_header_syntax(
+            &mut prepared_outputs,
+            &mut self.frontend.string_table,
+            &mut |source, diagnostic| {
+                let (_, builder) = retained_span_builders
+                    .iter_mut()
+                    .find(|(file_id, _)| *file_id == source)
+                    .expect("prepared source retains its original span builder");
+                diagnostic.capture_preparation_span(source, builder)
+            },
+        )
+        .expect("header syntax preparation should succeed");
         bind_module_headers(
             prepared_syntax,
             self.frontend.external_package_registry.as_ref(),

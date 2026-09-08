@@ -10,16 +10,9 @@ use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
 use crate::return_token;
-
-/// Boxed diagnostic result for numeric literal tokenization.
-///
-/// WHAT: one file-local alias for the boxed `CompilerDiagnostic` error variant returned by
-/// `tokenize_numeric_literal`.
-/// WHY: numeric tokens return directly into the lexer's boxed dispatch family, so matching its
-/// error shape avoids a boundary adapter while diagnostic constructors remain plain until return.
-type NumericResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 /// Tokenize an integer or float literal starting with `first_digit`.
 ///
@@ -32,7 +25,7 @@ pub(super) fn tokenize_numeric_literal(
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
     sign: NumericLiteralSign,
-) -> NumericResult<Token> {
+) -> TokenizeResult<Token> {
     let mut literal_text = String::new();
     literal_text.push(first_digit);
 
@@ -58,7 +51,8 @@ pub(super) fn tokenize_numeric_literal(
                 authored_id,
                 NumberLiteralErrorReason::MultipleDecimalPoints,
                 stream.new_location(),
-            )));
+            ))
+            .into());
         }
     }
 
@@ -114,7 +108,8 @@ pub(super) fn tokenize_numeric_literal(
                 authored_id,
                 reason,
                 stream.new_location(),
-            )))
+            ))
+            .into())
         }
     }
 }

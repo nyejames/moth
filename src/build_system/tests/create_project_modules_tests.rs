@@ -1156,8 +1156,11 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let root = _temp.path().to_path_buf();
 
     fs::write(root.join("main.moth"), "@helper\n").expect("should write entry");
-    fs::write(root.join("helper.moth"), "@core/math sin,\n")
-        .expect("should write malformed helper");
+    fs::write(
+        root.join("helper.moth"),
+        "-- é🦋\n@core/math sin,\nvalue = 1\n",
+    )
+    .expect("should write malformed helper");
 
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
@@ -1214,7 +1217,10 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     );
     assert!(matches!(
         diagnostics[0].payload,
-        DiagnosticPayload::InvalidDependencyClause { .. }
+        DiagnosticPayload::InvalidDependencyClause {
+            reason: InvalidDependencyClauseReason::ContinuationEnteredStatement,
+            ..
+        }
     ));
 
     let source_files = messages
@@ -1234,10 +1240,40 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         diagnostics[0].primary_location.scope,
         source_files.legacy_logical_path(helper_id)
     );
+    let diagnostic_span = diagnostics[0]
+        .primary_span
+        .expect("preparation diagnosis must retain its exact span");
+    assert_eq!(diagnostic_span.source(), helper_id);
+    let diagnostic_range = diagnostic_span.byte_range(source_files);
+    let helper_text = source_files.retained_text(helper_id).unwrap();
+    assert_eq!(
+        &helper_text[diagnostic_range.start() as usize..diagnostic_range.end() as usize],
+        "value"
+    );
+    assert_eq!(diagnostics[0].labels.len(), 2);
+    for (label, expected) in diagnostics[0].labels.iter().zip(["value", ","]) {
+        let span = label
+            .span
+            .expect("discovery retains every preparation label span");
+        assert_eq!(
+            span.source(),
+            helper_id,
+            "related spans must use the finalized source identity"
+        );
+        assert_eq!(
+            label.location.scope,
+            source_files.legacy_logical_path(helper_id)
+        );
+        let range = span.byte_range(source_files);
+        assert_eq!(
+            &helper_text[range.start() as usize..range.end() as usize],
+            expected
+        );
+    }
     assert_eq!(source_files.retained_text(entry_id), Some("@helper\n"));
     assert_eq!(
         source_files.retained_text(helper_id),
-        Some("@core/math sin,\n")
+        Some("-- é🦋\n@core/math sin,\nvalue = 1\n")
     );
     assert_eq!(
         super::source_loading::source_read_count_for_path_for_test(&entry_file_path),
