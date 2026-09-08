@@ -3477,8 +3477,9 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("missing user-authored resource should remain a retained outcome");
+    let (modules, _resource_inputs, source_files) =
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
+            .expect("missing user-authored resource should remain a retained outcome");
     let module = modules
         .waves()
         .iter()
@@ -3497,10 +3498,32 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
         .iter()
         .collect::<Vec<_>>();
     assert_eq!(references.len(), 1);
-    assert!(matches!(
-        references[0].outcome,
-        ResolvedFileReferenceOutcome::Diagnostic(_)
-    ));
+    let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &references[0].outcome else {
+        panic!("missing resource should retain a typed diagnostic outcome");
+    };
+    let source_id = source_files
+        .get_by_canonical_path(
+            &fs::canonicalize(src.join("@page.moth"))
+                .expect("entry source path should canonicalize"),
+        )
+        .expect("entry source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("Stage 0 file-reference diagnostics retain their authored span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(&source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("entry source snapshot should remain available");
+    let expected_start = source_text
+        .find("@assets/missing.svg")
+        .expect("fixture should contain the missing resource path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(
+        range.end(),
+        expected_start + "@assets/missing.svg".len() as u32
+    );
 }
 
 #[test]

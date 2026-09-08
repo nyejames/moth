@@ -20,7 +20,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -138,9 +138,10 @@ impl<'a> FileReferenceResolver<'a> {
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
 
-        if let Some(diagnostic) =
+        if let Some(mut diagnostic) =
             invalid_components_diagnostic(&authored_components, authored_path, &reference.location)
         {
+            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(ResolvedFileReference {
                 source_file,
                 path_syntax: reference.path_syntax,
@@ -234,17 +235,17 @@ impl<'a> FileReferenceResolver<'a> {
                         .extension()
                         .and_then(|extension| extension.to_str())
                         .unwrap_or_default();
+                    let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
+                        authored_path.clone(),
+                        string_table.intern(extension),
+                        reference.location.clone(),
+                    );
+                    set_primary_span_from_reference(&mut diagnostic, reference);
                     return Ok(ResolvedFileReference {
                         source_file,
                         path_syntax: reference.path_syntax,
                         class: reference.class,
-                        outcome: ResolvedFileReferenceOutcome::Diagnostic(Box::new(
-                            CompilerDiagnostic::unsupported_source_file_kind(
-                                authored_path.clone(),
-                                string_table.intern(extension),
-                                reference.location.clone(),
-                            ),
-                        )),
+                        outcome: ResolvedFileReferenceOutcome::Diagnostic(Box::new(diagnostic)),
                     });
                 }
                 let target_source_index = self.indexed_source(consumer_module_id, &canonical)?;
@@ -387,15 +388,24 @@ impl<'a> FileReferenceResolver<'a> {
             source_file,
             path_syntax: reference.path_syntax,
             class: reference.class,
-            outcome: ResolvedFileReferenceOutcome::Diagnostic(Box::new(
-                CompilerDiagnostic::invalid_compile_time_path(
+            outcome: {
+                let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
                     authored_path.clone(),
                     reason,
                     reference.location.clone(),
-                ),
-            )),
+                );
+                set_primary_span_from_reference(&mut diagnostic, reference);
+                ResolvedFileReferenceOutcome::Diagnostic(Box::new(diagnostic))
+            },
         }
     }
+}
+
+fn set_primary_span_from_reference(
+    diagnostic: &mut CompilerDiagnostic,
+    reference: &PreparedFileReference,
+) {
+    diagnostic.primary_span = Some(SourceSpan::new(reference.source_file, reference.span));
 }
 
 fn resolve_physical_target_cached(

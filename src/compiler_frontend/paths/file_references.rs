@@ -39,10 +39,6 @@ pub(crate) struct PreparedFileReference {
     pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates downstream consumers from legacy locations"
-    )]
     pub(crate) span: LocalSpan,
     pub(crate) class: PreparedFileReferenceClass,
 }
