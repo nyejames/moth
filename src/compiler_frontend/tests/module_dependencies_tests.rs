@@ -24,7 +24,7 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -223,6 +223,19 @@ fn reports_circular_dependencies() {
         ],
         "src/a.moth",
     );
+    let cycle_header = headers
+        .headers
+        .iter()
+        .find(|header| header_name(header, &string_table) == "Middle")
+        .expect("cycle fixture must contain the Middle header");
+    let expected_primary_location = cycle_header.name_location.clone();
+    let expected_primary_span = SourceSpan::new(
+        cycle_header
+            .tokens
+            .file_id
+            .expect("cycle fixture header must retain its source identity"),
+        cycle_header.name_span,
+    );
 
     let bag =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
@@ -248,6 +261,15 @@ fn reports_circular_dependencies() {
             .to_portable_string(&string_table)
             .contains("src/"),
         "cycle diagnostics should point at a declaration location instead of the default location"
+    );
+    assert_eq!(
+        cycle_diagnostic.primary_location, expected_primary_location,
+        "cycle diagnostics must preserve the legacy declaration location"
+    );
+    assert_eq!(
+        cycle_diagnostic.primary_span,
+        Some(expected_primary_span),
+        "cycle diagnostics must retain the exact owning header name span"
     );
 }
 

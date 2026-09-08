@@ -30,7 +30,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
@@ -315,6 +315,7 @@ impl<'a> DependencyGraph<'a> {
         // spelling, so a module-relative authored occurrence still targets the canonical
         // content constant.
         let location = header.name_location.to_owned();
+        let span = SourceSpan::new(source, header.name_span);
         let requested_path = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
             let Some(resolved_path) = self
                 .content_source_targets
@@ -324,6 +325,7 @@ impl<'a> DependencyGraph<'a> {
                     requested_path: hint.path().to_owned(),
                     resolved_path: None,
                     location,
+                    span,
                     source_order: None,
                     kind: DependencyEdgeKind::MissingContentSource,
                 };
@@ -341,6 +343,7 @@ impl<'a> DependencyGraph<'a> {
                 requested_path: requested_path.to_owned(),
                 resolved_path: Some(resolved_path),
                 location,
+                span,
                 source_order,
                 kind: DependencyEdgeKind::GraphHeader,
             },
@@ -349,6 +352,7 @@ impl<'a> DependencyGraph<'a> {
                     requested_path: requested_path.to_owned(),
                     resolved_path: Some(resolved_path),
                     location,
+                    span,
                     source_order,
                     kind: DependencyEdgeKind::SourcePackagePublicExport,
                 }
@@ -357,6 +361,7 @@ impl<'a> DependencyGraph<'a> {
                 requested_path: requested_path.to_owned(),
                 resolved_path: Some(resolved_path),
                 location,
+                span,
                 source_order,
                 kind: DependencyEdgeKind::ProviderInterface,
             },
@@ -365,6 +370,7 @@ impl<'a> DependencyGraph<'a> {
                     requested_path: requested_path.to_owned(),
                     resolved_path: None,
                     location,
+                    span,
                     source_order,
                     kind: DependencyEdgeKind::SameFileSymbolHint,
                 }
@@ -374,6 +380,7 @@ impl<'a> DependencyGraph<'a> {
                     requested_path: requested_path.to_owned(),
                     resolved_path: None,
                     location,
+                    span,
                     source_order,
                     kind: DependencyEdgeKind::MissingContentSource,
                 }
@@ -382,6 +389,7 @@ impl<'a> DependencyGraph<'a> {
                 requested_path: requested_path.to_owned(),
                 resolved_path: None,
                 location,
+                span,
                 source_order,
                 kind: DependencyEdgeKind::Missing,
             },
@@ -427,6 +435,7 @@ struct ResolvedDependencyEdge {
     requested_path: InternedPath,
     resolved_path: Option<InternedPath>,
     location: SourceLocation,
+    span: SourceSpan,
     source_order: Option<usize>,
     kind: DependencyEdgeKind,
 }
@@ -526,6 +535,12 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                     .header_for_path(path)
                     .map(|header| header.name_location.to_owned())
                     .unwrap_or_default();
+                let diagnostic_span = graph.header_for_path(path).and_then(|header| {
+                    header
+                        .tokens
+                        .file_id
+                        .map(|source| SourceSpan::new(source, header.name_span))
+                });
 
                 if let Err(error) = visit_node(
                     path,
@@ -534,6 +549,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                     &mut sorted,
                     string_table,
                     diagnostic_location,
+                    diagnostic_span,
                 ) {
                     diagnostic_bag.push(*error);
                 }
@@ -586,14 +602,15 @@ fn visit_node(
     sorted: &mut Vec<Header>,
     string_table: &mut StringTable,
     diagnostic_location: SourceLocation,
+    diagnostic_span: Option<SourceSpan>,
 ) -> VisitResult {
     tracker.visit_count += 1;
 
     let Some(resolved_graph_path) = graph.resolve_requested_path(node_path, string_table) else {
-        return Err(Box::new(CompilerDiagnostic::missing_import_target(
-            node_path.to_owned(),
-            diagnostic_location,
-        )));
+        return Err(box_diagnostic_with_primary_span(
+            CompilerDiagnostic::missing_import_target(node_path.to_owned(), diagnostic_location),
+            diagnostic_span,
+        ));
     };
 
     let resolved_path = match resolved_graph_path {
@@ -606,10 +623,10 @@ fn visit_node(
     };
 
     if tracker.is_in_current_stack(&resolved_path) {
-        return Err(Box::new(CompilerDiagnostic::circular_dependency(
-            resolved_path,
-            diagnostic_location,
-        )));
+        return Err(box_diagnostic_with_primary_span(
+            CompilerDiagnostic::circular_dependency(resolved_path, diagnostic_location),
+            diagnostic_span,
+        ));
     }
 
     if !tracker.visited.contains(&resolved_path) {
@@ -675,6 +692,7 @@ fn visit_dependency_edge(
                 sorted,
                 string_table,
                 edge.location,
+                Some(edge.span),
             )
         }
 
@@ -700,11 +718,19 @@ fn visit_dependency_edge(
             Ok(())
         }
 
-        DependencyEdgeKind::Missing => Err(Box::new(CompilerDiagnostic::missing_import_target(
-            edge.requested_path,
-            edge.location,
-        ))),
+        DependencyEdgeKind::Missing => Err(box_diagnostic_with_primary_span(
+            CompilerDiagnostic::missing_import_target(edge.requested_path, edge.location),
+            Some(edge.span),
+        )),
     }
+}
+
+fn box_diagnostic_with_primary_span(
+    mut diagnostic: CompilerDiagnostic,
+    primary_span: Option<SourceSpan>,
+) -> Box<CompilerDiagnostic> {
+    diagnostic.primary_span = primary_span;
+    Box::new(diagnostic)
 }
 
 #[cfg(test)]
