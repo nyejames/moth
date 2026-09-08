@@ -5207,8 +5207,11 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     .expect("should write config");
 
     // Entry file imports a .js file explicitly.
-    fs::write(src.join("@page.moth"), "@drawing.js as drawing\n#[:ok]\n")
-        .expect("should write entry");
+    fs::write(
+        src.join("@page.moth"),
+        "-- é🦋\n@drawing.js as drawing\n#[:ok]\n",
+    )
+    .expect("should write entry");
 
     // The .js file actually exists on disk.
     fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js file");
@@ -5250,6 +5253,50 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
             diagnostic.payload
         );
     }
+
+    let mut source_string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let empty_providers = ExternalImportProviderRegistry::empty();
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        resolver.source_file_kinds(),
+        &empty_providers,
+        &mut source_string_table,
+    )
+    .expect("source tree index should rebuild for span assertions");
+    let source_files =
+        source_database_for_test(&source_tree_index, &resolver, &mut source_string_table);
+    let entry_path =
+        fs::canonicalize(src.join("@page.moth")).expect("entry source path should canonicalize");
+    let source_id = source_files
+        .get_by_canonical_path(&entry_path)
+        .expect("entry source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("provider diagnostic should retain its authored path span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(&source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("entry source snapshot should remain available");
+    let expected_start = source_text
+        .find("@drawing.js")
+        .expect("fixture should contain the provider path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(
+        range.end(),
+        expected_start + "@drawing.js".len() as u32,
+        "provider span should cover the full UTF-8 path token"
+    );
 }
 
 #[test]

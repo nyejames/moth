@@ -40,8 +40,8 @@ use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex, SourceSpanBuilders,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceRegistrationIndex, SourceSpan, SourceSpanBuilders,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -126,6 +126,8 @@ pub(super) fn resolve_structural_provider_reference(
         ProviderCapableDependencyInput {
             dependency_path: &provider.path,
             dependency_location: &provider.location,
+            dependency_span: provider.span,
+            dependency_source: provider.dependency_shell_id.source,
             clause_kind,
             target: &provider.target,
             canonical_file,
@@ -1047,6 +1049,8 @@ enum DependencyPolicy<'a, 'b> {
 struct ProviderCapableDependencyInput<'a> {
     dependency_path: &'a InternedPath,
     dependency_location: &'a SourceLocation,
+    dependency_span: LocalSpan,
+    dependency_source: SourceId,
     clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
     canonical_file: &'a Path,
@@ -1371,6 +1375,8 @@ fn walk_reachable_sources(
             let action = policy.handle_dependency(ProviderCapableDependencyInput {
                 dependency_path,
                 dependency_location: &provider.location,
+                dependency_span: provider.span,
+                dependency_source: provider.dependency_shell_id.source,
                 clause_kind: clause.binding.clause_kind(),
                 target: &provider.target,
                 canonical_file: &canonical_file,
@@ -1619,6 +1625,8 @@ fn handle_provider_capable_dependency(
     let ProviderCapableDependencyInput {
         dependency_path,
         dependency_location,
+        dependency_span,
+        dependency_source,
         clause_kind,
         target,
         canonical_file,
@@ -1635,10 +1643,14 @@ fn handle_provider_capable_dependency(
         if is_project_globals_dependency(dependency_path, string_table) && is_owning_project_root {
             return Ok(DependencyPolicyAction::Skip);
         }
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
-            clause_kind,
-            InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
-            dependency_location.clone(),
+        return Err(with_provider_dependency_span(
+            CompilerDiagnostic::invalid_dependency_clause(
+                clause_kind,
+                InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
+                dependency_location.clone(),
+            ),
+            dependency_source,
+            dependency_span,
         )
         .into());
     }
@@ -1663,9 +1675,11 @@ fn handle_provider_capable_dependency(
         .external_packages
         .unsupported_known_package_dependency(dependency_path, string_table)
     {
-        return Err(SourceDiscoveryError::from(
+        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
             unsupported_builder_package_error(canonical_file, package_path, string_table),
-        ));
+            dependency_source,
+            dependency_span,
+        )));
     }
 
     // Consume the retained provider classification. Header syntax already identified the
@@ -1691,7 +1705,13 @@ fn handle_provider_capable_dependency(
                 external_imports,
                 string_table,
             );
-            result?;
+            if let Err(error) = result {
+                return Err(with_provider_dependency_error(
+                    error,
+                    dependency_source,
+                    dependency_span,
+                ));
+            }
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             // Explicit-extension registered-provider clauses bind through the provider registry.
             add_frontend_counter(FrontendCounter::ResolvedProviderClauseCount, 1);
@@ -1699,17 +1719,47 @@ fn handle_provider_capable_dependency(
         }
 
         // No provider registered for this extension — report unsupported extension.
-        return Err(SourceDiscoveryError::from(
+        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
             unsupported_external_extension_error(
                 canonical_file,
                 dependency_path,
                 &extension,
                 string_table,
             ),
-        ));
+            dependency_source,
+            dependency_span,
+        )));
     }
 
     Ok(DependencyPolicyAction::QueueLocal)
+}
+
+/// Attach the retained provider clause's exact authored span to a direct user diagnostic.
+///
+/// Provider resolution can also return infrastructure failures or a message set owned by the
+/// provider itself. Those lanes retain their existing ownership and source context; only the
+/// direct diagnostic produced at this dependency boundary is attributed to the clause span.
+fn with_provider_dependency_span(
+    mut diagnostic: CompilerDiagnostic,
+    source: SourceId,
+    span: LocalSpan,
+) -> CompilerDiagnostic {
+    diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    diagnostic
+}
+
+fn with_provider_dependency_error(
+    error: SourceDiscoveryError,
+    source: SourceId,
+    span: LocalSpan,
+) -> SourceDiscoveryError {
+    match error {
+        SourceDiscoveryError::Diagnostic(mut diagnostic) => {
+            *diagnostic = with_provider_dependency_span(*diagnostic, source, span);
+            SourceDiscoveryError::Diagnostic(diagnostic)
+        }
+        other => other,
+    }
 }
 
 fn load_missing_sources(
