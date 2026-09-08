@@ -29,10 +29,6 @@ pub struct TraitRequirementSyntax {
     pub name: StringId,
     pub name_location: SourceLocation,
     pub signature: FunctionSignatureSyntax,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 
@@ -41,10 +37,6 @@ pub struct TraitRequirementSyntax {
 pub struct TraitReferenceSyntax {
     pub name: StringId,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST trait-reference consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 
@@ -54,10 +46,6 @@ pub struct ConformanceTargetSyntax {
     pub name: StringId,
     pub kind: ConformanceTargetKind,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST conformance consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 

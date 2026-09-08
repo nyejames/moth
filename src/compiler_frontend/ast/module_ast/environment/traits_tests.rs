@@ -19,10 +19,12 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::traits::environment::{
@@ -484,5 +486,76 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     assert_eq!(
         &source[return_type_range.start() as usize..return_type_range.end() as usize],
         "This"
+    );
+}
+
+#[test]
+fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
+    let source =
+        "-- é🦋\nRENDERABLE must:\n    render |This| -> String\n    render |This| -> String\n;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let primary_span = diagnostic
+        .primary_span
+        .expect("duplicate requirement should retain its exact primary span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+
+    let empty_span_builder = ExtendedSpanBuilder::new();
+    let resolver = empty_span_builder.resolver();
+    let primary_range = primary_span.resolve_with(resolver);
+    assert_eq!(
+        &source[primary_range.start() as usize..primary_range.end() as usize],
+        "render"
+    );
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert_eq!(diagnostic.labels[0].span, Some(primary_span));
+
+    let first_span = diagnostic.labels[1]
+        .span
+        .expect("previous requirement label should retain its exact span");
+    assert_eq!(first_span.source(), SourceId::COMPILATION_ROOT);
+    let first_span_builder = ExtendedSpanBuilder::new();
+    let first_range = first_span.resolve_with(first_span_builder.resolver());
+    assert_eq!(
+        &source[first_range.start() as usize..first_range.end() as usize],
+        "render"
+    );
+}
+
+#[test]
+fn conformance_target_diagnostic_retains_exact_target_span() {
+    let source = "DISPLAYABLE must:\n;\nInt must DISPLAYABLE\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let target_span = diagnostic
+        .primary_span
+        .expect("conformance target diagnostics should retain their target span");
+    assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
+
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = target_span.resolve_with(span_builder.resolver());
+    assert_eq!(&source[range.start() as usize..range.end() as usize], "Int");
+    assert_eq!(
+        diagnostic.primary_location.start_pos.line_number, 2,
+        "legacy conformance location must remain on the target declaration"
+    );
+}
+
+#[test]
+fn unknown_trait_reference_diagnostic_retains_exact_reference_span() {
+    let source = "Thing = | value Int |\nThing must UNKNOWN\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let trait_span = diagnostic
+        .primary_span
+        .unwrap_or_else(|| panic!("unknown trait reference diagnostic lacks span: {diagnostic:?}"));
+    assert_eq!(trait_span.source(), SourceId::COMPILATION_ROOT);
+
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = trait_span.resolve_with(span_builder.resolver());
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "UNKNOWN"
+    );
+    assert_eq!(
+        diagnostic.primary_location.start_pos.line_number, 1,
+        "legacy unknown-trait location must remain on the trait reference"
     );
 }

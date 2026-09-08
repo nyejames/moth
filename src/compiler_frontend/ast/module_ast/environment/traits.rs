@@ -35,7 +35,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
@@ -374,18 +374,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut next_requirement_id = trait_environment.next_requirement_id();
 
         for requirement in &declaration.requirements {
-            if let Some(first_location) = requirement_locations_by_name
-                .insert(requirement.name, requirement.name_location.clone())
-            {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::duplicate_trait_requirement(
-                        declaration.name,
-                        requirement.name,
-                        first_location,
-                        requirement.name_location.clone(),
-                    ),
-                    string_table,
-                ));
+            if let Some(first_location) = requirement_locations_by_name.insert(
+                requirement.name,
+                (requirement.name_location.clone(), requirement.span),
+            ) {
+                let mut diagnostic = CompilerDiagnostic::duplicate_trait_requirement(
+                    declaration.name,
+                    requirement.name,
+                    first_location.0,
+                    requirement.name_location.clone(),
+                );
+                if let Some(source) = header.tokens.file_id {
+                    let duplicate_span = SourceSpan::new(source, requirement.span);
+                    diagnostic.primary_span = Some(duplicate_span);
+                    if let Some(primary_label) = diagnostic.labels.get_mut(0) {
+                        primary_label.span = Some(duplicate_span);
+                    }
+                    if let Some(first_label) = diagnostic.labels.get_mut(1) {
+                        first_label.span = Some(SourceSpan::new(source, first_location.1));
+                    }
+                }
+                return Err(self.diagnostic_messages(diagnostic, string_table));
             }
 
             let resolved_requirement = self.resolve_trait_requirement(
@@ -599,7 +608,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &visibility,
                     trait_environment,
                     string_table,
-                )?;
+                )
+                .map_err(|mut messages| {
+                    if let Some(source) = header.tokens.file_id
+                        && let Some(diagnostic) = messages.diagnostics.first_mut()
+                    {
+                        diagnostic.primary_span = Some(SourceSpan::new(source, trait_ref.span));
+                    }
+                    messages
+                })?;
             }
         }
 
