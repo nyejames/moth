@@ -5,7 +5,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, display_column_number, display_line_number,
+    DiagnosticRenderContext, display_column_number, display_line_number, primary_underline_length,
     relative_display_path_from_root, render_payload, resolve_source_file_path,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
@@ -31,14 +31,16 @@ fn render_source_frame(
     context: DiagnosticRenderContext<'_>,
 ) -> String {
     let string_table = context.string_table;
-    let resolved_path = resolve_source_file_path(&diagnostic.primary_location.scope, string_table);
+    let primary_position = context.primary_position(diagnostic);
+    let resolved_path = resolve_source_file_path(&primary_position.scope, string_table);
     let display_root = match std::fs::canonicalize(project_root) {
         Ok(canonical_root) => canonical_root,
         Err(_) => project_root.to_path_buf(),
     };
     let relative_path = relative_display_path_from_root(&resolved_path, &display_root);
-    let line = display_line_number(diagnostic.primary_location.start_pos.line_number);
-    let column = display_column_number(diagnostic.primary_location.start_pos.char_column);
+    let line = display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
+    let column =
+        display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
 
     // Use a simple file:// link to the resolved source path. The terminal
     // renderer works fine with this; browser-hosted dev-server links are a
@@ -50,10 +52,7 @@ fn render_source_frame(
 
     // A missing retained snapshot omits the source excerpt without rereading the filesystem.
     let source_line = context
-        .retained_source_line(
-            &diagnostic.primary_location.scope,
-            diagnostic.primary_location.start_pos.line_number,
-        )
+        .retained_source_line_for_primary(&primary_position)
         .unwrap_or_default();
 
     let line_label = line.to_string();
@@ -67,11 +66,8 @@ fn render_source_frame(
     }
 
     // Underline the primary span with carets.
-    let underline_start = diagnostic.primary_location.start_pos.char_column.max(0) as usize;
-    let underline_length = (diagnostic.primary_location.end_pos.char_column
-        - diagnostic.primary_location.start_pos.char_column
-        + 1)
-    .max(1) as usize;
+    let underline_start = primary_position.start.column as usize;
+    let underline_length = primary_underline_length(&primary_position, source_line);
     let padding = " ".repeat(underline_start);
     let underlines = "^".repeat(underline_length);
 

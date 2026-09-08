@@ -6,7 +6,21 @@
 //! kinds become user-facing prose.
 
 use super::*;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::source::line_index::LinePosition;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+
+/// Exact primary source position used by the renderer boundary.
+///
+/// A retained source span is resolved against the database that owns its source identity. The
+/// legacy location remains the fallback for diagnostics that have no usable retained snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DiagnosticPrimaryPosition {
+    pub(crate) scope: InternedPath,
+    pub(crate) source: Option<SourceId>,
+    pub(crate) start: LinePosition,
+    pub(crate) end: LinePosition,
+}
 
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
 ///
@@ -54,6 +68,79 @@ impl<'a> DiagnosticRenderContext<'a> {
         let slot = source_database.unique_record_for_logical_path(scope)?;
         let line_number = u32::try_from(line_number).ok()?;
         source_database.line_index(slot.id)?.line_text(line_number)
+    }
+
+    /// Resolve a diagnostic's primary span into renderer columns while its source snapshot is
+    /// still available. SourceSpan ranges are half-open; legacy locations are converted to the
+    /// same exclusive-end shape so caret lengths remain one calculation in every renderer.
+    pub(crate) fn primary_position(
+        self,
+        diagnostic: &CompilerDiagnostic,
+    ) -> DiagnosticPrimaryPosition {
+        if let Some(span) = diagnostic.primary_span
+            && let Some(source_database) = self.source_database
+            && let Some(line_index) = source_database.line_index(span.source())
+        {
+            let range = span.byte_range(source_database);
+            if let (Some(start), Some(end)) = (
+                line_index.position(range.start()),
+                line_index.position(range.end()),
+            ) {
+                return DiagnosticPrimaryPosition {
+                    scope: source_database.legacy_logical_path(span.source()),
+                    source: Some(span.source()),
+                    start,
+                    end,
+                };
+            }
+        }
+
+        let location = &diagnostic.primary_location;
+        DiagnosticPrimaryPosition {
+            scope: location.scope.clone(),
+            source: None,
+            start: legacy_line_position(
+                location.start_pos.line_number,
+                location.start_pos.char_column,
+            ),
+            end: legacy_line_position(
+                location.end_pos.line_number,
+                location.end_pos.char_column.saturating_add(1),
+            ),
+        }
+    }
+
+    pub(crate) fn retained_source_line_for_primary(
+        self,
+        position: &DiagnosticPrimaryPosition,
+    ) -> Option<&'a str> {
+        if let Some(source) = position.source {
+            return self
+                .source_database?
+                .line_index(source)?
+                .line_text(position.start.line);
+        }
+
+        self.retained_source_line(&position.scope, position.start.line as i32)
+    }
+}
+
+pub(crate) fn primary_underline_length(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
+    let length = if position.start.line == position.end.line {
+        position.end.column.saturating_sub(position.start.column) as usize
+    } else {
+        line.chars()
+            .count()
+            .saturating_sub(position.start.column as usize)
+    };
+
+    length.max(1)
+}
+
+fn legacy_line_position(line: i32, column: i32) -> LinePosition {
+    LinePosition {
+        line: u32::try_from(line.max(0)).unwrap_or(u32::MAX),
+        column: u32::try_from(column.max(0)).unwrap_or(u32::MAX),
     }
 }
 

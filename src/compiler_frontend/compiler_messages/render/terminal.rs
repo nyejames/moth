@@ -5,7 +5,8 @@
 
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, display_column_number, display_line_number,
-    relative_display_path_from_root, render_payload, resolve_source_file_path,
+    primary_underline_length, relative_display_path_from_root, render_payload,
+    resolve_source_file_path,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
@@ -37,12 +38,15 @@ pub(crate) fn print_diagnostic_with_context(
     say!(Reset descriptor.title);
     say!(Dark "  [", descriptor.code, "]");
 
+    let primary_position = context.primary_position(diagnostic);
     let relative_dir = relative_display_path_from_root(
-        &resolve_source_file_path(&diagnostic.primary_location.scope, string_table),
+        &resolve_source_file_path(&primary_position.scope, string_table),
         &std::env::current_dir().unwrap_or_default(),
     );
-    let display_line = display_line_number(diagnostic.primary_location.start_pos.line_number);
-    let display_column = display_column_number(diagnostic.primary_location.start_pos.char_column);
+    let display_line =
+        display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
+    let display_column =
+        display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
 
     if !relative_dir.is_empty() {
         say!(
@@ -63,10 +67,7 @@ pub(crate) fn print_diagnostic_with_context(
     }
 
     let line = context
-        .retained_source_line(
-            &diagnostic.primary_location.scope,
-            diagnostic.primary_location.start_pos.line_number,
-        )
+        .retained_source_line_for_primary(&primary_position)
         .unwrap_or_default();
 
     if !line.is_empty() {
@@ -76,12 +77,9 @@ pub(crate) fn print_diagnostic_with_context(
         say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
         print!("{}", " ".repeat(display_line.to_string().len() + 4));
 
-        let underline_start = diagnostic.primary_location.start_pos.char_column.max(0) as usize;
+        let underline_start = primary_position.start.column as usize;
         print!("{}", " ".repeat(underline_start));
-        let underline_length = (diagnostic.primary_location.end_pos.char_column
-            - diagnostic.primary_location.start_pos.char_column
-            + 1)
-        .max(1) as usize;
+        let underline_length = primary_underline_length(&primary_position, line);
         say!(Red "^".repeat(underline_length));
     }
 
@@ -93,7 +91,7 @@ pub(crate) fn print_diagnostic_with_context(
         say!(Bright Blue "  ", guidance);
     }
 
-    if line.is_empty() && diagnostic.primary_location.scope.as_components().is_empty() {
+    if line.is_empty() && primary_position.scope.as_components().is_empty() {
         say!(Dark "     No source location available.");
     }
 }

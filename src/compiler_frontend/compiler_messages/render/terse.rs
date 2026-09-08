@@ -40,6 +40,7 @@ pub(crate) fn format_terse_diagnostic_with_context(
 ) -> String {
     let string_table = context.string_table;
     let descriptor = diagnostic.kind.descriptor();
+    let primary_position = context.primary_position(diagnostic);
     let severity_char = match diagnostic.severity {
         DiagnosticSeverity::Error => 'E',
         DiagnosticSeverity::Warning => 'W',
@@ -47,12 +48,13 @@ pub(crate) fn format_terse_diagnostic_with_context(
     };
 
     let display_path = relative_display_path_from_root(
-        &resolve_source_file_path(&diagnostic.primary_location.scope, string_table),
+        &resolve_source_file_path(&primary_position.scope, string_table),
         &std::env::current_dir().unwrap_or_default(),
     );
     let sanitized_path = sanitize_terse_field(&display_path);
-    let line = display_line_number(diagnostic.primary_location.start_pos.line_number);
-    let column = display_column_number(diagnostic.primary_location.start_pos.char_column);
+    let line = display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
+    let column =
+        display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
 
     let message = terse_payload_message(&diagnostic.payload, diagnostic.kind, context);
 
