@@ -915,10 +915,6 @@ impl DependencyBindingSyntax {
 pub struct DependencySelection {
     pub source_name: StringId,
     pub source_location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates downstream consumers from legacy locations"
-    )]
     pub source_span: LocalSpan,
     pub local_alias: Option<DependencyAlias>,
 }

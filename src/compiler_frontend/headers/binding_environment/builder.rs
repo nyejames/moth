@@ -21,7 +21,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
@@ -795,12 +795,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     ) -> CompilerDiagnostic {
         let selected_path = dependency.dependency.path.append(selection.source_name);
 
-        super::provider_public_surface_diagnostic(
+        let mut diagnostic = super::provider_public_surface_diagnostic(
             &selected_path,
             interface,
             selection.source_location.clone(),
             self.string_table,
-        )
+        );
+        diagnostic.primary_span = Some(SourceSpan::new(
+            dependency.dependency.dependency_shell_id.source,
+            selection.source_span,
+        ));
+        diagnostic
     }
 
     fn register_source_provider_namespace_binding(

@@ -47,7 +47,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -2347,6 +2347,10 @@ fn missing_provider_record_fails_deterministically() {
     );
     let selection_location = location_for(&["src", "selected.moth"], &mut string_table);
     dependency_selections[0].source_location = selection_location.clone();
+    let expected_source_span = SourceSpan::new(
+        SourceId::from_index(0),
+        dependency_selections[0].source_span,
+    );
 
     let mut module_symbols =
         single_file_module_symbols(vec![missing], dependency_selections, &mut string_table);
@@ -2374,6 +2378,7 @@ fn missing_provider_record_fails_deterministically() {
         "provider/MISSING"
     );
     assert_eq!(diagnostic.primary_location, selection_location);
+    assert_eq!(diagnostic.primary_span, Some(expected_source_span));
 }
 
 #[test]
