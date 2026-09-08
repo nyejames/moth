@@ -1587,6 +1587,71 @@ fn generic_declaration_headers_parse_parameter_lists() {
 }
 
 #[test]
+fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
+    let long_bound = format!("d{}", "é".repeat(600));
+    let source = format!("-- é🦋\nidentity type T is {long_bound} |value T| -> T:\n;\n");
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let file_path = Path::new("src/@page.moth");
+    let source_id = SourceId::from_index(12);
+    let context = HeaderTestPrepareContext {
+        source_id,
+        entry_file_path: file_path,
+        options: &options,
+        style_directives: &style_directives,
+    };
+
+    let failure = prepare_test_source_file(
+        &source,
+        file_path,
+        &context,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .err()
+    .expect("a lowercase generic bound should be rejected");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected the malformed generic bound to remain a source diagnostic");
+    };
+
+    assert!(matches!(
+        error.diagnostic.payload,
+        DiagnosticPayload::InvalidDeclaration {
+            reason: InvalidDeclarationReason::InvalidTraitName,
+            ..
+        }
+    ));
+    let span = error
+        .diagnostic
+        .primary_span
+        .expect("generic-bound diagnostics should retain their token span");
+    assert_eq!(span.source(), source_id);
+    let range = span.resolve_with(span_builder.resolver());
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        long_bound
+    );
+    assert!(
+        range.end() - range.start() > 1023,
+        "the multibyte bound should exercise the extended span table"
+    );
+    assert_eq!(
+        error.diagnostic.primary_location.start_byte,
+        range.start(),
+        "the exact span must preserve the legacy byte start"
+    );
+    assert_eq!(
+        error.diagnostic.primary_location.end_byte,
+        range.end(),
+        "the exact span must preserve the legacy byte end"
+    );
+}
+
+#[test]
 fn top_level_const_template_outside_entry_file_errors() {
     let result = parse_single_file_headers_with_entry(
         "#[html.head: [\"x\"]]\n",

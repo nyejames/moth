@@ -12,6 +12,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, GenericTraitBound,
     TypeParameterId,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -46,6 +47,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     }
 
     let type_keyword_location = token_stream.current_location();
+    let type_keyword_span = token_stream.current_token().span;
     token_stream.advance();
 
     let mut parameters = Vec::new();
@@ -67,18 +69,24 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             }
 
             TokenKind::Symbol(_) => {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::unexpected_token(
+                        token_stream.current_token_kind().to_owned(),
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             TokenKind::Comma => {
                 if expecting_parameter {
-                    return Err(CompilerDiagnostic::unexpected_token(
-                        token_stream.current_token_kind().to_owned(),
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::unexpected_token(
+                            token_stream.current_token_kind().to_owned(),
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 }
@@ -101,17 +109,24 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             | TokenKind::DoubleColon
             | TokenKind::As => {
                 if parameters.is_empty() {
-                    return Err(CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::EmptyParameterList,
-                        type_keyword_location,
+                    return Err(with_token_span(
+                        token_stream,
+                        type_keyword_span,
+                        CompilerDiagnostic::invalid_generic_parameter(
+                            InvalidGenericParameterReason::EmptyParameterList,
+                            type_keyword_location,
+                        ),
                     )
                     .into());
                 }
 
                 if expecting_parameter {
-                    return Err(CompilerDiagnostic::unexpected_token(
-                        token_stream.current_token_kind().to_owned(),
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::unexpected_token(
+                            token_stream.current_token_kind().to_owned(),
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 }
@@ -123,46 +138,64 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     forbidden_names,
                     string_table,
                     "Header Parsing",
-                )?;
+                )
+                .map_err(|diagnostic| {
+                    with_parameter_span(token_stream, &parameter_list, diagnostic)
+                })?;
                 return Ok(parameter_list);
             }
 
             TokenKind::Must => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::BoundsMustUseIs,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::BoundsMustUseIs,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             TokenKind::Colon => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::BoundsMustUseIs,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::BoundsMustUseIs,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             TokenKind::Newline => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::ListMustStayWithHeader,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::ListMustStayWithHeader,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             TokenKind::Eof | TokenKind::End => {
-                return Err(CompilerDiagnostic::unexpected_end_of_file(
-                    None,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::unexpected_end_of_file(
+                        None,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             other => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::InvalidToken { found: other },
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::InvalidToken { found: other },
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -176,9 +209,12 @@ fn parse_trait_bounds_for_current_parameter(
     string_table: &StringTable,
 ) -> GenericParameterParseResult<()> {
     let Some(parameter) = parameters.last_mut() else {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            token_stream.current_location(),
+        return Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::unexpected_token(
+                token_stream.current_token_kind().to_owned(),
+                token_stream.current_location(),
+            ),
         )
         .into());
     };
@@ -189,11 +225,13 @@ fn parse_trait_bounds_for_current_parameter(
         match token_stream.current_token_kind().to_owned() {
             TokenKind::Symbol(trait_name) if expecting_trait_name => {
                 let span = token_stream.tokens[token_stream.index].span;
-                ensure_trait_bound_name_is_all_caps(
+                if let Err(diagnostic) = ensure_trait_bound_name_is_all_caps(
                     trait_name,
                     token_stream.current_location(),
                     string_table,
-                )?;
+                ) {
+                    return Err(with_token_span(token_stream, span, *diagnostic).into());
+                }
 
                 parameter.trait_bounds.push(GenericTraitBound {
                     trait_name,
@@ -220,25 +258,34 @@ fn parse_trait_bounds_for_current_parameter(
             }
 
             TokenKind::Must => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::BoundsMustUseIs,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::BoundsMustUseIs,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             TokenKind::Eof | TokenKind::End => {
-                return Err(CompilerDiagnostic::unexpected_end_of_file(
-                    None,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::unexpected_end_of_file(
+                        None,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             other => {
-                return Err(CompilerDiagnostic::invalid_generic_parameter(
-                    InvalidGenericParameterReason::InvalidToken { found: other },
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::InvalidToken { found: other },
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -261,4 +308,41 @@ fn ensure_trait_bound_name_is_all_caps(
         location,
     )
     .into())
+}
+
+/// Attach the authored token range while retaining the legacy location bridge.
+fn with_current_token_span(
+    token_stream: &FileTokens,
+    diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    with_token_span(token_stream, token_stream.current_token().span, diagnostic)
+}
+
+fn with_token_span(
+    token_stream: &FileTokens,
+    span: LocalSpan,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none()
+        && let Some(source) = token_stream.file_id
+    {
+        diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    }
+    diagnostic
+}
+
+fn with_parameter_span(
+    token_stream: &FileTokens,
+    parameter_list: &GenericParameterList,
+    diagnostic: Box<CompilerDiagnostic>,
+) -> Box<CompilerDiagnostic> {
+    let Some(parameter) = parameter_list
+        .parameters
+        .iter()
+        .find(|parameter| parameter.location == diagnostic.primary_location)
+    else {
+        return diagnostic;
+    };
+
+    Box::new(with_token_span(token_stream, parameter.span, *diagnostic))
 }
