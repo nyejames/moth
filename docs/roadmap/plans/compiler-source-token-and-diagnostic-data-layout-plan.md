@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `127af8d3c` — trait duplicate payload facts are label-owned and synthetic Stage 0
-  file-reference diagnostics retain their authored source spans. Focused trait, public-export,
-  header, source-reference and diagnostic tests pass; `cargo check -p moth`, the full
-  4,987-library-test suite and the worktree are clean.
+- `92ab5bb1d` — duplicate template-input and use-after-move diagnostics keep their related
+  source facts solely in labels, and module header binding/order failures move accumulated
+  warnings without cloning. Focused diagnostic, template, module-compilation and header tests
+  pass; `cargo check -p moth`, formatting and diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -195,6 +195,15 @@ CURRENT_WORKTREE_STATE:
   `PreparedFileReference` source ID and local span, while infrastructure failures remain
   `CompilerError` and legacy locations/lanes are unchanged. The synthetic file-reference suite
   (8 tests) and its exact-span regression pass.
+- Accepted the bounded 1G1 duplicate template-input and use-after-move payload simplifications
+  in `62d0465ee`. The first/previous source facts remain in ordered related labels, while payload
+  remapping, rebinding and rendering retain only semantic path/place data. Diagnostic-model (79)
+  and template duplicate regressions pass, with a fresh audit finding no ownership or ordering
+  defect.
+- Accepted the bounded 1F2 module warning handoff in `92ab5bb1d`. Header binding and sorting now
+  move accumulated warnings into diagnosed failures with `std::mem::take`, preserving warning
+  order while successful compilation keeps the same vector for later metadata. Module-compilation
+  (23) and header (378) suites pass, with no change to message or source ownership boundaries.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -356,6 +365,13 @@ VALIDATION_STATE:
 - 1E5 synthetic file-reference candidate: `cargo fmt --all`, `git diff --check`,
   `cargo check -p moth`, synthetic file-reference suite (8), exact-span regression (1) and full
   library suite (4,987) passed. The independent Slice review found no required correction.
+- 1G1 duplicate template/use-after-move candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, diagnostic model (79) and duplicate template regression (1) passed. A
+  fresh audit confirmed related source locations remain ordered labels and no independent source
+  facts remain in either payload.
+- 1F2 module warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  module-compilation (23) and header (378) suites passed. Failure paths move warnings exactly once;
+  success paths retain the vector for module metadata.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
