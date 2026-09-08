@@ -8558,7 +8558,7 @@ mod file_reference_resolution_tests {
         PreparedFileReference, PreparedFileReferenceClass,
     };
     use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-    use crate::compiler_frontend::source::{LocalSpan, SourceId};
+    use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
     use crate::compiler_frontend::symbols::interned_path::InternedPath;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::fs;
@@ -8712,16 +8712,20 @@ mod file_reference_resolution_tests {
                 &mut strings,
             )
             .expect("NotADirectory should remain a typed path outcome");
+        let SingleFileReferenceOutcome::Diagnostic(diagnostic) = resolved.outcome else {
+            panic!("NotADirectory should remain a typed path diagnostic");
+        };
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(SourceSpan::new(reference.source_file, reference.span)),
+            "synthetic file-reference diagnostics must retain the authored source span"
+        );
         assert!(matches!(
-            resolved.outcome,
-            SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                if matches!(
-                    diagnostic.payload,
-                    crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                        reason: InvalidCompileTimePathReason::TargetNotRegular,
-                        ..
-                    }
-                )
+            diagnostic.payload,
+            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
+                reason: InvalidCompileTimePathReason::TargetNotRegular,
+                ..
+            }
         ));
         assert!(resource_inputs.missing_watch_interests().is_empty());
     }

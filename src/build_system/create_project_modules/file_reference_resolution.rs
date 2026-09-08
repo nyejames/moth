@@ -758,13 +758,15 @@ fn invalid_components_diagnostic(
 fn invalid_path_outcome(
     authored_path: &InternedPath,
     reason: InvalidCompileTimePathReason,
-    location: &SourceLocation,
+    reference: &PreparedFileReference,
 ) -> SingleFileReferenceOutcome {
-    SingleFileReferenceOutcome::Diagnostic(Box::new(CompilerDiagnostic::invalid_compile_time_path(
+    let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
         authored_path.clone(),
         reason,
-        location.clone(),
-    )))
+        reference.location.clone(),
+    );
+    set_primary_span_from_reference(&mut diagnostic, reference);
+    SingleFileReferenceOutcome::Diagnostic(Box::new(diagnostic))
 }
 
 /// A Stage 0 outcome retained while synthetic single-file discovery is still assembling its
@@ -860,9 +862,10 @@ impl<'a> SingleFileReferenceResolver<'a> {
             .iter()
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
-        if let Some(diagnostic) =
+        if let Some(mut diagnostic) =
             invalid_components_diagnostic(&authored_components, authored_path, &reference.location)
         {
+            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(SingleFileResolvedReference {
                 outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(diagnostic)),
                 ..result
@@ -879,7 +882,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 outcome: invalid_path_outcome(
                     authored_path,
                     InvalidCompileTimePathReason::EscapesModuleBoundary,
-                    &reference.location,
+                    reference,
                 ),
                 ..result
             });
@@ -909,7 +912,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                         outcome: invalid_path_outcome(
                             authored_path,
                             InvalidCompileTimePathReason::EscapesModuleBoundary,
-                            &reference.location,
+                            reference,
                         ),
                         ..result
                     });
@@ -919,7 +922,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                     outcome: invalid_path_outcome(
                         authored_path,
                         InvalidCompileTimePathReason::MissingTarget,
-                        &reference.location,
+                        reference,
                     ),
                     ..result
                 });
@@ -929,7 +932,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                     outcome: invalid_path_outcome(
                         authored_path,
                         invalid_reason(reason, string_table),
-                        &reference.location,
+                        reference,
                     ),
                     ..result
                 });
@@ -941,7 +944,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 outcome: invalid_path_outcome(
                     authored_path,
                     InvalidCompileTimePathReason::EscapesModuleBoundary,
-                    &reference.location,
+                    reference,
                 ),
                 ..result
             });
@@ -957,13 +960,15 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 .supports_recognized_extension(extension)
             {
                 return Ok(SingleFileResolvedReference {
-                    outcome: SingleFileReferenceOutcome::Diagnostic(Box::new(
-                        CompilerDiagnostic::unsupported_source_file_kind(
+                    outcome: {
+                        let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
                             authored_path.clone(),
                             string_table.intern(extension),
                             reference.location.clone(),
-                        ),
-                    )),
+                        );
+                        set_primary_span_from_reference(&mut diagnostic, reference);
+                        SingleFileReferenceOutcome::Diagnostic(Box::new(diagnostic))
+                    },
                     ..result
                 });
             }
