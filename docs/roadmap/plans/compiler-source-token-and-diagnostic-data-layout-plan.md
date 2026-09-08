@@ -70,7 +70,7 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1E1/1E2/1E3/1E5/1F4, downstream span consumers and render boundary.
+- Phase: 1E1/1E2/1E3/1E5/1F1/1F2/1F4, downstream consumers and the first freeze boundary.
 - Goal: migrate downstream header/order and AST consumers onto the exact preparation spans while
   retaining the interval bridge for untouched consumers, and make renderers resolve retained
   primary spans through the source snapshot. Dependency-clause and remaining symbol consumers
@@ -81,10 +81,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `3b4ae4b26` — template body parser and source-build-config diagnostics retain exact
+- `5d527326d` — named call targets and template loop-control sentinels retain exact
   source-owned anchors, extending the accepted header, AST, template, config and renderer
-  consumers through the current Phase 1 slice. Focused namespace, trait, template, config,
-  renderer, dependency-selection, module-dependency and AST tests pass; source loading now has
+  consumers through the current Phase 1 slice. Focused namespace, call, trait, template, config,
+  renderer, dependency-selection, module-dependency and AST tests pass; source loading has
   explicit no-copy ownership coverage, `cargo check -p moth`, the full 4,979-library-test baseline
   and the worktree are clean.
 
@@ -97,8 +97,8 @@ CURRENT_WORKTREE_STATE:
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
   `b1e7dcb15`. Its worktree was clean after verification. 1D5c4 is implemented, validated and
   independently reviewed and committed in `8142352cd`. The worktree was clean after verification.
-  Scripted workers now use the implementation-coordinator launcher at the user's request;
-  plan-orchestrator still owns the workflow. Parsed generic parameters and bounds
+  Native Codex workers now handle bounded implementation and review slices; plan-orchestrator still
+  owns the workflow. Parsed generic parameters and bounds
   preserve original anchors. Generic declaration maps retain only kinds. Canonical registered
   parameters own semantic names and arity across local, imported and materialised nominals.
 - Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
@@ -152,6 +152,18 @@ CURRENT_WORKTREE_STATE:
 - Accepted the open 1B4 loading evidence in `3b4ae4b26`. A source-loading regression verifies that
   `retain_text` moves the original allocation into the loaded source record while preserving its
   exact contents; production lifecycle code is unchanged.
+- Accepted named call-target span consumption in `3d9ef3e65`. Duplicate named-argument
+  diagnostics publish the exact parameter-name token span while preserving the existing call-shape
+  location and diagnostic payload.
+- Accepted template loop-control span consumption in `5d527326d`. Direct break/continue markers
+  retain their token span and source ID through sentinel classification, so orphan diagnostics
+  point at the authored marker while retaining their legacy location and labels.
+- Accepted the first 1F1 freeze foundation in `1a7546d19`. A merged root `StringTable` can be
+  consumed into lookup-only `FrozenStringTable` storage without copying its boxed strings or
+  changing `StringId` values; forked tables are rejected until their deltas merge into the root.
+- Accepted the bounded 1F2 warning handoff in `641017866`. Module preparation moves its warning
+  vector into diagnosed failure messages instead of cloning it, while successful preparation
+  retains the same vector for the prepared module.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -280,6 +292,14 @@ VALIDATION_STATE:
   config-boundary suite (4 tests) and the full library test baseline (4,976 tests) passed.
 - 1B4 lifecycle candidate: `cargo fmt --all`, `git diff --check`, the focused no-copy source-loading
   test (1 test) and the full library suite (4,979 tests) passed.
+- 1E2 call-target candidate: `cargo fmt --all`, `git diff --check` and the focused cast-boundary
+  suite (28 tests) passed, including exact duplicate named-argument ownership.
+- 1E3 sentinel candidate: `cargo fmt --all`, `git diff --check` and the focused malformed-template
+  suite (14 tests) passed, including exact multibyte orphan-break ownership.
+- 1F1 string foundation candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`
+  and the focused string interning suite (8 tests) passed, including pointer-preserving freeze.
+- 1F2 warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and
+  the focused module-preparation suite (21 tests) passed.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
