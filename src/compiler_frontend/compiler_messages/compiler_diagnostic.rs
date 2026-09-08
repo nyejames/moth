@@ -553,10 +553,7 @@ impl CompilerDiagnostic {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration),
             duplicate_location,
-            DiagnosticPayload::DuplicateDeclaration {
-                name,
-                first_location,
-            },
+            DiagnosticPayload::DuplicateDeclaration { name },
         )
         .with_labels(labels)
     }

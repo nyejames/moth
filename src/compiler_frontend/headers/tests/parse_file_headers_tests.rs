@@ -5389,13 +5389,12 @@ fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the selected name to be the first location");
-    };
+    let first_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the selected name to be the first location")
+        .location;
     assert_eq!(first_location.start_pos.line_number, 0);
     assert_eq!(first_location.start_pos.char_column, 12);
     assert_eq!(first_location.end_pos.char_column, 14);
@@ -5423,13 +5422,12 @@ fn selected_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the selected alias to be the first location");
-    };
+    let first_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the selected alias to be the first location")
+        .location;
     assert_eq!(first_location.start_pos.line_number, 0);
     assert_eq!(first_location.start_pos.char_column, 19);
     assert_eq!(first_location.end_pos.char_column, 23);
@@ -5577,13 +5575,12 @@ fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the namespace alias to be the first location");
-    };
+    let first_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the namespace alias to be the first location")
+        .location;
     assert_eq!(first_location.start_pos.line_number, 0);
     assert_eq!(first_location.start_pos.char_column, 13);
     assert_eq!(first_location.end_pos.char_column, 14);
@@ -5614,13 +5611,12 @@ fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the provider path to be the first location");
-    };
+    let first_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the provider path to be the first location")
+        .location;
     assert_eq!(first_location.start_pos.line_number, 0);
     assert_eq!(first_location.start_pos.char_column, 1);
     assert_eq!(first_location.end_pos.char_column, 8);
@@ -5651,13 +5647,12 @@ fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the inferred namespace path to be the first location");
-    };
+    let first_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the inferred namespace path to be the first location")
+        .location;
     assert_eq!(first_location.start_pos.line_number, 0);
     assert_eq!(first_location.start_pos.char_column, 1);
     assert_eq!(first_location.end_pos.char_column, 8);

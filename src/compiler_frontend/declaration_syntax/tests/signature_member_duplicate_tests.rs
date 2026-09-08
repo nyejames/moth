@@ -75,21 +75,13 @@ fn assert_shared_duplicate_diagnostic(
         "duplicate members must use MOTH-RULE-0002 DuplicateDeclaration",
     );
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        name,
-        first_location,
-    } = &error.payload
-    else {
+    let DiagnosticPayload::DuplicateDeclaration { name } = &error.payload else {
         panic!(
             "expected DuplicateDeclaration payload, got {:?}",
             error.payload
         );
     };
     assert_eq!(string_table.resolve(*name), expected_name);
-
-    let first_location = first_location
-        .as_ref()
-        .expect("shared-parser duplicate must carry the first member location");
 
     assert_eq!(
         error.labels.len(),
@@ -112,10 +104,6 @@ fn assert_shared_duplicate_diagnostic(
         secondary.style,
         DiagnosticLabelStyle::Secondary,
         "second label must be the first member",
-    );
-    assert_eq!(
-        secondary.location, *first_location,
-        "secondary label must point at the first member",
     );
     assert!(
         primary.location != secondary.location,

@@ -727,21 +727,20 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     }
 
     match &diagnostics[1].payload {
-        DiagnosticPayload::DuplicateDeclaration {
-            name,
-            first_location,
-        } => {
+        DiagnosticPayload::DuplicateDeclaration { name } => {
             assert_eq!(merged_table.resolve(*name), "Button");
-            let previous_location = first_location
-                .as_ref()
-                .expect("explicit import should carry a previous location");
-            assert_eq!(
-                previous_location.scope.to_string(&merged_table),
-                String::from("lib.moth")
-            );
         }
         payload => panic!("unexpected duplicate payload: {payload:?}"),
     }
+    let previous_label = diagnostics[1]
+        .labels
+        .iter()
+        .find(|label| label.message == Some(DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("explicit import should carry a previous declaration label");
+    assert_eq!(
+        previous_label.location.scope.to_string(&merged_table),
+        "lib.moth"
+    );
 
     match &diagnostics[2].payload {
         DiagnosticPayload::ImportNameCollision { name } => {
@@ -868,15 +867,8 @@ fn duplicate_declaration_with_previous_location_keeps_secondary_label() {
         DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration)
     );
     match &diagnostic.payload {
-        DiagnosticPayload::DuplicateDeclaration {
-            name,
-            first_location,
-        } => {
+        DiagnosticPayload::DuplicateDeclaration { name } => {
             assert_eq!(string_table.resolve(*name), "Button");
-            assert!(
-                first_location.is_some(),
-                "explicit import carries a previous location"
-            );
         }
         payload => panic!("unexpected payload: {payload:?}"),
     }
@@ -905,15 +897,8 @@ fn duplicate_declaration_without_previous_location_omits_secondary_label() {
         DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration)
     );
     match &diagnostic.payload {
-        DiagnosticPayload::DuplicateDeclaration {
-            name,
-            first_location,
-        } => {
+        DiagnosticPayload::DuplicateDeclaration { name } => {
             assert_eq!(string_table.resolve(*name), "print");
-            assert!(
-                first_location.is_none(),
-                "prelude symbol has no previous location"
-            );
         }
         payload => panic!("unexpected payload: {payload:?}"),
     }

@@ -122,7 +122,7 @@ fn render_payload_message(
             diagnostic_type_name(*expected, context),
             diagnostic_type_name(*found, context)
         ),
-        DiagnosticPayload::DuplicateDeclaration { name, .. } => {
+        DiagnosticPayload::DuplicateDeclaration { name } => {
             duplicate_declaration_message(*name, string_table)
         }
         DiagnosticPayload::MissingImportTarget { .. }

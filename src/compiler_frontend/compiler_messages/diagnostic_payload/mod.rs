@@ -56,7 +56,6 @@ pub enum DiagnosticPayload {
 
     DuplicateDeclaration {
         name: StringId,
-        first_location: Option<SourceLocation>,
     },
 
     // -----------------

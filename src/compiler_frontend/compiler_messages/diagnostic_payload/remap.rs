@@ -36,14 +36,8 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::DuplicateDeclaration {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicateDeclaration { name } => {
                 *name = remap.get(*name);
-                if let Some(location) = first_location {
-                    location.remap_string_ids(remap);
-                }
             }
 
             DiagnosticPayload::MissingImportTarget { path }
@@ -696,10 +690,6 @@ impl DiagnosticPayload {
     /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
     pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         match self {
-            DiagnosticPayload::DuplicateDeclaration { first_location, .. } => {
-                rebind_optional_location(first_location, logical_path)
-            }
-
             DiagnosticPayload::DuplicatePublicExport { first_location, .. }
             | DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
                 first_location.rebind_source_identity(logical_path)
@@ -749,6 +739,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
             | DiagnosticPayload::UnknownName { .. }
             | DiagnosticPayload::TypeMismatch { .. }
+            | DiagnosticPayload::DuplicateDeclaration { .. }
             | DiagnosticPayload::ShadowedName { .. }
             | DiagnosticPayload::MissingImportTarget { .. }
             | DiagnosticPayload::ImportNameCollision { .. }
