@@ -71,17 +71,21 @@ ACTIVE_PLAN:
 
 CURRENT_SLICE:
 - Phase: 1E1, headers and ordering.
-- Goal: migrate the first downstream header/order consumers onto the exact preparation spans while
-  retaining the interval bridge for untouched consumers.
+- Goal: migrate downstream header/order consumers onto the exact preparation spans while retaining
+  the interval bridge for untouched consumers. The first bounded consumer, Stage 0 structural
+  file-reference diagnostics, is accepted; dependency-clause, symbol and sorted-header consumers
+  remain open.
 - Keep source ownership explicit across dependency and symbol records; do not add a second source
   table or convert legacy locations into guessed spans.
 - Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `cefb61634` — focused Rust tests share one test-only source identity/span-builder context, with
-  helper and c5 regression tests passing. The scripted independent audit was attempted but blocked
-  by provider sandbox/TLS failures without changing the worktree.
+- `3f40b6b48` — Stage 0 structural file-reference diagnostics consume their existing exact
+  source-local spans with final source ownership, and the missing-resource regression resolves the
+  stored range against retained source bytes. Focused Stage 0/file-reference tests pass. The
+  scripted independent audit was attempted but blocked by the configured provider's TLS
+  `UnknownIssuer` failure without changing the worktree.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -110,6 +114,12 @@ CURRENT_WORKTREE_STATE:
 - Accepted 1D6 is committed in `cefb61634`. The test-only `source::test_support::TestSourceContext`
   owns an explicit source identity, interned path, string table and live extended-span builder;
   focused header span regressions now share it, and its own test covers a long live-table span.
+- Accepted 1E1a is committed in `3f40b6b48`. Stage 0's directory file-reference resolver consumes
+  the retained `PreparedFileReference` local span for every user diagnostic, preserving the legacy
+  location and label order while removing the field-level dead-code bridge. The focused missing
+  resource regression proves the diagnostic span resolves to the authored path bytes in the
+  retained source snapshot. Dependency-clause, module-symbol and sorted-header consumers remain
+  the next 1E1 batches.
 - Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
   trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
   declaration allowance because synthetic `This` now consumes that span. Remove the remaining
@@ -204,6 +214,11 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
+- 1E1a candidate: `cargo fmt --all` and `git diff --check` passed. Focused directory Stage 0
+  tests (7) and file-reference tests (25) passed. `cargo check -p moth` passed in the delegated
+  worker. The independent scripted audit was attempted but unavailable because the configured
+  auditor provider's HTTPS fallback reported `invalid peer certificate: UnknownIssuer`; no audit
+  edits occurred. Parent Slice review found no required correction.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
@@ -255,9 +270,9 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: commit accepted 1D5c4, then implement header/fragment/source-contract anchors in 1D5c5.
-  Continue remaining 1D5c/1D6 and Phase 1, with final review and
-  closeout followed by the requested external review pause. Phases 2–7 remain pending.
+- next action: continue 1E1 with dependency-clause, module-symbol and sorted-header consumers,
+  then complete 1E2–1H and the Phase 1 closeout/final review before the requested external review
+  pause. Phases 2–7 remain pending.
 
 ---
 
