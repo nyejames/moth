@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::templates::template_body_sentinels::{
     ensure_loop_control_boundary_before_sentinel, first_line_has_meaningful_text,
     handle_direct_else_marker, inline_else_diagnostic, loop_control_marker_close_index,
     loop_control_marker_location, malformed_loop_control_reason, orphan_loop_control_diagnostic,
-    remap_else_if_inline_diagnostic,
+    remap_else_if_inline_diagnostic, with_direct_else_marker_span,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -40,7 +40,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region;
@@ -392,12 +392,16 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                     if_index,
                     close_index,
                     location,
+                    span,
+                    source,
                 } => {
                     let parsed_else_if = self.parse_else_if_branch_header(
                         &input.else_context,
                         if_index,
                         close_index,
                         &location,
+                        span,
+                        source,
                     )?;
                     branch_selector = parsed_else_if.selector;
                     branch_context = parsed_else_if.branch_context;
@@ -405,13 +409,19 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                     branch_starts_after_else_if = true;
                 }
 
-                TemplateBodyBoundary::Else { location } => {
+                TemplateBodyBoundary::Else {
+                    location,
+                    span,
+                    source,
+                } => {
                     let fallback_branch = self.parse_fallback_branch(
                         build_state,
                         &opening_location,
                         &input.else_context,
                         control_context,
                         location,
+                        span,
+                        source,
                     )?;
                     fallback_tir_body = Some(fallback_branch.body_node_id);
                     break;
@@ -449,8 +459,16 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         fallback_context: &ScopeContext,
         control_context: TemplateBodyControlContext,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     ) -> BodyParseResult<ParsedFallbackBranch> {
-        ensure_else_boundary_after_sentinel(self.token_stream, &location, self.string_table)?;
+        ensure_else_boundary_after_sentinel(
+            self.token_stream,
+            &location,
+            span,
+            source,
+            self.string_table,
+        )?;
 
         let mut else_construction_context =
             tir_only_body_construction_context(opening_location, fallback_context);
@@ -465,6 +483,8 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         ensure_else_body_starts_on_new_boundary(
             &else_construction_context,
             &location,
+            span,
+            source,
             self.string_table,
         )?;
         else_construction_context.trim_leading_whitespace(self.string_table);
@@ -486,13 +506,19 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         if_index: usize,
         close_index: usize,
         location: &SourceLocation,
+        marker_span: LocalSpan,
+        marker_source: Option<SourceId>,
     ) -> BodyParseResult<ParsedElseIfBranch> {
         self.token_stream.index = if_index + 1;
 
         if next_meaningful_token_is_template_close(self.token_stream, close_index) {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
-                location.clone(),
+            return Err(with_direct_else_marker_span(
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
+                    location.clone(),
+                ),
+                marker_span,
+                marker_source,
             )
             .into());
         }
@@ -510,16 +536,26 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 TokenKind::TemplateClose
             )
         {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::MalformedTemplateElseIf,
-                self.token_stream.current_location(),
+            return Err(with_direct_else_marker_span(
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::MalformedTemplateElseIf,
+                    self.token_stream.current_location(),
+                ),
+                marker_span,
+                marker_source,
             )
             .into());
         }
 
         self.token_stream.advance();
-        ensure_else_boundary_after_sentinel(self.token_stream, location, self.string_table)
-            .map_err(|diagnostic| remap_else_if_inline_diagnostic(diagnostic, location))?;
+        ensure_else_boundary_after_sentinel(
+            self.token_stream,
+            location,
+            marker_span,
+            marker_source,
+            self.string_table,
+        )
+        .map_err(|diagnostic| remap_else_if_inline_diagnostic(diagnostic, location))?;
 
         let (mut selector, branch_context) =
             branch_selector_and_context_from_parsed_if_header(parsed_header, base_context, self)?;
@@ -886,6 +922,8 @@ fn finalize_tir_body_builder(
 fn ensure_else_body_starts_on_new_boundary(
     construction_context: &TemplateConstructionContext,
     sentinel_location: &SourceLocation,
+    sentinel_span: LocalSpan,
+    sentinel_source: Option<SourceId>,
     string_table: &StringTable,
 ) -> BodyParseResult<()> {
     let store = construction_context.store();
@@ -900,7 +938,12 @@ fn ensure_else_body_starts_on_new_boundary(
     if let TemplateIrNodeKind::Text { text, .. } = &node.kind
         && first_line_has_meaningful_text(string_table.resolve(*text))
     {
-        return Err(inline_else_diagnostic(sentinel_location).into());
+        return Err(with_direct_else_marker_span(
+            inline_else_diagnostic(sentinel_location),
+            sentinel_span,
+            sentinel_source,
+        )
+        .into());
     }
 
     Ok(())

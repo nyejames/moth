@@ -94,6 +94,28 @@ fn assert_location_is_meaningful(diagnostic: &CompilerDiagnostic) {
     );
 }
 
+fn assert_exact_marker_span(
+    diagnostic: &CompilerDiagnostic,
+    source: &str,
+    span_builder: &ExtendedSpanBuilder,
+) {
+    let marker_start = source
+        .find("else")
+        .expect("test source should contain an else marker");
+    let marker_end = marker_start + "else".len();
+    let primary_span = diagnostic
+        .primary_span
+        .expect("else boundary diagnostic should retain its exact marker span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    assert_eq!(
+        (range.start(), range.end()),
+        (marker_start as u32, marker_end as u32)
+    );
+    assert_eq!(&source[marker_start..marker_end], "else");
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+}
+
 #[test]
 fn unexpected_template_body_token_retains_exact_primary_span() {
     let source = "[:π]";
@@ -304,6 +326,54 @@ fn malformed_else_if_missing_condition_keeps_non_default_location() {
         InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
     );
     assert_location_is_meaningful(&diagnostic);
+}
+
+#[test]
+fn malformed_else_if_missing_condition_retains_exact_multibyte_marker_span() {
+    let source = "[if true:\n    π\n[else if]\n    Hidden\n]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
+    );
+    assert_exact_marker_span(&diagnostic, source, &span_builder);
+}
+
+#[test]
+fn malformed_else_if_sentinel_retains_exact_multibyte_marker_span() {
+    let source = "[if true:\n    π\n[else if false, nope]\n    Hidden\n]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::MalformedTemplateElseIf,
+    );
+    assert_exact_marker_span(&diagnostic, source, &span_builder);
+}
+
+#[test]
+fn inline_else_if_boundary_retains_exact_multibyte_marker_span() {
+    let source = "[if true:\n    π\n[else if false] inline\n]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::InlineTemplateElseIf,
+    );
+    assert_exact_marker_span(&diagnostic, source, &span_builder);
+}
+
+#[test]
+fn inline_else_fallback_boundary_retains_exact_multibyte_marker_span() {
+    let source = "[if true:\n    π\n[else] inline\n]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::InlineTemplateElse,
+    );
+    assert_exact_marker_span(&diagnostic, source, &span_builder);
 }
 
 #[test]

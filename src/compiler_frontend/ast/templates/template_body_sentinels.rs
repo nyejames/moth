@@ -81,11 +81,15 @@ pub(super) enum TemplateBodyBoundary {
     TemplateClose,
     Else {
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
     ElseIf {
         if_index: usize,
         close_index: usize,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
 }
 
@@ -338,7 +342,11 @@ pub(super) fn handle_direct_else_marker(
             target.trim_trailing_whitespace(string_table);
             token_stream.index = close_index;
             token_stream.advance();
-            Ok(TemplateBodyBoundary::Else { location })
+            Ok(TemplateBodyBoundary::Else {
+                location,
+                span,
+                source,
+            })
         }
 
         ElseSentinelPolicy::Orphan => Err(with_direct_else_marker_span(
@@ -413,6 +421,8 @@ pub(super) fn handle_direct_else_if_marker(
                 if_index,
                 close_index,
                 location,
+                span,
+                source,
             })
         }
 
@@ -447,7 +457,7 @@ pub(super) fn handle_direct_else_if_marker(
 
 /// Attach the exact source span for a direct `[else]` marker diagnostic while retaining its
 /// legacy location and labels for the interval migration bridge.
-fn with_direct_else_marker_span(
+pub(super) fn with_direct_else_marker_span(
     mut diagnostic: CompilerDiagnostic,
     span: LocalSpan,
     source: Option<SourceId>,
@@ -658,6 +668,8 @@ fn inline_loop_control_reason(marker: &DirectLoopControlMarker) -> InvalidTempla
 pub(super) fn ensure_else_boundary_after_sentinel(
     token_stream: &FileTokens,
     sentinel_location: &SourceLocation,
+    sentinel_span: LocalSpan,
+    sentinel_source: Option<SourceId>,
     string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
     if token_stream.index >= token_stream.length {
@@ -669,14 +681,22 @@ pub(super) fn ensure_else_boundary_after_sentinel(
         TokenKind::StringSliceLiteral(text) | TokenKind::RawStringLiteral(text)
             if first_line_has_meaningful_text(string_table.resolve(*text)) =>
         {
-            return Err(inline_else_diagnostic(sentinel_location));
+            return Err(with_direct_else_marker_span(
+                inline_else_diagnostic(sentinel_location),
+                sentinel_span,
+                sentinel_source,
+            ));
         }
 
         TokenKind::TemplateHead
             if next_token.location.start_pos.line_number
                 == sentinel_location.start_pos.line_number =>
         {
-            return Err(inline_else_diagnostic(sentinel_location));
+            return Err(with_direct_else_marker_span(
+                inline_else_diagnostic(sentinel_location),
+                sentinel_span,
+                sentinel_source,
+            ));
         }
 
         _ => {}
@@ -753,10 +773,13 @@ pub(super) fn remap_else_if_inline_diagnostic(
             reason: InvalidTemplateStructureReason::InlineTemplateElse
         }
     ) {
-        return CompilerDiagnostic::invalid_template_structure(
+        let primary_span = diagnostic.primary_span;
+        let mut remapped = CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::InlineTemplateElseIf,
             location.clone(),
         );
+        remapped.primary_span = primary_span;
+        return remapped;
     }
 
     diagnostic
