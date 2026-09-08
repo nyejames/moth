@@ -701,6 +701,35 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
 }
 
 #[test]
+fn retaining_source_text_moves_the_original_allocation_into_the_loaded_record() {
+    let source_path = PathBuf::from("/project/main.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        std::iter::once(&source_path),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+    let source_id = database
+        .get_by_canonical_path(&source_path)
+        .expect("source should be registered")
+        .id;
+    let text = "x".repeat(4096);
+    let original_ptr = text.as_ptr();
+
+    database
+        .retain_text(source_id, text)
+        .expect("source text should be retained");
+
+    let retained = database
+        .retained_text(source_id)
+        .expect("loaded source should retain text");
+    assert_eq!(retained.as_ptr(), original_ptr);
+    assert_eq!(retained, "x".repeat(4096));
+}
+
+#[test]
 fn source_database_resolves_retained_text_by_logical_path() {
     let source_path = PathBuf::from("/project/main.moth");
     let mut string_table = StringTable::new();
