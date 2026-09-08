@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `92ab5bb1d` — duplicate template-input and use-after-move diagnostics keep their related
-  source facts solely in labels, and module header binding/order failures move accumulated
-  warnings without cloning. Focused diagnostic, template, module-compilation and header tests
-  pass; `cargo check -p moth`, formatting and diff checks are clean.
+- `990d334f1` — reactive template-head diagnostics retain their authored token spans through the
+  existing source owner after the generic-inference payload cleanup and warning handoff. Focused
+  generic, diagnostic, reactive and template-head tests pass; `cargo check -p moth`, formatting and
+  diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -204,6 +204,14 @@ CURRENT_WORKTREE_STATE:
   move accumulated warnings into diagnosed failures with `std::mem::take`, preserving warning
   order while successful compilation keeps the same vector for later metadata. Module-compilation
   (23) and header (378) suites pass, with no change to message or source ownership boundaries.
+- Accepted the bounded 1G1 generic-inference payload simplification in `401f8bb91`. Conflicting
+  inference keeps current and previous evidence solely in the ordered primary/secondary labels;
+  payload remapping, rebinding and rendering retain only semantic inference facts. Generic,
+  nominal-conflict and diagnostic-model regressions pass, with a fresh audit finding no issue.
+- Accepted the bounded 1E3 reactive template-head span consumer in `990d334f1`. Direct reactive
+  subscription diagnostics retain the marker, source-symbol or offending-token span through the
+  existing `FileTokens.file_id` owner while preserving legacy locations, labels and infrastructure
+  behavior. The multibyte unknown-source regression and reactive/template-head suites pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -372,6 +380,13 @@ VALIDATION_STATE:
 - 1F2 module warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
   module-compilation (23) and header (378) suites passed. Failure paths move warnings exactly once;
   success paths retain the vector for module metadata.
+- 1G1 generic-inference candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  generic functions (37), nominal conflict (1), generic rendering (1) and diagnostic model (79)
+  tests passed. A fresh audit confirmed label ownership and no stale payload location handling.
+- 1E3 reactive template-head candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, reactive tests (75), template-head tests (102) and the multibyte regression
+  (1) passed. A fresh audit found the direct parser branches sound; compatibility and downstream
+  const/type diagnostics remain a separate follow-up.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
