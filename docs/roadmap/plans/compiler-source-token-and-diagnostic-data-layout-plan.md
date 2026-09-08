@@ -82,11 +82,9 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `51ae0343e` — generic free-function and receiver-member call sites retain exact authored
-  `SourceSpan`s through inference, evidence labels, generated requests and materialisation while
-  preserving legacy locations, payloads, ordering and frozen-body ownership boundaries. The
-  focused generic/function-call/generated-request suites and real materialisation regression pass;
-  `cargo check -p moth`, formatting and diff checks are clean.
+- `c86cf90d3` — `InvalidAssignmentTarget` no longer stores the declaration location already owned
+  by its ordered `ImmutableBindingDeclaration` label; constructor input, label remapping, rendering,
+  ordering and source ownership remain unchanged. Assignment and diagnostic-model validation pass.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -266,6 +264,11 @@ CURRENT_WORKTREE_STATE:
   label order, source IDs and deferred frozen-body ownership remain unchanged. Generic-function
   (38), generic-diagnostic (11), function-call (15), generated-transaction (7), same-file request
   (1), receiver and real materialisation regressions pass; independent audits are clean.
+- Accepted the bounded 1G1 assignment payload cleanup in `c86cf90d3`. `InvalidAssignmentTarget`
+  keeps declaration context solely in the ordered `ImmutableBindingDeclaration` secondary label;
+  payload remapping, rebinding and rendering no longer duplicate that legacy location. Diagnostic
+  model (80), assignment mutation (9), collection assignment (57), fallible handling (38) and
+  header/config regression coverage pass; the independent audit is clean.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -423,6 +426,10 @@ VALIDATION_STATE:
   same-file request (1), receiver-member and real materialisation regressions passed. Two focused
   verification audits are clean after strengthening the tests to assert diagnostic identity and
   the exact final call occurrence.
+- 1G1 assignment payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, diagnostic-model (80), assignment mutation (9), collection assignment
+  (57), fallible-handling assignment (38) and header/config regression (1) passed. The independent
+  audit found no required correction; full `just validate` remains reserved for Phase 1 closeout.
 - 1G1 duplicate-declaration payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, diagnostic model (78), signature duplicate (5), header parsing (179)
   and the full library suite (4,987) passed. The independent Slice review found no required
