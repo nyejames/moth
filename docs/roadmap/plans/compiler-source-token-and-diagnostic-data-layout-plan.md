@@ -70,23 +70,22 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1E1/1E2/1E3/1E5/1F1/1F2/1F4, downstream consumers and the first freeze boundary.
+- Phase: 1E1/1E2/1E3/1E5/1F1/1F2/1F4/1G1, downstream consumers and the first freeze boundary.
 - Goal: migrate downstream header/order and AST consumers onto the exact preparation spans while
-  retaining the interval bridge for untouched consumers, and make renderers resolve retained
-  primary spans through the source snapshot. Dependency-clause and remaining symbol consumers
-  remain open; the accepted renderer slice is the first 1F4 checkpoint.
+  retaining the interval bridge for untouched consumers, and remove duplicated diagnostic source
+  facts where labels already own them. Renderers resolve retained primary spans through the source
+  snapshot. The source freeze remains deferred until a real final identity/render owner can consume
+  it without a parallel durable source database.
 - Keep source ownership explicit across dependency and symbol records; do not add a second source
   table or convert legacy locations into guessed spans.
 - Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `5d527326d` — named call targets and template loop-control sentinels retain exact
-  source-owned anchors, extending the accepted header, AST, template, config and renderer
-  consumers through the current Phase 1 slice. Focused namespace, call, trait, template, config,
-  renderer, dependency-selection, module-dependency and AST tests pass; source loading has
-  explicit no-copy ownership coverage, `cargo check -p moth`, the full 4,979-library-test baseline
-  and the worktree are clean.
+- `3b36306cd` — shadowed declaration and import-collision diagnostics retain exact primary and
+  related source facts while redundant collision payload storage is removed. Focused declaration,
+  namespace, diagnostic-model, header-remap, header-parsing and template tests pass; `cargo check
+  -p moth`, the full 4,985-library-test suite and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -164,6 +163,15 @@ CURRENT_WORKTREE_STATE:
 - Accepted the bounded 1F2 warning handoff in `641017866`. Module preparation moves its warning
   vector into diagnosed failure messages instead of cloning it, while successful preparation
   retains the same vector for the prepared module.
+- Accepted the bounded 1G1 import-collision payload simplification in `1bfefa23d`. The previous
+  declaration remains a related `PreviousDeclaration` label, including its exact span when one is
+  available, while the duplicate payload location is removed. String remapping, source rebinding,
+  renderer matches and header assertions now use the canonical labels; namespace bindings (38),
+  diagnostic model (78), header remap (29), header parsing (179) and collision regressions pass.
+- Accepted the bounded 1E2 shadowed-declaration consumer in `3b36306cd`. The duplicate declaration
+  token's existing `LocalSpan` and `FileTokens.file_id` become the diagnostic primary span while
+  the legacy location, payload and both labels remain unchanged. The multibyte declaration
+  regression and the full declaration test module (23 tests) pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -258,6 +266,9 @@ BLOCKERS / RISKS:
 - compact-ID merge order must remain deterministic across file and module parallelism
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
   Preserve them in 1F2; the source ownership checkpoint does not claim to repair that warning loss.
+- The first source-freeze experiment was deliberately rejected after mapping the final owner
+  boundary: a `FrozenSourceDatabase` without an immediate render/identity consumer would create a
+  dead parallel owner and warnings. Revisit source freezing together with that terminal owner.
 - Repeated canonical/check-only preparation now shares the original builder. Removing the repeated
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
@@ -300,6 +311,12 @@ VALIDATION_STATE:
   and the focused string interning suite (8 tests) passed, including pointer-preserving freeze.
 - 1F2 warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and
   the focused module-preparation suite (21 tests) passed.
+- 1G1 import-collision payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, namespace bindings (38), diagnostic model (78), header remap (29), header
+  parsing (179), template collision and focused remap regressions passed.
+- 1E2 shadowed-declaration candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, the focused regression (1), declaration test module (23) and the full
+  library suite (4,985) passed. The independent Slice review found no required correction.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
@@ -351,9 +368,9 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: continue 1E1/1E2 with remaining declaration, template and frontend consumers, then
-  expand 1F–1H and complete the Phase 1 closeout/final review before the requested external review
-  pause.
+- next action: continue the remaining bounded 1E2/1E3/1E5 consumers and 1G payload reductions,
+  then establish 1F's terminal identity/render owner before the Phase 1 closeout and final review
+  pause. Do not claim the broad 1F1 checkbox from the rejected unconsumed source-freeze attempt.
   Phases 2–7 remain pending.
 
 ---
