@@ -30,6 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -255,11 +256,15 @@ fn parse_call_arguments_inner(
                 if token_stream.peek_next_token() == Some(&TokenKind::Assign) =>
             {
                 let target_location = token_stream.current_location();
+                let target_span = token_stream.tokens[token_stream.index].span;
+                let target_source_span = token_stream
+                    .file_id
+                    .map(|source| SourceSpan::new(source, target_span));
                 let target_name = *name;
                 token_stream.advance();
                 token_stream.advance();
                 token_stream.skip_newlines();
-                Some((target_name, target_location))
+                Some((target_name, target_location, target_source_span))
             }
 
             // Parenthesized names like `(name) = expr` are not supported.
@@ -352,7 +357,7 @@ fn parse_call_arguments_inner(
         // stays in `target_location`, and the authored `~` marker (when present) stays in
         // `marker_location`, so diagnostics can point at whichever source the author must change.
         let value_location = value.location.clone();
-        let argument = if let Some((name, target_location)) = named_target {
+        let argument = if let Some((name, target_location, _target_span)) = named_target {
             CallArgument::named(value, name, access_mode, value_location, target_location)
         } else {
             CallArgument::positional(value, access_mode, value_location)
@@ -459,7 +464,7 @@ impl<'a> ParameterSlotRouter<'a> {
 
     fn route(
         &mut self,
-        named_target: Option<&(StringId, SourceLocation)>,
+        named_target: Option<&(StringId, SourceLocation, Option<SourceSpan>)>,
         argument_location: SourceLocation,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         let Some(expectations) = self.expectations else {
@@ -472,7 +477,7 @@ impl<'a> ParameterSlotRouter<'a> {
             return Ok(None);
         };
 
-        if let Some((target_name, target_location)) = named_target {
+        if let Some((target_name, target_location, target_span)) = named_target {
             self.saw_named_argument = true;
 
             match self.argument_syntax {
@@ -507,7 +512,7 @@ impl<'a> ParameterSlotRouter<'a> {
                         .into());
                     };
 
-                    self.mark_slot_occupied(slot, target_location.clone())?;
+                    self.mark_slot_occupied(slot, target_location.clone(), *target_span)?;
                     return Ok(Some(ParameterSlot::new(slot)));
                 }
             }
@@ -556,6 +561,7 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         slot: usize,
         location: SourceLocation,
+        source_span: Option<SourceSpan>,
     ) -> Result<(), ExpressionParseError> {
         let parameter_name = self
             .expectations
@@ -567,15 +573,16 @@ impl<'a> ParameterSlotRouter<'a> {
         };
 
         if occupied_slots[slot] {
-            return Err(CompilerDiagnostic::invalid_call_shape(
+            let mut diagnostic = CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::DuplicateArgument {
                     parameter_name,
                     parameter_index: slot,
                 },
                 callee_name,
                 location,
-            )
-            .into());
+            );
+            diagnostic.primary_span = source_span;
+            return Err(diagnostic.into());
         }
 
         occupied_slots[slot] = true;

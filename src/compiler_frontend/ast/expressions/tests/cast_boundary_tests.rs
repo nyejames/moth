@@ -9,6 +9,7 @@
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -101,6 +102,40 @@ draw |x Int, y Int| -> Int:
 value = draw(x = 0, x = cast "2")
 "#,
         |reason| matches!(reason, InvalidCallShapeReason::DuplicateArgument { .. }),
+    );
+}
+
+#[test]
+fn duplicate_named_parameter_preserves_exact_target_span() {
+    let source = r#"
+draw |x Int, y Int| -> Int:
+    return x + y
+;
+
+value = draw(x = 0, x = cast "2")
+"#;
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
+        panic!(
+            "expected InvalidCallShape diagnostic, got {:?}",
+            diagnostic.payload
+        );
+    };
+    assert!(matches!(
+        reason,
+        InvalidCallShapeReason::DuplicateArgument { .. }
+    ));
+
+    let target_start = source
+        .rfind("x = cast \"2\"")
+        .expect("the duplicate named argument should be present") as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let target_span = LocalSpan::exact(target_start, 1, &mut span_builder)
+        .expect("the duplicate target span should fit inline");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, target_span))
     );
 }
 
