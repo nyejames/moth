@@ -82,10 +82,11 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `62808f4eb` — directory module-namespace and provider-target diagnostics retain the retained
-  dependency's final `SourceId` and exact local span, with diagnosed test helpers preserving the
-  finalized source database. The focused create-project-modules suite (149 tests), `cargo check
-  -p moth`, formatting and diff checks pass.
+- `51ae0343e` — generic free-function and receiver-member call sites retain exact authored
+  `SourceSpan`s through inference, evidence labels, generated requests and materialisation while
+  preserving legacy locations, payloads, ordering and frozen-body ownership boundaries. The
+  focused generic/function-call/generated-request suites and real materialisation regression pass;
+  `cargo check -p moth`, formatting and diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -259,6 +260,12 @@ CURRENT_WORKTREE_STATE:
   helpers retain the finalized source database so the span can be resolved. The focused
   create-project-modules suite (149) covers multibyte missing, ambiguous, unsupported-source and
   unsupported-provider diagnostics; `cargo check -p moth`, formatting and diff checks are clean.
+- Accepted the bounded 1E2 generic call-site span consumer in `51ae0343e`. Authored free-function
+  and receiver-member tokens retain exact source-owned spans through generic inference, evidence
+  labels, canonical/generated request records and materialisation. Legacy locations, payloads,
+  label order, source IDs and deferred frozen-body ownership remain unchanged. Generic-function
+  (38), generic-diagnostic (11), function-call (15), generated-transaction (7), same-file request
+  (1), receiver and real materialisation regressions pass; independent audits are clean.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -411,6 +418,11 @@ VALIDATION_STATE:
   and the focused `cargo test -p moth --lib create_project_modules_tests --quiet` suite (149)
   passed. Namespace and provider-target diagnostics resolve their retained source snapshots in
   multibyte regressions; a fresh read-only audit found no required correction.
+- 1E2 generic call-site candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  generic-function (38), generic-diagnostic (11), function-call (15), generated-transaction (7),
+  same-file request (1), receiver-member and real materialisation regressions passed. Two focused
+  verification audits are clean after strengthening the tests to assert diagnostic identity and
+  the exact final call occurrence.
 - 1G1 duplicate-declaration payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, diagnostic model (78), signature duplicate (5), header parsing (179)
   and the full library suite (4,987) passed. The independent Slice review found no required
