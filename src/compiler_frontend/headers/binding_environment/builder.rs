@@ -1670,11 +1670,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     ) -> BuilderResult<()> {
         // Reject explicit `.moth` extension in dependency paths.
         if has_explicit_moth_extension(&dependency.dependency.path, self.string_table) {
-            return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
+            let mut diagnostic = CompilerDiagnostic::explicit_moth_extension(
                 dependency.dependency.path.clone(),
                 dependency.dependency.location.clone(),
-            ))
-            .into());
+            );
+            diagnostic.primary_span = Some(SourceSpan::new(
+                dependency.dependency.dependency_shell_id.source,
+                dependency.dependency.span,
+            ));
+            return Err(Box::new(diagnostic).into());
         }
 
         if let Some(resolved_clause) = self

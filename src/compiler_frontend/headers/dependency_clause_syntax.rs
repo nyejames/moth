@@ -103,10 +103,6 @@ pub struct RetainedDependencyPath {
     pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates downstream consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 
