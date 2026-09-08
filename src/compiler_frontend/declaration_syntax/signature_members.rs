@@ -59,10 +59,6 @@ pub struct SignatureMemberSyntax {
     pub type_annotation: ParsedTypeRef,
     pub default_tokens: Vec<Token>,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 

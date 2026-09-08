@@ -53,10 +53,6 @@ pub struct ChoiceVariantSyntax {
     pub id: StringId,
     pub payload: ChoiceVariantPayloadSyntax,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 

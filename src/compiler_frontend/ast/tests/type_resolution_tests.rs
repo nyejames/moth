@@ -33,20 +33,58 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_result,
+    parse_single_file_ast, parse_single_file_ast_diagnostic, parse_single_file_ast_result,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+fn expected_source_span(source: &str, text: &str) -> SourceSpan {
+    let start = source
+        .find(text)
+        .unwrap_or_else(|| panic!("test source should contain {text:?}"));
+    let mut builder = ExtendedSpanBuilder::new();
+    let local = LocalSpan::exact(start as u32, text.len() as u32, &mut builder)
+        .expect("test anchor should fit the local span table");
+    SourceSpan::new(SourceId::COMPILATION_ROOT, local)
+}
+
+#[test]
+fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
+    let source = "bad |items {Float = Int}|:\n;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .any(|label| label.span == Some(expected_source_span(source, "items"))),
+        "AST signature diagnostics should retain the authored member anchor"
+    );
+}
+
+#[test]
+fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
+    let source = "Status :: WithValue |value {Float = Int}|;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .any(|label| label.span == Some(expected_source_span(source, "WithValue"))),
+        "AST choice diagnostics should retain the authored variant anchor"
+    );
+}
 
 // ---------------------------------------------------------------
 //  Checked / optional diagnostic-type-to-TypeId bridge tests

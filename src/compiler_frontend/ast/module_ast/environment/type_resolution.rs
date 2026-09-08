@@ -27,7 +27,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -44,6 +44,7 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -79,7 +80,8 @@ fn member_shell_diagnostic_for_context(
     diagnostic: CompilerDiagnostic,
     member_context: MemberShellSemanticContext,
 ) -> CompilerDiagnostic {
-    match member_context {
+    let primary_span = diagnostic.primary_span;
+    let mut diagnostic = match member_context {
         MemberShellSemanticContext::StructField
             if is_non_constant_struct_default_diagnostic(&diagnostic) =>
         {
@@ -88,7 +90,9 @@ fn member_shell_diagnostic_for_context(
 
         MemberShellSemanticContext::StructField
         | MemberShellSemanticContext::ChoicePayloadField => diagnostic,
-    }
+    };
+    diagnostic.primary_span = primary_span;
+    diagnostic
 }
 
 fn is_non_constant_struct_default_diagnostic(diagnostic: &CompilerDiagnostic) -> bool {
@@ -1236,14 +1240,34 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ChoiceVariantPayloadSyntax::Unit => ChoiceVariantPayload::Unit,
 
                 ChoiceVariantPayloadSyntax::Record { fields } => {
-                    let declarations = self.unresolved_member_syntax_to_declarations(
-                        header,
-                        fields,
-                        MemberShellSemanticContext::ChoicePayloadField,
-                        string_table,
-                        fallback_policy,
-                        emit_warnings,
-                    )?;
+                    let declarations = self
+                        .unresolved_member_syntax_to_declarations(
+                            header,
+                            fields,
+                            MemberShellSemanticContext::ChoicePayloadField,
+                            string_table,
+                            fallback_policy,
+                            emit_warnings,
+                        )
+                        .map_err(|mut messages| {
+                            if let Some(source) = header.tokens.file_id {
+                                let variant_span = SourceSpan::new(source, variant.span);
+                                for diagnostic in &mut messages.diagnostics {
+                                    if diagnostic
+                                        .labels
+                                        .iter()
+                                        .any(|label| label.span == Some(variant_span))
+                                    {
+                                        continue;
+                                    }
+                                    let mut label =
+                                        DiagnosticLabel::secondary(variant.location.clone(), None);
+                                    label.span = Some(variant_span);
+                                    diagnostic.labels.push(label);
+                                }
+                            }
+                            messages
+                        })?;
                     ChoiceVariantPayload::Record {
                         fields: declarations,
                     }

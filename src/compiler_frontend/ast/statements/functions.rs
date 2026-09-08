@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::type_resolution::{
     resolve_diagnostic_type_to_type_id, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidCollectionTypeReason, NameNamespace,
+    CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload, InvalidCollectionTypeReason,
+    NameNamespace,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -30,6 +31,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     parse_function_signature_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -221,7 +223,8 @@ pub(crate) fn signature_member_to_declaration(
         expression_context,
         type_interner,
         string_table,
-    );
+    )
+    .map_err(|error| signature_member_error_with_span(error, member, expression_context));
 
     let (type_id, data_type) = match resolved {
         Ok(annotation) => (
@@ -262,7 +265,8 @@ pub(crate) fn signature_member_to_declaration(
             expression_context,
             type_interner,
             string_table,
-        )?
+        )
+        .map_err(|error| signature_member_error_with_span(error, member, expression_context))?
     };
 
     if member.is_reactive {
@@ -276,6 +280,40 @@ pub(crate) fn signature_member_to_declaration(
         value,
         config_qualifier: None,
     })
+}
+
+/// Attach the authored member-name anchor to an AST diagnostic while its declaring source
+/// identity is still available through the active scope.
+///
+/// The legacy `SourceLocation` remains the display fallback during the interval bridge. An
+/// existing exact span always wins, so a more precise nested consumer can refine this later.
+fn signature_member_error_with_span(
+    error: ExpressionParseError,
+    member: &SignatureMemberSyntax,
+    expression_context: &ScopeContext,
+) -> ExpressionParseError {
+    let ExpressionParseError::Diagnostic(mut diagnostic) = error else {
+        return error;
+    };
+
+    let Some(source) = expression_context.shared.declaring_file_id else {
+        return ExpressionParseError::Diagnostic(diagnostic);
+    };
+
+    let member_span = SourceSpan::new(source, member.span);
+    if diagnostic.primary_span.is_none() && diagnostic.primary_location == member.location {
+        diagnostic.primary_span = Some(member_span);
+    } else if !diagnostic
+        .labels
+        .iter()
+        .any(|label| label.span == Some(member_span))
+    {
+        let mut label = DiagnosticLabel::secondary(member.location.clone(), None);
+        label.span = Some(member_span);
+        diagnostic.labels.push(label);
+    }
+
+    ExpressionParseError::Diagnostic(diagnostic)
 }
 
 /// Resolve a parsed type annotation inside a function-style signature.
