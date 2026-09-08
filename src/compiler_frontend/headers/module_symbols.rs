@@ -37,7 +37,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -229,6 +229,12 @@ pub(crate) struct ModuleSymbols {
     // header/binding preparation; public interfaces convert them to portable diagnostic
     // provenance before crossing a module boundary.
     pub(crate) declaration_locations_by_symbol_path: FxHashMap<InternedPath, SourceLocation>,
+    /// Exact authored declaration-name spans keyed by the same canonical symbol path.
+    ///
+    /// WHAT: carries the source-owned header anchor into binding collision diagnostics.
+    /// WHY: the legacy location remains the display bridge, while this map keeps the exact byte
+    /// range available to the first downstream symbol consumer.
+    pub(crate) declaration_spans_by_symbol_path: FxHashMap<InternedPath, SourceSpan>,
     pub(crate) module_file_paths: FxHashSet<InternedPath>,
     // Per-file metadata is recorded for every prepared file, including dependency-only root files that
     // produce no declaration headers.
@@ -329,6 +335,7 @@ impl ModuleSymbols {
             builtin_declarations: Vec::new(),
             canonical_source_by_symbol_path: FxHashMap::default(),
             declaration_locations_by_symbol_path: FxHashMap::default(),
+            declaration_spans_by_symbol_path: FxHashMap::default(),
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
             source_ids_by_source: FxHashMap::default(),

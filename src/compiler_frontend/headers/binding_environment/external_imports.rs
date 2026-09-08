@@ -62,6 +62,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             local_name,
             VisibleNameBinding::ExternalImport { symbol_id },
             Some(local_name_location.clone()),
+            None,
         )?;
 
         file_visibility

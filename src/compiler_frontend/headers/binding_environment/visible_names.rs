@@ -13,6 +13,7 @@ use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceRecordSource;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -60,6 +61,7 @@ pub(crate) enum VisibleNameBinding {
 struct VisibleNameEntry {
     binding: VisibleNameBinding,
     location: Option<SourceLocation>,
+    span: Option<SourceSpan>,
 }
 
 /// Per-file registry of visible names.
@@ -92,6 +94,7 @@ impl VisibleNameRegistry {
                 VisibleNameEntry {
                     binding: VisibleNameBinding::ReservedCoreCastTraitName,
                     location: None,
+                    span: None,
                 },
             );
         });
@@ -108,11 +111,17 @@ impl VisibleNameRegistry {
     /// The diagnostic is boxed at this registry boundary because every connected
     /// binding-environment caller already propagates boxed diagnostics. Keeping the same
     /// error shape lets collisions travel directly to the header accumulation boundary.
+    /// Register a visible name while retaining the exact authored span for collision labels.
+    ///
+    /// The location remains the compatibility bridge for renderers that have not migrated. The
+    /// optional span belongs to the same source identity as that location and is only used when a
+    /// collision diagnostic is produced.
     pub(crate) fn register(
         &mut self,
         local_name: StringId,
         binding: VisibleNameBinding,
         location: Option<SourceLocation>,
+        span: Option<SourceSpan>,
     ) -> Result<(), Box<CompilerDiagnostic>> {
         if let Some(entry) = self.names.get(&local_name) {
             if can_coexist(&entry.binding, &binding) {
@@ -122,26 +131,42 @@ impl VisibleNameRegistry {
                 .clone()
                 .or_else(|| entry.location.clone())
                 .unwrap_or_default();
+            let current_span = if location.is_some() { span } else { entry.span };
             if matches!(entry.binding, VisibleNameBinding::ReservedCoreCastTraitName) {
-                return Err(Box::new(CompilerDiagnostic::reserved_name_collision(
+                let mut diagnostic = CompilerDiagnostic::reserved_name_collision(
                     local_name,
                     ReservedNameOwner::CoreTrait,
                     current_location,
-                )));
+                );
+                diagnostic.primary_span = current_span;
+                return Err(Box::new(diagnostic));
             }
             let previous_location = if location.is_some() {
                 entry.location.clone()
             } else {
                 None
             };
-            return Err(Box::new(diagnostics::dependency_name_collision(
+            let mut diagnostic = diagnostics::dependency_name_collision(
                 local_name,
                 current_location,
                 previous_location,
-            )));
+            );
+            diagnostic.primary_span = current_span;
+            if let Some(previous_span) = entry.span {
+                if let Some(label) = diagnostic.labels.get_mut(1) {
+                    label.span = Some(previous_span);
+                }
+            }
+            return Err(Box::new(diagnostic));
         }
-        self.names
-            .insert(local_name, VisibleNameEntry { binding, location });
+        self.names.insert(
+            local_name,
+            VisibleNameEntry {
+                binding,
+                location,
+                span,
+            },
+        );
         Ok(())
     }
 

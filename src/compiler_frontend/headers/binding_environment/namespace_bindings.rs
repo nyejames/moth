@@ -234,6 +234,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .cloned()
                     .unwrap_or_else(|| clause.dependency.location.clone()),
             ),
+            None,
         )?;
 
         file_visibility

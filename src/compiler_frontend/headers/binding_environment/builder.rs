@@ -266,7 +266,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .get(path)
                     .cloned()
                     .unwrap_or_default();
-                registry.register(name, binding, Some(declaration_location))?;
+                let declaration_span = self
+                    .module_symbols
+                    .declaration_spans_by_symbol_path
+                    .get(path)
+                    .copied();
+                registry.register(name, binding, Some(declaration_location), declaration_span)?;
 
                 if is_type_alias {
                     file_visibility
@@ -294,6 +299,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     name,
                     VisibleNameBinding::Builtin,
                     Some(SourceLocation::default()),
+                    None,
                 )?;
                 file_visibility
                     .visible_source_names
@@ -310,6 +316,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 VisibleNameBinding::Prelude {
                     symbol_id: *symbol_id,
                 },
+                None,
                 None,
             )?;
         }
@@ -329,6 +336,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 VisibleNameBinding::NamespaceRecord {
                     record_source: NamespaceRecordSource::ExternalPackage(package_path_id),
                 },
+                None,
                 None,
             )?;
         }
@@ -564,7 +572,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             },
         };
 
-        registry.register(local_name, binding, Some(local_name_location.clone()))?;
+        registry.register(local_name, binding, Some(local_name_location.clone()), None)?;
         file_visibility
             .visible_declaration_paths_mut()
             .insert(local_path.clone());
@@ -946,6 +954,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .cloned()
                     .unwrap_or_else(|| dependency.dependency.location.clone()),
             ),
+            None,
         )?;
         file_visibility
             .visible_namespace_records
@@ -1025,6 +1034,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     canonical_path: path.clone(),
                 },
                 Some(location),
+                None,
             )?;
             file_visibility
                 .visible_declaration_paths_mut()

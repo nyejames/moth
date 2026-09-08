@@ -1198,10 +1198,21 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
     let declaration_path = intern_path(&["src", "prelude_ns"], &mut string_table);
 
     let mut declared_paths = FxHashSet::default();
-    declared_paths.insert(declaration_path);
+    declared_paths.insert(declaration_path.clone());
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file.clone());
+    let declaration_location = location_for(&["src", "prelude_ns"], &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let declaration_span = LocalSpan::exact(12, 10, &mut span_builder)
+        .expect("focused declaration span should fit the inline representation");
+    module_symbols
+        .declaration_locations_by_symbol_path
+        .insert(declaration_path.clone(), declaration_location.clone());
+    module_symbols.declaration_spans_by_symbol_path.insert(
+        declaration_path.clone(),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, declaration_span),
+    );
     module_symbols
         .declared_paths_by_file
         .insert(source_file, declared_paths);
@@ -1220,6 +1231,18 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
     assert_eq!(
         error.diagnostics[0].kind,
         DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    );
+    assert_eq!(
+        error.diagnostics[0].primary_location, declaration_location,
+        "legacy collision location must remain stable"
+    );
+    assert_eq!(
+        error.diagnostics[0].primary_span,
+        Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            declaration_span
+        )),
+        "same-file declaration collision should retain its exact header span"
     );
 }
 

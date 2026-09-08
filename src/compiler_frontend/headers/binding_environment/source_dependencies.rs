@@ -212,7 +212,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         };
 
-        registry.register(local_name, binding, Some(local_name_location.clone()))?;
+        registry.register(local_name, binding, Some(local_name_location.clone()), None)?;
 
         if is_type_alias {
             file_visibility.visible_type_alias_names.insert(

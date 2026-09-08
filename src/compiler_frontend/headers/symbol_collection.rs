@@ -24,7 +24,7 @@ use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFail
 use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -70,6 +70,10 @@ pub(super) fn build_module_symbols(
             module_symbols.declaration_locations_by_symbol_path.insert(
                 header.tokens.src_path.to_owned(),
                 header.name_location.to_owned(),
+            );
+            module_symbols.declaration_spans_by_symbol_path.insert(
+                header.tokens.src_path.to_owned(),
+                SourceSpan::new(file_output.file_id, header.name_span),
             );
 
             register_header_symbol(&mut module_symbols, header, string_table);
