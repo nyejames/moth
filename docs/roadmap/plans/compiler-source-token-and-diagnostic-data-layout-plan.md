@@ -120,6 +120,11 @@ CURRENT_WORKTREE_STATE:
   resource regression proves the diagnostic span resolves to the authored path bytes in the
   retained source snapshot. Dependency-clause, module-symbol and sorted-header consumers remain
   the next 1E1 batches.
+- Accepted the first sorted-header consumer in `73ee265df`. Stage 3 dependency edges retain each
+  header's exact `name_span` with its owning `SourceId`; missing-import and circular-dependency
+  diagnostics publish that `SourceSpan` while preserving their legacy primary locations and
+  ordering. The focused module-dependency suite (30 tests) passes, and infrastructure errors keep
+  their existing location lane.
 - Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
   trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
   declaration allowance because synthetic `This` now consumes that span. Remove the remaining
@@ -219,6 +224,11 @@ VALIDATION_STATE:
   worker. The independent scripted audit was attempted but unavailable because the configured
   auditor provider's HTTPS fallback reported `invalid peer certificate: UnknownIssuer`; no audit
   edits occurred. Parent Slice review found no required correction.
+- 1E1 sorted-header candidate: `cargo fmt --all`, `git diff --check`, and the focused
+  `cargo test -p moth --lib module_dependencies -- --nocapture` suite (30 tests) passed. The
+  diagnostic regression checks exact `SourceSpan` ownership and preserved `SourceLocation`; no
+  audit worker was available after the coordinator provider block, so parent Slice review is the
+  acceptance review for this bounded change.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
