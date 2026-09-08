@@ -45,8 +45,12 @@ fn create_expression_for_test(
 #[test]
 fn slot_wrappers_remain_compile_time_templates_until_filled() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        template_tokens_from_source("[: before [$slot] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = template_tokens_from_source(
+        "[: before [$slot] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -77,11 +81,13 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
 #[test]
 fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strings() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
         &mut string_table,
+        &mut span_builder,
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned());
     let wrapper = Template::new(
@@ -98,7 +104,8 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[header]", &mut string_table);
+    let mut token_stream =
+        template_tokens_from_source("[header]", &mut string_table, &mut span_builder);
     let context = constant_template_context(&token_stream.src_path, &declarations)
         .with_template_ir_store(wrapper_context.template_ir_store.clone());
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -116,8 +123,12 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
 #[test]
 fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        template_tokens_from_source("[value: before [$slot] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = template_tokens_from_source(
+        "[value: before [$slot] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -148,6 +159,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
 #[test]
 fn constant_context_template_head_with_constant_references_folds_to_string_slice() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let const_before = string_table.intern("const_before");
     let const_after = string_table.intern("const_after");
@@ -207,8 +219,11 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
         &scope,
         &style_directives,
     );
-    let mut token_stream =
-        template_tokens_from_source("[const_before, const_after]", &mut string_table);
+    let mut token_stream = template_tokens_from_source(
+        "[const_before, const_after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let mut expected_type = ExpectedType::Infer;
 
     let expression = create_expression_for_test(
@@ -231,7 +246,9 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
 #[test]
 fn non_constant_context_template_head_keeps_runtime_template() {
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source("[value]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source("[value]", &mut string_table, &mut span_builder);
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
     let mut expected_type = ExpectedType::Infer;
 
@@ -257,7 +274,9 @@ fn non_constant_context_template_head_keeps_runtime_template() {
 
 fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source(source, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)

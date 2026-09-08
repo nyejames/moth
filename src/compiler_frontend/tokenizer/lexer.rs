@@ -17,7 +17,7 @@ use crate::compiler_frontend::keywords::{
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -28,8 +28,8 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeFailure,
-    TokenizeMode, TokenizeOutput, TokenizerEntryMode,
+    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode,
+    TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -472,7 +472,10 @@ fn greater_than_is_template_tag_end(
 
 /// Tokenize one source file and attach its stable file identity metadata.
 ///
-/// WHAT: wraps lexing output in `FileTokens` carrying logical path and `SourceId`.
+/// WHAT: wraps lexing output in `FileTokens` carrying logical path and `SourceId`. Spans are
+/// encoded into the caller's `span_builder`, which the caller retains on every exit; successive
+/// tokenizations against one builder append to it.
+///
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
 pub fn tokenize(
     source_code: &str,
@@ -481,13 +484,14 @@ pub fn tokenize(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     file_id: SourceId,
-) -> Result<TokenizeOutput, TokenizeFailure> {
+    span_builder: &mut ExtendedSpanBuilder,
+) -> Result<FileTokens, Box<CompilerDiagnostic>> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
 
     let mut tokens: Vec<Token> = Vec::with_capacity(initial_capacity);
-    let mut stream = TokenStream::new(source_code, src_path, entry_mode);
+    let mut stream = TokenStream::new(source_code, src_path, entry_mode, span_builder);
 
     // `ModuleStart` is synthetic, but it can remain in a retained dormant `start` body. Give it
     // the source file scope so every token that crosses the prepared-file boundary has one
@@ -522,16 +526,7 @@ pub fn tokenize(
             last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
             meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
         };
-        token = match get_token_kind(&mut stream, style_directives, string_table, context) {
-            Ok(token) => token,
-            Err(diagnostic) => {
-                return Err(TokenizeFailure {
-                    file_id,
-                    diagnostic,
-                    span_builder: std::mem::take(&mut stream.extended_span_builder),
-                });
-            }
-        };
+        token = get_token_kind(&mut stream, style_directives, string_table, context)?;
     }
 
     tokens.push(token);
@@ -539,17 +534,10 @@ pub fn tokenize(
         &mut stream.path_syntax,
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
-    let span_builder = std::mem::replace(
-        &mut stream.extended_span_builder,
-        crate::compiler_frontend::source::ExtendedSpanBuilder::new(),
-    );
     let mut file_tokens =
         FileTokens::new_with_identity(src_path.to_owned(), file_id, None, tokens, path_syntax);
     file_tokens.token_stats = token_stats;
-    Ok(TokenizeOutput {
-        file_tokens,
-        span_builder,
-    })
+    Ok(file_tokens)
 }
 
 fn get_token_kind(

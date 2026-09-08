@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -41,15 +42,17 @@ use std::sync::Arc;
 fn parse_args(
     source: &str,
 ) -> Vec<crate::compiler_frontend::ast::expressions::call_argument::CallArgument> {
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let mut tokens = tokenize(
+    let mut tokens: FileTokens = tokenize(
         source,
         &file_path,
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -76,6 +79,7 @@ fn parse_args(
 fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         source,
         &file_path,
@@ -83,6 +87,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -150,6 +155,7 @@ fn parse_raw_call_args_for_test(
 fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         source,
         &file_path,
@@ -157,6 +163,7 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -275,6 +282,7 @@ fn retains_parser_selected_parameter_slots_for_named_and_positional_arguments() 
 fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         "call(1, third = 3)",
         &file_path,
@@ -282,6 +290,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 

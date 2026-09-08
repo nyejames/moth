@@ -13,8 +13,9 @@
 //! This is not a second Moth template parser or compiler mode. It uses the same owners as an
 //! integrated `.mtf` dependency and must never grow a parallel Markdown or template renderer.
 //! Physical file-reference resolution stays with the calling project. Its Stage 0 bundle retains
-//! the entry and content-source preparations, which this service consumes without preparing again
-//! or probing the filesystem. Source collection, scope policy and output packaging stay with the caller.
+//! the entry and content-source preparations with their original span builders, which this
+//! service consumes without preparing again or probing the filesystem. Source collection, scope
+//! policy and output packaging stay with the caller.
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
@@ -30,7 +31,7 @@ use crate::compiler_frontend::folded_value::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
-    HeaderParseOptions, bind_module_headers, prepare_header_syntax,
+    HeaderParseOptions, SourcePreparationDelta, bind_module_headers, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::module_compilation::FrontendOptions;
@@ -43,7 +44,8 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceRegistrationIndex,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -79,9 +81,8 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
 /// WHAT: the calling project's Stage 0 bundle for one template — its prepared entry and content
 ///       dependencies, the settled physical outcome of every prepared file-reference occurrence,
 ///       and the source identities of the template with all its dependencies.
-/// WHY:  physical file-reference resolution stays build-owned. The service consumes settled facts
-///       and never probes the filesystem, while route and output placement stay out of the
-///       compiler service entirely.
+/// WHY: physical file-reference resolution stays build-owned. The service consumes settled facts
+///      without filesystem probes, route placement or output placement.
 pub(crate) struct MothTemplateFileValueBundle {
     /// Prepared entry source with its final identity and frozen path syntax.
     pub(crate) prepared_entry: FileFrontendPrepareOutput,
@@ -90,9 +91,10 @@ pub(crate) struct MothTemplateFileValueBundle {
     /// One settled outcome per prepared file-reference occurrence across the template and its
     /// content dependencies, keyed by `source_files` identities.
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
-    /// Source identities of the template and all prepared content dependencies. The template's
-    /// own canonical path must be present.
-    pub(crate) source_files: SourceDatabase,
+    /// Exclusive owner of the template's and every content dependency's final identities. It
+    /// retains each source's original builder — discovery-prepared or standalone — until the
+    /// service installs every table after its last producer (folding or a diagnosed boundary).
+    pub(crate) source_files: SourceDatabaseBuilder,
     /// The owning module origin resource pieces intern against.
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
 }
@@ -144,7 +146,8 @@ pub(crate) fn compile_moth_template_source(
     let mut direct_source_code = request.source_code.take();
     let file_value_resolution = request.file_value_resolution.take();
     let bundle_input = file_value_resolution.is_some();
-    let (mut all_prepared, resolved_references, source_files, module_origin) =
+
+    let (mut all_prepared, resolved_references, mut source_builder, module_origin) =
         match file_value_resolution {
             Some(MothTemplateFileValueBundle {
                 prepared_entry,
@@ -173,37 +176,17 @@ pub(crate) fn compile_moth_template_source(
                     request.source_path,
                     SourceKind::Compiler(SourceFileKind::MothTemplate),
                 )));
-                let mut source_files =
-                    SourceDatabase::from_registration_index_sorted_by_logical_path(
-                        &registration_index,
-                        request.source_path,
-                        Some(&path_resolver),
-                        string_table,
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                let source_id = match source_files
-                    .get_by_canonical_path(request.source_path)
-                    .map(|identity| identity.id)
-                {
-                    Some(source_id) => source_id,
-                    None => {
-                        return Err(CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(
-                                "standalone Moth template source identity was not registered",
-                            ),
-                            string_table,
-                        ));
-                    }
-                };
-                if let Some(source_code) = direct_source_code.take() {
-                    source_files
-                        .retain_text(source_id, source_code)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                }
-                (Vec::new(), None, source_files, None)
+                let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+                    &registration_index,
+                    request.source_path,
+                    Some(&path_resolver),
+                    string_table,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let source_builder = SourceDatabaseBuilder::new(source_files);
+                (Vec::new(), None, source_builder, None)
             }
         };
-    let source_files = Arc::new(source_files);
 
     let mut preparation_warnings = Vec::new();
     for prepared_source in &mut all_prepared {
@@ -220,14 +203,16 @@ pub(crate) fn compile_moth_template_source(
         );
         return Err(attach_finalized_source_database(
             messages,
-            source_files,
-            all_prepared,
+            source_builder,
             string_table,
         ));
     }
 
-    let source_identity = match source_files.get_by_canonical_path(request.source_path) {
-        Some(source_identity) => source_identity,
+    let entry_file_id = match source_builder
+        .sources()
+        .get_by_canonical_path(request.source_path)
+    {
+        Some(source_identity) => source_identity.id,
         None => {
             let messages = CompilerMessages::from_error_with_warnings(
                 CompilerError::compiler_error(
@@ -238,13 +223,11 @@ pub(crate) fn compile_moth_template_source(
             );
             return Err(attach_finalized_source_database(
                 messages,
-                source_files,
-                all_prepared,
+                source_builder,
                 string_table,
             ));
         }
     };
-    let entry_file_id = source_identity.id;
     if all_prepared
         .first()
         .is_some_and(|prepared_entry| prepared_entry.file_id != entry_file_id)
@@ -258,14 +241,12 @@ pub(crate) fn compile_moth_template_source(
         );
         return Err(attach_finalized_source_database(
             messages,
-            source_files,
-            all_prepared,
+            source_builder,
             string_table,
         ));
     }
-    let source_code = match source_files.retained_text(entry_file_id) {
-        Some(source_code) => source_code,
-        None => {
+    if !bundle_input {
+        let Some(source_code) = direct_source_code.take() else {
             let messages = CompilerMessages::from_error_with_warnings(
                 CompilerError::compiler_error("Moth template source has no retained source text"),
                 preparation_warnings,
@@ -273,30 +254,67 @@ pub(crate) fn compile_moth_template_source(
             );
             return Err(attach_finalized_source_database(
                 messages,
-                source_files,
-                all_prepared,
+                source_builder,
                 string_table,
             ));
-        }
-    };
-    let entry_scope = source_files.legacy_logical_path(entry_file_id);
+        };
+        source_builder
+            .sources_mut()
+            .retain_text(entry_file_id, source_code)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    } else if source_builder
+        .sources()
+        .retained_text(entry_file_id)
+        .is_none()
+    {
+        let messages = CompilerMessages::from_error_with_warnings(
+            CompilerError::compiler_error("Moth template source has no retained source text"),
+            preparation_warnings,
+            string_table,
+        );
+        return Err(attach_finalized_source_database(
+            messages,
+            source_builder,
+            string_table,
+        ));
+    }
+    let entry_scope = source_builder.sources().legacy_logical_path(entry_file_id);
 
     // Consume Stage 0's retained entry syntax, or prepare the standalone source once.
     if !bundle_input {
-        let mut prepared = match prepare_template_source(
-            &source_files,
-            &path_resolver,
-            &request,
-            source_code,
-            entry_file_id,
-            string_table,
-        ) {
+        let outcome = {
+            let (sources, mut span_builders) = source_builder.split();
+            let source_code = sources
+                .retained_text(entry_file_id)
+                .expect("standalone entry text was retained immediately before preparation");
+            let delta = prepare_template_source(
+                sources,
+                &path_resolver,
+                &request,
+                source_code,
+                entry_file_id,
+                string_table,
+                span_builders.take_span_builder(entry_file_id),
+            );
+            span_builders.retain_span_builder(entry_file_id, delta.span_builder);
+            delta.result
+        };
+        let mut prepared = match outcome {
             Ok(prepared) => prepared,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                return Err(diagnosed_preparation_messages(
-                    source_files,
-                    all_prepared,
-                    error,
+                let FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                    ..
+                } = error;
+                let messages = CompilerMessages::from_diagnostic_with_warnings(
+                    *diagnostic,
+                    warnings,
+                    string_table,
+                );
+                return Err(attach_finalized_source_database(
+                    messages,
+                    source_builder,
                     string_table,
                 ));
             }
@@ -304,8 +322,7 @@ pub(crate) fn compile_moth_template_source(
                 let messages = CompilerMessages::from_error(error, string_table.clone());
                 return Err(attach_finalized_source_database(
                     messages,
-                    source_files,
-                    all_prepared,
+                    source_builder,
                     string_table,
                 ));
             }
@@ -321,8 +338,7 @@ pub(crate) fn compile_moth_template_source(
             );
             return Err(attach_finalized_source_database(
                 messages,
-                source_files,
-                all_prepared,
+                source_builder,
                 string_table,
             ));
         }
@@ -338,15 +354,14 @@ pub(crate) fn compile_moth_template_source(
             CompilerMessages::from_error_with_warnings(error, preparation_warnings, string_table);
         return Err(attach_finalized_source_database(
             messages,
-            source_files,
-            all_prepared,
+            source_builder,
             string_table,
         ));
     }
 
     let sorted = match order_template_headers(
         &mut all_prepared,
-        &source_files,
+        source_builder.sources(),
         &path_resolver,
         resolved_references.as_ref(),
         string_table,
@@ -358,8 +373,7 @@ pub(crate) fn compile_moth_template_source(
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
             return Err(attach_finalized_source_database(
                 messages,
-                source_files,
-                all_prepared,
+                source_builder,
                 string_table,
             ));
         }
@@ -372,7 +386,7 @@ pub(crate) fn compile_moth_template_source(
         &request,
         string_table,
         resolved_references,
-        source_files,
+        source_builder,
         module_origin,
     );
 
@@ -381,21 +395,20 @@ pub(crate) fn compile_moth_template_source(
             content,
             module_resources,
             mut warnings,
-            source_database,
+            source_builder,
         } => {
             let mut source_database_warnings = preparation_warnings;
             source_database_warnings.append(&mut warnings);
-            let source_database =
-                match finalize_source_database(source_database, all_prepared, None) {
-                    Ok(source_database) => source_database,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_with_warnings(
-                            error,
-                            source_database_warnings,
-                            string_table,
-                        ));
-                    }
-                };
+            let source_database = match source_builder.finish() {
+                Ok(source_database) => source_database,
+                Err(error) => {
+                    return Err(CompilerMessages::from_error_with_warnings(
+                        error,
+                        source_database_warnings,
+                        string_table,
+                    ));
+                }
+            };
             Ok(FoldedMothTemplate {
                 content,
                 module_resources,
@@ -406,13 +419,12 @@ pub(crate) fn compile_moth_template_source(
 
         TemplateSemanticOutcome::Diagnosed {
             mut messages,
-            source_database,
+            source_builder,
         } => {
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
             Err(attach_finalized_source_database(
                 messages,
-                source_database,
-                all_prepared,
+                source_builder,
                 string_table,
             ))
         }
@@ -424,15 +436,15 @@ enum TemplateSemanticOutcome {
         content: OwnedFoldedString,
         module_resources: ModuleResourceTable,
         warnings: Vec<CompilerDiagnostic>,
-        source_database: Arc<SourceDatabase>,
+        source_builder: SourceDatabaseBuilder,
     },
     Diagnosed {
         messages: CompilerMessages,
-        source_database: Arc<SourceDatabase>,
+        source_builder: SourceDatabaseBuilder,
     },
 }
 
-/// Bind and order retained syntax without consuming its source-local span builders.
+/// Bind and order retained syntax without consuming the preparation owner's span builders.
 fn order_template_headers(
     prepared_sources: &mut [FileFrontendPrepareOutput],
     source_files: &SourceDatabase,
@@ -467,19 +479,20 @@ fn fold_template_semantics(
     request: &MothTemplateCompilationRequest<'_>,
     string_table: &mut StringTable,
     resolved_references: Option<ResolvedFileReferenceTable>,
-    source_database: Arc<SourceDatabase>,
+    source_builder: SourceDatabaseBuilder,
     module_origin: Option<StableModuleOriginIdentity>,
 ) -> TemplateSemanticOutcome {
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
 
-    // This Arc is private to the service. All AST readers end before finalization needs exclusive
-    // access, so installation can reuse the allocation without cloning the database.
+    // The owner shares its database with every AST reader. All of them end before the outcome
+    // returns, so the caller can regain exclusive access and install each span table once.
+    let source_database = source_builder.sources();
     let ast_result = {
         let file_value_resolution = resolved_references.map(|resolved_file_references| {
             Rc::new(FileValueResolutionServices {
                 stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                     resolved_file_references,
-                    Arc::clone(&source_database),
+                    Arc::clone(source_database),
                 ))),
                 module_resources: Rc::clone(&module_resources),
                 module_origin,
@@ -499,7 +512,7 @@ fn fold_template_semantics(
         Err(messages) => {
             return TemplateSemanticOutcome::Diagnosed {
                 messages,
-                source_database,
+                source_builder,
             };
         }
     };
@@ -523,7 +536,7 @@ fn fold_template_semantics(
                     warnings,
                     string_table,
                 ),
-                source_database,
+                source_builder,
             };
         }
     };
@@ -533,49 +546,27 @@ fn fold_template_semantics(
             content,
             module_resources,
             warnings,
-            source_database,
+            source_builder,
         },
         Err(mut messages) => {
             messages.prepend_diagnostics_preserving_context(warnings);
             TemplateSemanticOutcome::Diagnosed {
                 messages,
-                source_database,
+                source_builder,
             }
         }
     }
 }
 
-fn finalize_source_database(
-    mut source_database: Arc<SourceDatabase>,
-    prepared_sources: Vec<FileFrontendPrepareOutput>,
-    failed_builder: Option<(SourceId, ExtendedSpanBuilder)>,
-) -> Result<Arc<SourceDatabase>, CompilerError> {
-    let sources = Arc::get_mut(&mut source_database).ok_or_else(|| {
-        CompilerError::compiler_error(
-            "Moth template source database remained shared after semantic folding",
-        )
-    })?;
-    for prepared_source in prepared_sources {
-        sources.install_extended_spans(
-            prepared_source.file_id,
-            prepared_source.span_builder.freeze(),
-        )?;
-    }
-    if let Some((file_id, span_builder)) = failed_builder {
-        sources.install_extended_spans(file_id, span_builder.freeze())?;
-    }
-    Ok(source_database)
-}
-
+/// Finalize the private source database once its last span producer has finished.
 fn attach_finalized_source_database(
     mut messages: CompilerMessages,
-    source_database: Arc<SourceDatabase>,
-    prepared_sources: Vec<FileFrontendPrepareOutput>,
+    source_builder: SourceDatabaseBuilder,
     string_table: &StringTable,
 ) -> CompilerMessages {
-    match finalize_source_database(source_database, prepared_sources, None) {
-        Ok(source_database) => {
-            messages.set_source_database(source_database);
+    match source_builder.finish() {
+        Ok(source_files) => {
+            messages.set_source_database(source_files);
             messages
         }
         Err(error) => CompilerMessages::from_error_with_warnings(
@@ -586,46 +577,19 @@ fn attach_finalized_source_database(
     }
 }
 
-fn diagnosed_preparation_messages(
-    source_database: Arc<SourceDatabase>,
-    prepared_sources: Vec<FileFrontendPrepareOutput>,
-    error: FileFrontendPrepareError,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let FileFrontendPrepareError {
-        file_id,
-        warnings,
-        diagnostic,
-        span_builder,
-    } = error;
-    let messages =
-        CompilerMessages::from_diagnostic_with_warnings(*diagnostic, warnings, string_table);
-    match finalize_source_database(
-        source_database,
-        prepared_sources,
-        Some((file_id, span_builder)),
-    ) {
-        Ok(source_database) => {
-            let mut messages = messages;
-            messages.set_source_database(source_database);
-            messages
-        }
-        Err(error) => CompilerMessages::from_error_with_warnings(
-            error,
-            messages.into_diagnostics(),
-            string_table,
-        ),
-    }
-}
-
+/// Prepare the standalone template source exactly once.
+///
+/// The preparation owner lends its split database and span-builder view for this one call, so
+/// the delta's returned builder can be retained beside the immutable borrow that produced it.
 fn prepare_template_source(
-    source_files: &SourceDatabase,
+    source_files: &Arc<SourceDatabase>,
     path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
     source_code: &str,
     entry_file_id: SourceId,
     string_table: &mut StringTable,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    span_builder: ExtendedSpanBuilder,
+) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
         project_path_resolver: Some(path_resolver),
@@ -643,6 +607,8 @@ fn prepare_template_source(
             source_code,
             source_path: request.source_path.to_path_buf(),
         },
+        source_id: entry_file_id,
+        span_builder,
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };

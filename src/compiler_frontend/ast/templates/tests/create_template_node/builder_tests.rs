@@ -51,10 +51,12 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
 
     // Re-parse with a context that lacks '$brand' to exercise template-head fallback dispatch.
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         "[$brand: body]",
         &tokenization_registry,
         &mut string_table,
+        &mut span_builder,
     );
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
@@ -81,6 +83,7 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
 #[test]
 fn builder_registered_style_directive_parses_as_noop_scaffold() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -91,6 +94,7 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
         "[$brand: body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
@@ -108,6 +112,7 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
 #[test]
 fn builder_effects_only_handler_updates_style_without_formatter() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -127,6 +132,7 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
         "[$brand: body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
@@ -142,6 +148,7 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
 #[test]
 fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -152,6 +159,7 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
         "[$brand(\"tone\"): body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
@@ -172,6 +180,7 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
 #[test]
 fn builder_registered_handler_directive_accepts_declared_optional_argument_type() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -188,6 +197,7 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
         "[$brand(\"theme\"): body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
@@ -204,6 +214,7 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
 #[test]
 fn builder_registered_handler_directive_rejects_multiple_arguments() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -220,6 +231,7 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
         "[$brand(\"theme\", \"extra\"): body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);
@@ -238,6 +250,7 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
 #[test]
 fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -254,6 +267,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
         "[$brand(value): body]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = runtime_template_context_with_style_directives(
         &token_stream.src_path,
@@ -276,6 +290,7 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
 #[test]
 fn builder_registered_style_directive_preserves_raw_body_whitespace() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -286,6 +301,7 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
         "[$brand:\n    Hello\n    World\n]",
         &directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context =
         new_constant_context(token_stream.src_path.to_owned()).with_style_directives(&registry);

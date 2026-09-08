@@ -339,297 +339,310 @@ fn compile_single_file_frontend_with_target(
             return Err(messages);
         }
     };
-    let source_files = Arc::new(collected.source_files);
-    *project_source_files = Some(Arc::clone(&source_files));
+    let mut source_owner = collected.source_files;
     let input_files = collected.input_files;
     let resolved_file_references = collected.resolved_file_references;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
+    // Split the discovery builder once: preparation and semantic compilation borrow the
+    // immutable database beside the retained span builders, and the builder stays the exclusive
+    // owner that finalizes every table after the last span producer returns.
+    let (source_files, mut source_spans) = source_owner.split();
+
     // Share the effective external package registry immutably for the rest of the frontend
     // pipeline so each stage does not need its own deep clone.
     let external_packages = Arc::new(builder_surface.binding_packages.clone());
+    // Every stage after the split runs inside one scoped pipeline. Its early returns funnel
+    // through the single finalization tail below, so a diagnosed or infrastructure failure can
+    // never drop the builder with live span owners or an unfinalized table.
+    let result = (|| -> Result<SingleFileFrontendResult, CompilerMessages> {
+        add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
 
-    // 5. Run the module compilation pipeline with a local string-table delta.
-    add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
+        let string_table_fork = string_table.fork_for_module();
+        let (local_table, base_len) = string_table_fork.into_parts();
 
-    let string_table_fork = string_table.fork_for_module();
-    let (local_table, base_len) = string_table_fork.into_parts();
+        timing_scope_attributed!(
+            timing_guard_boundary_compile,
+            crate::timing::TimingMetric::BoundaryCompile,
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        );
 
-    timing_scope_attributed!(
-        timing_guard_boundary_compile,
-        crate::timing::TimingMetric::BoundaryCompile,
-        Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-    );
+        // Record module-input counters before preparation so the frontend module total can be
+        // attributed even when preparation fails. A source-load failure is replayed here from the
+        // final database rather than being replaced with a fabricated zero byte length.
+        let source_byte_count = match record_module_input_counters(&input_files, source_files) {
+            Ok(source_byte_count) => source_byte_count,
+            Err(error) => {
+                return Err(CompilerMessages::from_error_ref(error, string_table));
+            }
+        };
 
-    // Record module-input counters before preparation so the frontend module total can be
-    // attributed even when preparation fails. A source-load failure is replayed here from the
-    // final database rather than being replaced with a fabricated zero byte length.
-    let source_byte_count = match record_module_input_counters(&input_files, &source_files) {
-        Ok(source_byte_count) => source_byte_count,
-        Err(error) => {
-            return Err(CompilerMessages::from_error_ref(error, string_table));
-        }
-    };
-
-    // Register the single synthetic module with its portable logical identity and source facts.
-    // The empty path is this mode's fixed entry-root logical spelling, matching the origin
-    // constructed below.
-    #[cfg(feature = "timers")]
-    let timing_module_key = crate::timing::register_timing_module(
-        timing_boundary,
-        0,
-        "",
-        input_files.len() as u64,
-        source_byte_count as u64,
-    );
-    #[cfg(feature = "timers")]
-    let timing_module_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
-
-    // Single-file compilation is a separate synthetic-module mode: it builds one deterministic
-    // normal-module origin from the configured project identity, the empty logical module path
-    // and `ModuleRootRole::Normal`. The empty path is the entry-root spelling and is always valid,
-    // so construction failure is a proven internal invariant surfaced through the existing
-    // `CompilerError`/`CompilerMessages` lane rather than a panic. The origin travels through
-    // preparation into semantic compilation so the single-file module receives the same canonical
-    // identity contract as a directory-discovered module.
-    let stable_origin = match StableModuleOriginIdentity::from_relative_logical_path(
-        StablePackageIdentity::project_local(&config.project_name),
-        Path::new(""),
-        ModuleRootRole::Normal,
-    ) {
-        Ok(origin) => origin,
-        Err(error) => {
-            return Err(CompilerMessages::from_error_ref(error, string_table));
-        }
-    };
-    let preparation_context = ModulePreparationContext {
-        source_files: &source_files,
-        style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
-    };
-
-    let graph_stable_origin = stable_origin.clone();
-    #[cfg(feature = "timers")]
-    let prepare_result = preparation_context.prepare_module(
-        stable_origin,
-        input_files,
-        &entry_path,
-        local_table,
-        source_byte_count,
-        timing_module_context,
-    );
-    #[cfg(not(feature = "timers"))]
-    let prepare_result = preparation_context.prepare_module(
-        stable_origin,
-        input_files,
-        &entry_path,
-        local_table,
-        source_byte_count,
-    );
-    let mut prepared = match prepare_result {
-        Ok(prepared) => prepared,
-        Err(messages) => {
-            return Err(messages);
-        }
-    };
-    attach_single_file_resolved_references(
-        &mut prepared,
-        &source_files,
-        resolved_file_references,
-        string_table,
-    )?;
-
-    let source_facts =
-        config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
-    let effective_project_fields = config_boundary::effective_project_fields(config, string_table)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let fixed_project_facts =
-        config_boundary::fixed_project_contract_facts(&effective_project_fields);
-    let direct_project_facts =
-        config_boundary::direct_project_contract_facts(&effective_project_fields);
-    let fallback_location = SourceLocation::from_path(&config.entry_dir, string_table);
-    let build_config_values = config_boundary::resolve_boundary_build_config(
-        &source_facts,
-        &fixed_project_facts,
-        &direct_project_facts,
-        build_config_inputs,
-        builder_surface.config_globals(),
-        fallback_location,
-        string_table,
-    )?;
-    // Semantic compilation is one compiler service call. A synthetic single-file module has no
-    // completed providers, so it binds against empty provider and materialisation views.
-    let source_provider_dependencies = SourceProviderDependencySet::default();
-    let mut provider_materialisations = ProviderMaterialisationRegistry::default();
-    let mut generated_store = BoundaryGeneratedFunctionStore::default();
-    let compile_context = ModuleCompilationContext {
-        options: config.frontend_options(),
-        build_profile,
-        root_role_override: None,
-        project_path_resolver: Some(&project_path_resolver),
-        source_files: &source_files,
-        style_directives,
-        external_packages: Arc::clone(&external_packages),
-        build_config_values: Arc::new(build_config_values),
-        external_dependency_resolution_table: &builder_surface.external_dependency_resolution_table,
-        source_provider_dependencies: &source_provider_dependencies,
-        provider_materialisations: &provider_materialisations,
-        builder_runtime_packages: &builder_surface.builder_runtime_packages,
-    };
-    let semantic = prepared.semantic;
-
-    timing_scope_attributed!(
-        timing_guard_frontend_module_semantic_total,
-        crate::timing::TimingMetric::FrontendModuleSemanticTotal,
-        timing_module_context,
-    );
-    #[cfg(feature = "boracle")]
-    if target == SingleFileFrontendTarget::Boracle {
+        // Register the single synthetic module with its portable logical identity and source facts.
+        // The empty path is this mode's fixed entry-root logical spelling, matching the origin
+        // constructed below.
         #[cfg(feature = "timers")]
-        let boracle_result = compile_module_for_boracle(
+        let timing_module_key = crate::timing::register_timing_module(
+            timing_boundary,
+            0,
+            "",
+            input_files.len() as u64,
+            source_byte_count as u64,
+        );
+        #[cfg(feature = "timers")]
+        let timing_module_context =
+            Some(crate::timing::TimingContext::for_module(timing_module_key));
+
+        // Single-file compilation is a separate synthetic-module mode: it builds one deterministic
+        // normal-module origin from the configured project identity, the empty logical module path
+        // and `ModuleRootRole::Normal`. The empty path is the entry-root spelling and is always valid,
+        // so construction failure is a proven internal invariant surfaced through the existing
+        // `CompilerError`/`CompilerMessages` lane rather than a panic. The origin travels through
+        // preparation into semantic compilation so the single-file module receives the same canonical
+        // identity contract as a directory-discovered module.
+        let stable_origin = match StableModuleOriginIdentity::from_relative_logical_path(
+            StablePackageIdentity::project_local(&config.project_name),
+            Path::new(""),
+            ModuleRootRole::Normal,
+        ) {
+            Ok(origin) => origin,
+            Err(error) => {
+                return Err(CompilerMessages::from_error_ref(error, string_table));
+            }
+        };
+        let preparation_context = ModulePreparationContext {
+            source_files,
+            style_directives,
+            project_path_resolver: Some(project_path_resolver.clone()),
+        };
+
+        let graph_stable_origin = stable_origin.clone();
+        #[cfg(feature = "timers")]
+        let prepare_result = preparation_context.prepare_module(
+            stable_origin,
+            input_files,
+            &mut source_spans,
+            &entry_path,
+            local_table,
+            source_byte_count,
+            timing_module_context,
+        );
+        #[cfg(not(feature = "timers"))]
+        let prepare_result = preparation_context.prepare_module(
+            stable_origin,
+            input_files,
+            &mut source_spans,
+            &entry_path,
+            local_table,
+            source_byte_count,
+        );
+        let mut prepared = match prepare_result {
+            Ok(prepared) => prepared,
+            Err(messages) => {
+                return Err(messages);
+            }
+        };
+        attach_single_file_resolved_references(
+            &mut prepared,
+            source_files,
+            resolved_file_references,
+            string_table,
+        )?;
+
+        let source_facts =
+            config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
+        let effective_project_fields =
+            config_boundary::effective_project_fields(config, string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let fixed_project_facts =
+            config_boundary::fixed_project_contract_facts(&effective_project_fields);
+        let direct_project_facts =
+            config_boundary::direct_project_contract_facts(&effective_project_fields);
+        let fallback_location = SourceLocation::from_path(&config.entry_dir, string_table);
+        let build_config_values = config_boundary::resolve_boundary_build_config(
+            &source_facts,
+            &fixed_project_facts,
+            &direct_project_facts,
+            build_config_inputs,
+            builder_surface.config_globals(),
+            fallback_location,
+            string_table,
+        )?;
+        // Semantic compilation is one compiler service call. A synthetic single-file module has no
+        // completed providers, so it binds against empty provider and materialisation views.
+        let source_provider_dependencies = SourceProviderDependencySet::default();
+        let mut provider_materialisations = ProviderMaterialisationRegistry::default();
+        let mut generated_store = BoundaryGeneratedFunctionStore::default();
+        let compile_context = ModuleCompilationContext {
+            options: config.frontend_options(),
+            build_profile,
+            root_role_override: None,
+            project_path_resolver: Some(&project_path_resolver),
+            source_files,
+            style_directives,
+            external_packages: Arc::clone(&external_packages),
+            build_config_values: Arc::new(build_config_values),
+            external_dependency_resolution_table: &builder_surface
+                .external_dependency_resolution_table,
+            source_provider_dependencies: &source_provider_dependencies,
+            provider_materialisations: &provider_materialisations,
+            builder_runtime_packages: &builder_surface.builder_runtime_packages,
+        };
+        let semantic = prepared.semantic;
+
+        timing_scope_attributed!(
+            timing_guard_frontend_module_semantic_total,
+            crate::timing::TimingMetric::FrontendModuleSemanticTotal,
+            timing_module_context,
+        );
+        #[cfg(feature = "boracle")]
+        if target == SingleFileFrontendTarget::Boracle {
+            #[cfg(feature = "timers")]
+            let boracle_result = compile_module_for_boracle(
+                &compile_context,
+                semantic,
+                generated_store.known_generated(),
+                timing_module_context,
+            );
+            #[cfg(not(feature = "timers"))]
+            let boracle_result = compile_module_for_boracle(
+                &compile_context,
+                semantic,
+                generated_store.known_generated(),
+            );
+            #[cfg(feature = "timers")]
+            timing_guard_frontend_module_semantic_total.finish();
+            #[cfg(feature = "timers")]
+            timing_guard_boundary_compile.finish();
+            // The Boracle service consumed its retained payload and no span producer remains; the
+            // enclosing finalization tail installs every table before this result escapes.
+            return boracle_result.map(|input| SingleFileFrontendResult::Boracle(Box::new(input)));
+        }
+        #[cfg(not(feature = "boracle"))]
+        let _ = target;
+        #[cfg(feature = "timers")]
+        let semantic_result = compile_module(
             &compile_context,
             semantic,
             generated_store.known_generated(),
             timing_module_context,
         );
         #[cfg(not(feature = "timers"))]
-        let boracle_result = compile_module_for_boracle(
+        let semantic_result = compile_module(
             &compile_context,
             semantic,
             generated_store.known_generated(),
         );
         #[cfg(feature = "timers")]
         timing_guard_frontend_module_semantic_total.finish();
-        #[cfg(feature = "timers")]
-        timing_guard_boundary_compile.finish();
-        return boracle_result.map(|input| SingleFileFrontendResult::Boracle(Box::new(input)));
-    }
-    #[cfg(not(feature = "boracle"))]
-    let _ = target;
-    #[cfg(feature = "timers")]
-    let semantic_result = compile_module(
-        &compile_context,
-        semantic,
-        generated_store.known_generated(),
-        timing_module_context,
-    );
-    #[cfg(not(feature = "timers"))]
-    let semantic_result = compile_module(
-        &compile_context,
-        semantic,
-        generated_store.known_generated(),
-    );
-    #[cfg(feature = "timers")]
-    timing_guard_frontend_module_semantic_total.finish();
-    let result = match semantic_result {
-        Ok(ModuleCompilationOutcome::Success(compiled)) => *compiled,
-        Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
-            let mut messages = diagnostics.into_messages();
-            messages.set_source_database(Arc::clone(&source_files));
-            let remap = string_table.merge_delta_from(&messages.string_table, base_len);
-            if !remap.is_identity() {
-                messages.remap_string_ids(&remap);
-            }
-            let diagnosed = ModuleDiagnostics::from_messages(messages)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            let graph = ProjectModuleGraph::from_normal_roots(vec![(
-                graph_stable_origin,
-                source_root,
-                entry_path,
-            )]);
-            let module_id = graph
-                .entry_modules()
-                .first()
-                .copied()
-                .expect("a single-module graph has one normal entry");
-            let mut modules = ModuleArtifactStore::new(1);
-            modules
-                .mark_diagnosed(module_id)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-            let boundary = CompiledGraphBoundary {
-                structure: graph,
-                modules,
-                generated: generated_store,
-                diagnosed: vec![DiagnosedModule {
+        let outcome = semantic_result
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let graph = ProjectModuleGraph::from_normal_roots(vec![(
+            graph_stable_origin.clone(),
+            source_root,
+            entry_path,
+        )]);
+        let module_id = graph
+            .entry_modules()
+            .first()
+            .copied()
+            .expect("a single-module graph has one normal entry");
+        let mut modules = ModuleArtifactStore::new(1);
+        let diagnosed = match outcome {
+            ModuleCompilationOutcome::Success(compiled) => {
+                #[cfg(feature = "timers")]
+                timing_guard_boundary_compile.finish();
+                let remap = string_table.merge_delta_from(&compiled.string_table, base_len);
+                let ModuleSemanticResult {
+                    mut module,
+                    mut generated_delta,
+                    resource_source_associations,
+                    string_table: _,
+                    public_interface,
+                } = *compiled;
+                if !remap.is_identity() {
+                    module.remap_string_ids(&remap);
+                    generated_delta.remap_string_ids(&remap);
+                }
+                publish_module_and_generated(ModuleBoundaryPublication {
+                    modules: &mut modules,
+                    generated: &mut generated_store,
+                    materialisations: &mut provider_materialisations,
+                    resource_inputs: &mut resource_inputs,
                     module_id,
-                    diagnostics: diagnosed,
-                }],
-                blocked: Vec::new(),
-            };
-            return ProjectFrontendCompilation::new(
-                boundary
-                    .finish()
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                CompletedSourcePackageRegistry::new(),
-                resource_inputs,
-            )
-            .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table));
+                    expected_origin: &graph_stable_origin,
+                    artifact: CompiledModuleArtifact {
+                        module,
+                        interface: public_interface,
+                    },
+                    generated_delta,
+                    resource_source_associations,
+                })
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                Vec::new()
+            }
+            ModuleCompilationOutcome::Diagnosed(diagnostics) => {
+                let mut messages = diagnostics.into_messages();
+                let remap = string_table.merge_delta_from(&messages.string_table, base_len);
+                if !remap.is_identity() {
+                    messages.remap_string_ids(&remap);
+                }
+                let diagnostics = ModuleDiagnostics::from_messages(messages)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                modules
+                    .mark_diagnosed(module_id)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                vec![DiagnosedModule {
+                    module_id,
+                    diagnostics,
+                }]
+            }
+        };
+        let boundary = CompiledGraphBoundary {
+            structure: graph,
+            modules,
+            generated: generated_store,
+            diagnosed,
+            blocked: Vec::new(),
+        };
+        ProjectFrontendCompilation::new(
+            boundary
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+            CompletedSourcePackageRegistry::new(),
+            resource_inputs,
+        )
+        .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+    })();
+    let finalized = source_owner
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    *project_source_files = Some(Arc::clone(&finalized));
+    match result {
+        Ok(SingleFileFrontendResult::Project(mut compilation)) => {
+            for diagnosed in &mut compilation.project.diagnosed {
+                diagnosed
+                    .diagnostics
+                    .set_source_database(Arc::clone(&finalized));
+            }
+            for messages in &mut compilation.transient_messages {
+                if messages.source_database_for_diagnostic(0).is_none() {
+                    messages.set_source_database(Arc::clone(&finalized));
+                }
+            }
+            Ok(SingleFileFrontendResult::Project(compilation))
         }
-        Err(error) => {
-            return Err(CompilerMessages::from_error_ref(error, string_table));
+        #[cfg(feature = "boracle")]
+        Ok(SingleFileFrontendResult::Boracle(input)) => {
+            Ok(SingleFileFrontendResult::Boracle(input))
         }
-    };
-    #[cfg(feature = "timers")]
-    timing_guard_boundary_compile.finish();
-
-    // 6. Merge local results back into the global build context.
-    let remap = string_table.merge_delta_from(&result.string_table, base_len);
-    let ModuleSemanticResult {
-        mut module,
-        mut generated_delta,
-        resource_source_associations,
-        string_table: _,
-        public_interface,
-    } = result;
-    if !remap.is_identity() {
-        module.remap_string_ids(&remap);
-        generated_delta.remap_string_ids(&remap);
+        Err(mut messages) => {
+            if messages.source_database_for_diagnostic(0).is_none() {
+                messages.set_source_database(finalized);
+            }
+            Err(messages)
+        }
     }
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        graph_stable_origin.clone(),
-        source_root,
-        entry_path,
-    )]);
-    let module_id = graph
-        .entry_modules()
-        .first()
-        .copied()
-        .expect("a single-module graph has one normal entry");
-    let mut modules = ModuleArtifactStore::new(1);
-    let artifact = CompiledModuleArtifact {
-        module,
-        interface: public_interface,
-    };
-    publish_module_and_generated(ModuleBoundaryPublication {
-        modules: &mut modules,
-        generated: &mut generated_store,
-        materialisations: &mut provider_materialisations,
-        resource_inputs: &mut resource_inputs,
-        module_id,
-        expected_origin: &graph_stable_origin,
-        artifact,
-        generated_delta,
-        resource_source_associations,
-    })
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let boundary = CompiledGraphBoundary {
-        structure: graph,
-        modules,
-        generated: generated_store,
-        diagnosed: Vec::new(),
-        blocked: Vec::new(),
-    };
-    ProjectFrontendCompilation::new(
-        boundary
-            .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-        CompletedSourcePackageRegistry::new(),
-        resource_inputs,
-    )
-    .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
 /// Rebind synthetic Stage 0 file-reference rows to the boundary's source identities.

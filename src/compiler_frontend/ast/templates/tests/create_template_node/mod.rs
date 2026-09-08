@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -62,15 +63,25 @@ fn numeric_token(value: &str, line: i32, string_table: &mut StringTable) -> Toke
     )
 }
 
-fn template_tokens_from_source(source: &str, string_table: &mut StringTable) -> FileTokens {
+fn template_tokens_from_source(
+    source: &str,
+    string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> FileTokens {
     let style_directives = frontend_test_style_directives();
-    template_tokens_from_source_with_style_directives(source, &style_directives, string_table)
+    template_tokens_from_source_with_style_directives(
+        source,
+        &style_directives,
+        string_table,
+        span_builder,
+    )
 }
 
 fn template_tokens_from_source_with_style_directives(
     source: &str,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
     let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
     let mut tokens = tokenize(
@@ -80,9 +91,9 @@ fn template_tokens_from_source_with_style_directives(
         style_directives,
         string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
 
     tokens.index = tokens
         .tokens
@@ -102,11 +113,16 @@ fn template_tokens_from_source_with_directives(
     source: &str,
     directives: &[StyleDirectiveSpec],
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
-    let mut tokens =
-        template_tokens_from_source_with_style_directives(source, &registry, string_table);
+    let mut tokens = template_tokens_from_source_with_style_directives(
+        source,
+        &registry,
+        string_table,
+        span_builder,
+    );
 
     tokens.index = tokens
         .tokens
@@ -306,10 +322,12 @@ fn folded_template_output_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
@@ -332,6 +350,7 @@ fn template_parse_rendered_error_with_style_directives(
     source: &str,
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let mut token_stream = match tokenize(
@@ -341,11 +360,10 @@ fn template_parse_rendered_error_with_style_directives(
         style_directives,
         &mut string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     ) {
         Ok(tokens) => tokens,
-        Err(crate::compiler_frontend::tokenizer::tokens::TokenizeFailure {
-            diagnostic, ..
-        }) => {
+        Err(diagnostic) => {
             return render_test_diagnostic(&diagnostic, &string_table);
         }
     };
@@ -412,10 +430,12 @@ fn template_warnings_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = if runtime_context {
         runtime_template_context_with_style_directives(

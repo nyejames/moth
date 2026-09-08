@@ -6,7 +6,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyClauseParseError;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -15,13 +15,17 @@ use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, Token, TokenKind, TokenizerEntryMode,
 };
 
-fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
+fn tokenize_source(source: &str) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
     tokenize_named_source(source, "test.moth")
 }
 
-fn tokenize_named_source(source: &str, file_name: &str) -> (FileTokens, StringTable) {
+fn tokenize_named_source(
+    source: &str,
+    file_name: &str,
+) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str(file_name, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = tokenize(
         source,
         &source_path,
@@ -29,10 +33,10 @@ fn tokenize_named_source(source: &str, file_name: &str) -> (FileTokens, StringTa
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .expect("source should tokenize")
-    .file_tokens;
-    (tokens, string_table)
+    .expect("source should tokenize");
+    (tokens, string_table, span_builder)
 }
 
 fn path_token_index(tokens: &FileTokens) -> usize {
@@ -54,7 +58,7 @@ fn expect_infrastructure_error(error: DependencyClauseParseError, case: &str) {
 }
 
 fn parse_clause(source: &str) -> (ScannedDependencyClause, StringTable) {
-    let (tokens, string_table) = tokenize_source(source);
+    let (tokens, string_table, _span_builder) = tokenize_source(source);
     let path_index = tokens
         .tokens
         .iter()
@@ -66,7 +70,7 @@ fn parse_clause(source: &str) -> (ScannedDependencyClause, StringTable) {
 }
 
 fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
-    let (tokens, _) = tokenize_source(source);
+    let (tokens, _, _span_builder) = tokenize_source(source);
     let path_index = tokens
         .tokens
         .iter()
@@ -196,15 +200,15 @@ fn rejects_namespace_alias_followed_by_selections_and_delimiters() {
 
 #[test]
 fn corrupted_path_lookup_is_infrastructure_error() {
-    let (tokens, _) = tokenize_source("@core/math sin\n");
+    let (tokens, _, _span_builder) = tokenize_source("@core/math sin\n");
     let path_index = path_token_index(&tokens);
-    let (two_path_tokens, _) = tokenize_source("@core/math\n@other/path\n");
+    let (two_path_tokens, _, _span_builder) = tokenize_source("@core/math\n@other/path\n");
     let second_path_index = two_path_tokens
         .tokens
         .iter()
         .rposition(|token| matches!(token.kind, TokenKind::Path(_)))
         .expect("expected a second path token");
-    let (other_file, _) = tokenize_named_source("@other/path sin\n", "other.moth");
+    let (other_file, _, _span_builder) = tokenize_named_source("@other/path sin\n", "other.moth");
     let mut location_mismatch_tokens = tokens.tokens.clone();
     location_mismatch_tokens[path_index]
         .location

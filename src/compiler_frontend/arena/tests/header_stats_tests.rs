@@ -53,9 +53,9 @@ fn multi_file_declarations_are_aggregated() {
     let entry_path = PathBuf::from("src/@page.moth");
     let helper_path = PathBuf::from("src/helper.moth");
 
-    let entry_output =
+    let (entry_output, _span_builder) =
         prepare_single_file("[runtime1]\n", &entry_path, &entry_path, &mut string_table);
-    let helper_output = prepare_single_file(
+    let (helper_output, _span_builder) = prepare_single_file(
         "helper_func || -> Int:\n    return 1\n;\n",
         &helper_path,
         &entry_path,

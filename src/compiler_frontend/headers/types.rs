@@ -1075,9 +1075,6 @@ pub struct FileFrontendPrepareOutput {
     /// Stable source identity used by the prepared-file invariant gate to validate every header
     /// stream and retained dependency shell before module aggregation.
     pub file_id: SourceId,
-    /// The source-local span table remains live across aggregation until the owning boundary
-    /// finishes every span-producing stage.
-    pub(crate) span_builder: ExtendedSpanBuilder,
     /// The sole file-owned table while source preparation remains mutable, then the immutable
     /// table shared by every retained header stream from this file.
     pub(crate) path_syntax: PreparedFilePathSyntax,
@@ -1198,12 +1195,19 @@ impl PreparedFilePathSyntax {
     }
 }
 
-/// Failed per-file header preparation plus the source data needed to resolve its diagnostics.
+/// A source preparation owner retained independently of its result.
 ///
-/// WHAT: retains the real source identity and the live source-local span builder alongside
-///       warnings emitted before the failure and the primary diagnostic.
-/// WHY: the header producer remains the exclusive owner of every span row until a later
-///      preparation boundary takes over, including when parsing rejects the authored source.
+/// The same builder survives successful syntax, source diagnosis and infrastructure failure.
+/// File/chunk consumers return it to the source owner before propagating any result.
+pub(crate) struct SourcePreparationDelta {
+    pub(crate) file_id: SourceId,
+    pub(crate) span_builder: ExtendedSpanBuilder,
+    pub(crate) result: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
+}
+
+/// A diagnosed file preparation result and warnings emitted before rejection.
+///
+/// Its source's live span builder belongs to the enclosing preparation owner.
 #[derive(Debug)]
 pub struct FileFrontendPrepareError {
     #[allow(
@@ -1213,7 +1217,6 @@ pub struct FileFrontendPrepareError {
     pub(crate) file_id: SourceId,
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: Box<CompilerDiagnostic>,
-    pub(crate) span_builder: ExtendedSpanBuilder,
 }
 
 /// Per-file preparation outcome that preserves the diagnostic and infrastructure lanes.

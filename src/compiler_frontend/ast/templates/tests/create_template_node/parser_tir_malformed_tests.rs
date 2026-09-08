@@ -18,7 +18,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Parses a template that is expected to fail and returns the diagnostic.
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source(source, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source(source, &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.clone());
 
     expect_template_diagnostic(

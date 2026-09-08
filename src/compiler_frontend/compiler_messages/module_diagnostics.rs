@@ -13,7 +13,9 @@ use super::compiler_errors::{
     CompilerError, CompilerMessages, RenderSourceContext, RenderTypeContext,
 };
 use super::{CompilerDiagnostic, DiagnosticPayload, DiagnosticSeverity};
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 
 /// One diagnosed module's user-facing diagnostic set at the retained-module semantic boundary.
 ///
@@ -169,6 +171,14 @@ impl ModuleDiagnostics {
                 )))
             }
         }
+    }
+
+    /// Attach the boundary's source context after its last producer has finalized all tables.
+    pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
+        self.render_source_contexts.push(RenderSourceContext {
+            diagnostic_range: 0..self.diagnostics.len(),
+            source_database,
+        });
     }
 
     /// Reconstruct the build/render-boundary `CompilerMessages` from this diagnosed module.

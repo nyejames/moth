@@ -7,7 +7,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[test]
 fn markdown_formatter_output_text_uses_non_default_tir_locations() {
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -110,7 +112,9 @@ fn collect_text_nodes(
 #[test]
 fn markdown_formatter_produces_formatted_tir_output() {
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)

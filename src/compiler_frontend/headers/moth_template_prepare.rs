@@ -21,7 +21,6 @@ use crate::compiler_frontend::paths::file_references::classify_prepared_file_ref
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenizeOutput;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::collect_symbol_references;
 use std::path::PathBuf;
@@ -34,10 +33,9 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 /// policy. This function adds only structural wrapper tokens around those body tokens; it never
 /// prepends or appends source text.
 pub(crate) fn prepare_moth_template_file(
-    tokenized: TokenizeOutput,
+    mut file_tokens: FileTokens,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-    let (mut file_tokens, span_builder) = tokenized.into_parts();
     let file_id = file_tokens.file_id.ok_or_else(|| {
         CompilerError::compiler_error(
             "Moth template preparation requires a retained source file identity",
@@ -84,7 +82,6 @@ pub(crate) fn prepare_moth_template_file(
     Ok(FileFrontendPrepareOutput {
         source_file: context.source_file,
         file_id: context.file_id,
-        span_builder,
         path_syntax,
         token_count,
         token_stats,

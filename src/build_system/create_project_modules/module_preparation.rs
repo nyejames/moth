@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
-    HeaderParseOptions, PreparedHeaderSyntax, prepare_header_syntax,
+    HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta, prepare_header_syntax,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
@@ -24,7 +24,9 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpanBuilders,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
@@ -35,7 +37,7 @@ use crate::compiler_frontend::{
 use crate::timed_stage_attributed;
 
 use super::prepared_module::PreparedModule;
-use super::prepared_source::PreparedSourceInput;
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 
 use rayon::prelude::*;
 use std::ops::Range;
@@ -86,6 +88,7 @@ struct FilePreparationChunk {
     chunk_index: usize,
     local_string_table: StringTable,
     results: Vec<PreparedFileResult>,
+    span_builders: Vec<(SourceId, ExtendedSpanBuilder)>,
 }
 
 struct PreparedFileResult {
@@ -348,10 +351,15 @@ impl ModulePreparationContext<'_> {
     ///      interface binding without retokenizing or reparsing source and without reconstructing
     ///      module identity from paths. Provider binding is scheduled after this call, inside the
     ///      compiler's module compilation service.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "source mutation is borrowed separately from immutable preparation services"
+    )]
     pub(super) fn prepare_module(
         &self,
         stable_origin: StableModuleOriginIdentity,
         module: Vec<PreparedSourceInput>,
+        source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
@@ -386,6 +394,7 @@ impl ModulePreparationContext<'_> {
                 self.prepare_module_files(
                     &mut string_table,
                     module,
+                    source_spans,
                     entry_file_path,
                     active_root_role,
                     source_byte_count,
@@ -500,6 +509,7 @@ impl ModulePreparationContext<'_> {
         &self,
         string_table: &mut StringTable,
         module: Vec<PreparedSourceInput>,
+        source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
@@ -546,14 +556,21 @@ impl ModulePreparationContext<'_> {
             FilePreparationStrategy::selection_for_module(module_file_count, source_byte_count);
         record_file_preparation_strategy(strategy, strategy_reason);
 
-        let preparation_chunks = Self::prepare_module_file_chunks(
+        let mut preparation_chunks = Self::prepare_module_file_chunks(
             module,
             &fork_source,
             &prepare_context,
             const_template_offset,
             runtime_fragment_offset,
             strategy,
+            source_spans,
         );
+        // Restore all owners before any diagnostic, remap or aggregation path can return early.
+        for chunk in &mut preparation_chunks {
+            for (source, builder) in chunk.span_builders.drain(..) {
+                source_spans.retain_span_builder(source, builder);
+            }
+        }
 
         Self::merge_file_preparation_chunks(
             string_table,
@@ -742,21 +759,27 @@ impl ModulePreparationContext<'_> {
         const_template_offset: usize,
         runtime_fragment_offset: usize,
         strategy: FilePreparationStrategy,
+        source_spans: &mut SourceSpanBuilders<'_>,
     ) -> Vec<FilePreparationChunk> {
         let module_file_count = module.len();
+        let files = module.into_iter().map(|file| {
+            let builder = source_spans.take_span_builder(file.source_id());
+            (file, builder)
+        });
         match strategy {
             FilePreparationStrategy::Serial => vec![Self::prepare_module_file_chunk(
                 FilePreparationChunkPlan {
                     chunk_index: 0,
                     file_range: 0..module_file_count,
                 },
-                module.into_iter().enumerate(),
+                files.enumerate(),
                 fork_source,
                 prepare_context,
                 const_template_offset,
                 runtime_fragment_offset,
             )],
-            FilePreparationStrategy::ParallelPerFile => module
+            FilePreparationStrategy::ParallelPerFile => files
+                .collect::<Vec<_>>()
                 .into_par_iter()
                 .enumerate()
                 .map(|(file_index, file)| {
@@ -776,7 +799,7 @@ impl ModulePreparationContext<'_> {
             FilePreparationStrategy::ParallelChunked => {
                 let plans =
                     plan_file_preparation_chunks(module_file_count, rayon::current_num_threads());
-                let mut module_files = module.into_iter().enumerate();
+                let mut module_files = files.enumerate();
                 let planned_files = plans
                     .into_iter()
                     .map(|plan| {
@@ -807,7 +830,7 @@ impl ModulePreparationContext<'_> {
 
     fn prepare_module_file_chunk(
         plan: FilePreparationChunkPlan,
-        module: impl IntoIterator<Item = (usize, PreparedSourceInput)>,
+        module: impl IntoIterator<Item = (usize, (PreparedSourceInput, ExtendedSpanBuilder))>,
         fork_source: &StringTableForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
@@ -815,76 +838,49 @@ impl ModulePreparationContext<'_> {
     ) -> FilePreparationChunk {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
         let mut results = Vec::with_capacity(plan.file_range.len());
+        let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
-        for (file_index, file) in module {
-            let (string_domain, result) = match file {
-                PreparedSourceInput::MothPrepared { output, .. }
-                | PreparedSourceInput::MothTemplatePrepared { output, .. } => {
-                    (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
-                }
-                file => {
-                    let source_id = file.source_id();
-                    let source = match file {
-                        PreparedSourceInput::Moth {
-                            tokens,
-                            span_builder,
-                            ..
-                        } => source_path_for_id(prepare_context.source_files, source_id).map(
-                            |source_path| FrontendFilePrepareSource::Moth {
-                                source_path,
-                                tokens,
-                                span_builder,
-                            },
-                        ),
-                        PreparedSourceInput::MothTemplate { .. } => source_path_for_id(
-                            prepare_context.source_files,
-                            source_id,
-                        )
-                        .and_then(|source_path| {
-                            retained_source_text(prepare_context.source_files, source_id).map(
-                                |source_code| FrontendFilePrepareSource::MothTemplate {
-                                    source_code,
-                                    source_path,
-                                },
-                            )
-                        }),
-                        PreparedSourceInput::PlainMarkdown { .. } => source_path_for_id(
-                            prepare_context.source_files,
-                            source_id,
-                        )
-                        .and_then(|source_path| {
-                            retained_source_text(prepare_context.source_files, source_id).map(
-                                |source_code| FrontendFilePrepareSource::PlainMarkdown {
-                                    source_code,
-                                    source_path,
-                                },
-                            )
-                        }),
-                        PreparedSourceInput::MothPrepared { .. }
-                        | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                            unreachable!(
-                                "prepared Moth output was handled before source conversion"
-                            )
-                        }
-                    };
-                    let result = match source {
-                        Ok(source) => {
-                            let input = FrontendFilePrepareInput {
-                                source,
-                                const_template_offset,
-                                runtime_fragment_offset,
-                            };
-                            CompilerFrontend::prepare_file_frontend_local(
+        for (file_index, (file, span_builder)) in module {
+            let PreparedSourceInput { source_id, source } = file;
+            let (string_domain, delta) = match source {
+                PreparedSourceKind::MothPrepared { output }
+                | PreparedSourceKind::MothTemplatePrepared { output } => (
+                    PreparedFileStringDomain::AlreadyGlobal,
+                    SourcePreparationDelta {
+                        file_id: source_id,
+                        span_builder,
+                        result: Ok(*output),
+                    },
+                ),
+                source => {
+                    let delta =
+                        match frontend_source(source, source_id, prepare_context.source_files) {
+                            Ok(source) => CompilerFrontend::prepare_file_frontend_local(
                                 prepare_context,
-                                input,
+                                FrontendFilePrepareInput {
+                                    source,
+                                    source_id,
+                                    span_builder,
+                                    const_template_offset,
+                                    runtime_fragment_offset,
+                                },
                                 &mut local_string_table,
-                            )
-                        }
-                        Err(error) => Err(FileFrontendPrepareFailure::Infrastructure(error)),
-                    };
-                    (PreparedFileStringDomain::ChunkLocal, result)
+                            ),
+                            Err(error) => SourcePreparationDelta {
+                                file_id: source_id,
+                                span_builder,
+                                result: Err(FileFrontendPrepareFailure::Infrastructure(error)),
+                            },
+                        };
+                    (PreparedFileStringDomain::ChunkLocal, delta)
                 }
             };
+            let SourcePreparationDelta {
+                file_id,
+                span_builder,
+                result,
+            } = delta;
+            span_builders.push((file_id, span_builder));
             results.push(PreparedFileResult {
                 file_index,
                 string_domain,
@@ -896,6 +892,7 @@ impl ModulePreparationContext<'_> {
             chunk_index: plan.chunk_index,
             local_string_table,
             results,
+            span_builders,
         }
     }
 }
@@ -942,11 +939,12 @@ impl ModuleSyntaxDiscovery<'_> {
     pub(super) fn prepare_source(
         &mut self,
         source: PreparedSourceInput,
+        source_spans: &mut SourceSpanBuilders<'_>,
     ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
         if matches!(
-            &source,
-            PreparedSourceInput::MothPrepared { .. }
-                | PreparedSourceInput::MothTemplatePrepared { .. }
+            &source.source,
+            PreparedSourceKind::MothPrepared { .. }
+                | PreparedSourceKind::MothTemplatePrepared { .. }
         ) {
             return Err(CompilerMessages::from_error_ref(
                 CompilerError::compiler_error(
@@ -978,72 +976,21 @@ impl ModuleSyntaxDiscovery<'_> {
             entry_file_path: &self.entry_file_path,
             options: &options,
         };
-        let frontend_source = match source {
-            PreparedSourceInput::Moth {
-                tokens,
-                span_builder,
-                ..
-            } => {
-                let source_path = match source_path_for_id(self.context.source_files, source_id) {
-                    Ok(source_path) => source_path,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                    }
-                };
-                FrontendFilePrepareSource::Moth {
-                    source_path,
-                    tokens,
-                    span_builder,
-                }
-            }
-            PreparedSourceInput::MothTemplate { .. } => {
-                let source_path = match source_path_for_id(self.context.source_files, source_id) {
-                    Ok(source_path) => source_path,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                    }
-                };
-                let source_code = match retained_source_text(self.context.source_files, source_id) {
-                    Ok(source_code) => source_code,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                    }
-                };
-                FrontendFilePrepareSource::MothTemplate {
-                    source_code,
-                    source_path,
-                }
-            }
-            PreparedSourceInput::PlainMarkdown { .. } => {
-                let source_path = match source_path_for_id(self.context.source_files, source_id) {
-                    Ok(source_path) => source_path,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                    }
-                };
-                let source_code = match retained_source_text(self.context.source_files, source_id) {
-                    Ok(source_code) => source_code,
-                    Err(error) => {
-                        return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                    }
-                };
-                FrontendFilePrepareSource::PlainMarkdown {
-                    source_code,
-                    source_path,
-                }
-            }
-            PreparedSourceInput::MothPrepared { .. }
-            | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                unreachable!("already-prepared synthetic source was rejected above")
-            }
-        };
+        let frontend_source = frontend_source(source.source, source_id, self.context.source_files)
+            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
         let input = FrontendFilePrepareInput {
             source: frontend_source,
+            source_id,
+            span_builder: source_spans.take_span_builder(source_id),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
         };
 
-        let output = match timed_stage_attributed!(
+        let SourcePreparationDelta {
+            file_id,
+            span_builder,
+            result,
+        } = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
             CompilerFrontend::prepare_file_frontend_local(
@@ -1051,7 +998,9 @@ impl ModuleSyntaxDiscovery<'_> {
                 input,
                 &mut self.string_table,
             ),
-        ) {
+        );
+        source_spans.retain_span_builder(file_id, span_builder);
+        let output = match result {
             Ok(output) => output,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 let FileFrontendPrepareError {
@@ -1168,6 +1117,32 @@ fn record_successful_prepared_outputs(outputs: &[FileFrontendPrepareOutput]) {
 
     add_frontend_counter(FrontendCounter::PreparedFileCount, outputs.len());
     add_frontend_counter(FrontendCounter::TokenCount, token_count);
+}
+
+fn frontend_source(
+    source: PreparedSourceKind,
+    source_id: SourceId,
+    sources: &SourceDatabase,
+) -> Result<FrontendFilePrepareSource<'_>, CompilerError> {
+    let source_path = source_path_for_id(sources, source_id)?;
+    Ok(match source {
+        PreparedSourceKind::Moth { tokens } => FrontendFilePrepareSource::Moth {
+            source_path,
+            tokens,
+        },
+        PreparedSourceKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
+            source_code: retained_source_text(sources, source_id)?,
+            source_path,
+        },
+        PreparedSourceKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
+            source_code: retained_source_text(sources, source_id)?,
+            source_path,
+        },
+        PreparedSourceKind::MothPrepared { .. }
+        | PreparedSourceKind::MothTemplatePrepared { .. } => {
+            unreachable!("retained syntax bypasses frontend source conversion")
+        }
+    })
 }
 
 fn plan_file_preparation_chunks(

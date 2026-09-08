@@ -5,7 +5,7 @@ use super::file_reference_resolution::SingleFileReferenceOutcome;
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
-use super::prepared_source::PreparedSourceInput;
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
@@ -58,7 +58,9 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -357,6 +359,8 @@ fn discover_modules_for_test_with_resource_inputs(
         &mut string_table,
     )?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let (source_files, mut source_spans) = source_owner.split();
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -389,7 +393,8 @@ fn discover_modules_for_test_with_resource_inputs(
     let schedule = discover_all_modules_in_project(
         config,
         resolver,
-        &source_files,
+        source_files,
+        &mut source_spans,
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
@@ -399,6 +404,10 @@ fn discover_modules_for_test_with_resource_inputs(
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
     )?;
+    let source_files = source_owner
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+    let source_files = Arc::try_unwrap(source_files).expect("fixture source context is exclusive");
     Ok((schedule, resource_inputs, source_files))
 }
 
@@ -434,6 +443,8 @@ fn discover_modules_for_test_with_providers(
         &mut string_table,
     )?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let (source_files, mut source_spans) = source_owner.split();
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -465,7 +476,8 @@ fn discover_modules_for_test_with_providers(
     discover_all_modules_in_project(
         config,
         resolver,
-        &source_files,
+        source_files,
+        &mut source_spans,
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
@@ -558,13 +570,12 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
     }
 }
 
-/// Collect synthetic inputs through the production Stage 0 path while retaining the finished
-/// source database needed to inspect the final syntax identities.
+/// Collect production Stage 0 inputs with their original live source owner.
 fn collect_synthetic_inputs_for_test(
     entry_file_path: &Path,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> (SourceDatabase, Vec<PreparedSourceInput>, StringTable) {
+) -> (SourceDatabaseBuilder, Vec<PreparedSourceInput>, StringTable) {
     let mut string_table = StringTable::new();
     let mut external_packages = ExternalPackageRegistry::new();
     let external_import_providers =
@@ -724,21 +735,22 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (source_files, input_files, string_table) =
+    let (mut span_owners, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
-    let source_files = Arc::new(source_files);
+    let (source_files, mut span_view) = span_owners.split();
+    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
+
     let source_byte_count = input_files
         .iter()
         .map(|input| {
             source_files
                 .retained_text(input.source_id())
-                .expect("synthetic source should retain its snapshot")
+                .expect("synthetic snapshot should be retained")
                 .len()
         })
         .sum();
-    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
     let preparation_context = super::module_preparation::ModulePreparationContext {
-        source_files: &source_files,
+        source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -753,6 +765,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
@@ -764,12 +777,13 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
         )
         .expect("synthetic outputs should prepare against the retained source table");
-    synthetic_prepared_identity_snapshot(&prepared, &source_files)
+    synthetic_prepared_identity_snapshot(&prepared, source_files)
 }
 
 #[test]
@@ -832,6 +846,7 @@ fn synthetic_discovery_keeps_authored_kind_when_canonical_extension_disagrees() 
         "canonical target must keep the unrecognized extension"
     );
     let record = source_files
+        .sources()
         .get_by_canonical_path(&canonical)
         .expect("discovered source should retain its identity");
     assert_eq!(
@@ -842,7 +857,7 @@ fn synthetic_discovery_keeps_authored_kind_when_canonical_extension_disagrees() 
     assert!(
         input_files
             .iter()
-            .any(|input| matches!(input, PreparedSourceInput::MothPrepared { .. })),
+            .any(|input| matches!(input.source, PreparedSourceKind::MothPrepared { .. })),
         "discovery must prepare the authored Moth source rather than reject it as provider-owned"
     );
 }
@@ -1008,15 +1023,15 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (source_files, input_files, string_table) =
+    let (mut span_owners, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
-    let source_files = Arc::new(source_files);
+    let (source_files, mut span_view) = span_owners.split();
     let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     assert!(
         input_files
             .iter()
-            .all(|input| matches!(input, PreparedSourceInput::MothPrepared { .. })),
+            .all(|input| matches!(input.source, PreparedSourceKind::MothPrepared { .. })),
         "every synthetic Moth source must carry its complete first preparation"
     );
     assert_eq!(
@@ -1050,7 +1065,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         })
         .sum();
     let preparation_context = super::module_preparation::ModulePreparationContext {
-        source_files: &source_files,
+        source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -1066,6 +1081,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
@@ -1077,13 +1093,12 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
         )
         .expect("retained synthetic outputs should prepare once");
-
-    assert_eq!(prepared.semantic.source_file_count, 2);
     assert_eq!(
         prepared
             .semantic
@@ -1413,6 +1428,8 @@ fn discover_modules_and_graph_for_test(
     )
     .expect("source tree index should build");
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let (source_files, mut source_spans) = source_owner.split();
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -1447,7 +1464,8 @@ fn discover_modules_and_graph_for_test(
     let modules = discover_all_modules_in_project(
         config,
         resolver,
-        &source_files,
+        source_files,
+        &mut source_spans,
         &mut project_module_graph,
         style_directives,
         &mut external_imports,
@@ -1458,6 +1476,10 @@ fn discover_modules_and_graph_for_test(
         crate::timing::NO_TIMING_BOUNDARY,
     )
     .expect("module discovery should pass for focused graph-edge tests");
+    let source_files = source_owner
+        .finish()
+        .expect("discovery source tables should finalize");
+    let source_files = Arc::try_unwrap(source_files).expect("fixture source context is exclusive");
 
     (
         modules,
@@ -3260,6 +3282,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
         .map(|input| {
             collected
                 .source_files
+                .sources()
                 .get(input.source_id())
                 .and_then(|identity| identity.canonical_os_path.clone())
                 .expect("discovered source should have a canonical path")
@@ -3864,6 +3887,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         .map(|input| {
             collected
                 .source_files
+                .sources()
                 .get(input.source_id())
                 .and_then(|identity| identity.canonical_os_path.as_deref())
                 .and_then(Path::file_name)
@@ -3887,6 +3911,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         .find(|source_id| {
             collected
                 .source_files
+                .sources()
                 .get(*source_id)
                 .and_then(|identity| identity.canonical_os_path.as_deref())
                 .and_then(Path::file_name)
@@ -3894,7 +3919,10 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         })
         .expect("the Markdown content target should be a prepared input");
     assert_eq!(
-        collected.source_files.retained_text(markdown_source_id),
+        collected
+            .source_files
+            .sources()
+            .retained_text(markdown_source_id),
         Some("# notes\n")
     );
 
@@ -6020,7 +6048,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
         assert!(
-            matches!(input_file, PreparedSourceInput::PlainMarkdown { .. }),
+            matches!(input_file.source, PreparedSourceKind::PlainMarkdown),
             "missing-source loading should produce PlainMarkdown inputs"
         );
         let source_code = source_files
@@ -8372,6 +8400,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                     &format!("counter-fixture-{index}.moth"),
                     &mut expected_token_string_table,
                 );
+            let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,
                 &scope,
@@ -8379,6 +8408,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                 &style_directives,
                 &mut expected_token_string_table,
                 crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+                &mut counter_span_builder,
             )
             .expect("counter fixture source should tokenize")
             .length

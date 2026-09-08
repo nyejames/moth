@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -174,8 +175,10 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
         .expect("the snapshot should remain owned");
     let authored_scope = InternedPath::try_from_filesystem_path(authored_path, &mut string_table)
         .expect("the authored path should be UTF-8");
-
-    // A reference lexer pass captures the real handle whose append-only prefix the service keeps.
+    // A reference lexer pass captures the literal's local span; the span rows land in a
+    // throwaway reference builder, so the service's independent builder must re-encode the
+    // same bytes for the retained-span assertion below.
+    let mut reference_builder = ExtendedSpanBuilder::new();
     let reference_tokens = tokenize(
         source_code,
         &authored_scope,
@@ -183,16 +186,17 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
         &style_directives,
         &mut string_table,
         file_id,
+        &mut reference_builder,
     )
     .expect("the config should tokenize before its later dialect rejection");
     let literal_span = reference_tokens
-        .file_tokens
         .tokens
         .iter()
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("the reference lexer should produce the long literal")
         .span;
     drop(reference_tokens);
+    drop(reference_builder);
 
     let outcome = compile_config_source(
         ConfigCompilationRequest {
@@ -228,9 +232,7 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
         )
     }));
     assert_eq!(outcome.file_id, file_id);
-    let builder = outcome
-        .span_builder
-        .expect("the diagnosed source should retain its builder");
+    let builder = &outcome.span_builder;
     let literal_range = literal_span.resolve_with(builder.resolver());
     assert_eq!(
         source_code.get(literal_range.start() as usize..literal_range.end() as usize),

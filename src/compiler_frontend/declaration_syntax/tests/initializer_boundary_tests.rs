@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
     RuleDiagnosticKind,
 };
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -43,6 +44,7 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = tokenize(
         source,
         &source_path,
@@ -50,9 +52,9 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         &style_directives,
         &mut string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
     token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
@@ -232,8 +234,12 @@ fn non_control_flow_initializer_is_unchanged() {
 ///
 /// Returns the shared string table, the stream, the interned declaration name, and the
 /// index of the first `Assign` token (when present) so callers can compute the boundary
-/// location the shell must point at.
-fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId, Option<usize>) {
+/// location the shell must point at. The caller owns `span_builder` and keeps it alive
+/// wherever the returned token spans are still resolved.
+fn tokenize_for_declaration(
+    source: &str,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> (StringTable, FileTokens, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -244,9 +250,9 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
         &style_directives,
         &mut string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
     let assign_index = token_stream
@@ -260,7 +266,9 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
 /// Parses the declaration shell and returns the rejection diagnostic plus the interned
 /// declaration name so callers can assert the structured payload facts.
 fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
-    let (mut string_table, mut token_stream, name, _) = tokenize_for_declaration(source);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (mut string_table, mut token_stream, name, _) =
+        tokenize_for_declaration(source, &mut span_builder);
     token_stream.index = 2; // skip ModuleStart and the declaration name
 
     let diagnostic = *parse_declaration_syntax(&mut token_stream, name, &mut string_table)
@@ -272,7 +280,9 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
 ///
 /// This is the real newline/end/EOF/comma boundary the diagnostic must anchor against.
 fn boundary_location_after_assign(source: &str) -> SourceLocation {
-    let (_string_table, token_stream, _name, assign_index) = tokenize_for_declaration(source);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (_string_table, token_stream, _name, assign_index) =
+        tokenize_for_declaration(source, &mut span_builder);
     let assign_index = assign_index.expect("source must contain an authored '='");
     token_stream.tokens[assign_index + 1].location.clone()
 }
@@ -280,7 +290,9 @@ fn boundary_location_after_assign(source: &str) -> SourceLocation {
 /// Location of the first top-level boundary token (newline/end/EOF/comma) starting after
 /// the declaration name. Used for the no-`=` path, which never sees an authored `=`.
 fn first_boundary_location_after_name(source: &str) -> SourceLocation {
-    let (_string_table, token_stream, _name, _) = tokenize_for_declaration(source);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (_string_table, token_stream, _name, _) =
+        tokenize_for_declaration(source, &mut span_builder);
     token_stream
         .tokens
         .iter()

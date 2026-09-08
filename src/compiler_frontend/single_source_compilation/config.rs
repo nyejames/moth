@@ -56,7 +56,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenizeFailure, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 use std::collections::HashMap;
@@ -95,14 +95,12 @@ pub(crate) struct CompiledConfigSource {
 
 /// The semantic config result plus the source-local span owner produced while compiling it.
 ///
-/// WHAT: keeps the request identity and the exact live extended-span builder together with the
-///       folded result, including diagnosed paths after tokenization or header preparation.
-/// WHY: every retained token span remains paired with the one mutable builder that encoded it until
-///      the build caller installs its frozen table in the source database.
+/// The build caller retains the original builder through config validation and installs its
+/// frozen table only after the last producer, including diagnosed and infrastructure outcomes.
 pub(crate) struct ConfigCompilationOutcome {
     pub(crate) result: Result<CompiledConfigSource, CompilerMessages>,
     pub(crate) file_id: SourceId,
-    pub(crate) span_builder: Option<ExtendedSpanBuilder>,
+    pub(crate) span_builder: ExtendedSpanBuilder,
 }
 
 /// One authored top-level config constant projected to the owned folded-value vocabulary.
@@ -123,8 +121,7 @@ pub(crate) struct FoldedConfigDeclaration {
 
 /// Compile one authored `config.moth` to owned folded declarations and retain its source spans.
 ///
-/// The semantic result is returned through [`ConfigCompilationOutcome::result`]. The service never
-/// freezes the source-local span builder; the caller owns that final installation boundary.
+/// The service returns its live source builder on every outcome; the build caller owns finalization.
 pub(crate) fn compile_config_source(
     request: ConfigCompilationRequest<'_>,
     string_table: &mut StringTable,
@@ -152,49 +149,43 @@ pub(crate) fn compile_config_source(
                     string_table.clone(),
                 )),
                 file_id,
-                span_builder: None,
+                span_builder: ExtendedSpanBuilder::new(),
             };
         }
     };
 
-    // Tokenize and prepare the single authored file, retaining any builder from a diagnosed
-    // producer path before entering the semantic stages.
-    match prepare_config_file(&request, &authored_scope, string_table) {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    match prepare_config_file(&request, &authored_scope, string_table, &mut span_builder) {
         Ok(mut file) => {
-            // Semantic stages borrow the prepared file. Move its builder only after they finish.
             let result =
                 compile_prepared_config_source(&request, &authored_scope, &mut file, string_table);
             ConfigCompilationOutcome {
                 result,
                 file_id,
-                span_builder: Some(file.span_builder),
+                span_builder,
             }
         }
 
-        Err(ConfigPreparationFailure::Diagnosed {
-            diagnostics,
-            span_builder,
-        }) => ConfigCompilationOutcome {
+        Err(ConfigPreparationFailure::Diagnosed(diagnostics)) => ConfigCompilationOutcome {
             result: Err(CompilerMessages::from_diagnostics(
                 diagnostics,
                 string_table.clone(),
             )),
             file_id,
-            span_builder: Some(span_builder),
+            span_builder,
         },
 
         Err(ConfigPreparationFailure::Infrastructure(error)) => ConfigCompilationOutcome {
             result: Err(CompilerMessages::from_error_ref(error, string_table)),
             file_id,
-            span_builder: None,
+            span_builder,
         },
     }
 }
 
 /// Run config-specific aggregation, binding, ordering, AST folding and folded-value projection.
 ///
-/// The prepared file remains borrowed for the complete semantic sequence so its builder stays
-/// paired with every retained token span until the outer service owns the final move.
+/// Header aggregation consumes the retained shells while the outer service owns their span builder.
 fn compile_prepared_config_source(
     request: &ConfigCompilationRequest<'_>,
     authored_scope: &InternedPath,
@@ -554,10 +545,7 @@ impl NominalOriginResolver for ConfigNominalOriginResolver<'_> {
 }
 
 enum ConfigPreparationFailure {
-    Diagnosed {
-        diagnostics: Vec<CompilerDiagnostic>,
-        span_builder: ExtendedSpanBuilder,
-    },
+    Diagnosed(Vec<CompilerDiagnostic>),
     Infrastructure(CompilerError),
 }
 
@@ -568,40 +556,36 @@ enum ConfigPreparationFailure {
 /// Tokenize and header-parse the single authored config file, then apply the config dialect surface.
 ///
 /// Dependency clauses are rejected from the retained structural shell before interface binding can
-/// resolve a package or filesystem target.
+/// resolve a package or filesystem target. Every span tokenization encodes lands in the caller's
+/// builder, which survives success, diagnosed rejection and infrastructure failure alike.
 fn prepare_config_file(
     request: &ConfigCompilationRequest<'_>,
     authored_scope: &InternedPath,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
     let mut diagnostics = Vec::new();
 
     // The caller registers this source before invoking the service.
-    let mut tokenization = match tokenize(
+    let mut file_tokens = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
         request.style_directives,
         string_table,
         request.file_id,
+        span_builder,
     ) {
         Ok(output) => output,
-        Err(TokenizeFailure {
-            diagnostic,
-            span_builder,
-            ..
-        }) => {
+        Err(diagnostic) => {
             diagnostics.push(*diagnostic);
-            return Err(ConfigPreparationFailure::Diagnosed {
-                diagnostics,
-                span_builder,
-            });
+            return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
         }
     };
-    tokenization.file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
+    file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
 
     let output = match prepare_file_from_tokens(
-        tokenization,
+        file_tokens,
         request.authored_path,
         &HeaderParseOptions::default(),
         string_table,
@@ -613,7 +597,6 @@ fn prepare_config_file(
             let FileFrontendPrepareError {
                 warnings,
                 diagnostic,
-                span_builder,
                 ..
             } = error;
             diagnostics.extend(warnings);
@@ -626,10 +609,7 @@ fn prepare_config_file(
             } else {
                 diagnostics.push(*diagnostic);
             }
-            return Err(ConfigPreparationFailure::Diagnosed {
-                diagnostics,
-                span_builder,
-            });
+            return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
             return Err(ConfigPreparationFailure::Infrastructure(error));
@@ -655,10 +635,7 @@ fn prepare_config_file(
     if diagnostics.is_empty() {
         Ok(output)
     } else {
-        Err(ConfigPreparationFailure::Diagnosed {
-            diagnostics,
-            span_builder: output.span_builder,
-        })
+        Err(ConfigPreparationFailure::Diagnosed(diagnostics))
     }
 }
 

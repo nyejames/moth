@@ -36,7 +36,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -59,7 +59,6 @@ fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
 pub(super) fn parse_headers_in_file(
     token_stream: &mut FileTokens,
     file_id: SourceId,
-    span_builder: ExtendedSpanBuilder,
     context: &mut HeaderParseContext<'_>,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let mut state = HeaderFileParseState::new(token_stream.length);
@@ -67,14 +66,10 @@ pub(super) fn parse_headers_in_file(
     let result = parse_headers_in_file_inner(token_stream, context, &mut state);
 
     match result {
-        Ok(()) => finish_file_output(token_stream, file_id, span_builder, context, state),
-        Err(HeaderParseFailure::Diagnostic(diagnostic)) => {
-            Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
-                file_id,
-                span_builder,
-                *diagnostic,
-            )))
-        }
+        Ok(()) => finish_file_output(token_stream, file_id, context, state),
+        Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
+            FileFrontendPrepareFailure::Diagnosed(state.into_error(file_id, *diagnostic)),
+        ),
         Err(HeaderParseFailure::Infrastructure(error)) => {
             Err(FileFrontendPrepareFailure::Infrastructure(error))
         }
@@ -748,7 +743,6 @@ fn handle_runtime_template_item(
 fn finish_file_output(
     token_stream: &mut FileTokens,
     file_id: SourceId,
-    span_builder: ExtendedSpanBuilder,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
@@ -768,11 +762,9 @@ fn finish_file_output(
                 location,
             )
         };
-        return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
-            file_id,
-            span_builder,
-            diagnostic,
-        )));
+        return Err(FileFrontendPrepareFailure::Diagnosed(
+            state.into_error(file_id, diagnostic),
+        ));
     }
 
     if let Some(diagnostic) = dependency_generic_parameter_collision(
@@ -781,11 +773,9 @@ fn finish_file_output(
         &state.dependency_selections,
         context.string_table,
     ) {
-        return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
-            file_id,
-            span_builder,
-            diagnostic,
-        )));
+        return Err(FileFrontendPrepareFailure::Diagnosed(
+            state.into_error(file_id, diagnostic),
+        ));
     }
 
     // Ordinary source files have no semantic consumer for an implicit start. Dependency-reached roots are
@@ -800,18 +790,17 @@ fn finish_file_output(
             .unwrap_or_default();
         return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
             file_id,
-            span_builder,
             CompilerDiagnostic::invalid_top_level_runtime_statement(location),
         )));
     }
 
     let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
-            .into_entry_output(token_stream, span_builder, context.file_role)
+            .into_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
-            .into_non_entry_output(token_stream, span_builder, context.file_role)
+            .into_non_entry_output(token_stream, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
     attach_structural_file_facts(&mut output, context.string_table)

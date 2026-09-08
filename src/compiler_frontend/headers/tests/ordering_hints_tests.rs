@@ -13,7 +13,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::HeaderParseOptions;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -27,11 +27,13 @@ fn prepare_source(
 ) -> (
     crate::compiler_frontend::headers::types::FileFrontendPrepareOutput,
     StringTable,
+    ExtendedSpanBuilder,
 ) {
     let mut string_table = StringTable::new();
     let file_path = Path::new("@page.moth");
     let interned_path = InternedPath::try_from_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &interned_path,
@@ -39,6 +41,7 @@ fn prepare_source(
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
     let output = prepare_file_from_tokens(
@@ -50,7 +53,7 @@ fn prepare_source(
         0,
     )
     .expect("preparation should succeed");
-    (output, string_table)
+    (output, string_table, span_builder)
 }
 
 fn content_hint(
@@ -100,7 +103,7 @@ fn assert_hints(header: &Header, expected: &HashSet<LocalDeclarationOrderingHint
 
 #[test]
 fn constant_initializer_content_value_records_content_hint() {
-    let (output, mut strings) = prepare_source("intro #= @docs/intro.mtf\n");
+    let (output, mut strings, _span_builder) = prepare_source("intro #= @docs/intro.mtf\n");
 
     let header = header_of_kind(&output.headers, "constant", |kind| {
         matches!(kind, HeaderKind::Constant { .. })
@@ -119,7 +122,8 @@ fn constant_initializer_content_value_records_content_hint() {
 
 #[test]
 fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
-    let (output, mut strings) = prepare_source("#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n");
+    let (output, mut strings, _span_builder) =
+        prepare_source("#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })
@@ -140,10 +144,10 @@ fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
 
 #[test]
 fn function_parameter_default_records_content_hint_and_body_stays_unhinted() {
-    let (output, mut strings) = prepare_source(
+    let (output, mut strings, _span_builder) = prepare_source(
         "label |prefix String = [: [@docs/intro.md] ]| -> String:\n\
-         \x20   io.line([: [@docs/body.md]])\n\
-         ;\n",
+     \x20   io.line([: [@docs/body.md]])\n\
+     ;\n",
     );
 
     let function_header = header_of_kind(&output.headers, "function", |kind| {
@@ -163,7 +167,7 @@ fn function_parameter_default_records_content_hint_and_body_stays_unhinted() {
 
 #[test]
 fn struct_field_default_records_content_hint() {
-    let (output, mut strings) =
+    let (output, mut strings, _span_builder) =
         prepare_source("Options = |\n    path String = [: [@docs/intro.md] ],\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
@@ -183,7 +187,7 @@ fn struct_field_default_records_content_hint() {
 
 #[test]
 fn top_level_const_fragment_records_content_hint() {
-    let (output, mut strings) = prepare_source("#[: [@docs/intro.md]]\n");
+    let (output, mut strings, _span_builder) = prepare_source("#[: [@docs/intro.md]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })
@@ -202,7 +206,7 @@ fn top_level_const_fragment_records_content_hint() {
 
 #[test]
 fn runtime_start_body_content_value_records_no_content_hint() {
-    let (output, _) = prepare_source("io.line([: [@docs/intro.mtf]])\n");
+    let (output, _, _span_builder) = prepare_source("io.line([: [@docs/intro.mtf]])\n");
 
     let start_header = header_of_kind(&output.headers, "start", |kind| {
         matches!(kind, HeaderKind::StartFunction)
@@ -223,7 +227,7 @@ fn runtime_start_body_content_value_records_no_content_hint() {
 
 #[test]
 fn resource_file_value_records_no_content_hint() {
-    let (output, _) = prepare_source("icon #= @assets/logo.svg\n");
+    let (output, _, _span_builder) = prepare_source("icon #= @assets/logo.svg\n");
 
     let header = header_of_kind(&output.headers, "constant", |kind| {
         matches!(kind, HeaderKind::Constant { .. })
@@ -237,7 +241,7 @@ fn resource_file_value_records_no_content_hint() {
 
 #[test]
 fn struct_field_resource_default_records_no_content_hint() {
-    let (output, strings) =
+    let (output, strings, _span_builder) =
         prepare_source("Options = |\n    icon_url String = @assets/logo.svg,\n|\n");
 
     let struct_header = header_of_kind(&output.headers, "struct", |kind| {
@@ -261,9 +265,9 @@ fn struct_field_resource_default_records_no_content_hint() {
 
 #[test]
 fn dependency_clause_rows_record_no_content_hint() {
-    let (output, strings) = prepare_source(
+    let (output, strings, _span_builder) = prepare_source(
         "@core/math sin\n\
-         unused #= @assets/logo.svg\n",
+     unused #= @assets/logo.svg\n",
     );
 
     for header in &output.headers {
@@ -280,9 +284,9 @@ fn dependency_clause_rows_record_no_content_hint() {
 fn recollecting_content_hints_deduplicates_into_the_hint_set() {
     // Re-running the collector over the same shells and rows must be a no-op, so no ordering or
     // diagnostic difference can depend on worklist insertion order.
-    let (mut output, mut strings) = prepare_source(
+    let (mut output, mut strings, _span_builder) = prepare_source(
         "intro #= @docs/intro.mtf\n\
-         other #= @docs/other.mtf\n",
+     other #= @docs/other.mtf\n",
     );
 
     let before: Vec<usize> = output

@@ -58,10 +58,12 @@ fn escape_html_escapes_body_html_sensitive_characters() {
 fn escape_html_preserves_runtime_head_references() {
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         "[value, $escape_html:\n    <b>body</b>\n]",
         &style_directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = runtime_template_context_with_style_directives(
         &token_stream.src_path,

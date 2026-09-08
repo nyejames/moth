@@ -42,7 +42,6 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -146,7 +145,6 @@ fn make_prepared_output(
     FileFrontendPrepareOutput {
         source_file,
         file_id,
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -769,7 +767,6 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: SourceId::COMPILATION_ROOT,
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 12,
         token_stats: TokenStats::default(),
@@ -875,7 +872,6 @@ fn file_frontend_prepare_output_identity_remap_preserves_payload() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: SourceId::COMPILATION_ROOT,
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1020,7 +1016,6 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source.clone(),
         file_id: SourceId::from_index(7),
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 3,
         token_stats: TokenStats::default(),
@@ -1273,7 +1268,6 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source,
         file_id: SourceId::from_index(3),
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1364,7 +1358,6 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
     let mut output = FileFrontendPrepareOutput {
         source_file,
         file_id: SourceId::COMPILATION_ROOT,
-        span_builder: ExtendedSpanBuilder::new(),
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
         token_stats: TokenStats::default(),
@@ -1786,7 +1779,6 @@ fn file_frontend_prepare_error_remaps_warnings_and_diagnostic() {
         file_id: SourceId::COMPILATION_ROOT,
         warnings: vec![warning_a, warning_b],
         diagnostic: Box::new(diagnostic),
-        span_builder: ExtendedSpanBuilder::new(),
     };
 
     let remap = global.merge_from(&local);
@@ -1830,7 +1822,6 @@ fn file_frontend_prepare_error_identity_remap_preserves_payload() {
         file_id: SourceId::COMPILATION_ROOT,
         warnings: vec![warning],
         diagnostic: Box::new(diagnostic),
-        span_builder: ExtendedSpanBuilder::new(),
     };
 
     let remap = global.merge_from(&local);

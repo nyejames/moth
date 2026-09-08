@@ -23,7 +23,7 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -241,7 +241,7 @@ struct SourcePackageModuleInventory {
     package_identity: StablePackageIdentity,
     root_module_id: ModuleId,
     path_resolver: ProjectPathResolver,
-    source_files: Arc<SourceDatabase>,
+    source_files: SourceDatabaseBuilder,
     graph: ProjectModuleGraph,
     schedule: module_inventory::ModuleCompilationSchedule,
     /// Canonical source facts merged before transient jobs fork their string-table base.
@@ -258,13 +258,14 @@ struct SourcePackageModuleInventory {
 struct SourcePackageCheckOnlyInventory {
     dependency_prefix: String,
     path_resolver: ProjectPathResolver,
-    source_files: Arc<SourceDatabase>,
+    source_files: SourceDatabaseBuilder,
     check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     /// Canonical source contracts used to resolve each deferred job independently.
     canonical_source_facts: Vec<BuildConfigContractFact>,
     build_config_values: ResolvedBuildConfigMap,
+    messages: Vec<CompilerMessages>,
 }
 
 /// Index every resolved provider edge once by consumer module and retained dependency shell.
@@ -527,544 +528,587 @@ pub(crate) fn compile_directory_frontend(
     };
     let project_path_resolver = project_setup.resolver;
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
-    let project_source_files =
-        project_source_files.get_or_insert_with(|| Arc::new(SourceDatabase::empty()));
-    let project_source_files_mut = Arc::get_mut(project_source_files).ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "project source database was shared before Stage 0 registration completed",
-            ),
-            string_table,
-        )
-    })?;
-    project_source_files_mut
-        .append_ordered_registration_index(
+    let mut project_sources = SourceDatabaseBuilder::new(
+        project_source_files
+            .take()
+            .unwrap_or_else(|| Arc::new(SourceDatabase::empty())),
+    );
+    let result = (|| {
+        project_sources
+            .sources_mut()
+            .append_ordered_registration_index(
+                &project_registration_index,
+                project_path_resolver.entry_root(),
+                Some(&project_path_resolver),
+                string_table,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        load_registered_source_texts(
+            project_sources.sources_mut(),
             &project_registration_index,
-            project_path_resolver.entry_root(),
-            Some(&project_path_resolver),
             string_table,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    load_registered_source_texts(
-        project_source_files_mut,
-        &project_registration_index,
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let project_source_files = Arc::clone(project_source_files);
-    let config_globals = builder_surface.config_globals().clone();
+        let (project_source_files, mut project_source_spans) = project_sources.split();
+        let config_globals = builder_surface.config_globals().clone();
 
-    // 2. Build every source-package inventory and the project inventory before semantic
-    // compilation. Provider-backed discovery may extend the binding registry, so all boundaries
-    // finish that serial mutation phase before the registry becomes the immutable frontend view.
-    let mut external_imports = source_discovery::ExternalImportDiscoveryState {
-        external_packages: &mut builder_surface.binding_packages,
-        providers: &builder_surface.external_import_providers,
-        cache: &mut builder_surface.external_import_cache,
-        resolution_table: &mut builder_surface.external_dependency_resolution_table,
-    };
-    let mut resource_inputs = ResourceInputRegistry::new();
+        // 2. Build every source-package inventory and the project inventory before semantic
+        // compilation. Provider-backed discovery may extend the binding registry, so all boundaries
+        // finish that serial mutation phase before the registry becomes the immutable frontend view.
+        let mut external_imports = source_discovery::ExternalImportDiscoveryState {
+            external_packages: &mut builder_surface.binding_packages,
+            providers: &builder_surface.external_import_providers,
+            cache: &mut builder_surface.external_import_cache,
+            resolution_table: &mut builder_surface.external_dependency_resolution_table,
+        };
+        let mut resource_inputs = ResourceInputRegistry::new();
 
-    let mut source_package_inventories = Vec::new();
-    for (dependency_prefix, package_index) in project_setup
-        .module_namespace_set
-        .source_package_boundaries()
-    {
-        // Register the package boundary before its inventory so inventory and compile
-        // observations share one dense id for the human boundary total.
-        #[cfg(feature = "timers")]
-        let timing_boundary = crate::timing::register_timing_boundary(
-            crate::timing::TimingBoundaryKind::SourcePackage,
-            || format!("@{dependency_prefix}"),
-        );
-        let mut package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
-        let package_path_resolver = project_path_resolver.for_source_package_boundary(
-            package_index.entry_root().to_path_buf(),
-            package_index
-                .module_identities()
-                .derive_compilation_root_table(),
-        );
-        let package_resolution = DirectoryDependencyResolution::package(
-            &project_setup.module_namespace_set,
-            dependency_prefix,
-            package_index,
-        );
-        let package_registration_index = package_index.source_registration_index();
-        let mut package_source_files = SourceDatabase::from_ordered_registration_index(
-            &package_registration_index,
-            package_path_resolver.entry_root(),
-            Some(&package_path_resolver),
-            string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        if let Err(error) = load_registered_source_texts(
-            &mut package_source_files,
-            &package_registration_index,
-            string_table,
-        ) {
-            let mut messages = CompilerMessages::from_error_ref(error, string_table);
-            messages.set_source_database(Arc::new(package_source_files));
-            return Err(messages);
-        }
-        let package_source_files = Arc::new(package_source_files);
-        timing_scope_attributed!(
-            timing_guard_build_boundary_inventory_2,
-            crate::timing::TimingMetric::BoundaryInventory,
-            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-        );
-        let package_waves = match module_inventory::discover_all_modules_in_package_with_check_only(
-            config,
-            &package_path_resolver,
-            &package_source_files,
-            &mut package_graph,
-            style_directives,
-            &mut external_imports,
-            package_resolution,
-            &mut resource_inputs,
-            mode.includes_check_only(),
-            string_table,
+        let mut source_package_inventories = Vec::new();
+        for (dependency_prefix, package_index) in project_setup
+            .module_namespace_set
+            .source_package_boundaries()
+        {
+            // Register the package boundary before its inventory so inventory and compile
+            // observations share one dense id for the human boundary total.
             #[cfg(feature = "timers")]
-            timing_boundary,
-        ) {
-            Ok(module_waves) => module_waves,
-            Err(mut messages) => {
-                messages.set_source_database(Arc::clone(&package_source_files));
+            let timing_boundary = crate::timing::register_timing_boundary(
+                crate::timing::TimingBoundaryKind::SourcePackage,
+                || format!("@{dependency_prefix}"),
+            );
+            let mut package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
+            let package_path_resolver = project_path_resolver.for_source_package_boundary(
+                package_index.entry_root().to_path_buf(),
+                package_index
+                    .module_identities()
+                    .derive_compilation_root_table(),
+            );
+            let package_resolution = DirectoryDependencyResolution::package(
+                &project_setup.module_namespace_set,
+                dependency_prefix,
+                package_index,
+            );
+            let package_registration_index = package_index.source_registration_index();
+            let package_source_files = SourceDatabase::from_ordered_registration_index(
+                &package_registration_index,
+                package_path_resolver.entry_root(),
+                Some(&package_path_resolver),
+                string_table,
+            )
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
+            if let Err(error) = load_registered_source_texts(
+                package_sources.sources_mut(),
+                &package_registration_index,
+                string_table,
+            ) {
+                let mut messages = CompilerMessages::from_error_ref(error, string_table);
+                messages.set_source_database(
+                    package_sources
+                        .finish()
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                );
                 return Err(messages);
             }
-        };
-        // Merge canonical contract locations before any transient package job forks its string
-        // table. Every later transient fact can then share this boundary prefix safely.
-        let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
-            package_waves.waves(),
-            string_table,
-        );
-        let root_module_id = package_index
-            .module_identities()
-            .module_id_for_directory(package_index.entry_root())
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
+            let (package_source_files, mut package_source_spans) = package_sources.split();
+            timing_scope_attributed!(
+                timing_guard_build_boundary_inventory_2,
+                crate::timing::TimingMetric::BoundaryInventory,
+                Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+            );
+            let package_waves =
+                match module_inventory::discover_all_modules_in_package_with_check_only(
+                    config,
+                    &package_path_resolver,
+                    package_source_files,
+                    &mut package_source_spans,
+                    &mut package_graph,
+                    style_directives,
+                    &mut external_imports,
+                    package_resolution,
+                    &mut resource_inputs,
+                    mode.includes_check_only(),
+                    string_table,
+                    #[cfg(feature = "timers")]
+                    timing_boundary,
+                ) {
+                    Ok(module_waves) => module_waves,
+                    Err(mut messages) => {
+                        messages.set_source_database(package_sources.finish().map_err(
+                            |error| CompilerMessages::from_error_ref(error, string_table),
+                        )?);
+                        return Err(messages);
+                    }
+                };
+            // Merge canonical contract locations before any transient package job forks its string
+            // table. Every later transient fact can then share this boundary prefix safely.
+            let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
+                package_waves.waves(),
+                string_table,
+            );
+            let Some(root_module_id) = package_index
+                .module_identities()
+                .module_id_for_directory(package_index.entry_root())
+            else {
+                let mut messages = CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(format!(
                         "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
                     )),
                     string_table,
-                )
-            })
-            .map_err(|mut messages| {
-                messages.set_source_database(Arc::clone(&package_source_files));
-                messages
-            })?;
-        source_package_inventories.push(SourcePackageModuleInventory {
-            dependency_prefix: dependency_prefix.to_owned(),
-            package_identity: package_index.stable_package_identity().clone(),
-            root_module_id,
-            path_resolver: package_path_resolver,
-            source_files: package_source_files,
-            graph: package_graph,
-            schedule: package_waves,
-            canonical_source_facts,
-            #[cfg(feature = "timers")]
-            timing_boundary,
-        });
-    }
-
-    // Register the main-project boundary before its inventory so its accumulated total is
-    // attributed separately from every source package.
-    #[cfg(feature = "timers")]
-    let project_timing_boundary = crate::timing::register_timing_boundary(
-        crate::timing::TimingBoundaryKind::MainProject,
-        || config.project_name.clone(),
-    );
-
-    let directory_dependency_resolution = DirectoryDependencyResolution::project(
-        &project_setup.module_namespace_set,
-        &project_setup.source_tree_index,
-    );
-    timing_scope_attributed!(
-        timing_guard_build_boundary_inventory_3,
-        crate::timing::TimingMetric::BoundaryInventory,
-        Some(crate::timing::TimingContext::for_boundary(
-            project_timing_boundary
-        )),
-    );
-    let mut project_schedule =
-        match module_inventory::discover_all_modules_in_project_with_check_only(
-            config,
-            &project_path_resolver,
-            &project_source_files,
-            &mut project_setup.project_module_graph,
-            style_directives,
-            &mut external_imports,
-            directory_dependency_resolution,
-            &mut resource_inputs,
-            mode.includes_check_only(),
-            string_table,
-            #[cfg(feature = "timers")]
-            project_timing_boundary,
-        ) {
-            Ok(schedule) => schedule,
-            Err(messages) => {
+                );
+                messages.set_source_database(
+                    package_sources
+                        .finish()
+                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                );
                 return Err(messages);
-            }
-        };
-    // Merge all canonical project contract locations before transient jobs fork their local
-    // string-table base. Project fixed/direct fields are also materialized now so their locations
-    // belong to the same inherited prefix used by every check-only job.
-    let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
-        project_schedule.waves(),
-        string_table,
-    );
-    let effective_project_fields = config_boundary::effective_project_fields(config, string_table)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let fixed_project_facts =
-        config_boundary::fixed_project_contract_facts(&effective_project_fields);
-    let direct_project_facts =
-        config_boundary::direct_project_contract_facts(&effective_project_fields);
-    let project_fallback = config.setting_location_or_config_file("project", string_table);
-    // All canonical project and source-package inventories are complete now. Prepare transient
-    // jobs only after that global provider-discovery barrier so each job forks final canonical
-    // external package/cache/resolution state.
-    if mode.includes_check_only() {
-        for inventory in &mut source_package_inventories {
-            let Some((_, package_index)) = project_setup
-                .module_namespace_set
-                .source_package_boundaries()
-                .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
-            else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "Source package @{} disappeared before deferred check-only preparation",
-                        inventory.dependency_prefix
-                    )),
-                    string_table,
-                ));
             };
-            let package_resolution = DirectoryDependencyResolution::package(
-                &project_setup.module_namespace_set,
-                inventory.dependency_prefix.as_str(),
-                package_index,
-            );
-            inventory.schedule.prepare_check_only_jobs(
+            source_package_inventories.push(SourcePackageModuleInventory {
+                dependency_prefix: dependency_prefix.to_owned(),
+                package_identity: package_index.stable_package_identity().clone(),
+                root_module_id,
+                path_resolver: package_path_resolver,
+                source_files: package_sources,
+                graph: package_graph,
+                schedule: package_waves,
+                canonical_source_facts,
+                #[cfg(feature = "timers")]
+                timing_boundary,
+            });
+        }
+
+        // Register the main-project boundary before its inventory so its accumulated total is
+        // attributed separately from every source package.
+        #[cfg(feature = "timers")]
+        let project_timing_boundary = crate::timing::register_timing_boundary(
+            crate::timing::TimingBoundaryKind::MainProject,
+            || config.project_name.clone(),
+        );
+
+        let directory_dependency_resolution = DirectoryDependencyResolution::project(
+            &project_setup.module_namespace_set,
+            &project_setup.source_tree_index,
+        );
+        timing_scope_attributed!(
+            timing_guard_build_boundary_inventory_3,
+            crate::timing::TimingMetric::BoundaryInventory,
+            Some(crate::timing::TimingContext::for_boundary(
+                project_timing_boundary
+            )),
+        );
+        let mut project_schedule =
+            match module_inventory::discover_all_modules_in_project_with_check_only(
+                config,
+                &project_path_resolver,
+                project_source_files,
+                &mut project_source_spans,
+                &mut project_setup.project_module_graph,
                 style_directives,
-                &inventory.source_files,
-                &inventory.path_resolver,
                 &mut external_imports,
-                package_resolution,
+                directory_dependency_resolution,
+                &mut resource_inputs,
+                mode.includes_check_only(),
+                string_table,
+                #[cfg(feature = "timers")]
+                project_timing_boundary,
+            ) {
+                Ok(schedule) => schedule,
+                Err(messages) => {
+                    return Err(messages);
+                }
+            };
+        // Merge all canonical project contract locations before transient jobs fork their local
+        // string-table base. Project fixed/direct fields are also materialized now so their locations
+        // belong to the same inherited prefix used by every check-only job.
+        let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
+            project_schedule.waves(),
+            string_table,
+        );
+        let effective_project_fields =
+            config_boundary::effective_project_fields(config, string_table)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let fixed_project_facts =
+            config_boundary::fixed_project_contract_facts(&effective_project_fields);
+        let direct_project_facts =
+            config_boundary::direct_project_contract_facts(&effective_project_fields);
+        let project_fallback = config.setting_location_or_config_file("project", string_table);
+        // All canonical project and source-package inventories are complete now. Prepare transient
+        // jobs only after that global provider-discovery barrier so each job forks final canonical
+        // external package/cache/resolution state.
+        if mode.includes_check_only() {
+            for index in 0..source_package_inventories.len() {
+                let inventory = &mut source_package_inventories[index];
+                let Some((_, package_index)) = project_setup
+                    .module_namespace_set
+                    .source_package_boundaries()
+                    .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
+                else {
+                    return Err(CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(format!(
+                            "Source package @{} disappeared before deferred check-only preparation",
+                            inventory.dependency_prefix
+                        )),
+                        string_table,
+                    ));
+                };
+                let package_resolution = DirectoryDependencyResolution::package(
+                    &project_setup.module_namespace_set,
+                    inventory.dependency_prefix.as_str(),
+                    package_index,
+                );
+                let (_, mut source_spans) = inventory.source_files.split();
+                if let Err(mut messages) = inventory.schedule.prepare_check_only_jobs(
+                    style_directives,
+                    &mut source_spans,
+                    &inventory.path_resolver,
+                    &mut external_imports,
+                    package_resolution,
+                    string_table,
+                ) {
+                    let inventory = source_package_inventories.swap_remove(index);
+                    messages.set_source_database(
+                        inventory.source_files.finish().map_err(|error| {
+                            CompilerMessages::from_error_ref(error, string_table)
+                        })?,
+                    );
+                    return Err(messages);
+                }
+            }
+        }
+        if mode.includes_check_only() {
+            project_schedule.prepare_check_only_jobs(
+                style_directives,
+                &mut project_source_spans,
+                &project_path_resolver,
+                &mut external_imports,
+                directory_dependency_resolution,
                 string_table,
             )?;
         }
-    }
-    if mode.includes_check_only() {
-        project_schedule.prepare_check_only_jobs(
-            style_directives,
-            &project_source_files,
-            &project_path_resolver,
-            &mut external_imports,
-            directory_dependency_resolution,
+
+        let (
+            project_module_waves,
+            project_provider_bindings,
+            project_source_package_dependencies,
+            project_check_only_jobs,
+        ) = project_schedule.into_parts();
+        let mut all_project_source_facts = project_source_facts.clone();
+        if mode.includes_check_only() {
+            all_project_source_facts.extend(
+                config_boundary::source_contract_facts_from_check_only_jobs(
+                    &project_check_only_jobs,
+                    string_table,
+                ),
+            );
+        }
+        // Canonical resolution must use only canonical source facts, but explicit inputs are checked
+        // against the full analyzed union after canonical values have validated successfully. This
+        // lets a check-only-only name make an input known without retaining that transient contract.
+        let canonical_project_inputs = config_boundary::filter_build_config_inputs_to_known_facts(
+            build_config_inputs,
+            &project_source_facts,
+            &direct_project_facts,
+        );
+        let project_build_config_values = config_boundary::resolve_boundary_build_config(
+            &project_source_facts,
+            &fixed_project_facts,
+            &direct_project_facts,
+            &canonical_project_inputs,
+            &config_globals,
+            project_fallback.clone(),
             string_table,
         )?;
-    }
-
-    let (
-        project_module_waves,
-        project_provider_bindings,
-        project_source_package_dependencies,
-        project_check_only_jobs,
-    ) = project_schedule.into_parts();
-    let mut all_project_source_facts = project_source_facts.clone();
-    if mode.includes_check_only() {
-        all_project_source_facts.extend(
-            config_boundary::source_contract_facts_from_check_only_jobs(
-                &project_check_only_jobs,
+        if let Some(input) = config_boundary::first_unknown_build_config_input(
+            build_config_inputs,
+            &all_project_source_facts,
+            &direct_project_facts,
+        ) {
+            return Err(config_boundary::build_config_resolution_messages(
+                BuildConfigResolutionError::UnknownExplicitInput { input },
+                project_fallback,
                 string_table,
-            ),
-        );
-    }
-    // Canonical resolution must use only canonical source facts, but explicit inputs are checked
-    // against the full analyzed union after canonical values have validated successfully. This
-    // lets a check-only-only name make an input known without retaining that transient contract.
-    let canonical_project_inputs = config_boundary::filter_build_config_inputs_to_known_facts(
-        build_config_inputs,
-        &project_source_facts,
-        &direct_project_facts,
-    );
-    let project_build_config_values = config_boundary::resolve_boundary_build_config(
-        &project_source_facts,
-        &fixed_project_facts,
-        &direct_project_facts,
-        &canonical_project_inputs,
-        &config_globals,
-        project_fallback.clone(),
-        string_table,
-    )?;
-    if let Some(input) = config_boundary::first_unknown_build_config_input(
-        build_config_inputs,
-        &all_project_source_facts,
-        &direct_project_facts,
-    ) {
-        return Err(config_boundary::build_config_resolution_messages(
-            BuildConfigResolutionError::UnknownExplicitInput { input },
-            project_fallback,
-            string_table,
-        ));
-    }
-    let project_globals = config_boundary::build_project_globals_interface(
-        config,
-        &effective_project_fields,
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    #[cfg(feature = "timers")]
-    timing_guard_build_boundary_inventory_3.finish();
-    let source_package_inventories =
-        order_source_package_inventories(source_package_inventories, string_table)?;
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_directory_inventory.finish();
-
-    // Share the effective external package registry immutably across all boundary compilations;
-    // the serial module scheduler can safely read the same Arc for every directory module.
-    let external_packages = Arc::new(builder_surface.binding_packages.clone());
-
-    // 3. Compile source packages in package-dependency order, then compile the project against
-    // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
-    // provider stores; only the stable public interface crosses into a consuming boundary.
-    timing_scope!(
-        timing_guard_stage0_directory_compile,
-        crate::timing::TimingMetric::Stage0DirectoryCompile
-    );
-    let mut completed_source_packages = CompletedSourcePackageRegistry::new();
-    let mut transient_messages = Vec::new();
-    let mut source_package_check_only_inventories = Vec::new();
-    for inventory in source_package_inventories {
-        let SourcePackageModuleInventory {
-            package_identity,
-            root_module_id,
-            path_resolver,
-            source_files,
-            graph,
-            schedule,
-            canonical_source_facts: source_facts,
-            dependency_prefix,
-            #[cfg(feature = "timers")]
-            timing_boundary,
-        } = inventory;
-        let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
-            schedule.into_parts();
-        let package_inputs = BuildConfigInputSet::new();
-        let package_fallback = SourceLocation::from_path(path_resolver.entry_root(), string_table);
-        let build_config_values = config_boundary::resolve_boundary_build_config(
-            &source_facts,
-            &[],
-            &[],
-            &package_inputs,
-            &config_globals,
-            package_fallback,
-            string_table,
-        )
-        .map_err(|mut messages| {
-            messages.set_source_database(Arc::clone(&source_files));
-            messages
-        })?;
-        let deferred_path_resolver = path_resolver.clone();
-        let deferred_build_config_values = build_config_values.clone();
-        timing_scope_attributed!(
-            timing_guard_build_boundary_compile,
-            crate::timing::TimingMetric::BoundaryCompile,
-            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-        );
-        // Canonical package compilation is deliberately independent of the transient lane. In
-        // particular, no check-only job may publish an artefact or make a package ready for
-        // dependency scheduling.
-        let (boundary, mut package_transient_messages) = canonical::compile_module_waves(
-            canonical::BoundaryCompilationContext::new(
-                config,
-                build_profile,
-                &path_resolver,
-                Arc::clone(&source_files),
-                style_directives,
-                &external_packages,
-                builder_surface,
-                &completed_source_packages,
-                build_config_values,
-                source_facts.clone(),
-                BuildConfigInputSet::new(),
-                config_globals.clone(),
-                Vec::new(),
-                Vec::new(),
-                None,
-            ),
-            graph,
-            module_waves,
-            Vec::new(),
-            &provider_bindings,
-            &source_package_dependencies,
-            &mut resource_inputs,
-            string_table,
-        )
-        .map_err(|mut messages| {
-            messages.set_source_database(Arc::clone(&source_files));
-            messages
-        })?;
-        transient_messages.append(&mut package_transient_messages);
-        let mut dependency_prefixes = Vec::new();
-        let mut seen_dependency_prefixes = FxHashSet::default();
-        for dependency in &source_package_dependencies {
-            // Several modules may depend on the same provider. Publication records one direct
-            // package edge, while module-level dependency bindings retain every consumer binding.
-            if seen_dependency_prefixes.insert(dependency.dependency_prefix.clone()) {
-                dependency_prefixes.push(dependency.dependency_prefix.clone());
-            }
+            ));
         }
-        let package = CompiledSourcePackage {
-            package_identity,
-            root_module_id,
-            boundary,
-        };
-        let publication = completed_source_packages
-            .preflight(&package, &dependency_prefixes)
-            .map_err(|error| {
-                let mut messages = CompilerMessages::from_error_ref(error, string_table);
-                messages.set_source_database(Arc::clone(&source_files));
-                messages
-            })?;
-        let package_id = publication.package_id();
-        completed_source_packages.reserve_commit(&publication);
-        completed_source_packages.commit(publication, package);
-        completed_source_packages
-            .set_source_database(package_id, Arc::clone(&source_files))
-            .map_err(|error| {
-                let mut messages = CompilerMessages::from_error_ref(error, string_table);
-                messages.set_source_database(Arc::clone(&source_files));
-                messages
-            })?;
-        if mode.includes_check_only() && !check_only_jobs.is_empty() {
+        let project_globals = config_boundary::build_project_globals_interface(
+            config,
+            &effective_project_fields,
+            string_table,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        #[cfg(feature = "timers")]
+        timing_guard_build_boundary_inventory_3.finish();
+        let source_package_inventories =
+            order_source_package_inventories(source_package_inventories, string_table)?;
+        #[cfg(feature = "timers")]
+        timing_guard_stage0_directory_inventory.finish();
+
+        // Share the effective external package registry immutably across all boundary compilations;
+        // the serial module scheduler can safely read the same Arc for every directory module.
+        let external_packages = Arc::new(builder_surface.binding_packages.clone());
+
+        // 3. Compile source packages in package-dependency order, then compile the project against
+        // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
+        // provider stores; only the stable public interface crosses into a consuming boundary.
+        timing_scope!(
+            timing_guard_stage0_directory_compile,
+            crate::timing::TimingMetric::Stage0DirectoryCompile
+        );
+        let mut completed_source_packages = CompletedSourcePackageRegistry::new();
+        let mut transient_messages = Vec::new();
+        let mut source_package_check_only_inventories = Vec::new();
+        for inventory in source_package_inventories {
+            let SourcePackageModuleInventory {
+                package_identity,
+                root_module_id,
+                path_resolver,
+                source_files,
+                graph,
+                schedule,
+                canonical_source_facts: source_facts,
+                dependency_prefix,
+                #[cfg(feature = "timers")]
+                timing_boundary,
+            } = inventory;
+            let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
+                schedule.into_parts();
+            let result: Result<_, CompilerMessages> = (|| {
+                let package_inputs = BuildConfigInputSet::new();
+                let package_fallback =
+                    SourceLocation::from_path(path_resolver.entry_root(), string_table);
+                let build_config_values = config_boundary::resolve_boundary_build_config(
+                    &source_facts,
+                    &[],
+                    &[],
+                    &package_inputs,
+                    &config_globals,
+                    package_fallback,
+                    string_table,
+                )?;
+                let deferred_build_config_values = build_config_values.clone();
+                timing_scope_attributed!(
+                    timing_guard_build_boundary_compile,
+                    crate::timing::TimingMetric::BoundaryCompile,
+                    Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+                );
+                // Canonical package compilation is deliberately independent of the transient lane. In
+                // particular, no check-only job may publish an artefact or make a package ready for
+                // dependency scheduling.
+                let (boundary, package_transient_messages) = canonical::compile_module_waves(
+                    canonical::BoundaryCompilationContext::new(
+                        config,
+                        build_profile,
+                        &path_resolver,
+                        Arc::clone(source_files.sources()),
+                        style_directives,
+                        &external_packages,
+                        builder_surface,
+                        &completed_source_packages,
+                        build_config_values,
+                        source_facts.clone(),
+                        BuildConfigInputSet::new(),
+                        config_globals.clone(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                    ),
+                    graph,
+                    module_waves,
+                    Vec::new(),
+                    &provider_bindings,
+                    &source_package_dependencies,
+                    &mut resource_inputs,
+                    string_table,
+                )?;
+                let mut dependency_prefixes = Vec::new();
+                let mut seen_dependency_prefixes = FxHashSet::default();
+                for dependency in &source_package_dependencies {
+                    // Several modules may depend on the same provider. Publication records one direct
+                    // package edge, while module-level dependency bindings retain every consumer binding.
+                    if seen_dependency_prefixes.insert(dependency.dependency_prefix.clone()) {
+                        dependency_prefixes.push(dependency.dependency_prefix.clone());
+                    }
+                }
+                let package = CompiledSourcePackage {
+                    package_identity,
+                    root_module_id,
+                    boundary,
+                };
+                let publication = completed_source_packages
+                    .preflight(&package, &dependency_prefixes)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                completed_source_packages.reserve_commit(&publication);
+                completed_source_packages.commit(publication, package);
+                Ok((deferred_build_config_values, package_transient_messages))
+            })();
+            let (build_config_values, messages) =
+                match result {
+                    Ok(value) => value,
+                    Err(mut messages) => {
+                        messages.set_source_database(source_files.finish().map_err(|error| {
+                            CompilerMessages::from_error_ref(error, string_table)
+                        })?);
+                        return Err(messages);
+                    }
+                };
             source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
                 dependency_prefix,
-                path_resolver: deferred_path_resolver,
+                path_resolver,
                 source_files,
                 check_only_jobs,
                 provider_bindings,
                 source_package_dependencies,
                 canonical_source_facts: source_facts,
-                build_config_values: deferred_build_config_values,
+                build_config_values,
+                messages,
             });
         }
-    }
 
-    completed_source_packages
-        .validate_dependency_edges()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    // Every canonical package facade is now published. Run the deferred transient package jobs
-    // against those immutable boundaries so their package providers can never affect Kahn
-    // ordering or surface as a readiness infrastructure failure.
-    for inventory in source_package_check_only_inventories {
-        let SourcePackageCheckOnlyInventory {
-            dependency_prefix,
-            source_files,
-            path_resolver,
-            check_only_jobs,
-            provider_bindings,
-            source_package_dependencies,
-            canonical_source_facts,
-            build_config_values,
-        } = inventory;
-        let package_id = completed_source_packages
-            .by_prefix(dependency_prefix.as_str())
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "deferred check-only source package @{} was not published",
-                        dependency_prefix
-                    )),
-                    string_table,
-                )
-            })
-            .map_err(|mut messages| {
-                messages.set_source_database(Arc::clone(&source_files));
-                messages
-            })?;
-        let package = completed_source_packages
-            .package(package_id)
-            .map_err(|error| {
-                let mut messages = CompilerMessages::from_error_ref(error, string_table);
-                messages.set_source_database(Arc::clone(&source_files));
-                messages
-            })?;
-        let package_transient_messages =
-            deferred_check_only::compile_check_only_jobs_after_canonical(
-                canonical::BoundaryCompilationContext::new(
-                    config,
-                    build_profile,
-                    &path_resolver,
-                    Arc::clone(&source_files),
-                    style_directives,
-                    &external_packages,
-                    builder_surface,
-                    &completed_source_packages,
-                    build_config_values,
-                    canonical_source_facts,
-                    BuildConfigInputSet::new(),
-                    config_globals.clone(),
-                    Vec::new(),
-                    Vec::new(),
-                    None,
-                ),
-                &package.boundary.modules,
-                &package.boundary.generated,
+        completed_source_packages
+            .validate_dependency_edges()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        // Every canonical package facade is now published. Run the deferred transient package jobs
+        // against those immutable boundaries so their package providers can never affect Kahn
+        // ordering or surface as a readiness infrastructure failure.
+        for inventory in source_package_check_only_inventories {
+            let SourcePackageCheckOnlyInventory {
+                dependency_prefix,
+                source_files,
+                path_resolver,
                 check_only_jobs,
-                &provider_bindings,
-                &source_package_dependencies,
-                string_table,
-            )
-            .map_err(|mut messages| {
-                messages.set_source_database(Arc::clone(&source_files));
+                provider_bindings,
+                source_package_dependencies,
+                canonical_source_facts,
+                build_config_values,
+                mut messages,
+            } = inventory;
+            let result: Result<_, CompilerMessages> = (|| {
+                let package_id = completed_source_packages
+                    .by_prefix(dependency_prefix.as_str())
+                    .ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(format!(
+                                "deferred check-only source package @{} was not published",
+                                dependency_prefix
+                            )),
+                            string_table,
+                        )
+                    })?;
+                let package = completed_source_packages
+                    .package(package_id)
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let package_transient_messages =
+                    deferred_check_only::compile_check_only_jobs_after_canonical(
+                        canonical::BoundaryCompilationContext::new(
+                            config,
+                            build_profile,
+                            &path_resolver,
+                            Arc::clone(source_files.sources()),
+                            style_directives,
+                            &external_packages,
+                            builder_surface,
+                            &completed_source_packages,
+                            build_config_values,
+                            canonical_source_facts,
+                            BuildConfigInputSet::new(),
+                            config_globals.clone(),
+                            Vec::new(),
+                            Vec::new(),
+                            None,
+                        ),
+                        &package.boundary.modules,
+                        &package.boundary.generated,
+                        check_only_jobs,
+                        &provider_bindings,
+                        &source_package_dependencies,
+                        string_table,
+                    )?;
+                Ok((package_id, package_transient_messages))
+            })();
+            let finalized = source_files
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let (package_id, mut check_only_messages) = result.map_err(|mut messages| {
+                messages.set_source_database(Arc::clone(&finalized));
                 messages
             })?;
-        transient_messages.extend(package_transient_messages);
-    }
+            completed_source_packages
+                .set_source_database(package_id, Arc::clone(&finalized))
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            messages.append(&mut check_only_messages);
+            for messages in &mut messages {
+                messages.set_source_database(Arc::clone(&finalized));
+            }
+            transient_messages.extend(messages);
+        }
 
-    timing_scope_attributed!(
-        timing_guard_build_boundary_compile_2,
-        crate::timing::TimingMetric::BoundaryCompile,
-        Some(crate::timing::TimingContext::for_boundary(
-            project_timing_boundary
-        )),
-    );
-    let (project_boundary, mut project_transient_messages) = canonical::compile_module_waves(
-        canonical::BoundaryCompilationContext::new(
-            config,
-            build_profile,
-            &project_path_resolver,
-            Arc::clone(&project_source_files),
-            style_directives,
-            &external_packages,
-            builder_surface,
-            &completed_source_packages,
-            project_build_config_values,
-            project_source_facts,
-            build_config_inputs.clone(),
-            config_globals.clone(),
-            fixed_project_facts.clone(),
-            direct_project_facts.clone(),
-            project_globals.as_ref(),
-        ),
-        project_setup.project_module_graph,
-        project_module_waves,
-        project_check_only_jobs,
-        &project_provider_bindings,
-        &project_source_package_dependencies,
-        &mut resource_inputs,
-        string_table,
-    )?;
-    transient_messages.append(&mut project_transient_messages);
-    #[cfg(feature = "timers")]
-    timing_guard_build_boundary_compile_2.finish();
-    #[cfg(feature = "timers")]
-    timing_guard_stage0_directory_compile.finish();
-    ProjectFrontendCompilation::new_with_transient_messages(
-        project_boundary,
-        completed_source_packages,
-        resource_inputs,
-        transient_messages,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+        timing_scope_attributed!(
+            timing_guard_build_boundary_compile_2,
+            crate::timing::TimingMetric::BoundaryCompile,
+            Some(crate::timing::TimingContext::for_boundary(
+                project_timing_boundary
+            )),
+        );
+        let (project_boundary, mut project_transient_messages) = canonical::compile_module_waves(
+            canonical::BoundaryCompilationContext::new(
+                config,
+                build_profile,
+                &project_path_resolver,
+                Arc::clone(project_source_files),
+                style_directives,
+                &external_packages,
+                builder_surface,
+                &completed_source_packages,
+                project_build_config_values,
+                project_source_facts,
+                build_config_inputs.clone(),
+                config_globals.clone(),
+                fixed_project_facts.clone(),
+                direct_project_facts.clone(),
+                project_globals.as_ref(),
+            ),
+            project_setup.project_module_graph,
+            project_module_waves,
+            project_check_only_jobs,
+            &project_provider_bindings,
+            &project_source_package_dependencies,
+            &mut resource_inputs,
+            string_table,
+        )?;
+        transient_messages.append(&mut project_transient_messages);
+        #[cfg(feature = "timers")]
+        timing_guard_build_boundary_compile_2.finish();
+        #[cfg(feature = "timers")]
+        timing_guard_stage0_directory_compile.finish();
+        ProjectFrontendCompilation::new_with_transient_messages(
+            project_boundary,
+            completed_source_packages,
+            resource_inputs,
+            transient_messages,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+    })();
+    let finalized = project_sources
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    *project_source_files = Some(Arc::clone(&finalized));
+    match result {
+        Ok(mut compilation) => {
+            for diagnosed in &mut compilation.project.diagnosed {
+                diagnosed
+                    .diagnostics
+                    .set_source_database(Arc::clone(&finalized));
+            }
+            for messages in &mut compilation.transient_messages {
+                if messages.source_database_for_diagnostic(0).is_none() {
+                    messages.set_source_database(Arc::clone(&finalized));
+                }
+            }
+            Ok(compilation)
+        }
+        Err(mut messages) => {
+            if messages.source_database_for_diagnostic(0).is_none() {
+                messages.set_source_database(finalized);
+            }
+            Err(messages)
+        }
+    }
 }

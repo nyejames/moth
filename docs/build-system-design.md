@@ -603,6 +603,18 @@ This distinction lets tooling diagnose abandoned or disconnected source without 
 
 Stage 0 asks the compiler to perform tokenization and header syntax preparation once for each selected source candidate.
 
+The compilation boundary keeps a `SourceDatabaseBuilder` beside immutable source lookup services.
+Tokenization borrows a source's original live span builder; each `SourcePreparationDelta` returns
+that builder outside its success or failure result. File workers and chunk merges return every
+builder before fallible aggregation, including discarded speculative preparations. Repeated
+canonical and check-only preparation appends to the same source-local table.
+
+Source identity finalization and span-table finalization are separate boundaries. The live source
+owner survives all canonical and check-only producers. Private AST lookup handles end before the
+owner regains exclusive access to its existing `Arc<SourceDatabase>` and installs each table once.
+Only then may outcomes retain that source context for rendering. Package interfaces can publish
+earlier; their source lookup context waits for the package's remaining check-only producers.
+
 Prepared syntax may contain:
 
 - tokens or source-kind payloads

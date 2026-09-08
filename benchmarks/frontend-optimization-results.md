@@ -3311,3 +3311,29 @@ The Phase 0 deferral "Exact span start/length histograms with per-candidate boun
 discharged by this section. Its recorded owner was written as slice 1C3 consumed by 1C1, under the
 pre-activation numbering; the work landed as 1C1 (byte cursor and line index) followed by 1C2
 (this census), which is the same order under the corrected names.
+
+## Data Layout Migration - Source Ownership Checkpoint - 2026-09-08
+
+Phase 1D4b replaces tokenizer-owned builder results with a borrowed original source builder.
+File/chunk aggregation returns every builder before fallible merging. Directory, package,
+single-file and direct-template outcomes retain the live owner until their last producer and
+reuse its existing `Arc<SourceDatabase>` for final lookup. This is an ownership checkpoint;
+the diagnostic, path and token layout migrations remain open.
+
+Machine: Apple M1 Pro, aarch64 macOS; Rust/Clippy 1.97.1. Commands and results:
+
+- `cargo fmt --all && just validate`: native featured all-target Clippy, 5,060 compiler tests,
+  17 CLI tests, 825 xtask tests, 1,951 integration cases, docs check and source audit passed.
+- The shared benchmark gate preflighted all 82 cases. Three-iteration quick CLI and frontend
+  averages reported no measurable change (0 ms); the changed docs workloads were excluded.
+  This does not establish a five-run median comparison or aggregate retained-memory improvement.
+- Scaling fits passed: nominal members \(n^{0.98}\), constant chains \(n^{0.82}\), generic
+  instantiation \(n^{1.61}\). Timer erasure passed.
+- `cargo check -p moth --all-targets --features boracle,timers,benchmark_counters` passed.
+- `target/release/moth build docs --release`: 74 outputs. Known generated-only CSS drift was
+  excluded from the ownership checkpoint.
+
+The existing preparation-to-semantics regression now resolves a tokenizer-created 1,506-byte
+identifier span through the finalized database and checks the return-site offset and exact text.
+Source-unit coverage separately proves repeated preparation preserves distinct original overflow
+rows. Neither test claims semantic stages already append compact spans; that migration follows.

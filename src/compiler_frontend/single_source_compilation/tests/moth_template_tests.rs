@@ -11,7 +11,7 @@
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, HeaderParseOptions,
+    FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -24,7 +24,9 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
@@ -161,14 +163,14 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
             .id
     };
 
-    let prepared_template = prepare_bundle_source(
+    let (prepared_template, template_span_builder) = prepare_bundle_source(
         &source_files,
         template_path,
         template_source,
         &style_directives,
         &mut string_table,
     );
-    let prepared_markdown = prepare_bundle_source(
+    let (prepared_markdown, markdown_span_builder) = prepare_bundle_source(
         &source_files,
         markdown_path,
         "Nested intro body.",
@@ -208,11 +210,14 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     }
 
     let module_origin = direct_test_module_origin();
+    let mut source_builder = SourceDatabaseBuilder::new(source_files);
+    source_builder.retain_span_builder(template_id, template_span_builder);
+    source_builder.retain_span_builder(markdown_id, markdown_span_builder);
     let bundle = MothTemplateFileValueBundle {
         prepared_entry: prepared_template,
         prepared_content_sources: vec![prepared_markdown],
         resolved_file_references,
-        source_files,
+        source_files: source_builder,
         module_origin: Some(module_origin.clone()),
     };
 
@@ -296,7 +301,11 @@ fn prepare_bundle_source(
     source_code: &str,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-) -> FileFrontendPrepareOutput {
+) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
+    let source_id = source_files
+        .get_by_canonical_path(source_path)
+        .unwrap_or_else(|| panic!("bundle source {source_path:?} should have a source identity"))
+        .id;
     let source = match source_path.extension() {
         Some(extension) if extension == "md" => FrontendFilePrepareSource::PlainMarkdown {
             source_code,
@@ -317,15 +326,21 @@ fn prepare_bundle_source(
     };
     let input = FrontendFilePrepareInput {
         source,
+        source_id,
+        span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
-    let mut prepared = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
-        .expect("bundle source preparation should succeed");
+    let SourcePreparationDelta {
+        span_builder,
+        result,
+        ..
+    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table);
+    let mut prepared = result.expect("bundle source preparation should succeed");
     prepared
         .freeze_path_syntax(string_table)
         .expect("bundle source should freeze its path syntax");
-    prepared
+    (prepared, span_builder)
 }
 
 fn direct_test_module_origin() -> StableModuleOriginIdentity {

@@ -31,14 +31,12 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{
-    TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -129,6 +127,7 @@ pub(crate) fn parse_single_file_ast_build_result(
 
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &interned_path,
@@ -136,12 +135,18 @@ pub(crate) fn parse_single_file_ast_build_result(
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    )
-    .map_err(|TokenizeFailure { diagnostic, .. }| diagnostic)?;
+        &mut span_builder,
+    )?;
 
-    let output =
-        prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0)
-            .map_err(|error| match error {
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        &file_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+    )
+    .map_err(|error| match error {
                 crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
                     crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
                         diagnostic, ..
@@ -270,12 +275,15 @@ pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilerDiagnost
 /// WHAT: provides a test-support helper that calls the real `tokenize_source` implementation.
 /// WHY: tokenization-only tests need access to the tokenizer without taking ownership of the
 ///      frontend's string table, and this keeps test-only entry points out of production code.
+///      The caller owns the span builder for the tokenized source and keeps it alive wherever its
+///      assertions still resolve spans; this helper only borrows it for the lexical pass.
 pub(crate) fn tokenize_source_for_test(
     frontend: &mut CompilerFrontend<'_>,
     source_code: &str,
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
-) -> Result<TokenizeOutput, Box<CompilerDiagnostic>> {
+    span_builder: &mut ExtendedSpanBuilder,
+) -> Result<FileTokens, Box<CompilerDiagnostic>> {
     CompilerFrontend::tokenize_source(
         frontend.source_files.as_ref(),
         frontend.style_directives,
@@ -283,6 +291,7 @@ pub(crate) fn tokenize_source_for_test(
         module_path,
         tokenizer_entry_mode,
         &mut frontend.string_table,
+        span_builder,
     )
     .map_err(|error| match error {
         crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(

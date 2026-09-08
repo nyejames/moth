@@ -26,6 +26,7 @@ use crate::compiler_frontend::headers::file_parser::parse_headers_in_file;
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 use crate::compiler_frontend::headers::types::HeaderParseContext;
+pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
 pub use crate::compiler_frontend::headers::types::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
     FileFrontendPrepareOutput, FileRole, Header, HeaderKind, HeaderParseOptions,
@@ -42,12 +43,12 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenizeOutput};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use std::mem;
 use std::path::Path;
 
@@ -58,7 +59,6 @@ use std::path::Path;
 /// while the header stage owns only header parsing against whichever table the caller provides.
 pub fn parse_file_headers_with_table(
     file_tokens: &mut FileTokens,
-    span_builder: ExtendedSpanBuilder,
     entry_file_path: &Path,
     options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
@@ -117,7 +117,7 @@ pub fn parse_file_headers_with_table(
         const_template_offset,
         runtime_fragment_offset,
     };
-    parse_headers_in_file(file_tokens, file_id, span_builder, &mut parse_context)
+    parse_headers_in_file(file_tokens, file_id, &mut parse_context)
 }
 
 /// Parse headers from an already-tokenized file against a local string-table fork, then merge
@@ -125,24 +125,21 @@ pub fn parse_file_headers_with_table(
 ///
 /// WHAT: this is the per-file header-parsing half of preparation for callers that already ran
 ///       tokenization, such as config parsing that runs token-level validation first.
-/// WHY: the tokenize output is taken whole because its span builder owns every row the tokens'
-///      spans index. Accepting bare `FileTokens` here would pair them with an empty table, while
-///      a diagnosed result returns that same builder with the file identity for later resolution.
+/// WHY: the caller retains the source's span builder; header parsing only consumes the token
+///      stream and leaves span resolution with the enclosing preparation owner on every exit.
 pub(crate) fn prepare_file_from_tokens(
-    tokenized: TokenizeOutput,
+    mut file_tokens: FileTokens,
     entry_file_path: &Path,
     options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let (mut file_tokens, span_builder) = tokenized.into_parts();
     let fork_source = string_table.fork_source();
     let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
 
     let file_output = parse_file_headers_with_table(
         &mut file_tokens,
-        span_builder,
         entry_file_path,
         options,
         &mut local_string_table,

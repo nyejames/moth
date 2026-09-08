@@ -10,19 +10,17 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
-    HeaderParseOptions,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
+    SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{
-    TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -43,7 +41,7 @@ use super::source_loading::extract_source_code;
 ///      final-domain publication, and the loaded text moves into the final source record without
 ///      another read in either lane.
 pub(super) struct PreparedDiscoverySource {
-    pub(super) prepared_output: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
+    pub(super) prepared_output: SourcePreparationDelta,
     pub(super) source_byte_len: usize,
     pub(super) source_code: String,
 }
@@ -106,6 +104,7 @@ pub(super) fn prepare_discovery_source_text(
     // Tokenize the file once. Callers may supply source text that was read during an earlier
     // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
     // file before assembling `PreparedSourceInput` values.
+    let mut span_builder = ExtendedSpanBuilder::new();
     let tokenized = match tokenize(
         &source,
         &interned_path,
@@ -113,31 +112,39 @@ pub(super) fn prepare_discovery_source_text(
         style_directives,
         string_table,
         source_id,
+        &mut span_builder,
     ) {
         Ok(output) => output,
-        Err(TokenizeFailure {
-            file_id,
-            diagnostic,
-            span_builder,
-        }) => {
+        Err(diagnostic) => {
             return Ok(PreparedDiscoverySource {
-                prepared_output: Err(FileFrontendPrepareFailure::Diagnosed(
-                    FileFrontendPrepareError {
-                        file_id,
-                        warnings: Vec::new(),
-                        diagnostic,
-                        span_builder,
-                    },
-                )),
+                prepared_output: SourcePreparationDelta {
+                    file_id: source_id,
+                    span_builder,
+                    result: Err(FileFrontendPrepareFailure::Diagnosed(
+                        FileFrontendPrepareError {
+                            file_id: source_id,
+                            warnings: Vec::new(),
+                            diagnostic,
+                        },
+                    )),
+                },
                 source_byte_len: source.len(),
                 source_code: source,
             });
         }
     };
 
-    let prepared_output = prepare_discovery_file(
-        file_path,
-        tokenized,
+    let prepared_output = prepare_discovery_output(
+        FrontendFilePrepareInput {
+            source: FrontendFilePrepareSource::Moth {
+                source_path: file_path.to_path_buf(),
+                tokens: Box::new(tokenized),
+            },
+            source_id,
+            span_builder,
+            const_template_offset: 0,
+            runtime_fragment_offset: 0,
+        },
         style_directives,
         project_path_resolver,
         entry_file_path,
@@ -164,7 +171,7 @@ pub(super) fn prepare_discovery_template_source(
         extract_source_code(file_path, string_table).map_err(SourceDiscoveryError::from)?;
     let source_byte_len = source.len();
 
-    source_files.insert(
+    let source_id = source_files.insert(
         file_path.to_path_buf(),
         SourceKind::Compiler(SourceFileKind::MothTemplate),
         entry_file_path,
@@ -172,9 +179,15 @@ pub(super) fn prepare_discovery_template_source(
         string_table,
     )?;
     let prepared_output = prepare_discovery_output(
-        FrontendFilePrepareSource::MothTemplate {
-            source_code: source.as_str(),
-            source_path: file_path.to_path_buf(),
+        FrontendFilePrepareInput {
+            source: FrontendFilePrepareSource::MothTemplate {
+                source_code: source.as_str(),
+                source_path: file_path.to_path_buf(),
+            },
+            source_id,
+            span_builder: ExtendedSpanBuilder::new(),
+            const_template_offset: 0,
+            runtime_fragment_offset: 0,
         },
         style_directives,
         project_path_resolver,
@@ -189,48 +202,14 @@ pub(super) fn prepare_discovery_template_source(
     })
 }
 
-/// Prepare one scanned Moth file and retain its complete provider-independent result.
-///
-/// WHAT: runs the same retained header preparation that later feeds binding, so discovery and
-///      binding consume one clause owner.
-/// WHY: Stage 0 needs dependency clauses immediately, while module compilation later needs the
-///      complete headers, selection table and header-owned token substreams from that same pass.
-///      A diagnosed header rejection keeps the lexical pass's builder instead of freezing it.
-fn prepare_discovery_file(
-    file_path: &Path,
-    tokenized: TokenizeOutput,
-    style_directives: &StyleDirectiveRegistry,
-    project_path_resolver: &Option<ProjectPathResolver>,
-    entry_file_path: &Path,
-    source_files: &SourceDatabase,
-    string_table: &mut StringTable,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let TokenizeOutput {
-        file_tokens,
-        span_builder,
-    } = tokenized;
-    prepare_discovery_output(
-        FrontendFilePrepareSource::Moth {
-            source_path: file_path.to_path_buf(),
-            tokens: Box::new(file_tokens),
-            span_builder,
-        },
-        style_directives,
-        project_path_resolver,
-        entry_file_path,
-        source_files,
-        string_table,
-    )
-}
-
 fn prepare_discovery_output(
-    source: FrontendFilePrepareSource<'_>,
+    input: FrontendFilePrepareInput<'_>,
     style_directives: &StyleDirectiveRegistry,
     project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
-) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+) -> SourcePreparationDelta {
     // Fork a local string table so preparation never mutates the shared table while merging.
     let fork_source = string_table.fork_source();
     let base_len = fork_source.base_len();
@@ -251,23 +230,16 @@ fn prepare_discovery_output(
         entry_file_path,
         options: &options,
     };
-    let input = FrontendFilePrepareInput {
-        source,
-        const_template_offset: 0,
-        runtime_fragment_offset: 0,
-    };
 
-    let outcome =
+    let mut outcome =
         CompilerFrontend::prepare_file_frontend_local(&prepare_context, input, &mut local_table);
     let remap = string_table.merge_delta_from(&local_table, base_len);
 
-    match outcome {
-        Ok(mut output) => {
-            output
-                .remap_string_ids(&remap)
-                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-            Ok(output)
-        }
+    outcome.result = match outcome.result {
+        Ok(mut output) => output
+            .remap_string_ids(&remap)
+            .map(|()| output)
+            .map_err(FileFrontendPrepareFailure::Infrastructure),
 
         Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
             error.remap_string_ids(&remap);
@@ -278,5 +250,6 @@ fn prepare_discovery_output(
             error.remap_string_ids(&remap);
             Err(FileFrontendPrepareFailure::Infrastructure(error))
         }
-    }
+    };
+    outcome
 }

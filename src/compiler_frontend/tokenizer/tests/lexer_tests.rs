@@ -19,7 +19,6 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::TokenizeFailure;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 
@@ -42,15 +41,18 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let TokenizeFailure { diagnostic, .. } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    )
-    .expect_err("tokenization should fail");
+        &mut span_builder,
+    ) else {
+        panic!("tokenization should fail");
+    };
     (*diagnostic, string_table)
 }
 
@@ -60,6 +62,7 @@ fn tokenize_source_with_registry(
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -67,9 +70,9 @@ fn tokenize_source_with_registry(
         style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
     (file_tokens, string_table)
 }
 
@@ -81,6 +84,7 @@ fn tokenize_source_with_directives(
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -88,9 +92,9 @@ fn tokenize_source_with_directives(
         &registry,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
     (file_tokens, string_table)
 }
 
@@ -98,6 +102,7 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
     let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -106,9 +111,9 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .expect("Moth template tokenization should succeed")
-    .file_tokens;
+    .expect("Moth template tokenization should succeed");
     (file_tokens, string_table)
 }
 
@@ -116,7 +121,8 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
     let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
-    let TokenizeFailure { diagnostic, .. } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
@@ -124,8 +130,10 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    )
-    .expect_err("Moth template tokenization should fail");
+        &mut span_builder,
+    ) else {
+        panic!("Moth template tokenization should fail");
+    };
     (*diagnostic, string_table)
 }
 
@@ -1589,15 +1597,18 @@ fn rejects_legacy_reset_style_directive_name() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let TokenizeFailure { diagnostic, .. } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         "[$reset: body]",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    )
-    .expect_err("legacy reset directive should be rejected");
+        &mut span_builder,
+    ) else {
+        panic!("legacy reset directive should be rejected");
+    };
     let error = *diagnostic;
 
     match &error.payload {
@@ -1691,6 +1702,7 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
+    let mut span_builder = ExtendedSpanBuilder::new();
     let result = tokenize(
         "[$[:prefix], $md:\nhello\n]",
         &source_path,
@@ -1698,6 +1710,7 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     );
     assert!(
         result.is_err(),
@@ -1752,16 +1765,18 @@ fn unknown_style_directives_fail_under_strict_registry() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
-    let result = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         "[$unknown: value]",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
-    );
-    let TokenizeFailure { diagnostic, .. } =
-        result.expect_err("unknown directive should fail during tokenization");
+        &mut span_builder,
+    ) else {
+        panic!("unknown directive should fail during tokenization");
+    };
     let error = *diagnostic;
 
     match &error.payload {
@@ -1805,6 +1820,7 @@ fn rejects_numeric_slot_directive_prefixes() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
+    let mut span_builder = ExtendedSpanBuilder::new();
     let result = tokenize(
         "[wrapper: [$1: first]]",
         &source_path,
@@ -1812,6 +1828,7 @@ fn rejects_numeric_slot_directive_prefixes() {
         &style_directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     );
     assert!(
         result.is_err(),
@@ -2463,35 +2480,34 @@ fn every_token_legacy_byte_range_matches_its_encoded_span() {
     let source = "name = \"café😀\"\r\nvalue = \"quoted\"\rbody = [$md:\nbody\r]\n[$note:\ndiscarded\r]\nlast = 2";
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("span-bridge.moth", &mut string_table);
-    let output = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &frontend_test_style_directives(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("span bridge fixture should tokenize");
-    let resolver = output.span_builder.resolver();
+    let resolver = span_builder.resolver();
 
     assert!(
-        output
-            .file_tokens
+        file_tokens
             .tokens
             .iter()
             .any(|token| matches!(token.kind, TokenKind::TemplateHead))
     );
     assert!(
-        output
-            .file_tokens
+        file_tokens
             .tokens
             .iter()
             .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
     );
 
     let mut previous_end = 0u32;
-    let authored: Vec<&str> = output
-        .file_tokens
+    let authored: Vec<&str> = file_tokens
         .tokens
         .iter()
         .map(|token| {
@@ -2555,18 +2571,19 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
     let source = format!("value = \"{quoted}\"");
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("long-token.moth", &mut string_table);
-    let output = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
         &source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &frontend_test_style_directives(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("long token should tokenize");
-    let resolver = output.span_builder.resolver();
-    let token = output
-        .file_tokens
+    let resolver = span_builder.resolver();
+    let token = file_tokens
         .tokens
         .iter()
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
@@ -2574,7 +2591,7 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
     let resolved = token.span.resolve_with(resolver);
 
     assert_eq!(
-        output.span_builder.len(),
+        span_builder.len(),
         1,
         "the long string is the only token past the inline length limit, so it owns the one row"
     );
@@ -2601,21 +2618,19 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
         .expect("the fixture should have a source identity")
         .id;
 
-    let TokenizeFailure {
-        file_id,
-        diagnostic,
-        span_builder,
-    } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         &source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &frontend_test_style_directives(),
         &mut string_table,
         expected_file_id,
-    )
-    .expect_err("the malformed trailing character should abort tokenization");
+        &mut span_builder,
+    ) else {
+        panic!("the malformed trailing character should abort tokenization");
+    };
 
-    assert_eq!(file_id, expected_file_id);
     assert_eq!(
         diagnostic.primary_location.start_byte,
         (source.len() - 1) as u32
@@ -2641,7 +2656,13 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
 fn diagnostic_location_does_not_append_an_extended_span_row() {
     let source = "x".repeat(3000);
     let source_path = InternedPath::new();
-    let mut stream = TokenStream::new(&source, &source_path, TokenizerEntryMode::SourceFile);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut stream = TokenStream::new(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &mut span_builder,
+    );
 
     for _ in 0..1500 {
         stream.next();

@@ -196,17 +196,10 @@ pub(crate) fn compile_module(
         Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
-        Err(mut messages) => {
-            // The semantic service still has the boundary-owned snapshot handle when it
-            // classifies a user diagnostic. Carry that handle into the diagnosed owner before the
-            // prepared/module-local table is dropped, so later boundary aggregation can render
-            // each diagnostic against the database that produced it.
-            messages.set_source_database(Arc::clone(context.source_files));
-            match ModuleDiagnostics::from_messages(messages) {
-                Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
-                Err(error) => Err(error),
-            }
-        }
+        Err(messages) => match ModuleDiagnostics::from_messages(messages) {
+            Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
+            Err(error) => Err(error),
+        },
     }
 }
 

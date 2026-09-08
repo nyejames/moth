@@ -1,15 +1,17 @@
 //! Path-only syntax tests.
 
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, PathKind};
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeFailure, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 
 fn tokenize_source(
     source: &str,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> (
     crate::compiler_frontend::tokenizer::tokens::FileTokens,
     StringTable,
@@ -23,15 +25,16 @@ fn tokenize_source(
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        span_builder,
     )
-    .expect("source should tokenize")
-    .file_tokens;
+    .expect("source should tokenize");
     (tokens, string_table)
 }
 
 #[test]
 fn path_token_terminates_at_unquoted_whitespace() {
-    let (tokens, string_table) = tokenize_source("@core/math sin\n");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (tokens, string_table) = tokenize_source("@core/math sin\n", &mut span_builder);
     let path_id = tokens
         .tokens
         .iter()
@@ -56,7 +59,8 @@ fn path_token_terminates_at_unquoted_whitespace() {
 
 #[test]
 fn quoted_path_component_retains_whitespace() {
-    let (tokens, string_table) = tokenize_source("@docs/\"my file.md\"\n");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (tokens, string_table) = tokenize_source("@docs/\"my file.md\"\n", &mut span_builder);
     let path_id = tokens
         .tokens
         .iter()
@@ -78,7 +82,8 @@ fn quoted_path_component_retains_whitespace() {
 
 #[test]
 fn try_path_for_token_rejects_wrong_table_and_location_mismatch() {
-    let (tokens, _) = tokenize_source("@core/math\n");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (tokens, _) = tokenize_source("@core/math\n", &mut span_builder);
     let path_token = tokens
         .tokens
         .iter()
@@ -107,7 +112,8 @@ fn try_path_for_token_rejects_wrong_table_and_location_mismatch() {
         .expect_err("an empty wrong table must stay an infrastructure failure");
     assert!(empty_error.msg.contains("outside a table"));
 
-    let (other, _) = tokenize_source("@other/path\n");
+    let mut other_span_builder = ExtendedSpanBuilder::new();
+    let (other, _) = tokenize_source("@other/path\n", &mut other_span_builder);
     let other_error = other
         .path_syntax
         .try_path_for_token(path_id, &path_token.location)
@@ -136,16 +142,21 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
     for source in ["@ docs\n", "@docs/ my\n"] {
         let mut strings = StringTable::new();
         let source_path = InternedPath::from_single_str("test.moth", &mut strings);
-        let TokenizeFailure { diagnostic, .. } = tokenize(
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let error = match tokenize(
             source,
             &source_path,
             TokenizerEntryMode::SourceFile,
             &StyleDirectiveRegistry::built_ins(),
             &mut strings,
             SourceId::COMPILATION_ROOT,
-        )
-        .expect_err("whitespace cannot separate a path introducer or separator from its component");
-        let error = *diagnostic;
+            &mut span_builder,
+        ) {
+            Ok(_) => panic!(
+                "whitespace cannot separate a path introducer or separator from its component"
+            ),
+            Err(diagnostic) => *diagnostic,
+        };
         assert!(matches!(
             error.payload,
             DiagnosticPayload::InvalidPath { .. }
@@ -157,16 +168,19 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
 fn path_errors_remain_structured() {
     let mut strings = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut strings);
-    let TokenizeFailure { diagnostic, .. } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let error = match tokenize(
         "@/child",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut strings,
         SourceId::COMPILATION_ROOT,
-    )
-    .expect_err("public root suffix should fail");
-    let error = *diagnostic;
+        &mut span_builder,
+    ) {
+        Ok(_) => panic!("public root suffix should fail"),
+        Err(diagnostic) => *diagnostic,
+    };
     assert!(matches!(
         error.payload,
         DiagnosticPayload::InvalidPath {

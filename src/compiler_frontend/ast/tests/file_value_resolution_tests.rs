@@ -48,12 +48,12 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizeFailure, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
@@ -166,16 +166,19 @@ fn moth_file_value_reports_typed_no_value_diagnostic() {
 fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let TokenizeFailure { diagnostic, .. } = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let error = match tokenize(
         "@/logo.svg",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
-    )
-    .expect_err("a public root path cannot have a suffix");
-    let error = *diagnostic;
+        &mut span_builder,
+    ) {
+        Ok(_) => panic!("a public root path cannot have a suffix"),
+        Err(diagnostic) => *diagnostic,
+    };
 
     assert_eq!(
         error.kind,
@@ -344,11 +347,13 @@ fn compile_fixture(
     };
     let mut prepared_outputs =
         Vec::with_capacity(moth_files.len() + templates.len() + markdown_files.len());
+    let mut retained_span_builders = Vec::new();
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
         let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
@@ -356,8 +361,12 @@ fn compile_fixture(
             &style_directives,
             &mut string_table,
             file_id_for(path),
+            &mut span_builder,
         )
         .expect("Moth tokenization should succeed");
+        // Prepared outputs keep their identity, but their token spans still index this
+        // builder's table; keep every builder alive through the binding assertions below.
+        retained_span_builders.push(span_builder);
 
         prepared_outputs.push(
             prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
@@ -371,6 +380,7 @@ fn compile_fixture(
             .expect("test path should be UTF-8");
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
@@ -378,8 +388,10 @@ fn compile_fixture(
             &style_directives,
             &mut string_table,
             file_id_for(path),
+            &mut span_builder,
         )
         .expect("Moth template tokenization should succeed");
+        retained_span_builders.push(span_builder);
 
         let mut output = prepare_moth_template_file(file_tokens, &mut string_table)
             .expect("Moth template preparation should succeed");
@@ -543,6 +555,7 @@ fn assert_file_value_reuses_content(
         "file-value constant must reuse the synthetic content StringId"
     );
 }
+
 fn resolve_file_value_fixture(
     source: &str,
     class: PreparedFileReferenceClass,
@@ -573,6 +586,7 @@ fn resolve_file_value_fixture(
     let source_path = InternedPath::try_from_filesystem_path(&source_path_buf, &mut string_table)
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = tokenize(
         source,
         &source_path,
@@ -580,6 +594,7 @@ fn resolve_file_value_fixture(
         &style_directives,
         &mut string_table,
         source_file,
+        &mut span_builder,
     )
     .expect("file-value fixture should tokenize");
     token_stream.freeze_path_syntax_for_test();

@@ -29,8 +29,8 @@ use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
-    FileFrontendPrepareOutput, HeaderParseOptions, parse_file_headers_with_table,
+    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
+    SourcePreparationDelta, parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -53,9 +53,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TokenizeFailure, TokenizeOutput, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -175,7 +173,6 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
     Moth {
         source_path: PathBuf,
         tokens: Box<FileTokens>,
-        span_builder: ExtendedSpanBuilder,
     },
     MothTemplate {
         source_code: &'a str,
@@ -194,6 +191,8 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
 /// WHY: grouping these inputs keeps the preparation API explicit without a broad argument list.
 pub(crate) struct FrontendFilePrepareInput<'a> {
     pub(crate) source: FrontendFilePrepareSource<'a>,
+    pub(crate) source_id: SourceId,
+    pub(crate) span_builder: ExtendedSpanBuilder,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
 }
@@ -259,24 +258,11 @@ impl CompilerFrontend<'static> {
         module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
-    ) -> Result<TokenizeOutput, FileFrontendPrepareFailure> {
-        let map_tokenize_error = |TokenizeFailure {
-                                      file_id,
-                                      diagnostic,
-                                      span_builder,
-                                  }| {
-            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                file_id,
-                warnings: Vec::new(),
-                diagnostic,
-                span_builder,
-            })
-        };
-
+        span_builder: &mut ExtendedSpanBuilder,
+    ) -> Result<FileTokens, FileFrontendPrepareFailure> {
         let (logical_path, source_id, canonical_os_path) =
             source_identity_facts(source_files, module_path)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
         let mut tokens = tokenize(
             source_code,
             &logical_path,
@@ -284,8 +270,15 @@ impl CompilerFrontend<'static> {
             style_directives,
             string_table,
             source_id,
+            span_builder,
         )
-        .map_err(map_tokenize_error)?;
+        .map_err(|diagnostic| {
+            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                file_id: source_id,
+                warnings: Vec::new(),
+                diagnostic,
+            })
+        })?;
         tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }
@@ -300,12 +293,14 @@ impl CompilerFrontend<'static> {
         context: &FrontendFilePrepareContext<'_>,
         input: FrontendFilePrepareInput<'_>,
         local_string_table: &mut StringTable,
-    ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    ) -> SourcePreparationDelta {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
         #[cfg(test)]
         record_file_frontend_prepare_for_test(&input.source);
 
-        match input.source {
+        let file_id = input.source_id;
+        let mut span_builder = input.span_builder;
+        let result = (|| match input.source {
             FrontendFilePrepareSource::PlainMarkdown {
                 source_code,
                 source_path,
@@ -326,7 +321,6 @@ impl CompilerFrontend<'static> {
             FrontendFilePrepareSource::Moth {
                 source_path,
                 mut tokens,
-                span_builder,
             } => {
                 // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
@@ -339,7 +333,6 @@ impl CompilerFrontend<'static> {
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 parse_file_headers_with_table(
                     &mut tokens,
-                    span_builder,
                     context.entry_file_path,
                     context.options,
                     local_string_table,
@@ -364,11 +357,17 @@ impl CompilerFrontend<'static> {
                     &source_path,
                     tokenizer_entry_mode,
                     local_string_table,
+                    &mut span_builder,
                 )?;
 
                 prepare_moth_template_file(tokenization, local_string_table)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
+        })();
+        SourcePreparationDelta {
+            file_id,
+            span_builder,
+            result,
         }
     }
 }

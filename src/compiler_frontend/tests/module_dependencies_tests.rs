@@ -24,7 +24,7 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -56,11 +56,13 @@ fn parse_module_headers(
     let mut prepared_outputs = Vec::with_capacity(files.len());
     let mut const_template_offset = 0usize;
     let mut runtime_fragment_offset = 0usize;
+    let mut retained_span_builders = Vec::with_capacity(files.len());
 
     for (path, source) in files {
         let path_buf = PathBuf::from(path);
         let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
@@ -68,6 +70,7 @@ fn parse_module_headers(
             &style_directives,
             &mut string_table,
             file_id_for(path),
+            &mut span_builder,
         )
         .expect("tokenization should succeed");
 
@@ -80,6 +83,9 @@ fn parse_module_headers(
             runtime_fragment_offset,
         )
         .expect("preparation should succeed");
+        // Keep every source's span builder alive for the whole fixture so retained header
+        // spans keep their owner table across the binding stage.
+        retained_span_builders.push(span_builder);
 
         const_template_offset += output.const_template_count;
         runtime_fragment_offset += output.runtime_fragment_count;
@@ -415,6 +421,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         .id;
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         "make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n",
         &interned_path,
@@ -422,13 +429,13 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &style_directives,
         &mut string_table,
         file_id,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
     let output =
         prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
             .expect("preparation should succeed");
-
     let prepared_syntax = prepare_header_syntax(&mut [output], &mut string_table)
         .expect("header syntax preparation should succeed");
     let result = bind_module_headers(
@@ -1014,11 +1021,13 @@ fn parse_module_headers_with_content_sources(
     };
 
     let mut prepared_outputs = Vec::new();
+    let mut retained_span_builders = Vec::new();
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
         let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
@@ -1026,8 +1035,11 @@ fn parse_module_headers_with_content_sources(
             &style_directives,
             &mut string_table,
             file_id_for(path),
+            &mut span_builder,
         )
         .expect("tokenization should succeed");
+        // Keep every source's builder alive through the sorting and binding assertions below.
+        retained_span_builders.push(span_builder);
 
         prepared_outputs.push(
             prepare_file_from_tokens(
@@ -1048,6 +1060,7 @@ fn parse_module_headers_with_content_sources(
             .expect("test path should be UTF-8");
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
@@ -1055,8 +1068,12 @@ fn parse_module_headers_with_content_sources(
             &style_directives,
             &mut string_table,
             file_id_for(path),
+            &mut span_builder,
         )
         .expect("template tokenization should succeed");
+        // The template's retained tokens index the builder's table; keep it alive with the
+        // other prepared sources for the remainder of this fixture.
+        retained_span_builders.push(span_builder);
 
         prepared_outputs.push(
             prepare_moth_template_file(file_tokens, &mut string_table)
@@ -1327,7 +1344,9 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
 
     let entry_path_buf = root_logical.to_path_buf(&string_table);
     let mut prepared_outputs = Vec::new();
+    let mut retained_span_builders = Vec::new();
 
+    let mut root_span_builder = ExtendedSpanBuilder::new();
     let root_tokens = tokenize(
         "icon #= @icon.mtf\n",
         &root_logical,
@@ -1335,8 +1354,12 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &style_directives,
         &mut string_table,
         root_file_id,
+        &mut root_span_builder,
     )
     .expect("root file should tokenize");
+    // The prepared root file keeps its source identity, but its retained tokens still index
+    // this builder's table; keep it alive through the binding assertions below.
+    retained_span_builders.push(root_span_builder);
     prepared_outputs.push(
         prepare_file_from_tokens(
             root_tokens,
@@ -1349,6 +1372,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         .expect("root file should prepare"),
     );
 
+    let mut icon_span_builder = ExtendedSpanBuilder::new();
     let icon_tokens = tokenize(
         "[: icon body]",
         &icon_logical,
@@ -1357,8 +1381,10 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &style_directives,
         &mut string_table,
         icon_file_id,
+        &mut icon_span_builder,
     )
     .expect("icon template should tokenize");
+    retained_span_builders.push(icon_span_builder);
     prepared_outputs.push(
         prepare_moth_template_file(icon_tokens, &mut string_table)
             .expect("icon template should prepare"),

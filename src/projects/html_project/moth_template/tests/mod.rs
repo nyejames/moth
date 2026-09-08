@@ -680,6 +680,7 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
             .unwrap_or_else(|error| panic!("{name} should canonicalize: {error}"));
         bundle
             .source_files
+            .sources()
             .get_by_canonical_path(&path)
             .unwrap_or_else(|| panic!("{name} should have a source identity"))
             .id

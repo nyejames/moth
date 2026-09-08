@@ -17,6 +17,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, parse_function_signature_syntax,
     parse_trait_requirement_signature_syntax,
 };
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -25,7 +26,14 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, Tokeniz
 
 /// Tokenize `source` and position the stream on the first opening `|` so a wrapper parser
 /// (`parse_record_body`, `parse_function_signature_syntax`, ...) can advance past it.
-fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTable) -> FileTokens {
+///
+/// The caller owns `span_builder` and keeps it alive wherever the positioned stream's
+/// token spans are still resolved.
+fn stream_positioned_at_open_bracket(
+    source: &str,
+    string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> FileTokens {
     let source_path = InternedPath::from_single_str("test.moth", string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut token_stream = tokenize(
@@ -35,9 +43,9 @@ fn stream_positioned_at_open_bracket(source: &str, string_table: &mut StringTabl
         &style_directives,
         string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
     )
-    .expect("tokenization should succeed")
-    .file_tokens;
+    .expect("tokenization should succeed");
 
     let open_index = token_stream
         .tokens
@@ -135,9 +143,11 @@ fn assert_shared_duplicate_diagnostic(
 #[test]
 fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "fn | value Int, value Int | -> Int :",
         &mut string_table,
+        &mut span_builder,
     );
     let function_path = owner_path(&mut string_table);
     let mut warnings = Vec::new();
@@ -156,8 +166,12 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
 #[test]
 fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        stream_positioned_at_open_bracket("| value Int, value Int |", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = stream_positioned_at_open_bracket(
+        "| value Int, value Int |",
+        &mut string_table,
+        &mut span_builder,
+    );
     let struct_path = owner_path(&mut string_table);
     let mut warnings = Vec::new();
 
@@ -176,8 +190,12 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
 #[test]
 fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        stream_positioned_at_open_bracket("| message String, message Int |", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = stream_positioned_at_open_bracket(
+        "| message String, message Int |",
+        &mut string_table,
+        &mut span_builder,
+    );
     let choice_path = owner_path(&mut string_table);
     let mut warnings = Vec::new();
 
@@ -196,9 +214,11 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
 #[test]
 fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = stream_positioned_at_open_bracket(
         "| This, value Int, value Int | -> Int ;",
         &mut string_table,
+        &mut span_builder,
     );
     let method_path = owner_path(&mut string_table);
     let mut warnings = Vec::new();
@@ -217,8 +237,12 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
 #[test]
 fn distinct_members_parse_successfully_through_shared_parser() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        stream_positioned_at_open_bracket("| first Int, second String |", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = stream_positioned_at_open_bracket(
+        "| first Int, second String |",
+        &mut string_table,
+        &mut span_builder,
+    );
     let struct_path = owner_path(&mut string_table);
     let mut warnings = Vec::new();
 

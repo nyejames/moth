@@ -5,12 +5,18 @@
 //! the cold array of load failures. Loaded records retain the exact UTF-8 source text plus
 //! line-start table for each successful load. Their extended-span table is installed once, after
 //! the final span-producing stage, and remains source-owned for frozen consumers.
+//!
+//! [`SourceDatabaseBuilder`] is the exclusive build-stage owner around one database. It registers
+//! and loads sources through the existing database surface, retains each loaded source's live
+//! [`ExtendedSpanBuilder`] in a dense array aligned to the database's private loaded-record
+//! indices, and either splits into an immutable database borrow plus a mutable builder view for
+//! lookup/mutation callers or finishes by installing every outstanding span table once.
 
 use super::line_index::LineIndex;
 use super::record::{
     LoadFailureIndex, LoadedSourceIndex, SourceLoadStatus, SourceSlot, ensure_source_snapshot_fits,
 };
-use super::span::ExtendedSpanTable;
+use super::span::{ExtendedSpanBuilder, ExtendedSpanTable};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
@@ -23,6 +29,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Source identity slots in deterministic logical-path order, plus the snapshots and failures
 /// associated with candidates that loaded or failed.
@@ -606,6 +613,154 @@ fn compilation_root_slot() -> SourceSlot {
         kind: None,
         provenance: SourceProvenance::CompilationRoot,
         load: SourceLoadStatus::Pending,
+    }
+}
+
+/// Exclusive source ownership until all preparation and semantic producers have finished.
+///
+/// Span states use the database's private dense loaded-record index. Registration-only slots
+/// allocate no builder, and a split borrow lets producers read snapshots without sharing mutation.
+/// Semantic Stage 0 facts may hold private immutable snapshot handles during a call. All such
+/// handles must be released before finalization recovers exclusive ownership and installs tables.
+#[derive(Debug)]
+pub(crate) struct SourceDatabaseBuilder {
+    sources: Arc<SourceDatabase>,
+    live_builders: Vec<SpanBuilderState>,
+}
+
+#[derive(Debug)]
+enum SpanBuilderState {
+    Unprepared,
+    CheckedOut,
+    Live(ExtendedSpanBuilder),
+}
+
+impl SourceDatabaseBuilder {
+    pub(crate) fn new(sources: impl Into<Arc<SourceDatabase>>) -> Self {
+        Self {
+            sources: sources.into(),
+            live_builders: Vec::new(),
+        }
+    }
+
+    pub(crate) fn sources(&self) -> &Arc<SourceDatabase> {
+        &self.sources
+    }
+
+    pub(crate) fn sources_mut(&mut self) -> &mut SourceDatabase {
+        Arc::get_mut(&mut self.sources).expect(
+            "source registration changed while snapshots were shared; this is a compiler bug",
+        )
+    }
+
+    pub(crate) fn split(&mut self) -> (&Arc<SourceDatabase>, SourceSpanBuilders<'_>) {
+        self.sync_loaded_records();
+        (
+            &self.sources,
+            SourceSpanBuilders {
+                sources: &self.sources,
+                live_builders: &mut self.live_builders,
+            },
+        )
+    }
+
+    pub(crate) fn retain_span_builder(&mut self, source: SourceId, builder: ExtendedSpanBuilder) {
+        self.split().1.retain_span_builder(source, builder);
+    }
+
+    /// Freeze returned builders once; an outstanding producer is an ownership bug.
+    pub(crate) fn finish(mut self) -> Result<Arc<SourceDatabase>, CompilerError> {
+        self.sync_loaded_records();
+        let sources = Arc::get_mut(&mut self.sources)
+            .expect("source context escaped before span finalization; this is a compiler bug");
+        for slot_index in 0..sources.slots.len() {
+            let slot = &sources.slots[slot_index];
+            let SourceLoadStatus::Loaded(loaded_index) = slot.load else {
+                continue;
+            };
+            let source = slot.id;
+            let index = loaded_index.index();
+            if sources.loaded[index].extended_spans.is_some() {
+                assert!(
+                    matches!(&self.live_builders[index], SpanBuilderState::Unprepared),
+                    "finalized source {} still has a live span owner; this is a compiler bug",
+                    source.index()
+                );
+                continue;
+            }
+            let state =
+                std::mem::replace(&mut self.live_builders[index], SpanBuilderState::Unprepared);
+            let builder = match state {
+                SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
+                SpanBuilderState::Live(builder) => builder,
+                SpanBuilderState::CheckedOut => panic!(
+                    "source {} still has an outstanding span producer; this is a compiler bug",
+                    source.index()
+                ),
+            };
+            sources.install_extended_spans(source, builder.freeze())?;
+        }
+        Ok(self.sources)
+    }
+
+    fn sync_loaded_records(&mut self) {
+        assert!(
+            self.live_builders.len() <= self.sources.loaded.len(),
+            "loaded source records were removed while builders were live; this is a compiler bug"
+        );
+        self.live_builders
+            .resize_with(self.sources.loaded.len(), || SpanBuilderState::Unprepared);
+    }
+}
+
+/// Disjoint mutable span ownership beside an immutable source lookup borrow.
+pub(crate) struct SourceSpanBuilders<'a> {
+    sources: &'a SourceDatabase,
+    live_builders: &'a mut [SpanBuilderState],
+}
+
+impl<'a> SourceSpanBuilders<'a> {
+    /// Snapshot lookup borrows the database, independently of the mutable span-state borrow.
+    pub(crate) fn sources(&self) -> &'a SourceDatabase {
+        self.sources
+    }
+
+    pub(crate) fn take_span_builder(&mut self, source: SourceId) -> ExtendedSpanBuilder {
+        match std::mem::replace(self.live_slot(source), SpanBuilderState::CheckedOut) {
+            SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
+            SpanBuilderState::Live(builder) => builder,
+            SpanBuilderState::CheckedOut => panic!(
+                "source {} already has an outstanding span producer; this is a compiler bug",
+                source.index()
+            ),
+        }
+    }
+
+    /// Accept a producer's returned builder or adopt a discovery-prepared source's original.
+    pub(crate) fn retain_span_builder(&mut self, source: SourceId, builder: ExtendedSpanBuilder) {
+        let slot = self.live_slot(source);
+        assert!(
+            !matches!(slot, SpanBuilderState::Live(_)),
+            "source {} already owns a live span builder; this is a compiler bug",
+            source.index()
+        );
+        *slot = SpanBuilderState::Live(builder);
+    }
+
+    fn live_slot(&mut self, source: SourceId) -> &mut SpanBuilderState {
+        let slot = self
+            .sources
+            .get(source)
+            .expect("span producer source must be registered; this is a compiler bug");
+        let SourceLoadStatus::Loaded(index) = slot.load else {
+            panic!("span producer source must be loaded; this is a compiler bug");
+        };
+        assert!(
+            self.sources.loaded[index.index()].extended_spans.is_none(),
+            "source {} was finalized before its last span producer; this is a compiler bug",
+            source.index()
+        );
+        &mut self.live_builders[index.index()]
     }
 }
 

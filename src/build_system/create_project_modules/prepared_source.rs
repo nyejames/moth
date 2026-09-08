@@ -15,7 +15,7 @@
 //! output); paths and retained snapshots are resolved from the shared source database.
 
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Owned prepared source input keyed by its final build-lifetime source identity.
@@ -29,49 +29,38 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Source paths and snapshots belong to the final `SourceDatabase`. The source ID is the only
 /// identity carried by this transient handoff, so consumers resolve paths and retained text from
 /// one authoritative database.
-pub(crate) enum PreparedSourceInput {
-    /// A Moth module source with the token stream from its single lexical pass.
-    Moth {
-        source_id: SourceId,
-        tokens: Box<FileTokens>,
-        span_builder: ExtendedSpanBuilder,
-    },
-    /// A Moth file whose complete header output was retained during synthetic discovery.
-    ///
-    /// The output owns its header token substreams, clause shell and selection table. It is
-    /// consumed directly by module aggregation; no raw token stream or second file preparation
-    /// is available on this variant.
+pub(crate) struct PreparedSourceInput {
+    pub(crate) source_id: SourceId,
+    pub(crate) source: PreparedSourceKind,
+}
+
+pub(crate) enum PreparedSourceKind {
+    /// A Moth module source with tokens from its single lexical pass.
+    Moth { tokens: Box<FileTokens> },
+    /// Complete Moth syntax retained by private synthetic discovery.
     MothPrepared {
-        source_id: SourceId,
         output: Box<FileFrontendPrepareOutput>,
     },
-    /// A Moth-template file whose complete header output was retained during synthetic discovery.
+    /// Complete Moth-template syntax retained by private synthetic discovery.
     MothTemplatePrepared {
-        source_id: SourceId,
         output: Box<FileFrontendPrepareOutput>,
     },
-    /// A Moth template body, tokenized once by the template-body preparation path.
-    MothTemplate { source_id: SourceId },
+    /// A Moth-template body awaiting its one template-body preparation pass.
+    MothTemplate,
     /// Plain Markdown content, never tokenized.
-    PlainMarkdown { source_id: SourceId },
+    PlainMarkdown,
 }
 
 impl PreparedSourceInput {
     pub(crate) fn source_id(&self) -> SourceId {
-        match self {
-            Self::Moth { source_id, .. }
-            | Self::MothPrepared { source_id, .. }
-            | Self::MothTemplatePrepared { source_id, .. }
-            | Self::MothTemplate { source_id }
-            | Self::PlainMarkdown { source_id } => *source_id,
-        }
+        self.source_id
     }
 
     /// Whether this selected source is a Moth template body.
     pub(crate) fn is_moth_template(&self) -> bool {
         matches!(
-            self,
-            Self::MothTemplate { .. } | Self::MothTemplatePrepared { .. }
+            &self.source,
+            PreparedSourceKind::MothTemplate | PreparedSourceKind::MothTemplatePrepared { .. }
         )
     }
 }

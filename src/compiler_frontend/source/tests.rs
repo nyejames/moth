@@ -1,6 +1,6 @@
 use super::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceKind, SourceProvenance,
-    SourceRecord, SourceRegistrationIndex, SourceSlot, SpanCapacityReason,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceProvenance, SourceRecord, SourceRegistrationIndex, SourceSlot, SpanCapacityReason,
     line_index::{LineIndex, LinePosition, line_start_offsets},
     record::ensure_source_snapshot_fits,
     span::{SourceSpan, SpanJoinError},
@@ -1108,6 +1108,47 @@ fn installing_extended_spans_preserves_live_record_resolution() {
     assert_eq!(empty_extended.resolve(record), live_ranges[2]);
     assert!(!inline.is_empty(record));
     assert!(empty_extended.is_empty(record));
+}
+
+#[test]
+fn repeated_source_preparation_preserves_earlier_extended_spans() {
+    let text = format!("{}{}", "a".repeat(2_000), "b".repeat(2_000));
+    let (database, source_id) = database_with_retained_text(&text);
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let mut first = sources.split().1.take_span_builder(source_id);
+    let first_span = LocalSpan::exact(0, 2_000, &mut first).expect("first extended span");
+    sources.retain_span_builder(source_id, first);
+
+    let (_, mut builders) = sources.split();
+    let mut repeated = builders.take_span_builder(source_id);
+    let repeated_span =
+        LocalSpan::exact(2_000, 2_000, &mut repeated).expect("repeated extended span");
+    builders.retain_span_builder(source_id, repeated);
+    let database = sources
+        .finish()
+        .expect("all producers returned their builders");
+    let first = first_span.resolve(database.source_record(source_id));
+    let repeated = repeated_span.resolve(database.source_record(source_id));
+    let snapshot = database
+        .retained_text(source_id)
+        .expect("retained snapshot");
+    assert_eq!(
+        &snapshot[first.start() as usize..first.end() as usize],
+        "a".repeat(2_000)
+    );
+    assert_eq!(
+        &snapshot[repeated.start() as usize..repeated.end() as usize],
+        "b".repeat(2_000)
+    );
+}
+
+#[test]
+#[should_panic]
+fn source_finalization_rejects_a_checked_out_span_builder() {
+    let (database, source_id) = database_with_retained_text("source snapshot");
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let _active_producer = sources.split().1.take_span_builder(source_id);
+    let _ = sources.finish();
 }
 
 #[test]

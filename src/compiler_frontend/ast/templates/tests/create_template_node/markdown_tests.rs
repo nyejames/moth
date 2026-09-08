@@ -5,8 +5,12 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[test]
 fn markdown_formats_only_template_body_content() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        template_tokens_from_source("[\"prefix\", $md:\n# Hello\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = template_tokens_from_source(
+        "[\"prefix\", $md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)

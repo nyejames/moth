@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
@@ -222,6 +222,7 @@ fn hash_from_tokenized_source_rejected() {
     let mut string_table = StringTable::default();
     let source = "result = 1 # 2";
     let file_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &file_path,
@@ -229,6 +230,7 @@ fn hash_from_tokenized_source_rejected() {
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .unwrap();
 

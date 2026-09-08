@@ -462,12 +462,6 @@ pub(crate) struct SourcePackagePublication {
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
 
-impl SourcePackagePublication {
-    pub(crate) fn package_id(&self) -> PackageBoundaryId {
-        self.package_id
-    }
-}
-
 impl CompletedSourcePackageRegistry {
     pub(crate) fn new() -> Self {
         Self {
@@ -1007,9 +1001,13 @@ impl ProjectFrontendCompilation {
         for diagnosed in project.diagnosed {
             messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
         }
-        for package in source_packages {
+        for (package_index, package) in source_packages.into_iter().enumerate() {
             for diagnosed in package.boundary.diagnosed {
-                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
+                let mut package_messages = diagnosed.diagnostics.into_messages();
+                if let Some(Some(source_database)) = source_databases.get(package_index) {
+                    package_messages.set_source_database(Arc::clone(source_database));
+                }
+                messages.append_messages_preserving_context(package_messages);
             }
         }
 

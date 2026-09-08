@@ -1035,6 +1035,7 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
             "test.moth",
             &mut string_table,
         );
+    let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
     let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
         source,
         &interned_path,
@@ -1042,6 +1043,7 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
         &style_directives,
         &mut string_table,
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("classifier fixture should tokenize");
 
@@ -1100,6 +1102,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
                 "test.moth",
                 &mut string_table,
             );
+        let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
         let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
             "if name is\n|value|:\n    io.line(\"x\")\n;\n",
             &interned_path,
@@ -1107,6 +1110,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             &style_directives,
             &mut string_table,
             crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+            &mut span_builder,
         )
         .expect("classifier fixture should tokenize");
         while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {

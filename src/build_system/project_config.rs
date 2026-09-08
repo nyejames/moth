@@ -200,11 +200,9 @@ pub(crate) fn compile_project_config_file(
     };
 
     // Both compiler and build-owned diagnostics are complete before the source becomes immutable.
-    if let Some(span_builder) = span_builder {
-        project_source_files
-            .install_extended_spans(outcome_file_id, span_builder.freeze())
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    }
+    project_source_files
+        .install_extended_spans(outcome_file_id, span_builder.freeze())
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let (compiled_config, validated_output_settings) = validated_config?;
     // Retain provenance until the build boundary projects source providers and `@project`.

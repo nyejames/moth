@@ -2223,7 +2223,7 @@ result = removed
 #[test]
 fn boracle_source_branch_separates_use_and_mutation() {
     let output = run_source_dump(
-        include_str!("../../../tests/cases/branch_reborrow_after_last_use/input/@page.moth"),
+        include_str!("../../../tests/cases/branch_reborrow_after_last_use/input/src/@page.moth"),
         BoracleDump::Conflicts,
     );
 
@@ -2236,7 +2236,7 @@ fn boracle_source_branch_separates_use_and_mutation() {
 #[test]
 fn boracle_source_loop_copy_keeps_independent_roots() {
     let output = run_source_dump(
-        include_str!("../../../tests/cases/loop_borrow_independent_roots/input/@page.moth"),
+        include_str!("../../../tests/cases/loop_borrow_independent_roots/input/src/@page.moth"),
         BoracleDump::Conflicts,
     );
 

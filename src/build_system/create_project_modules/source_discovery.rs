@@ -25,7 +25,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::headers::dependency_target::{
     DependencyTargetKind, decode_dependency_target,
 };
-use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    FileFrontendPrepareFailure, SourcePreparationDelta,
+};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_normalization::{
@@ -38,7 +40,8 @@ use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
 use crate::compiler_frontend::source::{
-    SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceRegistrationIndex, SourceSpanBuilders,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -46,7 +49,7 @@ use crate::compiler_frontend::symbols::string_interning::{
     StringIdRemap, StringTable, StringTableForkSource,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenizeFailure, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::counter_observation;
 
 use rayon::prelude::*;
@@ -55,14 +58,13 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileReferenceResolver, SingleFileResolvedReference,
 };
 use super::module_identity::ModuleId;
 use super::module_namespace::DirectoryDependencyResolution;
-use super::prepared_source::PreparedSourceInput;
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
 use super::source_loading::extract_source_code;
@@ -172,14 +174,14 @@ struct TraversalFailure {
     source_path: Option<PathBuf>,
 }
 
-/// Collected reachable inputs for one entry plus the finished source identity database.
+/// Collected reachable inputs for one entry plus the live final source owner.
 ///
 /// WHAT: discovery owns the provisional traversal table, builds the final canonically ordered
-///       table, moves every retained snapshot into its final slot and returns only final-domain
-///       `SourceId` inputs.
+///       table, moves every retained snapshot and original builder into its final owner and
+///       returns only final-domain `SourceId` inputs.
 /// WHY: no later stage should need to join a prepared input or retained source text by path.
 pub(super) struct CollectedReachableInputs {
-    pub(super) source_files: SourceDatabase,
+    pub(super) source_files: SourceDatabaseBuilder,
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
@@ -284,15 +286,37 @@ pub(super) fn prepare_owned_source_input(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
+    let (source_id, kind, text) = owned_source_text(source_index, source_tree_index, source_files)?;
+    let mut builder = source_spans.take_span_builder(source_id);
+    let result = prepare_owned_source_text(
+        source_id,
+        kind,
+        text,
+        source_files,
+        style_directives,
+        string_table,
+        &mut builder,
+    );
+    source_spans.retain_span_builder(source_id, builder);
+    result
+}
+
+/// Loading failures precede span ownership; a loaded source has exactly one live builder.
+fn owned_source_text<'a>(
+    source_index: SourceRecordIndex,
+    source_tree_index: &SourceTreeIndex,
+    source_files: &'a SourceDatabase,
+) -> Result<(SourceId, SourceFileKind, &'a str), SourceDiscoveryError> {
     let record = source_tree_index.source(source_index);
     let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
         return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
             format!(
                 "Project source row {} is not compiler semantic",
-                source_index.index(),
+                source_index.index()
             ),
         )));
     };
@@ -305,10 +329,9 @@ pub(super) fn prepare_owned_source_input(
                 source_index.index(),
             )))
         })?;
-    let source_code = match source_files.retained_text(source_id) {
-        Some(source_code) => source_code,
-        None => {
-            let error = source_files
+    let source_code = source_files.retained_text(source_id).ok_or_else(|| {
+        SourceDiscoveryError::from(
+            source_files
                 .source_load_error(source_id)
                 .cloned()
                 .unwrap_or_else(|| {
@@ -316,46 +339,42 @@ pub(super) fn prepare_owned_source_input(
                         "Registered source row {} has no retained source text",
                         source_index.index(),
                     ))
-                });
-            return Err(SourceDiscoveryError::from(error));
-        }
-    };
-    let tokens = if *source_kind == SourceFileKind::Moth {
-        let interned_path = source_files.legacy_logical_path(source_id);
-        Some(
-            tokenize(
-                source_code,
-                &interned_path,
+                }),
+        )
+    })?;
+    Ok((source_id, *source_kind, source_code))
+}
+
+fn prepare_owned_source_text(
+    source_id: SourceId,
+    kind: SourceFileKind,
+    text: &str,
+    source_files: &SourceDatabase,
+    style_directives: &StyleDirectiveRegistry,
+    string_table: &mut StringTable,
+    builder: &mut ExtendedSpanBuilder,
+) -> Result<PreparedSourceInput, SourceDiscoveryError> {
+    let source = match kind {
+        SourceFileKind::Moth => {
+            let path = source_files.legacy_logical_path(source_id);
+            let tokens = tokenize(
+                text,
+                &path,
                 TokenizerEntryMode::SourceFile,
                 style_directives,
                 string_table,
                 source_id,
+                builder,
             )
-            .map_err(|TokenizeFailure { diagnostic, .. }| {
-                SourceDiscoveryError::Diagnostic(diagnostic)
-            })?,
-        )
-    } else {
-        None
-    };
-
-    Ok(match *source_kind {
-        SourceFileKind::Moth => {
-            let Some(tokenization) = tokens else {
-                return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                    "Moth source preparation completed without a token stream",
-                )));
-            };
-            let (file_tokens, span_builder) = tokenization.into_parts();
-            PreparedSourceInput::Moth {
-                source_id,
-                tokens: Box::new(file_tokens),
-                span_builder,
+            .map_err(SourceDiscoveryError::Diagnostic)?;
+            PreparedSourceKind::Moth {
+                tokens: Box::new(tokens),
             }
         }
-        SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate { source_id },
-        SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown { source_id },
-    })
+        SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
+        SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
+    };
+    Ok(PreparedSourceInput { source_id, source })
 }
 
 /// One provider-independent source input prepared against a batch-local string-table fork.
@@ -383,41 +402,64 @@ pub(super) fn prepare_owned_source_inputs(
     source_indices: &[SourceRecordIndex],
     source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     style_directives: &StyleDirectiveRegistry,
     fork_source: &StringTableForkSource,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> FxHashMap<SourceRecordIndex, PreparedOwnedSource> {
-    let prepare_source = |&source_index: &SourceRecordIndex| {
-        let fork = fork_source.fork_for_module();
-        let (mut string_table, base_len) = fork.into_parts();
-        let input = crate::timed_stage_attributed!(
-            crate::timing::TimingMetric::FrontendPrepare,
-            timing_context,
-            prepare_owned_source_input(
+    let requests = source_indices
+        .iter()
+        .map(|&source_index| {
+            let request = owned_source_text(source_index, source_tree_index, source_files)
+                .map(|(id, kind, text)| (id, kind, text, source_spans.take_span_builder(id)));
+            (source_index, request)
+        })
+        .collect::<Vec<_>>();
+    let prepared = requests
+        .into_par_iter()
+        .map(|(source_index, request)| {
+            let (mut string_table, base_len) = fork_source.fork_for_module().into_parts();
+            let (input, span_owner) = match request {
+                Ok((source_id, kind, text, mut builder)) => {
+                    let input = crate::timed_stage_attributed!(
+                        crate::timing::TimingMetric::FrontendPrepare,
+                        timing_context,
+                        prepare_owned_source_text(
+                            source_id,
+                            kind,
+                            text,
+                            source_files,
+                            style_directives,
+                            &mut string_table,
+                            &mut builder,
+                        ),
+                    );
+                    (input, Some((source_id, builder)))
+                }
+                Err(error) => (Err(error), None),
+            };
+            (
                 source_index,
-                source_tree_index,
-                source_files,
-                style_directives,
-                &mut string_table,
-            ),
-        );
-
-        (
-            source_index,
-            PreparedOwnedSource {
-                string_table,
-                base_len,
-                input,
-            },
-        )
-    };
-
-    let prepared_sources = source_indices
-        .par_iter()
-        .map(prepare_source)
+                PreparedOwnedSource {
+                    string_table,
+                    base_len,
+                    input,
+                },
+                span_owner,
+            )
+        })
         .collect::<Vec<_>>();
 
-    prepared_sources.into_iter().collect()
+    // Restore every original builder before reachability can discard a speculative outcome.
+    prepared
+        .into_iter()
+        .map(|(index, prepared, span_owner)| {
+            if let Some((source, builder)) = span_owner {
+                source_spans.retain_span_builder(source, builder);
+            }
+            (index, prepared)
+        })
+        .collect()
 }
 
 /// Merge one selected batched input into the module string table before header preparation.
@@ -449,7 +491,7 @@ fn remap_prepared_source_input(
     input: &mut PreparedSourceInput,
     remap: &StringIdRemap,
 ) -> Result<(), CompilerError> {
-    if let PreparedSourceInput::Moth { tokens, .. } = input {
+    if let PreparedSourceKind::Moth { tokens } = &mut input.source {
         tokens.remap_preparing_string_ids(remap)?;
     }
 
@@ -479,15 +521,20 @@ fn remap_source_discovery_error(
 }
 
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
+///
+/// The final source owner already contains every known snapshot and original span builder. This
+/// boundary only normalizes retained preparation facts and then finishes that owner so any
+/// terminal rebinding failure still carries the finalized source context.
 fn finalize_failed_discovery(
     mut files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
-    mut source_files: SourceDatabase,
+    source_builder: SourceDatabaseBuilder,
     failure: Option<TraversalFailure>,
     string_table: &StringTable,
-) -> Result<CompilerMessages, CompilerError> {
+) -> CompilerMessages {
     files.sort_by_key(|file| {
-        source_files
+        source_builder
+            .sources()
             .get_by_canonical_path(&file.path)
             .expect("known discovery source has a final registration")
             .id
@@ -499,17 +546,72 @@ fn finalize_failed_discovery(
         let Some(prepared) = source_cache.remove(&file.path) else {
             continue;
         };
-        let source_id = source_files
+        let source_id = match source_builder
+            .sources()
             .get_by_canonical_path(&file.path)
-            .expect("retained discovery source has a final registration")
-            .id;
-        let logical_path = source_files.legacy_logical_path(source_id);
-        source_files.retain_text(source_id, prepared.source_code)?;
-        match prepared.prepared_output {
+            .map(|source| source.id)
+        {
+            Some(source_id) => source_id,
+            None => {
+                let error = CompilerError::compiler_error(format!(
+                    "retained discovery source {} has no final registration",
+                    file.path.display()
+                ));
+                let messages =
+                    CompilerMessages::from_error_with_warnings(error, warnings, string_table);
+                return finish_discovery_source_owner(messages, source_builder, string_table);
+            }
+        };
+        let logical_path = source_builder.sources().legacy_logical_path(source_id);
+        let SourcePreparationDelta {
+            span_builder: _,
+            result,
+            ..
+        } = prepared.prepared_output;
+        match result {
             Ok(mut output) => {
-                output.rebind_source_identity(source_id, logical_path, file.path)?;
+                let canonical_os_path = match source_builder
+                    .sources()
+                    .get_by_canonical_path(&file.path)
+                    .and_then(|record| record.canonical_os_path.clone())
+                {
+                    Some(canonical_os_path) => canonical_os_path,
+                    None => {
+                        for warning in &mut output.warnings {
+                            warning.rebind_source_identity(&logical_path);
+                        }
+                        warnings.append(&mut output.warnings);
+                        let error = CompilerError::compiler_error(format!(
+                            "final source identity {} has no canonical path",
+                            source_id.index()
+                        ));
+                        let messages = CompilerMessages::from_error_with_warnings(
+                            error,
+                            warnings,
+                            string_table,
+                        );
+                        return finish_discovery_source_owner(
+                            messages,
+                            source_builder,
+                            string_table,
+                        );
+                    }
+                };
+
+                if let Err(error) = output.rebind_source_identity(
+                    source_id,
+                    logical_path.clone(),
+                    canonical_os_path,
+                ) {
+                    for warning in &mut output.warnings {
+                        warning.rebind_source_identity(&logical_path);
+                    }
+                    warnings.append(&mut output.warnings);
+                    let messages =
+                        CompilerMessages::from_error_with_warnings(error, warnings, string_table);
+                    return finish_discovery_source_owner(messages, source_builder, string_table);
+                }
                 warnings.append(&mut output.warnings);
-                source_files.install_extended_spans(source_id, output.span_builder.freeze())?;
             }
 
             Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
@@ -518,7 +620,6 @@ fn finalize_failed_discovery(
                 }
                 error.diagnostic.rebind_source_identity(&logical_path);
                 warnings.append(&mut error.warnings);
-                source_files.install_extended_spans(source_id, error.span_builder.freeze())?;
                 preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
             }
 
@@ -534,10 +635,10 @@ fn finalize_failed_discovery(
         if let Some(source_id) = failure
             .source_path
             .as_ref()
-            .and_then(|path| source_files.get_by_canonical_path(path))
+            .and_then(|path| source_builder.sources().get_by_canonical_path(path))
             .map(|source| source.id)
         {
-            let logical_path = source_files.legacy_logical_path(source_id);
+            let logical_path = source_builder.sources().legacy_logical_path(source_id);
             for diagnostic in &mut messages.diagnostics {
                 diagnostic.rebind_source_identity(&logical_path);
             }
@@ -549,16 +650,149 @@ fn finalize_failed_discovery(
             .into_messages(string_table)
     };
     messages.prepend_diagnostics_preserving_context(warnings);
-    messages.set_source_database(Arc::new(source_files));
-    Ok(messages)
+    finish_discovery_source_owner(messages, source_builder, string_table)
+}
+
+/// Finish the final source owner before attaching its source context to a terminal message set.
+///
+/// Every known source snapshot and original builder has already moved into `source_builder`.
+/// Finishing here is the only path that can publish those tables after a post-registration error.
+fn finish_discovery_source_owner(
+    mut messages: CompilerMessages,
+    source_builder: SourceDatabaseBuilder,
+    string_table: &StringTable,
+) -> CompilerMessages {
+    match source_builder.finish() {
+        Ok(source_files) => {
+            messages.set_source_database(source_files);
+            messages
+        }
+        Err(error) => CompilerMessages::from_error_with_warnings(
+            error,
+            messages.into_diagnostics(),
+            string_table,
+        ),
+    }
+}
+
+fn discovery_finalization_error(
+    error: CompilerError,
+    source_builder: SourceDatabaseBuilder,
+    string_table: &StringTable,
+) -> SourceDiscoveryError {
+    SourceDiscoveryError::Messages(finish_discovery_source_owner(
+        CompilerMessages::from_error_ref(error, string_table),
+        source_builder,
+        string_table,
+    ))
+}
+
+/// Move every known synthetic snapshot and its original span builder into final source ownership.
+///
+/// Snapshots are retained first because the builder owner accepts a span builder only after its
+/// source slot is loaded. Retention continues after the first snapshot error, preserving sibling
+/// source facts before the caller publishes the terminal failure; successful snapshots then receive
+/// their original builders before any output identity transformation begins.
+fn retain_known_discovery_sources(
+    files: &[ReachableSourceFile],
+    source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
+    source_builder: &mut SourceDatabaseBuilder,
+) -> Result<(), CompilerError> {
+    let mut first_error = None;
+    for file in files {
+        let Some(prepared) = source_cache.get_mut(&file.path) else {
+            continue;
+        };
+        let Some(source_id) = source_builder
+            .sources()
+            .get_by_canonical_path(&file.path)
+            .map(|source| source.id)
+        else {
+            first_error.get_or_insert_with(|| {
+                CompilerError::compiler_error(format!(
+                    "known discovery source {} has no final registration",
+                    file.path.display()
+                ))
+            });
+            continue;
+        };
+        let source_code = std::mem::take(&mut prepared.source_code);
+        match source_builder
+            .sources_mut()
+            .retain_text(source_id, source_code)
+        {
+            Ok(()) => {
+                let span_builder = std::mem::take(&mut prepared.prepared_output.span_builder);
+                source_builder.retain_span_builder(source_id, span_builder);
+            }
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// Move successfully loaded non-Moth sources into the final owner before output rebinding.
+fn retain_loaded_missing_sources(
+    files: &[ReachableSourceFile],
+    loaded_sources: Vec<LoadedMissingSourceFile>,
+    source_builder: &mut SourceDatabaseBuilder,
+) -> Result<(), CompilerError> {
+    let mut first_error = None;
+    for loaded in loaded_sources {
+        let Some(source_file) = files.get(loaded.input_index) else {
+            first_error.get_or_insert_with(|| {
+                CompilerError::compiler_error(format!(
+                    "loaded source inventory slot {} is out of range",
+                    loaded.input_index
+                ))
+            });
+            continue;
+        };
+        let Some(source_id) = source_builder
+            .sources()
+            .get_by_canonical_path(&source_file.path)
+            .map(|source| source.id)
+        else {
+            first_error.get_or_insert_with(|| {
+                CompilerError::compiler_error(format!(
+                    "loaded discovery source {} has no final registration",
+                    source_file.path.display()
+                ))
+            });
+            continue;
+        };
+        add_frontend_counter(
+            FrontendCounter::Stage0SourceBytesLoaded,
+            loaded.source_code.len(),
+        );
+        if let Err(error) = source_builder
+            .sources_mut()
+            .retain_text(source_id, loaded.source_code)
+        {
+            first_error.get_or_insert(error);
+        }
+    }
+
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Build the final source database and remap every synthetic prepared output before returning it.
 ///
-/// WHAT: registers the complete reachable closure in canonical logical order, moves retained
-///       snapshots into those final slots and rebinds traversal-prepared outputs to final IDs.
+/// WHAT: registers the complete reachable closure in canonical logical order, moves every known
+///       snapshot and original span builder into final ownership, then rebinds traversal-prepared
+///       outputs to final IDs.
 /// WHY: header preparation needs traversal identities before the closure is complete, but no
-///      traversal-domain identity may cross this discovery boundary.
+///      traversal-domain identity may cross this discovery boundary. Ownership is established
+///      before any fallible output transformation so terminal failures retain source context.
 fn finalize_reachable_files(
     files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
@@ -566,27 +800,37 @@ fn finalize_reachable_files(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     failure: Option<TraversalFailure>,
-) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), SourceDiscoveryError> {
+) -> Result<(SourceDatabaseBuilder, Vec<PreparedSourceInput>), SourceDiscoveryError> {
     let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
         (
             source_file.path.as_path(),
             SourceKind::Compiler(source_file.kind),
         )
     }));
-    let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
         &registration_index,
         entry_file_path,
         Some(project_path_resolver),
         string_table,
     )?;
+    let mut source_files = SourceDatabaseBuilder::new(source_files);
+
+    if let Err(error) = retain_known_discovery_sources(&files, &mut source_cache, &mut source_files)
+    {
+        return Err(discovery_finalization_error(
+            error,
+            source_files,
+            string_table,
+        ));
+    }
 
     if failure.is_some()
         || source_cache
             .values()
-            .any(|source| source.prepared_output.is_err())
+            .any(|source| source.prepared_output.result.is_err())
     {
         let messages =
-            finalize_failed_discovery(files, source_cache, source_files, failure, string_table)?;
+            finalize_failed_discovery(files, source_cache, source_files, failure, string_table);
         return Err(SourceDiscoveryError::Messages(messages));
     }
 
@@ -602,137 +846,152 @@ fn finalize_reachable_files(
     for source_file in &missing_sources {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
         if source_file.source_file.kind == SourceFileKind::Moth {
-            return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                format!(
-                    "reachable Moth source {} has no prepared traversal output",
-                    source_file.source_file.path.display()
-                ),
-            )));
+            let error = CompilerError::compiler_error(format!(
+                "reachable Moth source {} has no prepared traversal output",
+                source_file.source_file.path.display()
+            ));
+            return Err(discovery_finalization_error(
+                error,
+                source_files,
+                string_table,
+            ));
         }
     }
-    let mut loaded_missing_sources = (0..files.len()).map(|_| None).collect::<Vec<_>>();
     for source_file in &files {
         if source_cache.contains_key(&source_file.path) {
             add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
         }
     }
-    for loaded in load_missing_sources(missing_sources, string_table)? {
-        let input_index = loaded.input_index;
-        loaded_missing_sources[input_index] = Some(loaded);
+    let loaded = match load_missing_sources(missing_sources, string_table) {
+        Ok(loaded) => loaded,
+        Err(messages) => {
+            let failure = TraversalFailure {
+                error: SourceDiscoveryError::Messages(messages),
+                source_path: None,
+            };
+            return Err(SourceDiscoveryError::Messages(finalize_failed_discovery(
+                files,
+                source_cache,
+                source_files,
+                Some(failure),
+                string_table,
+            )));
+        }
+    };
+    if let Err(error) = retain_loaded_missing_sources(&files, loaded, &mut source_files) {
+        return Err(discovery_finalization_error(
+            error,
+            source_files,
+            string_table,
+        ));
     }
 
-    let mut input_files = Vec::with_capacity(files.len());
-    for (input_index, source_file) in files.into_iter().enumerate() {
-        let final_record = source_files
-            .get_by_canonical_path(&source_file.path)
-            .ok_or_else(|| {
+    // All original tables are owned before this fallible identity transformation. The closure
+    // borrows the owner so every error reaches the same consuming finalization boundary.
+    let normalized: Result<_, CompilerError> = (|| {
+        let mut input_files = Vec::with_capacity(files.len());
+        for source_file in files {
+            let final_record = source_files
+                .sources()
+                .get_by_canonical_path(&source_file.path)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "final source database is missing reachable source {}",
+                        source_file.path.display()
+                    ))
+                })?;
+            let final_source_id = final_record.id;
+            let source_kind = final_record.kind.ok_or_else(|| {
                 CompilerError::compiler_error(format!(
-                    "final source database is missing reachable source {}",
-                    source_file.path.display()
-                ))
-            })?;
-        let final_source_id = final_record.id;
-        let source_kind = final_record.kind.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "final source identity {} has no lexical kind",
-                final_source_id.index()
-            ))
-        })?;
-
-        if let Some(scanned_source) = source_cache.remove(&source_file.path) {
-            let PreparedDiscoverySource {
-                prepared_output,
-                source_code,
-                ..
-            } = scanned_source;
-            let mut prepared_output = prepared_output
-                .expect("diagnosed preparation exits through failed discovery finalization");
-            let canonical_os_path = final_record.canonical_os_path.clone().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "final source identity {} has no canonical path",
+                    "final source identity {} has no lexical kind",
                     final_source_id.index()
                 ))
             })?;
 
-            prepared_output.rebind_source_identity(
-                final_source_id,
-                source_files.legacy_logical_path(final_source_id),
-                canonical_os_path,
-            )?;
-            prepared_output.freeze_path_syntax(string_table)?;
-            source_files.retain_text(final_source_id, source_code)?;
-
-            input_files.push(match source_kind {
-                SourceKind::Compiler(SourceFileKind::Moth) => PreparedSourceInput::MothPrepared {
-                    source_id: final_source_id,
-                    output: Box::new(prepared_output),
-                },
-                SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                    PreparedSourceInput::MothTemplatePrepared {
-                        source_id: final_source_id,
-                        output: Box::new(prepared_output),
+            let source = if let Some(scanned_source) = source_cache.remove(&source_file.path) {
+                let mut output = scanned_source
+                    .prepared_output
+                    .result
+                    .expect("diagnosed preparation exits through failed discovery finalization");
+                output.rebind_source_identity(
+                    final_source_id,
+                    source_files.sources().legacy_logical_path(final_source_id),
+                    source_file.path,
+                )?;
+                output.freeze_path_syntax(string_table)?;
+                match source_kind {
+                    SourceKind::Compiler(SourceFileKind::Moth) => {
+                        PreparedSourceKind::MothPrepared {
+                            output: Box::new(output),
+                        }
                     }
-                }
-                SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
-                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                        "plain Markdown cannot enter the prepared source cache",
-                    )));
-                }
-                SourceKind::ProviderOwned => {
-                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                        format!(
+                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
+                        PreparedSourceKind::MothTemplatePrepared {
+                            output: Box::new(output),
+                        }
+                    }
+                    SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
+                        return Err(CompilerError::compiler_error(
+                            "plain Markdown cannot enter the prepared source cache",
+                        ));
+                    }
+                    SourceKind::ProviderOwned => {
+                        return Err(CompilerError::compiler_error(format!(
                             "final source identity {} is provider-owned and cannot be compiled",
                             final_source_id.index()
-                        ),
+                        )));
+                    }
+                }
+            } else {
+                if source_files
+                    .sources()
+                    .retained_text(final_source_id)
+                    .is_none()
+                {
+                    return Err(CompilerError::compiler_error(format!(
+                        "source inventory slot for {} was not loaded",
+                        source_file.path.display()
                     )));
                 }
-            });
-        } else {
-            let loaded = loaded_missing_sources[input_index].take().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "source inventory slot {} was not loaded",
-                    input_index
-                ))
-            })?;
-            add_frontend_counter(
-                FrontendCounter::Stage0SourceBytesLoaded,
-                loaded.source_code.len(),
-            );
-            source_files.retain_text(final_source_id, loaded.source_code)?;
-
-            input_files.push(match source_kind {
-                SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                    PreparedSourceInput::MothTemplate {
-                        source_id: final_source_id,
+                match source_kind {
+                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
+                        PreparedSourceKind::MothTemplate
                     }
-                }
-                SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
-                    PreparedSourceInput::PlainMarkdown {
-                        source_id: final_source_id,
+                    SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
+                        PreparedSourceKind::PlainMarkdown
                     }
-                }
-                SourceKind::Compiler(SourceFileKind::Moth) => {
-                    unreachable!("Moth sources were handled above")
-                }
-                SourceKind::ProviderOwned => {
-                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                        format!(
+                    SourceKind::Compiler(SourceFileKind::Moth) => {
+                        unreachable!("Moth sources were handled above")
+                    }
+                    SourceKind::ProviderOwned => {
+                        return Err(CompilerError::compiler_error(format!(
                             "final source identity {} is provider-owned and cannot be compiled",
                             final_source_id.index()
-                        ),
-                    )));
+                        )));
+                    }
                 }
+            };
+            input_files.push(PreparedSourceInput {
+                source_id: final_source_id,
+                source,
             });
         }
-    }
+        if !source_cache.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "synthetic source cache contains an unreachable prepared source",
+            ));
+        }
+        Ok(input_files)
+    })();
 
-    if !source_cache.is_empty() {
-        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-            "synthetic source cache contains an unreachable prepared source",
-        )));
+    match normalized {
+        Ok(input_files) => Ok((source_files, input_files)),
+        Err(error) => Err(discovery_finalization_error(
+            error,
+            source_files,
+            string_table,
+        )),
     }
-
-    Ok((source_files, input_files))
 }
 
 // -------------------------
@@ -871,9 +1130,10 @@ fn scan_and_cache_local_moth_template_source(
 ///      only for a file invoked directly as one synthetic module.
 ///
 /// The traversal-local source database is consumed before this value is constructed. Every source
-/// ID in the returned inputs and database therefore belongs to the final logical-order domain.
+/// ID in the returned inputs and database therefore belongs to the final logical-order domain,
+/// while the returned owner remains live for semantic span producers.
 pub(super) struct ReachableTraversalOutcome {
-    pub(super) source_files: SourceDatabase,
+    pub(super) source_files: SourceDatabaseBuilder,
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
@@ -1068,7 +1328,8 @@ fn walk_reachable_sources(
         let prepared = &local_source_cache
             .get(&canonical_file)
             .expect("scanned source remains owned by traversal")
-            .prepared_output;
+            .prepared_output
+            .result;
         let Ok(prepared) = prepared else {
             return Ok(DiscoveryWalkOutcome::PreparationFailed);
         };
@@ -1596,9 +1857,9 @@ pub(super) fn load_missing_source_paths_for_test(
         source_files
             .retain_text(source_id, loaded.source_code)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        input_slots[loaded.input_index] = Some(match source_kind {
-            SourceFileKind::MothTemplate => PreparedSourceInput::MothTemplate { source_id },
-            SourceFileKind::PlainMarkdown => PreparedSourceInput::PlainMarkdown { source_id },
+        let source = match source_kind {
+            SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
+            SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
             SourceFileKind::Moth => {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
@@ -1607,7 +1868,8 @@ pub(super) fn load_missing_source_paths_for_test(
                     string_table,
                 ));
             }
-        });
+        };
+        input_slots[loaded.input_index] = Some(PreparedSourceInput { source_id, source });
     }
     let input_files = input_slots
         .into_iter()

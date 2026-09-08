@@ -1,7 +1,7 @@
 //! Unit tests for `TokenStats` classification.
 
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -15,7 +15,7 @@ fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
         InternedPath::try_from_filesystem_path(Path::new("src/main.moth"), &mut string_table)
             .expect("test path should be UTF-8");
     let directives = StyleDirectiveRegistry::built_ins();
-
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &path,
@@ -23,6 +23,7 @@ fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
         &directives,
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("source should tokenize");
 

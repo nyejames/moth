@@ -21,7 +21,9 @@ use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId as CompilerSourceId};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -167,11 +169,11 @@ fn resolve_directory_dependency_path(
         })
 }
 
-/// Immutable Stage 0 owners shared while the serial discovery pass prepares graph modules.
-struct ModuleDiscoveryContext<'a> {
+/// Borrowed Stage 0 services and live source spans for one serial discovery pass.
+struct ModuleDiscoveryContext<'a, 'sources> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
-    source_files: &'a SourceDatabase,
+    source_spans: &'a mut SourceSpanBuilders<'sources>,
     directory_dependency_resolution: DirectoryDependencyResolution<'a>,
     project_module_graph: &'a ProjectModuleGraph,
     /// One boundary-owned source-origin table shared by every prepared module and check-only
@@ -217,12 +219,13 @@ impl ModuleCompilationSchedule {
     /// Prepare deferred transient jobs from the final canonical provider state.
     ///
     /// Canonical discovery for every project and source-package boundary must complete before
-    /// this method is called. Each job receives the same immutable boundary source database and
-    /// source-origin table while transient provider mutations remain isolated to the job.
-    pub(crate) fn prepare_check_only_jobs(
+    /// this method is called. Each job receives the same boundary source database, live span
+    /// builder view and source-origin table while transient provider mutations remain isolated
+    /// to the job.
+    pub(super) fn prepare_check_only_jobs(
         &mut self,
         style_directives: &StyleDirectiveRegistry,
-        source_files: &SourceDatabase,
+        source_spans: &mut SourceSpanBuilders<'_>,
         project_path_resolver: &ProjectPathResolver,
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
@@ -233,7 +236,7 @@ impl ModuleCompilationSchedule {
             return Ok(());
         }
         let preparation_context = ModulePreparationContext {
-            source_files,
+            source_files: source_spans.sources(),
             style_directives,
             project_path_resolver: Some(project_path_resolver.clone()),
         };
@@ -252,6 +255,7 @@ impl ModuleCompilationSchedule {
                 directory_dependency_resolution.source_tree_index(),
                 style_directives,
                 &preparation_context,
+                source_spans,
                 project_path_resolver,
                 external_imports,
                 directory_dependency_resolution,
@@ -302,6 +306,7 @@ pub(crate) fn discover_all_modules_in_project(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -314,6 +319,7 @@ pub(crate) fn discover_all_modules_in_project(
         config,
         project_path_resolver,
         source_files,
+        source_spans,
         project_module_graph,
         style_directives,
         external_imports,
@@ -335,6 +341,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -348,6 +355,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         config,
         project_path_resolver,
         source_files,
+        source_spans,
         project_module_graph,
         style_directives,
         external_imports,
@@ -369,6 +377,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     package_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -382,6 +391,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         config,
         project_path_resolver,
         source_files,
+        source_spans,
         package_module_graph,
         style_directives,
         external_imports,
@@ -400,6 +410,7 @@ fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
     source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -443,7 +454,7 @@ fn discover_all_modules_in_boundary(
         ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
-            source_files,
+            source_spans,
             directory_dependency_resolution,
             project_module_graph,
             source_module_origins: Arc::clone(&source_module_origins),
@@ -579,6 +590,7 @@ fn prepare_check_only_module(
     source_tree_index: &super::source_tree_index::SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
     preparation_context: &ModulePreparationContext<'_>,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
@@ -697,12 +709,12 @@ fn prepare_check_only_module(
             current_source_index,
             source_tree_index,
             preparation_context.source_files,
+            source_spans,
             style_directives,
             syntax.string_table_mut(),
         )
         .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
-        let prepared_output = syntax.prepare_source(input)?;
-
+        let prepared_output = syntax.prepare_source(input, source_spans)?;
         for dependency in &prepared_output.file_dependency_clauses {
             let provider = &dependency.dependency;
             let action = match resolve_structural_provider_reference(
@@ -870,11 +882,12 @@ fn prepare_check_only_module(
             target_source_index,
             source_tree_index,
             preparation_context.source_files,
+            source_spans,
             style_directives,
             syntax.string_table_mut(),
         )
         .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
-        let target_output = syntax.prepare_source(target_input)?;
+        let target_output = syntax.prepare_source(target_input, source_spans)?;
         let mut nested_content_sources = Vec::new();
         for file_reference in target_output.structural_file_references.iter() {
             let resolved = syntax
@@ -1087,7 +1100,7 @@ fn order_discovered_modules_by_compile_waves(
 /// tokenization before that serial BFS, while semantic module compilation remains serial.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
-    context: ModuleDiscoveryContext<'_>,
+    context: ModuleDiscoveryContext<'_, '_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
@@ -1097,11 +1110,12 @@ fn discover_modules_serial_provider_capable(
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
-        source_files,
+        source_spans,
         directory_dependency_resolution,
         project_module_graph,
         source_module_origins,
     } = context;
+    let source_files = source_spans.sources();
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
     let mut source_package_dependencies = Vec::new();
@@ -1174,6 +1188,7 @@ fn discover_modules_serial_provider_capable(
                 &candidate_source_indices,
                 source_tree_index,
                 source_files,
+                source_spans,
                 style_directives,
                 &fork_source,
                 #[cfg(feature = "timers")]
@@ -1239,6 +1254,7 @@ fn discover_modules_serial_provider_capable(
                         source_index,
                         source_tree_index,
                         source_files,
+                        source_spans,
                         style_directives,
                         syntax.string_table_mut(),
                     ),
@@ -1248,7 +1264,7 @@ fn discover_modules_serial_provider_capable(
                 Ok(input) => input,
                 Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
             };
-            let prepared_output = syntax.prepare_source(input)?;
+            let prepared_output = syntax.prepare_source(input, source_spans)?;
             for dependency in &prepared_output.file_dependency_clauses {
                 let provider = &dependency.dependency;
                 let action = match resolve_structural_provider_reference(

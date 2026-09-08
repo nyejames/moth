@@ -30,15 +30,13 @@ use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, TokenKind, TokenizeFailure, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenKind, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use std::cell::RefCell;
@@ -432,6 +430,9 @@ fn malformed_quoted_literal_error(
 ///       `ModuleStart + one matching StringSliceLiteral/CharLiteral + Eof` shape. The literal
 ///       must begin at the first value character and end at the tokenizer's final Eof position.
 ///       This deliberately rejects all terminal trivia, including comments and whitespace.
+///       The command-value token stream is synthetic: its span rows land in a temporary
+///       builder that is discarded with the tokens, and command diagnostics report their
+///       stable titles rather than any source location.
 /// WHY:  command inputs must reuse the one ordinary literal grammar — delimiter, escape and
 ///       rejection policy stay owned by the tokenizer instead of a second command parser. The
 ///       strict terminal-trivia policy prevents source-file comment handling from silently
@@ -441,6 +442,7 @@ fn parse_ordinary_quoted_literal(
 ) -> Result<OrdinaryCommandLiteral, QuotedLiteralRejection> {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str(COMMAND_INPUT_TOKENIZER_PATH, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         value,
         &path,
@@ -448,13 +450,11 @@ fn parse_ordinary_quoted_literal(
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .map_err(
-        |TokenizeFailure { diagnostic, .. }| QuotedLiteralRejection {
-            reason: diagnostic.kind.descriptor().title,
-        },
-    )?
-    .file_tokens;
+    .map_err(|diagnostic| QuotedLiteralRejection {
+        reason: diagnostic.kind.descriptor().title,
+    })?;
 
     let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {
         return Err(QuotedLiteralRejection {

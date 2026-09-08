@@ -72,17 +72,20 @@ CURRENT_SLICE:
 - Phase: 1D4b, module source-preparation and finalization ownership.
 - Goal: retain original source builders through discovery, file/chunk aggregation and semantic
   outcomes, then install each table under exclusive source ownership after its last producer.
-- Synthetic success/failure finalization is reviewed and validated. Checkpoint it, then retain
-  original builders across canonical and check-only module consumers.
-- Canonical/check-only duplicate preparation, general module deltas and the final lookup-only
-  boundary remain open.
+- Implemented and audit-accepted: `SourceDatabaseBuilder` owns original live tables; tokenizer
+  borrows them; `SourcePreparationDelta` keeps ownership outside every preparation result.
+- Full validation and the installed-overflow-row regression pass. Record the checkpoint, then
+  continue with 1D3 preparation diagnostics; broader exact-span and frozen-context work remains open.
+- Repeated directory/check-only sources are Normal: namespace entries exclude root files.
+  Preserve check-only semantic isolation. No-reparse source syntax ownership remains open.
 
 LAST_GOOD_COMMIT:
-- `756fb424a` — approved private discovery identity contract, plan cleanup and insertion visibility.
+- `939845c90` — synthetic diagnosed-source finalization, regression, coverage and full validation.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Synthetic discovery candidate, regression and coverage docs are uncommitted; reviews and gates passed.
+- Source ownership candidate is validated and audit-accepted, awaiting its checkpoint commit.
+- Untracked `librust_out.rmeta` has unknown ownership and is excluded from the checkpoint.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -164,22 +167,24 @@ BLOCKERS / RISKS:
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
-  Preserve them in the remaining 1D4b/1F2 outcome migration; the accepted config-span checkpoint
-  did not claim to repair that existing warning loss.
-- Canonical and check-only jobs can prepare the same source under different root options.
-  One final source table cannot accept independent builders for those jobs. Preserve one original
-  builder through their producers without locks, early freezing or rejecting legitimate jobs.
+  Preserve them in 1F2; the source ownership checkpoint does not claim to repair that warning loss.
+- Repeated canonical/check-only preparation now shares the original builder. Removing the repeated
+  syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
-- Synthetic candidate: baseline regression failed on missing source context; all 33 focused
-  synthetic tests now pass. CLI preserves `MOTH-SYNTAX-0019` at `helper.moth:1:16`.
-- Two independent reviews accepted ownership and coverage. `cargo fmt --all && just validate`
-  passed: 5,058 compiler, 17 CLI, 825 xtask, 1,951 integration, docs, 1,319-file source audit,
-  82 preflights, three scaling budgets and timer erasure. Documentation release: 74 outputs.
-- Quick benchmark checks reported +1 ms average with changed docs workloads excluded. This is
-  bounded gate evidence, not a five-run performance claim. Earlier checkpoint details remain in Git.
-- Coverage gaps for the upcoming source-span/render migration: diagnosed-table contents,
-  content-source one-shot installation, cross-document collision secondary-site rendering.
+- `cargo fmt --all && just validate` passes: native featured all-target Clippy; 5,060 compiler,
+  17 CLI and 825 xtask tests; 1,951 integration cases; docs check; 1,319-file source audit;
+  82 benchmark preflights; three scaling budgets; timer erasure.
+- Focused source, preparation, service, synthetic and package tests pass. The strengthened semantic
+  boundary regression resolves an original 1,506-byte return-site span after final installation.
+- CLI long-literal success, diagnosed discovery, check-only semantic failure and Boracle pass.
+  Boracle all-target checking and both corrected fixture-path regressions pass.
+- Outcome/render-domain audit and both fresh correction-verification lanes are clean. Restoring a
+  field-forwarding source-count assertion was rejected under the test policy; observable installed
+  span resolution replaced the real coverage gap.
+- Quick CLI/frontend benchmark averages show no measurable change (0 ms), excluding changed docs
+  workloads. This is bounded gate evidence, not a five-run performance claim.
+- Documentation release: 74 outputs. Unrelated generated-only CSS drift was restored.
 - Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
   it starts or after it exits. `cargo test -p moth --lib` misses test targets; before calling a
   slice green, run `cargo clippy -p moth --all-targets` with the featured feature set.
@@ -188,9 +193,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: implement the smallest coherent source-preparation delta and
-  exclusive-finalization slice, owning the approved discovery-finalization barrier and the
-  remaining 1D4b module ownership.
+- next action: commit 1D4b, then carry exact source spans on preparation diagnostics in 1D3.
 
 ---
 
@@ -557,7 +560,7 @@ The frozen table owns nodes and depths only; the child map lives and dies with t
   Synthetic single-file and recursive direct-template traversal normalize private provisional
   identities once before publication. Authored provenance and deterministic late deltas remain.
 - [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
-- [ ] **1B5 — module inputs and worker ownership:** ordered candidate `SourceId` sets and canonical file/chunk merge checks are delivered. The remaining per-source `SourcePreparationDelta`, live span-builder retention and final record installation belong to 1D4/1F; this item remains open until those ownership boundaries are implemented.
+- [x] **1B5 — module inputs and worker ownership:** ordered candidate IDs, canonical file/chunk merge checks, per-source deltas, original live builder retention and final table installation are delivered. Move-only diagnostic bags and the complete frozen identity context remain 1F work.
 - [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
 
@@ -580,11 +583,11 @@ identity but acquire no compiler snapshots merely by registration. Module inputs
 candidate `SourceId` sets whose external-import scope is the module's owned candidates, not every
 source in the boundary database. File/chunk merges place prepared results in preassigned slots and
 reject duplicate, missing and out-of-range outputs.
-The current `Arc<SourceDatabase>` removed deep source-table copies but makes post-worker
-`Arc::get_mut` installation unavailable while other owners retain the database; it is not a
-finished mutable/frozen lifecycle. 1D4 must preserve the source builder through its last producer;
-1F owns the final lookup-only boundary. Shared interior mutation is not a substitute for that
-ownership split.
+`SourceDatabaseBuilder` now separates live span ownership from immutable lookup services.
+Private AST handles share the same allocation only during producer calls; finalization regains
+exclusive access and returns that same `Arc` after installing the tables. Package lookup publication
+waits for check-only producers. This is the source half of the lifecycle; 1F still owns the complete
+lookup-only identity/render boundary and its string/path context.
 The source path foundation is delivered: `SourceDatabase` owns the existing path interner as its
 one source identity base; Stage 0's test-only path table is gone with its stable logical ordering
 and authored classification unchanged. The source `PathId`/legacy-path bridge ends at 2D and
@@ -678,23 +681,21 @@ actual remaining consumer, not blanket suppressions.
 
 1D is split at source ownership boundaries:
 
-- **1D1 — frozen record spans:** delivered codec and one-shot install API; production
-  installation remains open until an exclusive owner can finalize the source after its last span
-  producer.
+- **1D1 — frozen record spans:** delivered codec and one-shot install API; 1D4b supplies production
+  installation under the exclusive owner after every current span producer.
 - **1D2 — tokenizer spans and identity:** delivered exact local spans and registered inputs for
-  authored tokenization; `TokenizeOutput` carries the builder beside its tokens; frozen generic
-  materialisation must retain honest identity absence until 1F supplies its context.
-- **1D4 — builder lifetime and source preparation delta:** comes next. Preserve each builder on
-  success and diagnosed paths, across file aggregation and all later span-producing stages.
-  File/chunk merges move source-local data; they do not freeze builders early or mutate shared
-  databases. Finalization happens under the outcome's exclusive owner.
+  authored tokenization. The 1D4 ownership cutover makes tokenization borrow the source's original
+  builder; frozen generic materialisation still needs its owning context in 1F.
+- **1D4 — builder lifetime and source preparation delta:** delivered across successful and diagnosed
+  file/chunk aggregation, semantic calls and module/direct-service outcomes. Identity-rebind errors
+  also retain every known original table before finalization. Later migrations must thread this owner
+  into any new joined/insertion-span producer, rather than start an independent builder.
   - [x] **1D4a — diagnosed producer ownership:** delivered; returns the existing span builder and
     real source identity on tokenizer and file-header failures, retaining warnings and diagnostic
     facts. Closed producer-local drops only, not later aggregation.
-  - [ ] **1D4b — aggregation and outcome ownership:** move successful and diagnosed source
-    deltas through existing file/chunk merges, header aggregation and module/direct-service
-    outcomes. Keep builders separate from generic diagnostic bags and retain one live resolver
-    through every later span producer. The final exclusive source owner installs each table once.
+  - [x] **1D4b — aggregation and outcome ownership:** original builders stay outside diagnostic
+    bags and survive preparation, aggregation and semantic outcomes. The exclusive source owner
+    installs each table once and retains final render context on terminal errors.
   - [x] **1D4b prerequisite — direct-template entry reuse:** delivered; preserves the entry's
     original preparation and builder through final identity rebinding and bundle consumption; the
     compiler service prepares only standalone raw-source inputs, not bundle entries. Brings
@@ -722,18 +723,12 @@ The explicitly temporary `Token::terminator_at` is an exception: it carries the 
 legacy anchor but a source-start local span. 1D5 must replace it with the shell's exact span,
 and 1H deletes the legacy field after all consumers have migrated.
 
-**1D3 prerequisite.** `prepare_header_syntax` currently consumes the headers and drops the
-unmoved span builders. In addition, the directory and direct-template databases are already
-shared through `Arc` before preparation. Calling the existing `&mut SourceDatabase` installer
-at their file merge is therefore impossible without changing ownership.
-
-1D4 must carry the live builders into module/direct-service ownership and keep one read-only
-resolver available before finalization. Later parsers still create joined or insertion spans, so
-file preparation is not the final span-producing boundary. Freeze each builder exactly once at
-the actual last producer, then assemble the source lookup context at 1F. Do not add a shared
-lock or `OnceLock` installation path to evade the exclusive-owner requirement. 1D3's
-tokenizer/in-file lane can use the live builder; its post-file lane depends on this retained
-resolver ownership, not on an early frozen table.
+**1D3 prerequisite.** The 1D4 ownership cutover keeps original builders outside preparation results,
+retains them before fallible aggregation and defers installation until all producers have ended.
+Identity-rebind failures also finalize the known original tables before publication. Preparation
+diagnostics can use the live source resolver; later parsers must keep that same source owner when
+they begin producing joined or insertion spans. Shared locks,
+`OnceLock` installation and independent builders for repeated source preparation are prohibited.
 
 *The bounding fact.* `SourceLocation` must not gain a required span field. Outside this lane there
 are hundreds of `CompilerDiagnostic::`/`CompilerError::` construction and adapter sites across AST,

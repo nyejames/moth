@@ -3,7 +3,7 @@
 use crate::compiler_frontend::headers::parse_file_headers::prepare_file_from_tokens;
 use crate::compiler_frontend::headers::types::HeaderParseOptions;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -16,11 +16,13 @@ fn prepare_source(
 ) -> (
     crate::compiler_frontend::headers::types::FileFrontendPrepareOutput,
     StringTable,
+    ExtendedSpanBuilder,
 ) {
     let mut string_table = StringTable::new();
     let file_path = Path::new("@page.moth");
     let interned_path = InternedPath::try_from_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &interned_path,
@@ -28,6 +30,7 @@ fn prepare_source(
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
         SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -40,14 +43,14 @@ fn prepare_source(
         0,
     )
     .expect("preparation should succeed");
-    (output, string_table)
+    (output, string_table, span_builder)
 }
 
 #[test]
 fn dependency_clause_paths_are_excluded_from_file_values() {
-    let (output, strings) = prepare_source(
+    let (output, strings, _span_builder) = prepare_source(
         "@core/math sin\n\
-         unused #= @assets/logo.svg\n",
+     unused #= @assets/logo.svg\n",
     );
     let references = output.structural_file_references.references();
     assert_eq!(
@@ -68,10 +71,10 @@ fn dependency_clause_paths_are_excluded_from_file_values() {
 
 #[test]
 fn unused_content_and_resource_paths_are_graph_active() {
-    let (output, _) = prepare_source(
+    let (output, _, _span_builder) = prepare_source(
         "unused_mtf #= @docs/old.mtf\n\
-         unused_md #= @legal/license.md\n\
-         unused_resource #= @assets/large.webp\n",
+     unused_md #= @legal/license.md\n\
+     unused_resource #= @assets/large.webp\n",
     );
     let classes: Vec<_> = output
         .structural_file_references
@@ -91,9 +94,9 @@ fn unused_content_and_resource_paths_are_graph_active() {
 
 #[test]
 fn site_root_and_quoted_urls_create_no_file_edge() {
-    let (output, _) = prepare_source(
+    let (output, _, _span_builder) = prepare_source(
         "root #= @/\n\
-         external #= \"https://example.com/logo.svg\"\n",
+     external #= \"https://example.com/logo.svg\"\n",
     );
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
@@ -102,7 +105,7 @@ fn site_root_and_quoted_urls_create_no_file_edge() {
 
 #[test]
 fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
-    let (output, _) = prepare_source("helpers = @helpers.moth\n");
+    let (output, _, _span_builder) = prepare_source("helpers = @helpers.moth\n");
     assert!(output.file_dependency_clauses.is_empty());
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
@@ -114,7 +117,7 @@ fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
 
 #[test]
 fn a_path_inside_a_broken_expression_is_still_graph_active() {
-    let (output, _) = prepare_source("broken #= @assets/logo.svg foo\n");
+    let (output, _, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
     assert_eq!(

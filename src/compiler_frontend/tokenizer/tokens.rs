@@ -6,7 +6,6 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 pub use crate::compiler_frontend::compiler_messages::source_location::{
     CharPosition, SourceLocation,
 };
@@ -19,7 +18,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::token_log;
 use std::iter::Peekable;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::Chars;
 use std::sync::Arc;
@@ -653,56 +652,6 @@ impl FileTokens {
     }
 }
 
-/// Result of one lexical pass, retaining the source-local span table beside its tokens.
-///
-/// The builder is deliberately outside [`FileTokens`]. `FileTokens` is cloned when parser
-/// substreams are created, while this builder must remain the one mutable owner for every span
-/// encoded by the source's token stream.
-#[derive(Debug)]
-pub(crate) struct TokenizeOutput {
-    pub(crate) file_tokens: FileTokens,
-    pub(crate) span_builder: ExtendedSpanBuilder,
-}
-
-impl TokenizeOutput {
-    pub(crate) fn into_parts(self) -> (FileTokens, ExtendedSpanBuilder) {
-        (self.file_tokens, self.span_builder)
-    }
-}
-
-/// A diagnosed lexical pass that retains the source identity and every extended span encoded
-/// before the failure.
-///
-/// The tokenizer owns the builder while it is producing tokens. If a lexical diagnostic aborts
-/// that pass, this value moves the same builder out of the stream rather than dropping it or
-/// replacing it with an empty table. Later preparation boundaries can then decide whether and how
-/// to retain the partial source data.
-#[derive(Debug)]
-pub(crate) struct TokenizeFailure {
-    pub(crate) file_id: SourceId,
-    pub(crate) diagnostic: Box<CompilerDiagnostic>,
-    pub(crate) span_builder: ExtendedSpanBuilder,
-}
-
-/// Borrowing the token stream is free; separating it from its builder is not.
-///
-/// WHY: consumers that only read tokens should not have to name the pair, but a borrow cannot
-/// move the stream away from the table its spans index. Ownership is taken through
-/// [`TokenizeOutput::into_parts`], where both halves travel together.
-impl Deref for TokenizeOutput {
-    type Target = FileTokens;
-
-    fn deref(&self) -> &Self::Target {
-        &self.file_tokens
-    }
-}
-
-impl DerefMut for TokenizeOutput {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.file_tokens
-    }
-}
-
 pub struct TokenStream<'a> {
     pub file_path: &'a InternedPath,
     pub chars: Peekable<Chars<'a>>,
@@ -735,10 +684,13 @@ pub struct TokenStream<'a> {
     /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
     /// completes.
     pub path_syntax: PathSyntaxTable,
-    /// One mutable extended-span table for every token encoded by this source stream.
+    /// One mutable extended-span builder borrowed from the caller for every token encoded by
+    /// this source stream.
     ///
-    /// This owner stays outside [`FileTokens`] because parser substreams clone that value.
-    pub extended_span_builder: ExtendedSpanBuilder,
+    /// The caller keeps ownership across tokenization, so rows appended by one pass remain
+    /// visible to the next and survive both success and diagnostic exits. The builder stays
+    /// outside [`FileTokens`] because parser substreams clone that value.
+    pub extended_span_builder: &'a mut ExtendedSpanBuilder,
 }
 
 // WHAT: Metadata for one template nesting level in the tokenizer.
@@ -781,6 +733,7 @@ impl<'a> TokenStream<'a> {
         source_code: &'a str,
         file_path: &'a InternedPath,
         entry_mode: TokenizerEntryMode,
+        extended_span_builder: &'a mut ExtendedSpanBuilder,
     ) -> Self {
         let mode = entry_mode.initial_tokenize_mode();
         let initial_close_policy = match entry_mode {
@@ -801,7 +754,7 @@ impl<'a> TokenStream<'a> {
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
             path_syntax: PathSyntaxTable::new(),
-            extended_span_builder: ExtendedSpanBuilder::new(),
+            extended_span_builder,
         }
     }
 
@@ -871,7 +824,7 @@ impl<'a> TokenStream<'a> {
             .byte_offset
             .checked_sub(start_byte)
             .expect("token byte cursor moved before its anchored start");
-        let span = LocalSpan::exact(start_byte, length, &mut self.extended_span_builder)?;
+        let span = LocalSpan::exact(start_byte, length, &mut *self.extended_span_builder)?;
         let resolved = span.resolve_with(self.extended_span_builder.resolver());
 
         self.start_position = self.position;

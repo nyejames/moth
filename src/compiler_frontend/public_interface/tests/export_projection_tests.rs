@@ -117,15 +117,13 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
     let mut string_table = StringTable::new();
     let mut prepared_outputs = Vec::with_capacity(sources.len());
     let mut canonical_paths = Vec::with_capacity(sources.len());
+    let mut span_builders = Vec::with_capacity(sources.len());
 
     for (path, source) in sources {
         let path = PathBuf::from(path);
-        prepared_outputs.push(prepare_single_file(
-            source,
-            &path,
-            &active_path,
-            &mut string_table,
-        ));
+        let (output, builder) = prepare_single_file(source, &path, &active_path, &mut string_table);
+        prepared_outputs.push(output);
+        span_builders.push(builder);
         canonical_paths.push(path);
     }
 
@@ -855,13 +853,13 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 
     // The active root is the entry file; the imported root is a normal module-root file compiled only to
     // validate its public declaration surface.
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let imported_output = prepare_single_file(
+    let (imported_output, _span_builder) = prepare_single_file(
         "export:\n    Imported = | value Int |\n;\n",
         &imported_path,
         &active_path,
@@ -963,13 +961,13 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     let active_path = PathBuf::from("src/@page.moth");
     let imported_path = PathBuf::from("src/@mod.moth");
 
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let imported_output = prepare_single_file(
+    let (imported_output, _span_builder) = prepare_single_file(
         "export:\n    Imported = | value Int |\n;\n",
         &imported_path,
         &active_path,
@@ -1041,7 +1039,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let active_path = PathBuf::from("src/@page.moth");
     let package_path = PathBuf::from("src/@pkg.moth");
 
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
         &active_path,
         &active_path,
@@ -1049,7 +1047,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     );
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
-    let package_output = prepare_single_file(
+    let (package_output, _span_builder) = prepare_single_file(
         "export:\n    Pkg = | value Int |\n;\n",
         &package_path,
         &active_path,
@@ -1137,13 +1135,13 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
     // private struct in the normal file `impl.moth` and has no public export of its own. A
     // module-root public alias (`PublicCounter as Counter`) re-exports it, so the retained
     // module-root public export entry targets `Counter`'s canonical source path.
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    placeholder #= 1\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let impl_output = prepare_single_file(
+    let (impl_output, _span_builder) = prepare_single_file(
         "Counter = | count Int |\n",
         &impl_path,
         &active_path,
@@ -1227,13 +1225,13 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 
     // The active root exports `Local` publicly; `Counter` is a private struct in the normal file
     // with no public export targeting it.
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    Local = | value Int |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let impl_output = prepare_single_file(
+    let (impl_output, _span_builder) = prepare_single_file(
         "Counter = | count Int |\n",
         &impl_path,
         &active_path,
@@ -1312,7 +1310,7 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,
         &file_path,
@@ -1371,13 +1369,13 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
     let active_path = PathBuf::from("src/@page.moth");
     let imported_path = PathBuf::from("src/@mod.moth");
 
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let imported_output = prepare_single_file(
+    let (imported_output, _span_builder) = prepare_single_file(
         "export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
         &imported_path,
         &active_path,
@@ -1466,13 +1464,13 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
     // The active root carries an unrelated public constant; `DRAWABLE` is a private trait in the
     // normal file with no public export of its own. A module-root public alias targets it, so the
     // retained module-root public export entry targets `DRAWABLE`'s canonical source path.
-    let active_output = prepare_single_file(
+    let (active_output, _span_builder) = prepare_single_file(
         "export:\n    placeholder #= 1\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
     );
-    let impl_output = prepare_single_file(
+    let (impl_output, _span_builder) = prepare_single_file(
         "DRAWABLE must:\n    draw |This| -> String\n;\n",
         &impl_path,
         &active_path,
@@ -1545,7 +1543,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
 
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "RENDERABLE must:\n    show |This| -> String\n;\n",
         &file_path,
         &file_path,
@@ -1602,7 +1600,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
     let mut string_table = StringTable::new();
     let package_path = PathBuf::from("src/@pkg.moth");
 
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
         &package_path,
         &package_path,
@@ -1655,7 +1653,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 fn public_source_trait_origin_index_rejects_unowned_source_identity() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,
         &file_path,

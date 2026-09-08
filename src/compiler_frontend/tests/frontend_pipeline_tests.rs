@@ -27,6 +27,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
@@ -36,7 +37,7 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
-    TemplateBodyMode, TokenizeOutput, TokenizerEntryMode,
+    FileTokens, TemplateBodyMode, TokenizerEntryMode,
 };
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
@@ -160,18 +161,21 @@ impl FrontendProject {
         }
     }
 
-    fn tokenize_all(&mut self) -> Vec<TokenizeOutput> {
+    fn tokenize_all(&mut self) -> Vec<(FileTokens, ExtendedSpanBuilder)> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
         self.frontend.with_compiler(|frontend| {
             for file in &self.files {
                 let source = fs::read_to_string(file).expect("should read source file");
+                let mut span_builder = ExtendedSpanBuilder::new();
                 tokenized_files.push(
                     tokenize_source_for_test(
                         frontend,
                         &source,
                         file,
                         TokenizerEntryMode::SourceFile,
+                        &mut span_builder,
                     )
+                    .map(|tokens| (tokens, span_builder))
                     .expect("tokenization should succeed"),
                 );
             }
@@ -212,8 +216,8 @@ impl FrontendProject {
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
-
-        for file_tokens in tokenized_files {
+        let mut retained_span_builders = Vec::with_capacity(tokenized_files.len());
+        for (file_tokens, span_builder) in tokenized_files {
             let output = prepare_file_from_tokens(
                 file_tokens,
                 &self.entry_file,
@@ -227,6 +231,10 @@ impl FrontendProject {
             const_template_offset += output.const_template_count;
             runtime_fragment_offset += output.runtime_fragment_count;
             prepared_outputs.push(output);
+            // Retained token spans may be consumed by preparation and binding; keep each
+            // source's builder alive through those fixture stages instead of dropping it at the
+            // loop binding.
+            retained_span_builders.push(span_builder);
         }
 
         let prepared_syntax =
