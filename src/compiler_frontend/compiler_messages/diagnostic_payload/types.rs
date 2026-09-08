@@ -1897,8 +1897,6 @@ pub enum InvalidGenericInstantiationReason {
         parameter_name: StringId,
         existing_type_id: TypeId,
         replacement_type_id: TypeId,
-        current_evidence_location: SourceLocation,
-        previous_evidence_location: Option<SourceLocation>,
     },
     MissingTraitEvidence {
         parameter_name: StringId,

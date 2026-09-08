@@ -439,15 +439,9 @@ impl DiagnosticPayload {
                     }
                     InvalidGenericInstantiationReason::ConflictingInference {
                         parameter_name,
-                        current_evidence_location,
-                        previous_evidence_location,
                         ..
                     } => {
                         *parameter_name = remap.get(*parameter_name);
-                        current_evidence_location.remap_string_ids(remap);
-                        if let Some(previous_evidence_location) = previous_evidence_location {
-                            previous_evidence_location.remap_string_ids(remap);
-                        }
                     }
                     InvalidGenericInstantiationReason::MissingTraitEvidence {
                         parameter_name,
@@ -708,10 +702,6 @@ impl DiagnosticPayload {
                 ..
             } => rebind_optional_location(declaration_location, logical_path),
 
-            DiagnosticPayload::InvalidGenericInstantiation { reason, .. } => {
-                reason.rebind_source_identity(logical_path);
-            }
-
             DiagnosticPayload::None
             | DiagnosticPayload::ExpectedToken { .. }
             | DiagnosticPayload::UnexpectedToken { .. }
@@ -765,6 +755,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidDependencyClause { .. }
             | DiagnosticPayload::LegacyDependencyClause { .. }
             | DiagnosticPayload::InvalidTypeAnnotation { .. }
+            | DiagnosticPayload::InvalidGenericInstantiation { .. }
             | DiagnosticPayload::InvalidCollectionType { .. }
             | DiagnosticPayload::InvalidMapType { .. }
             | DiagnosticPayload::InvalidMapLiteral { .. }
@@ -829,22 +820,6 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidStatementPosition { .. }
             | DiagnosticPayload::CommonSyntaxMistake { .. }
             | DiagnosticPayload::InfrastructureError { .. } => {}
-        }
-    }
-}
-
-impl InvalidGenericInstantiationReason {
-    fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        if let Self::ConflictingInference {
-            current_evidence_location,
-            previous_evidence_location,
-            ..
-        } = self
-        {
-            current_evidence_location.rebind_source_identity(logical_path);
-            if let Some(previous_evidence_location) = previous_evidence_location {
-                previous_evidence_location.rebind_source_identity(logical_path);
-            }
         }
     }
 }

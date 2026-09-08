@@ -2584,8 +2584,6 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
             parameter_name,
             existing_type_id: type_environment.builtins().int,
             replacement_type_id: type_environment.builtins().string,
-            current_evidence_location: location.clone(),
-            previous_evidence_location: None,
         },
         location,
     );

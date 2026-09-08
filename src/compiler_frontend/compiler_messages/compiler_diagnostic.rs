@@ -1537,8 +1537,6 @@ impl CompilerDiagnostic {
                 parameter_name,
                 existing_type_id: conflict.existing_type_id,
                 replacement_type_id: conflict.replacement_type_id,
-                current_evidence_location: current_evidence_location.clone(),
-                previous_evidence_location: previous_evidence_location.clone(),
             },
             current_evidence_location.clone(),
         );

@@ -194,7 +194,7 @@ fn rejects_removed_builtin_error_fields() {
 }
 
 #[test]
-fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations() {
+fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_labels() {
     let diagnostic = parse_single_file_ast_diagnostic(
         "Pair type T = |\n\
              left T,\n\
@@ -204,13 +204,7 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations()
     );
 
     let DiagnosticPayload::InvalidGenericInstantiation {
-        reason:
-            InvalidGenericInstantiationReason::ConflictingInference {
-                subject,
-                current_evidence_location,
-                previous_evidence_location,
-                ..
-            },
+        reason: InvalidGenericInstantiationReason::ConflictingInference { subject, .. },
         ..
     } = &diagnostic.payload
     else {
@@ -219,12 +213,18 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations()
             diagnostic.payload
         );
     };
-    let previous_evidence_location = previous_evidence_location
-        .as_ref()
-        .expect("expected type evidence should be retained");
-
     assert_eq!(*subject, GenericInferenceSubject::NominalType);
-    assert_eq!(diagnostic.primary_location, *current_evidence_location);
+    assert_eq!(diagnostic.labels.len(), 2);
+    let current_evidence_location = diagnostic.labels[0].location.clone();
+    let previous_evidence_location = diagnostic.labels[1].location.clone();
+
+    assert_eq!(diagnostic.primary_location, current_evidence_location);
+    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
+    assert_eq!(diagnostic.labels[1].style, DiagnosticLabelStyle::Secondary);
+    assert_eq!(
+        diagnostic.labels[1].message,
+        Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
+    );
     assert_eq!(
         current_evidence_location.start_pos.line_number,
         previous_evidence_location.start_pos.line_number
@@ -234,9 +234,4 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations()
             > previous_evidence_location.start_pos.char_column,
         "the argument evidence should follow the receiving-boundary evidence"
     );
-    assert!(diagnostic.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.location == *previous_evidence_location
-            && label.message == Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
-    }));
 }
