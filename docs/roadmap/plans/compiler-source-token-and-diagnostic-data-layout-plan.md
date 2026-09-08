@@ -82,9 +82,11 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `c86cf90d3` — `InvalidAssignmentTarget` no longer stores the declaration location already owned
-  by its ordered `ImmutableBindingDeclaration` label; constructor input, label remapping, rendering,
-  ordering and source ownership remain unchanged. Assignment and diagnostic-model validation pass.
+- `f308f91e5` — source discovery settles every serial/parallel missing-source read in input order,
+  retains successful siblings before publishing failures, and finalizes each failed source slot;
+  authored oversize snapshots now enter the existing source-failure lane while compiler-provenance
+  failures remain compiler errors. The focused create-project-modules suite (151 tests),
+  `cargo check -p moth`, formatting and diff checks pass.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -269,6 +271,11 @@ CURRENT_WORKTREE_STATE:
   payload remapping, rebinding and rendering no longer duplicate that legacy location. Diagnostic
   model (80), assignment mutation (9), collection assignment (57), fallible handling (38) and
   header/config regression coverage pass; the independent audit is clean.
+- Accepted the bounded 1B4/1D4b source-loading lifecycle repair in `f308f91e5`. Serial and parallel
+  missing-source reads collect all outcomes deterministically, retain successful siblings before
+  failure publication, and record every read failure in its registered source slot. Finalized
+  diagnostics retain their source database; no ProviderOwned loading policy changed. The focused
+  create-project-modules suite (151) and source ownership checks pass; the independent audit is clean.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -400,6 +407,11 @@ VALIDATION_STATE:
   config-boundary suite (4 tests) and the full library test baseline (4,976 tests) passed.
 - 1B4 lifecycle candidate: `cargo fmt --all`, `git diff --check`, the focused no-copy source-loading
   test (1 test) and the full library suite (4,979 tests) passed.
+- 1B4/1D4b lifecycle correction candidate: `cargo fmt --all`, `git diff --check`, `cargo check
+  -p moth` and the focused `cargo test -p moth --lib create_project_modules_tests --quiet` suite
+  (151) passed. Serial and parallel mixed success/failure regressions retain sibling snapshots,
+  finalize failed slots and preserve deterministic infrastructure diagnostics; a fresh audit is
+  clean.
 - 1E2 call-target candidate: `cargo fmt --all`, `git diff --check` and the focused cast-boundary
   suite (28 tests) passed, including exact duplicate named-argument ownership.
 - 1E3 sentinel candidate: `cargo fmt --all`, `git diff --check` and the focused malformed-template
