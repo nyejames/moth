@@ -1580,7 +1580,6 @@ impl CompilerDiagnostic {
                 target_type,
                 field_name,
                 root_binding_name,
-                declaration_location,
             },
         )
         .with_labels(labels)

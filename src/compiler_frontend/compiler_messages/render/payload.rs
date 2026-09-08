@@ -422,7 +422,6 @@ fn render_payload_message(
             target_type,
             field_name,
             root_binding_name,
-            declaration_location: _,
         } => invalid_assignment_target_message(
             *reason,
             *target_name,

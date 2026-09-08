@@ -324,7 +324,6 @@ impl DiagnosticPayload {
                 target_name,
                 field_name,
                 root_binding_name,
-                declaration_location,
                 ..
             } => {
                 if let Some(name) = target_name {
@@ -336,7 +335,6 @@ impl DiagnosticPayload {
                 if let Some(name) = root_binding_name {
                     *name = remap.get(*name);
                 }
-                remap_optional_location(declaration_location, remap);
             }
 
             DiagnosticPayload::InvalidMultiBind {
@@ -676,11 +674,6 @@ impl DiagnosticPayload {
                 ..
             } => rebind_optional_location(existing_location, logical_path),
 
-            DiagnosticPayload::InvalidAssignmentTarget {
-                declaration_location,
-                ..
-            } => rebind_optional_location(declaration_location, logical_path),
-
             DiagnosticPayload::None
             | DiagnosticPayload::ExpectedToken { .. }
             | DiagnosticPayload::UnexpectedToken { .. }
@@ -756,6 +749,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidReceiverDeclaration { .. }
             | DiagnosticPayload::InvalidControlFlowStatement { .. }
             | DiagnosticPayload::InvalidDeclaration { .. }
+            | DiagnosticPayload::InvalidAssignmentTarget { .. }
             | DiagnosticPayload::InvalidMultiBind { .. }
             | DiagnosticPayload::InvalidBuiltinCall { .. }
             | DiagnosticPayload::InvalidCast { .. }
