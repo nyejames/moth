@@ -84,7 +84,6 @@ use crate::compiler_frontend::traits::evidence::{
     TraitEvidenceEnvironment, ValidateTraitEvidenceInput, validate_trait_evidence,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
-use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1048,12 +1047,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let mut resolved_bounds = Vec::with_capacity(parameter.trait_bounds.len());
             for trait_bound in &parameter.trait_bounds {
-                let trait_ref = TraitReferenceSyntax {
-                    name: trait_bound.trait_name,
-                    location: trait_bound.location.clone(),
-                };
-                let trait_id = self.resolve_visible_trait_reference(
-                    &trait_ref,
+                let trait_id = self.resolve_visible_trait_name(
+                    trait_bound.trait_name,
+                    &trait_bound.location,
                     visibility,
                     trait_environment,
                     string_table,

@@ -14,10 +14,10 @@ use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitConformanceSyntax, TraitDeclarationSyntax,
-    TraitIncompatibilitySyntax, TraitReferenceSyntax, TraitRequirementSyntax, TraitThisUsage,
+    TraitIncompatibilitySyntax, TraitReferenceSyntax, TraitRequirementSyntax,
 };
 
 use super::types::HeaderBuildContext;
@@ -37,12 +37,13 @@ type TraitHeaderResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 pub(super) fn parse_trait_declaration(
     token_stream: &mut FileTokens,
+    declaration_token: &Token,
     declaration_name: StringId,
-    name_location: SourceLocation,
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
     let trait_path = context.source_file.append(declaration_name);
+    let name_location = declaration_token.location.clone();
 
     token_stream.skip_newlines();
 
@@ -73,9 +74,9 @@ pub(super) fn parse_trait_declaration(
 
     Ok(TraitDeclarationSyntax {
         name: declaration_name,
-        name_location: name_location.clone(),
+        name_location,
         requirements,
-        location: name_location,
+        span: declaration_token.span,
     })
 }
 
@@ -85,6 +86,7 @@ fn parse_trait_requirement(
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
     let name_location = token_stream.current_location();
+    let name_span = token_stream.tokens[token_stream.index].span;
 
     let TokenKind::Symbol(method_name) = token_stream.current_token_kind() else {
         return Err(Box::new(
@@ -113,7 +115,7 @@ fn parse_trait_requirement(
     )?;
 
     // Every non-empty requirement must start with `This` or `~This`.
-    let this_usage = if let Some(first_param) = signature.parameters.first() {
+    if let Some(first_param) = signature.parameters.first() {
         let param_name = first_param
             .id
             .name()
@@ -125,25 +127,18 @@ fn parse_trait_requirement(
                 first_param.location.clone(),
             )));
         }
-
-        if first_param.value_mode.is_mutable() {
-            TraitThisUsage::Mutable
-        } else {
-            TraitThisUsage::Immutable
-        }
     } else {
         return Err(Box::new(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::TraitReceiverMustBeThis,
             name_location.clone(),
         )));
-    };
+    }
 
     Ok(TraitRequirementSyntax {
         name: method_name,
-        name_location: name_location.clone(),
-        this_usage,
+        name_location,
         signature,
-        location: name_location,
+        span: name_span,
     })
 }
 
@@ -171,6 +166,7 @@ pub(super) fn parse_trait_conformance(
                 traits.push(TraitReferenceSyntax {
                     name: *trait_name,
                     location: trait_location,
+                    span: token_stream.tokens[token_stream.index].span,
                 });
                 token_stream.advance();
             }
@@ -231,17 +227,13 @@ pub(super) fn parse_trait_conformance(
         }
     }
 
-    Ok(TraitConformanceSyntax {
-        location: target.location.clone(),
-        target,
-        traits,
-    })
+    Ok(TraitConformanceSyntax { target, traits })
 }
 
 pub(super) fn parse_specialized_conformance_target(
     token_stream: &mut FileTokens,
     target_name: StringId,
-    name_location: SourceLocation,
+    target_token: &Token,
 ) -> TraitHeaderResult<ConformanceTargetSyntax> {
     token_stream.advance(); // past `of`
 
@@ -251,7 +243,8 @@ pub(super) fn parse_specialized_conformance_target(
                 return Ok(ConformanceTargetSyntax {
                     name: target_name,
                     kind: ConformanceTargetKind::SpecializedGenericInstance,
-                    location: name_location,
+                    location: target_token.location.clone(),
+                    span: target_token.span,
                 });
             }
 
@@ -288,6 +281,7 @@ pub(super) fn parse_trait_incompatibility(
                 incompatible_traits.push(TraitReferenceSyntax {
                     name: *trait_name,
                     location: trait_location,
+                    span: token_stream.tokens[token_stream.index].span,
                 });
                 token_stream.advance();
             }
@@ -348,7 +342,6 @@ pub(super) fn parse_trait_incompatibility(
     }
 
     Ok(TraitIncompatibilitySyntax {
-        location: subject.location.clone(),
         subject,
         incompatible_traits,
     })

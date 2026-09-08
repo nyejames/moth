@@ -43,7 +43,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
@@ -77,10 +77,11 @@ type HeaderDispatchResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub(super) fn create_header(
     full_name: InternedPath,
     token_stream: &mut FileTokens,
-    name_location: SourceLocation,
+    declaration_token: &Token,
     export_mode: HeaderExportMode,
     context: &mut HeaderBuildContext<'_>,
 ) -> HeaderDispatchResult<Header> {
+    let name_location = declaration_token.location.clone();
     let Some(declaration_name) = full_name.name() else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
@@ -109,7 +110,7 @@ pub(super) fn create_header(
         let target = parse_specialized_conformance_target(
             token_stream,
             declaration_name,
-            name_location.clone(),
+            declaration_token,
         )?;
         token_stream.advance(); // past must
 
@@ -164,6 +165,7 @@ pub(super) fn create_header(
             let subject = TraitReferenceSyntax {
                 name: declaration_name,
                 location: name_location.clone(),
+                span: declaration_token.span,
             };
             let incompatibility = parse_trait_incompatibility(token_stream, subject, context)?;
             kind = HeaderKind::TraitIncompatibility { incompatibility };
@@ -180,8 +182,8 @@ pub(super) fn create_header(
 
             let declaration = parse_trait_declaration(
                 token_stream,
+                declaration_token,
                 declaration_name,
-                name_location.clone(),
                 context,
             )?;
 
@@ -222,6 +224,7 @@ pub(super) fn create_header(
                     name: declaration_name,
                     kind: ConformanceTargetKind::Named,
                     location: name_location.clone(),
+                    span: declaration_token.span,
                 },
                 context,
             )?;

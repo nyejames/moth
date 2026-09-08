@@ -427,8 +427,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?,
         );
 
-        let subject_id = self.resolve_visible_trait_reference(
-            &incompatibility.subject,
+        let subject_id = self.resolve_visible_trait_name(
+            incompatibility.subject.name,
+            &incompatibility.subject.location,
             &visibility,
             trait_environment,
             string_table,
@@ -443,8 +444,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         });
 
         for incompatible_trait in &incompatibility.incompatible_traits {
-            let incompatible_id = self.resolve_visible_trait_reference(
-                incompatible_trait,
+            let incompatible_id = self.resolve_visible_trait_name(
+                incompatible_trait.name,
+                &incompatible_trait.location,
                 &visibility,
                 trait_environment,
                 string_table,

@@ -15,7 +15,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -35,7 +35,7 @@ fn trait_header(
                 name: string_table.intern(name),
                 name_location: SourceLocation::default(),
                 requirements: Vec::new(),
-                location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             },
         },
         file_role,

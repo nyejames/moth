@@ -41,7 +41,8 @@ use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind, TokenizerEntryMode,
 };
-use crate::compiler_frontend::traits::syntax::TraitThisUsage;
+use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
+use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -2228,12 +2229,12 @@ fn trait_declaration_headers_parse_requirement_shells() {
     assert_eq!(string_table.resolve(declaration.name), "DISPLAYABLE");
     assert_eq!(declaration.requirements.len(), 3);
     assert_eq!(
-        declaration.requirements[0].this_usage,
-        TraitThisUsage::Immutable
+        declaration.requirements[0].signature.parameters[0].value_mode,
+        ValueMode::ImmutableOwned
     );
     assert_eq!(
-        declaration.requirements[1].this_usage,
-        TraitThisUsage::Mutable
+        declaration.requirements[1].signature.parameters[0].value_mode,
+        ValueMode::MutableOwned
     );
 
     let copy_requirement = &declaration.requirements[2];
@@ -5770,4 +5771,208 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         })
         .expect("struct shell");
     assert_eq!(resolve(fields[0].span), "member");
+}
+
+#[test]
+fn trait_shell_spans_retain_original_ranges_after_remapping_and_rebinding() {
+    let trait_name = format!("DISPLAYABLE_{}", "X".repeat(1100));
+    let requirement_name = format!("render_{}", "x".repeat(1100));
+    let target_name = format!("Target{}", "X".repeat(1100));
+    let incompatible_name = format!("INCOMPATIBLE_{}", "Y".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{trait_name} must:\n\
+    {requirement_name} |This| -> String\n\
+;\n\
+{target_name} must {trait_name}, SERIALIZABLE\n\
+{trait_name} must not {incompatible_name}, OTHER_TRAIT\n\
+Generic of A must {trait_name}\n"
+    );
+    let canonical = PathBuf::from("trait-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("trait shells should prepare");
+
+    let snapshot = |prepared: &FileFrontendPrepareOutput, table: &StringTable| {
+        let mut anchors = Vec::new();
+        let mut generated_header_names = Vec::new();
+        let mut header_counts = [0usize; 4];
+        for header in &prepared.headers {
+            match &header.kind {
+                HeaderKind::Trait { declaration } => {
+                    header_counts[0] += 1;
+                    anchors.push((
+                        declaration.span,
+                        declaration.name_location.clone(),
+                        table.resolve(declaration.name).to_owned(),
+                    ));
+                    let requirement = declaration.requirements.first().expect("trait requirement");
+                    anchors.push((
+                        requirement.span,
+                        requirement.name_location.clone(),
+                        table.resolve(requirement.name).to_owned(),
+                    ));
+                }
+                HeaderKind::TraitConformance { conformance } => {
+                    match conformance.target.kind {
+                        ConformanceTargetKind::Named => {
+                            header_counts[1] += 1;
+                        }
+                        ConformanceTargetKind::SpecializedGenericInstance => {
+                            header_counts[3] += 1;
+                        }
+                    }
+                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    anchors.push((
+                        conformance.target.span,
+                        conformance.target.location.clone(),
+                        table.resolve(conformance.target.name).to_owned(),
+                    ));
+                    for trait_ref in &conformance.traits {
+                        anchors.push((
+                            trait_ref.span,
+                            trait_ref.location.clone(),
+                            table.resolve(trait_ref.name).to_owned(),
+                        ));
+                    }
+                }
+                HeaderKind::TraitIncompatibility { incompatibility } => {
+                    header_counts[2] += 1;
+                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    anchors.push((
+                        incompatibility.subject.span,
+                        incompatibility.subject.location.clone(),
+                        table.resolve(incompatibility.subject.name).to_owned(),
+                    ));
+                    for trait_ref in &incompatibility.incompatible_traits {
+                        anchors.push((
+                            trait_ref.span,
+                            trait_ref.location.clone(),
+                            table.resolve(trait_ref.name).to_owned(),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        (anchors, generated_header_names, header_counts)
+    };
+
+    let (original_anchors, original_header_names, original_header_counts) =
+        snapshot(&prepared, &strings);
+    assert_eq!(original_header_counts, [1, 1, 1, 1]);
+    assert_eq!(
+        original_anchors.len(),
+        10,
+        "all trait shell anchors are captured"
+    );
+    assert_eq!(
+        spans.len(),
+        7,
+        "only the seven long authored identifier tokens should need extended rows"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("trait shell strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("trait-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span| {
+        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+
+    let (rebound_anchors, rebound_header_names, rebound_header_counts) =
+        snapshot(&prepared, &merged);
+    assert_eq!(rebound_header_counts, original_header_counts);
+    assert_eq!(rebound_header_names, original_header_names);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for (
+        (original_span, original_location, expected_text),
+        (rebound_span, rebound_location, rebound_text),
+    ) in original_anchors.iter().zip(rebound_anchors.iter())
+    {
+        assert_eq!(rebound_span, original_span, "span encoding changed");
+        assert_eq!(
+            rebound_text, expected_text,
+            "string remap changed anchor name"
+        );
+        let resolved_range = SourceSpan::new(prepared.file_id, *rebound_span).byte_range(&database);
+        assert_eq!(
+            resolved_range.start(),
+            original_location.start_byte,
+            "resolved span start changed"
+        );
+        assert_eq!(
+            resolved_range.end(),
+            original_location.end_byte,
+            "resolved span end changed"
+        );
+        assert_eq!(
+            rebound_location.start_byte, original_location.start_byte,
+            "legacy anchor start changed"
+        );
+        assert_eq!(
+            rebound_location.end_byte, original_location.end_byte,
+            "legacy anchor end changed"
+        );
+        assert_eq!(
+            resolve(*rebound_span),
+            expected_text,
+            "span no longer resolves to the exact authored UTF-8 bytes"
+        );
+    }
 }

@@ -91,7 +91,7 @@ pub(crate) fn validate_trait_evidence(
                 conformance.target.name,
                 conformance.traits.first().map(|trait_ref| trait_ref.name),
                 InvalidTraitConformanceReason::ImportedModuleRoot,
-                conformance.location.clone(),
+                conformance.target.location.clone(),
                 Vec::new(),
             )
             .into());
@@ -105,7 +105,7 @@ pub(crate) fn validate_trait_evidence(
                     conformance.target.name,
                     conformance.traits.first().map(|trait_ref| trait_ref.name),
                     InvalidTraitConformanceReason::NonCanonicalTarget,
-                    conformance.location.clone(),
+                    conformance.target.location.clone(),
                     Vec::new(),
                 )
             })?;
@@ -180,7 +180,7 @@ pub(crate) fn validate_trait_evidence(
                 .into());
             }
 
-            pending_canonical_locations.insert(key, conformance.location.clone());
+            pending_canonical_locations.insert(key, conformance.target.location.clone());
 
             pending_evidence.push(PendingConformanceEvidence {
                 target: target.clone(),
@@ -188,7 +188,7 @@ pub(crate) fn validate_trait_evidence(
                 trait_id,
                 trait_name: trait_ref.name,
                 source_file: conformance_source_file.clone(),
-                declaration_location: conformance.location.clone(),
+                declaration_location: conformance.target.location.clone(),
                 trait_location: trait_ref.location.clone(),
             });
         }

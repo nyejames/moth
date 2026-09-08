@@ -10,6 +10,7 @@
 //!      touching the full builder pipeline.
 
 use super::signature_with_trait_this_as_parameter;
+use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
@@ -21,14 +22,11 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
-
-use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 
 #[test]
 fn displayable_registers_through_unified_core_path() {
@@ -58,11 +56,8 @@ fn displayable_resolves_via_core_trait_id_for_name() {
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
 
-    let trait_ref = TraitReferenceSyntax {
-        name: string_table.intern(DISPLAYABLE_TRAIT_NAME),
-        location: SourceLocation::default(),
-    };
-    let resolved = trait_environment.core_trait_id_for_name(trait_ref.name, &string_table);
+    let trait_name = string_table.intern(DISPLAYABLE_TRAIT_NAME);
+    let resolved = trait_environment.core_trait_id_for_name(trait_name, &string_table);
     assert!(
         resolved.is_some(),
         "DISPLAYABLE must resolve without dependency clauses"

@@ -70,35 +70,34 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5c1, signature and choice preparation anchors.
-- Goal: copy exact token-local member, return-type and variant anchors; remove the duplicate
-  `ReturnSlotSyntax.location` and use its nested return value as the one anchor owner.
-- Non-goals: trait-shell and parsed-type migration, header/const-fragment joins, source contracts,
-  resolved AST/HIR records, diagnostic storage redesign and token-store migration.
-- Preserve existing token-sized meanings, explicit enclosing source ownership, string remapping
-  and trait `This` substitution. Copy the original span without new encoding or source scans.
-- `SourceLocation` remains the private interval bridge through 1H.
+- Phase: 1D5c2, trait preparation anchors.
+- Goal: copy original token spans into trait declarations, requirements, references and conformance
+  targets. Remove duplicated outer locations and receiver classification already owned by the signature.
+- Replace temporary trait-reference construction in generic-bound lookup with the existing resolver
+  accepting a name and borrowed diagnostic location. Change header dispatch to receive the original token.
+- Preserve synthesized semantic names, exact token-sized anchors, diagnostics and source ordering.
+- Non-goals: parsed types and generic-parameter spans, resolved semantic spans, new source owners,
+  diagnostic storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `86d4bf508` — exact path/dependency anchors and consolidated clause location; final gate and
-  independent correction verification passed.
+- `835253c32` — signature and choice anchors, with final validation and independent review accepted.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
 - Continuation order: remaining 1D5 and 1D6, remaining Phase 1, final review and closeout,
   then pause for external review. Phases 2–7 stay pending until the user authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
-- 1D5c1 is implemented, validated and independently accepted across shared signature/choice
-  producers, return-slot consumers and focused fixtures. Its checkpoint is being recorded.
-- Resumed after the requested restart. The complete uncommitted 1D5c1 diff was inspected.
-  The substitution regression satisfies the parser entry contract. The long-anchor test now
-  preserves encoded spans through nonidentity source rebinding and resolves the original table.
-  Focused independent verification is clean.
-- Current 1D5c1 edits: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
+- 1D5c1 is accepted in `835253c32`. The worktree was clean after checkpoint verification.
+  The complete 1D5c2 worker diff and integrated regression have been inspected. The full gate
+  passed and independent review is clean. The accepted checkpoint is being recorded.
+- Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
   copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
   redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
   the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
-- Two new field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
+- The 1D5c2 candidate adds four field-level allowances for the remaining 1E AST consumers:
+  trait declaration, requirement, reference and conformance-target spans. Remove them in 1E
+  and confirm none survives 1H.
+- Two 1D5c1 field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
   and `ChoiceVariantSyntax.span`. Remove them in the owning 1E batch and confirm none survives 1H.
 - The user identified `librust_out.rmeta` as an earlier-session Rust metadata artefact;
   it was inspected and removed at their request before this continuation.
@@ -188,6 +187,12 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
+- 1D5c2 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
+  5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
+  source audit, benchmark preflights, scaling and timer erasure. Focused trait (9), remap (29),
+  public trait root (8), requirement (1) and header-parser (175) tests passed. The final regression
+  also checks decoded byte offsets against the original locations after nonidentity source rebinding.
+  Independent review is clean with no required findings or material test gaps.
 - 1D5c1 final candidate: `cargo fmt --all && just validate` passed native featured all-target
   Clippy, 5,074 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused substitution (1),
@@ -215,7 +220,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint accepted 1D5c1, then migrate trait-shell anchors in 1D5c2.
+- next action: checkpoint accepted trait-shell anchors, then implement parsed types and capacities in 1D5c3.
   Continue remaining 1D5c/1D6 and Phase 1, with final review and
   closeout followed by the requested external review pause. Phases 2–7 remain pending.
 
@@ -757,7 +762,7 @@ actual remaining consumer, not blanket suppressions.
     - [x] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
       remove `ReturnSlotSyntax.location`, which duplicates its nested return value's location.
       Preserve anchors through remapping and trait `This` substitution.
-    - [ ] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
+    - [x] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
       consolidate duplicate name locations without changing synthesized semantic names.
     - [ ] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
       anchor and all synthetic/materialized constructors. Resolved types remain 1E2.
@@ -765,7 +770,10 @@ actual remaining consumer, not blanket suppressions.
       synthetic metadata without manufacturing source identities.
     - [ ] **1D5c5 — header names, const fragments and source contracts:** thread the original
       builder only where a joined range needs encoding. Keep const-fragment source ownership
-      explicit after module aggregation and preserve the infrastructure failure lane.
+      explicit after module aggregation and preserve the infrastructure failure lane. Source contracts
+      retain the qualifier `#` anchor already copied into `DeclarationSyntax.span`, not the header
+      name anchor. Const-template joins preserve the existing first-interior-token through post-close-token
+      bounds by joining those original token spans through the original live builder.
 - **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
   repeated ad hoc path/location constructors in Rust tests.
 

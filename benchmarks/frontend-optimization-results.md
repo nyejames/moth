@@ -3409,3 +3409,21 @@ workloads. Scaling fits were 0.99, 0.80 and 1.61, within their budgets. Timer er
 with a 9,043,728-byte no-timer binary. These bounded checks establish neither five-run medians
 nor phase-wide memory evidence. Independent review's rebind test correction passed focused
 verification. The accepted checkpoint is the commit containing this subsection.
+
+### Trait preparation anchor checkpoint (1D5c2)
+
+Trait declarations, requirements, references and conformance targets copy their original token
+anchors. Duplicate outer locations and receiver classification are removed. The resolver consumes
+names and borrowed locations directly, removing temporary trait-reference records for generic bounds.
+The regression preserves ten anchors through string remapping and nonidentity source rebinding,
+resolves seven original extended rows after multibyte text and checks exact byte offsets and text.
+The interval bridge remains until 1H; this checkpoint claims no aggregate retained-memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, source audit and all 82 benchmark preflights. Quick historical comparisons reported
++4 ms CLI averages and +2 ms frontend averages, excluding changed docs workloads. Scaling fits
+were 0.98, 0.78 and 1.64, within their budgets. Timer erasure passed with a 9,027,216-byte no-timer
+binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
+Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
+commit containing this subsection.

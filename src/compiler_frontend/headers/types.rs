@@ -1714,14 +1714,12 @@ fn validate_header_kind(
                 source_file,
                 "trait declaration name",
             )?;
-            validate_source_location(&declaration.location, source_file, "trait declaration")?;
             for requirement in &declaration.requirements {
                 validate_source_location(
                     &requirement.name_location,
                     source_file,
                     "trait requirement name",
                 )?;
-                validate_source_location(&requirement.location, source_file, "trait requirement")?;
                 validate_function_signature(&requirement.signature, source_file, path_syntax)?;
             }
         }
@@ -1731,7 +1729,6 @@ fn validate_header_kind(
                 source_file,
                 "trait conformance target",
             )?;
-            validate_source_location(&conformance.location, source_file, "trait conformance")?;
             for trait_reference in &conformance.traits {
                 validate_source_location(
                     &trait_reference.location,
@@ -1745,11 +1742,6 @@ fn validate_header_kind(
                 &incompatibility.subject.location,
                 source_file,
                 "trait incompatibility subject",
-            )?;
-            validate_source_location(
-                &incompatibility.location,
-                source_file,
-                "trait incompatibility",
             )?;
             for trait_reference in &incompatibility.incompatible_traits {
                 validate_source_location(

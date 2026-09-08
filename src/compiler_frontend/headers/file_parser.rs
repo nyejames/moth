@@ -653,7 +653,7 @@ fn handle_symbol_item_with_export_mode(
     let header = create_header(
         token_stream.src_path.append(name_id),
         token_stream,
-        current_location.clone(),
+        &current_token,
         export_mode,
         &mut build_context,
     )?;

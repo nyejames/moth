@@ -466,7 +466,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 CompilerDiagnostic::unsupported_trait_feature(
                     declaration.name,
                     string_table.intern("missing This receiver"),
-                    requirement.location.clone(),
+                    requirement.name_location.clone(),
                 ),
                 string_table,
             ));
@@ -501,7 +501,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     CompilerDiagnostic::unsupported_trait_feature(
                         declaration.name,
                         string_table.intern("unresolved requirement return"),
-                        requirement.location.clone(),
+                        requirement.name_location.clone(),
                     ),
                     string_table,
                 ));
@@ -510,7 +510,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             returns.push(ResolvedTraitReturn {
                 type_id,
                 channel: return_slot.channel,
-                location: requirement.location.clone(),
+                location: requirement.name_location.clone(),
             });
         }
 
@@ -521,7 +521,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             receiver,
             parameters,
             returns,
-            location: requirement.location.clone(),
+            location: requirement.name_location.clone(),
         })
     }
 
@@ -585,8 +585,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let visibility = self.header_visibility(header, string_table)?;
 
             for trait_ref in &conformance.traits {
-                self.resolve_visible_trait_reference(
-                    trait_ref,
+                self.resolve_visible_trait_name(
+                    trait_ref.name,
+                    &trait_ref.location,
                     &visibility,
                     trait_environment,
                     string_table,
@@ -732,25 +733,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(trait_id)
     }
 
-    pub(in crate::compiler_frontend::ast) fn resolve_visible_trait_reference(
+    pub(in crate::compiler_frontend::ast) fn resolve_visible_trait_name(
         &self,
-        trait_ref: &TraitReferenceSyntax,
-        visibility: &crate::compiler_frontend::headers::binding_environment::FileVisibility,
+        name: StringId,
+        location: &SourceLocation,
+        visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<TraitId, CompilerMessages> {
-        if let Some(path) = visibility.visible_trait_names.get(&trait_ref.name)
+        if let Some(path) = visibility.visible_trait_names.get(&name)
             && let Some(id) = trait_environment.id_for_path(path)
         {
             return Ok(id);
         }
 
-        if let Some(id) = trait_environment.core_trait_id_for_name(trait_ref.name, string_table) {
+        if let Some(id) = trait_environment.core_trait_id_for_name(name, string_table) {
             return Ok(id);
         }
 
         Err(self.diagnostic_messages(
-            CompilerDiagnostic::unknown_trait_name(trait_ref.name, trait_ref.location.clone()),
+            CompilerDiagnostic::unknown_trait_name(name, location.clone()),
             string_table,
         ))
     }

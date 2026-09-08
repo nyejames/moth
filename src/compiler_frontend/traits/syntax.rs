@@ -9,6 +9,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -19,7 +20,11 @@ pub struct TraitDeclarationSyntax {
     pub name: StringId,
     pub name_location: SourceLocation,
     pub requirements: Vec<TraitRequirementSyntax>,
-    pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 /// One method requirement inside a trait block.
@@ -27,18 +32,12 @@ pub struct TraitDeclarationSyntax {
 pub struct TraitRequirementSyntax {
     pub name: StringId,
     pub name_location: SourceLocation,
-    // Retained with the shell as diagnostic metadata for the parsed requirement receiver.
-    #[allow(dead_code)]
-    pub this_usage: TraitThisUsage,
     pub signature: FunctionSignatureSyntax,
-    pub location: SourceLocation,
-}
-
-/// Classification of `This` usage in a trait requirement receiver.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TraitThisUsage {
-    Immutable,
-    Mutable,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 /// Reference to a trait name in a conformance list.
@@ -46,6 +45,11 @@ pub enum TraitThisUsage {
 pub struct TraitReferenceSyntax {
     pub name: StringId,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST trait-reference consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 /// Target type in a conformance declaration.
@@ -54,6 +58,11 @@ pub struct ConformanceTargetSyntax {
     pub name: StringId,
     pub kind: ConformanceTargetKind,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST conformance consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +76,6 @@ pub enum ConformanceTargetKind {
 pub struct TraitConformanceSyntax {
     pub target: ConformanceTargetSyntax,
     pub traits: Vec<TraitReferenceSyntax>,
-    pub location: SourceLocation,
 }
 
 /// Parsed trait incompatibility declaration shell: `TRAIT must not TRAIT, TRAIT`
@@ -81,7 +89,6 @@ pub struct TraitConformanceSyntax {
 pub struct TraitIncompatibilitySyntax {
     pub subject: TraitReferenceSyntax,
     pub incompatible_traits: Vec<TraitReferenceSyntax>,
-    pub location: SourceLocation,
 }
 
 impl TraitDeclarationSyntax {
@@ -93,7 +100,6 @@ impl TraitDeclarationSyntax {
         for requirement in &mut self.requirements {
             requirement.remap_string_ids(remap);
         }
-        self.location.remap_string_ids(remap);
     }
 
     pub fn validate_required_source_prefixes(
@@ -115,7 +121,6 @@ impl TraitDeclarationSyntax {
         for requirement in &mut self.requirements {
             requirement.rebind_source_identity(logical_path, provisional_source_file)?;
         }
-        self.location.rebind_source_identity(logical_path);
         Ok(())
     }
 }
@@ -127,7 +132,6 @@ impl TraitRequirementSyntax {
         self.name = remap.get(self.name);
         self.name_location.remap_string_ids(remap);
         self.signature.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     pub fn validate_required_source_prefixes(
@@ -146,7 +150,6 @@ impl TraitRequirementSyntax {
         self.name_location.rebind_source_identity(logical_path);
         self.signature
             .rebind_source_identity(logical_path, provisional_source_file)?;
-        self.location.rebind_source_identity(logical_path);
         Ok(())
     }
 }
@@ -185,7 +188,6 @@ impl TraitConformanceSyntax {
         for trait_ref in &mut self.traits {
             trait_ref.remap_string_ids(remap);
         }
-        self.location.remap_string_ids(remap);
     }
 
     pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
@@ -193,7 +195,6 @@ impl TraitConformanceSyntax {
         for trait_ref in &mut self.traits {
             trait_ref.rebind_source_identity(logical_path);
         }
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -206,7 +207,6 @@ impl TraitIncompatibilitySyntax {
         for trait_ref in &mut self.incompatible_traits {
             trait_ref.remap_string_ids(remap);
         }
-        self.location.remap_string_ids(remap);
     }
 
     pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
@@ -214,6 +214,5 @@ impl TraitIncompatibilitySyntax {
         for trait_ref in &mut self.incompatible_traits {
             trait_ref.rebind_source_identity(logical_path);
         }
-        self.location.rebind_source_identity(logical_path);
     }
 }

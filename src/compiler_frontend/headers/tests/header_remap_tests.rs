@@ -48,9 +48,7 @@ use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
-use crate::compiler_frontend::traits::syntax::{
-    TraitDeclarationSyntax, TraitRequirementSyntax, TraitThisUsage,
-};
+use crate::compiler_frontend::traits::syntax::{TraitDeclarationSyntax, TraitRequirementSyntax};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -983,7 +981,6 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let trait_requirement = TraitRequirementSyntax {
         name: string_table.intern("required"),
         name_location: provisional_location.clone(),
-        this_usage: TraitThisUsage::Immutable,
         signature: FunctionSignatureSyntax {
             parameters: vec![SignatureMemberSyntax {
                 span: LocalSpan::source_start(),
@@ -998,7 +995,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             }],
             returns: Vec::new(),
         },
-        location: provisional_location.clone(),
+        span: LocalSpan::source_start(),
     };
 
     let warning = CompilerDiagnostic::import_name_collision(
@@ -1086,7 +1083,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                         name: string_table.intern("Trait"),
                         name_location: provisional_location.clone(),
                         requirements: vec![trait_requirement],
-                        location: provisional_location.clone(),
+                        span: LocalSpan::source_start(),
                     },
                 },
                 file_role: FileRole::Normal,
@@ -1193,7 +1190,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let HeaderKind::Trait { declaration } = &output.headers[2].kind else {
         panic!("expected trait header");
     };
-    assert_eq!(declaration.location.scope, output.source_file);
+    assert_eq!(declaration.name_location.scope, output.source_file);
     assert_eq!(
         declaration.requirements[0].name_location.scope,
         output.source_file
