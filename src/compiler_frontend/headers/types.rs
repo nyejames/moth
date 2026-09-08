@@ -27,7 +27,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -134,6 +134,7 @@ pub struct TopLevelConstFragment {
     pub runtime_insertion_index: usize,
     pub header_path: InternedPath,
     pub location: SourceLocation,
+    pub span: SourceSpan,
 }
 
 /// Optional settings that affect module header parsing.
@@ -430,6 +431,7 @@ pub struct Header {
     /// Stage 3 resolves the retained local hints into sortable graph edges.
     pub local_ordering_hints: HashSet<LocalDeclarationOrderingHint>,
     pub name_location: SourceLocation,
+    pub name_span: LocalSpan,
 
     // Token Body (for functions / templates) and info about canonical_os_path
     pub tokens: FileTokens,
@@ -472,6 +474,7 @@ impl TopLevelConstFragment {
 
     pub fn rebind_source_identity(
         &mut self,
+        final_file_id: SourceId,
         provisional_source_file: &InternedPath,
         logical_path: &InternedPath,
     ) -> Result<(), CompilerError> {
@@ -479,6 +482,7 @@ impl TopLevelConstFragment {
             .header_path
             .try_rebind_required_prefix(provisional_source_file, logical_path)?;
         self.location.rebind_source_identity(logical_path);
+        self.span = SourceSpan::new(final_file_id, self.span.local());
         Ok(())
     }
 }
@@ -1376,7 +1380,11 @@ impl FileFrontendPrepareOutput {
             )?;
         }
         for fragment in &mut self.top_level_const_fragments {
-            fragment.rebind_source_identity(&provisional_source_file, &final_logical_path)?;
+            fragment.rebind_source_identity(
+                final_file_id,
+                &provisional_source_file,
+                &final_logical_path,
+            )?;
         }
         for warning in &mut self.warnings {
             warning.rebind_source_identity(
@@ -1971,6 +1979,7 @@ pub(super) struct HeaderParseContext<'a> {
     pub file_role: FileRole,
     pub is_config_file: bool,
     pub string_table: &'a mut StringTable,
+    pub span_builder: &'a mut ExtendedSpanBuilder,
     /// Module-wide base offset for const-template synthetic names in this file.
     ///
     /// WHY: const-template names must be unique across the module; each file's parser

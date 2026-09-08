@@ -16,6 +16,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -56,6 +57,7 @@ pub(crate) struct SourceBuildConfigContract {
     pub(crate) required: bool,
     pub(crate) default: Option<PrimitiveBuildValue>,
     pub(crate) location: SourceLocation,
+    pub(crate) span: SourceSpan,
 }
 
 /// Convert one parsed type annotation into the build-input contract vocabulary.
@@ -123,6 +125,7 @@ pub(crate) fn build_input_type_name(contract: BuildInputType) -> String {
 pub(crate) fn normalize_source_build_config_contract(
     name: StringId,
     name_location: SourceLocation,
+    span: SourceSpan,
     qualifier: &BuildConfigQualifierSyntax,
     initializer_tokens: &[Token],
     string_table: &mut StringTable,
@@ -242,6 +245,7 @@ pub(crate) fn normalize_source_build_config_contract(
         required,
         default,
         location: qualifier.qualifier_location.clone(),
+        span,
     })
 }
 

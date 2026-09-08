@@ -27,6 +27,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
@@ -353,6 +354,7 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
         runtime_insertion_index: 0,
         header_path: path,
         location: test_source_location(2),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
     let collected =
@@ -379,6 +381,7 @@ fn collects_const_top_level_fragments_from_folded_value() {
         runtime_insertion_index: 2,
         header_path: path,
         location: test_source_location(4),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
     let collected =
@@ -413,11 +416,13 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
             runtime_insertion_index: 1,
             header_path: first_path,
             location: test_source_location(2),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 3,
             header_path: second_path,
             location: test_source_location(5),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
     ];
 
@@ -493,16 +498,19 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
             runtime_insertion_index: 1,
             header_path: piece_path,
             location: test_source_location(2),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 2,
             header_path: all_text_path,
             location: test_source_location(3),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 3,
             header_path: text_path,
             location: test_source_location(4),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
     ];
 
@@ -535,6 +543,7 @@ fn missing_const_top_level_fragment_result_returns_compiler_error() {
         runtime_insertion_index: 0,
         header_path: path,
         location: test_source_location(2),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
     let error = collect_const_top_level_fragments(&fragments, &results)

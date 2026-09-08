@@ -66,6 +66,7 @@ fn header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_location: SourceLocation::default(),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new(src_path, SourceId::COMPILATION_ROOT, Vec::new()),
         source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),

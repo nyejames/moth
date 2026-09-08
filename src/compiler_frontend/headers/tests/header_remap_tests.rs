@@ -42,8 +42,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::LocalSpan;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -127,6 +126,7 @@ fn make_prepared_header(
             CharPosition::default(),
             CharPosition::default(),
         ),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new_deferred_with_identity(
             source_file.clone(),
             file_id,
@@ -176,6 +176,7 @@ fn top_level_const_fragment_remaps_path_and_location() {
         runtime_insertion_index: 3,
         header_path,
         location,
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     };
 
     let remap = global.merge_from(&local);
@@ -314,6 +315,7 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
         runtime_insertion_index: 7,
         header_path: InternedPath::from_single_str("file.moth", &mut local),
         location: make_location("file.moth", &mut local),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     };
 
     let remap = global.merge_from(&local);
@@ -591,6 +593,7 @@ fn header_remaps_kind_dependencies_locations_tokens_and_source_file() {
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: dependencies,
         name_location: make_location("test.moth", &mut local),
+        name_span: LocalSpan::source_start(),
         tokens: make_file_tokens("my_symbol", &mut local),
         source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
@@ -655,6 +658,7 @@ fn header_remap_preserves_correct_ids_when_global_has_preexisting_strings() {
         export_mode: HeaderExportMode::Public,
         local_ordering_hints: dependencies,
         name_location: make_location("test.moth", &mut local),
+        name_span: LocalSpan::source_start(),
         tokens: make_file_tokens("my_symbol", &mut local),
         source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
@@ -734,6 +738,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: dependencies,
         name_location: make_location("test.moth", &mut local),
+        name_span: LocalSpan::source_start(),
         tokens: make_file_tokens("my_func", &mut local),
         source_file: InternedPath::from_single_str("test.moth", &mut local),
         capacity_references: Vec::new(),
@@ -743,6 +748,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         runtime_insertion_index: 2,
         header_path: InternedPath::from_single_str("src/@page.moth", &mut local),
         location: make_location("src/@page.moth", &mut local),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     };
 
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
@@ -1047,6 +1053,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 export_mode: HeaderExportMode::Private,
                 local_ordering_hints: local_ordering_hints.clone(),
                 name_location: provisional_location.clone(),
+                name_span: LocalSpan::source_start(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
                     SourceId::from_index(7),
@@ -1073,6 +1080,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 export_mode: HeaderExportMode::Private,
                 local_ordering_hints: HashSet::new(),
                 name_location: provisional_location.clone(),
+                name_span: LocalSpan::source_start(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
                     SourceId::from_index(7),
@@ -1098,6 +1106,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 export_mode: HeaderExportMode::Private,
                 local_ordering_hints: HashSet::new(),
                 name_location: provisional_location.clone(),
+                name_span: LocalSpan::source_start(),
                 tokens: FileTokens::new_deferred_with_identity(
                     provisional_source.clone(),
                     SourceId::from_index(7),
@@ -1115,6 +1124,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             runtime_insertion_index: 0,
             header_path: provisional_source.clone(),
             location: provisional_location.clone(),
+            span: SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
         }],
         const_template_count: 1,
         runtime_fragment_count: 0,
@@ -1698,6 +1708,7 @@ fn prepared_file_rebinding_preflights_required_paths_without_partial_mutation() 
             CharPosition::default(),
             CharPosition::default(),
         ),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new_deferred_with_identity(
             malformed_header_path.clone(),
             SourceId::from_index(6),

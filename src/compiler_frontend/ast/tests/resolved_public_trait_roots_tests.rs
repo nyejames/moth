@@ -42,6 +42,7 @@ fn trait_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_location: SourceLocation::default(),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
             SourceId::COMPILATION_ROOT,
@@ -67,6 +68,7 @@ fn function_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_location: SourceLocation::default(),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
             SourceId::COMPILATION_ROOT,

@@ -43,7 +43,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
@@ -118,6 +118,7 @@ pub fn parse_file_headers_with_table(
         file_role,
         is_config_file,
         string_table,
+        span_builder,
         const_template_offset,
         runtime_fragment_offset,
     };
@@ -391,6 +392,7 @@ fn collect_source_build_config_contracts(
             match normalize_source_build_config_contract(
                 name,
                 header.name_location.clone(),
+                SourceSpan::new(output.file_id, declaration.span),
                 qualifier,
                 &declaration.initializer_tokens,
                 string_table,

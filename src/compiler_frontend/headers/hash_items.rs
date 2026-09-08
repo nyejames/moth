@@ -4,6 +4,7 @@
 //! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
 //! high-level loop over classified items.
 
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason,
 };
@@ -11,16 +12,10 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::find_co
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
-    FileRole, HeaderBuildContext, HeaderParseContext, TopLevelConstFragment,
+    FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
-
-/// Boxed diagnostic result for hash-item handling.
-///
-/// WHAT: gives the hash-item family one small error boundary.
-/// WHY: hash-item parsing passes structured diagnostics through to the file-parser loop
-///      without carrying the large value inline at every return.
-type HashItemsResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 pub(super) fn handle_hash_item(
     token_stream: &mut FileTokens,
@@ -29,7 +24,7 @@ pub(super) fn handle_hash_item(
     current_token: Token,
     current_location: SourceLocation,
     at_statement_boundary: bool,
-) -> HashItemsResult<()> {
+) -> Result<(), HeaderParseFailure> {
     if !at_statement_boundary {
         state.push_start_body_token(current_token);
         return Ok(());
@@ -38,9 +33,7 @@ pub(super) fn handle_hash_item(
     match token_stream.current_token_kind() {
         TokenKind::TemplateHead => {
             if state.export_mode.is_public() {
-                return Err(Box::new(CompilerDiagnostic::invalid_export_target(
-                    current_location,
-                )));
+                return Err(CompilerDiagnostic::invalid_export_target(current_location).into());
             }
 
             handle_top_level_const_template(token_stream, state, context, current_location)
@@ -58,14 +51,15 @@ fn handle_top_level_const_template(
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     current_location: SourceLocation,
-) -> HashItemsResult<()> {
+) -> Result<(), HeaderParseFailure> {
     if context.file_role == FileRole::Normal {
-        return Err(Box::new(CompilerDiagnostic::deferred_feature(
+        return Err(CompilerDiagnostic::deferred_feature(
             context
                 .string_table
                 .intern("top-level const templates in ordinary source files"),
             current_location,
-        )));
+        )
+        .into());
     }
 
     if context.file_role == FileRole::ImportedModuleRoot {
@@ -94,19 +88,25 @@ fn handle_top_level_const_template(
                     location,
                 )
             };
-            return Err(Box::new(diagnostic));
+            return Err(diagnostic.into());
         }
         return Ok(());
     }
 
     if context.file_role == FileRole::ActiveApiOnlyModuleRoot {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_top_level_runtime_statement(current_location),
-        ));
+        return Err(
+            CompilerDiagnostic::invalid_top_level_runtime_statement(current_location).into(),
+        );
     }
 
     let template_token = token_stream.current_token();
     token_stream.advance();
+
+    let source_id = token_stream.file_id.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "const fragment preparation requires a retained source identity",
+        )
+    })?;
 
     let source_file = token_stream.src_path.to_owned();
     let mut build_context = HeaderBuildContext {
@@ -123,6 +123,7 @@ fn handle_top_level_const_template(
         context.const_template_offset + state.const_template_count,
         token_stream,
         &mut build_context,
+        context.span_builder,
     )?;
 
     state.const_template_count += 1;
@@ -132,6 +133,7 @@ fn handle_top_level_const_template(
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: context.runtime_fragment_offset + state.runtime_fragment_count,
         location: header.name_location.clone(),
+        span: SourceSpan::new(source_id, header.name_span),
         header_path: header.tokens.src_path.clone(),
     };
     state.register_top_level_const_fragment(fragment, header);

@@ -838,6 +838,7 @@ fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut Stri
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: Default::default(),
         name_location: SourceLocation::default(),
+        name_span: LocalSpan::source_start(),
         tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
         source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),

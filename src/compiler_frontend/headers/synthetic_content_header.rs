@@ -87,6 +87,7 @@ pub(crate) fn synthetic_content_header(
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: HashSet::new(),
         name_location: input.location.clone(),
+        name_span: input.span,
         tokens: header_tokens,
         source_file: input.source_file,
         capacity_references: Vec::new(),

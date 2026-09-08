@@ -24,10 +24,12 @@ use crate::compiler_frontend::external_packages::{
     ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
     ExternalTypeDef, ExternalTypeId, external_success_returns,
 };
+use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::types::{
-    DependencyBindingSyntax, DependencySelectionRange, HeaderExportMode, RetainedDependencyClause,
+    DependencyBindingSyntax, DependencySelectionRange, HeaderBuildContext, HeaderExportMode,
+    HeaderParseFailure, RetainedDependencyClause,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -1639,6 +1641,163 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
         ),
         "const template token stream should end with EOF sentinel"
     );
+}
+
+#[test]
+fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
+    let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
+    let source = format!("value #Config of Int = 1\n#[{long_fragment_name}]\n");
+    let file_path = PathBuf::from("src/@page.moth");
+    let mut string_table = StringTable::new();
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let tokenizer_span_count = {
+        let file_tokens = tokenize(
+            &source,
+            &interned_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut string_table,
+            SourceId::COMPILATION_ROOT,
+            &mut span_builder,
+        )
+        .expect("source should tokenize");
+        let count = span_builder.len();
+        let output = prepare_file_from_tokens(
+            file_tokens,
+            &file_path,
+            &HeaderParseOptions::default(),
+            &mut string_table,
+            0,
+            0,
+            &mut span_builder,
+        )
+        .expect("headers should prepare");
+
+        let header_name_span = output
+            .headers
+            .iter()
+            .find_map(|header| {
+                matches!(header.kind, HeaderKind::Constant { .. }).then_some(header.name_span)
+            })
+            .expect("source config header");
+        let fragment_span = output
+            .top_level_const_fragments
+            .first()
+            .expect("const fragment metadata")
+            .span;
+        let mut outputs = [output];
+        let prepared = prepare_header_syntax(
+            &mut outputs,
+            &mut string_table,
+            &mut |source, diagnostic| {
+                diagnostic.capture_preparation_span(source, &mut span_builder)
+            },
+        )
+        .expect("header syntax should aggregate");
+
+        let resolver = span_builder.resolver();
+        let header_range = header_name_span.resolve_with(resolver);
+        assert_eq!(
+            source.get(header_range.start() as usize..header_range.end() as usize),
+            Some("value"),
+            "header name span should retain the declaration-name token"
+        );
+
+        let fragment_range = fragment_span.resolve_with(resolver);
+        assert_eq!(fragment_span.source(), SourceId::COMPILATION_ROOT);
+        assert_eq!(
+            fragment_range.start() as usize,
+            source.find(&long_fragment_name).expect("fragment name")
+        );
+        assert_eq!(fragment_range.end() as usize, source.len());
+        let expected_fragment = format!("{long_fragment_name}]\n");
+        assert_eq!(
+            source.get(fragment_range.start() as usize..fragment_range.end() as usize),
+            Some(expected_fragment.as_str()),
+            "const fragment span should include the post-close source boundary"
+        );
+
+        let contract = prepared
+            .source_build_config_contracts
+            .first()
+            .expect("source config contract");
+        let contract_range = contract.span.resolve_with(resolver);
+        assert_eq!(contract.span.source(), SourceId::COMPILATION_ROOT);
+        assert_eq!(
+            source.get(contract_range.start() as usize..contract_range.end() as usize),
+            Some("#"),
+            "source config contract span should use the qualifier anchor"
+        );
+
+        count
+    };
+
+    assert_eq!(
+        span_builder.len(),
+        tokenizer_span_count + 1,
+        "joining the long const fragment should append exactly one source-owned row"
+    );
+}
+
+#[test]
+fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
+    let source = "#[value]\n";
+    let file_path = PathBuf::from("src/@page.moth");
+    let mut string_table = StringTable::new();
+    let scope = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = tokenize(
+        source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("source should tokenize");
+    let opening_index = token_stream
+        .tokens
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
+        .expect("template opener");
+    let opening_token = token_stream.tokens[opening_index].clone();
+    token_stream.index = opening_index + 1;
+
+    let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
+    let mut warnings = Vec::new();
+    let mut context = HeaderBuildContext {
+        warnings: &mut warnings,
+        source_file: &scope,
+        file_dependency_clauses: std::slice::from_ref(&malformed_clause),
+        dependency_selections: &[],
+        string_table: &mut string_table,
+        file_role: FileRole::ActiveModuleRoot,
+    };
+    let failure = create_top_level_const_template(
+        scope.clone(),
+        opening_token,
+        0,
+        &mut token_stream,
+        &mut context,
+        &mut span_builder,
+    )
+    .expect_err("malformed retained selection should fail");
+
+    match failure {
+        HeaderParseFailure::Infrastructure(error) => {
+            assert!(
+                error.msg.contains("outside a table"),
+                "unexpected error: {error:?}"
+            );
+        }
+        HeaderParseFailure::Diagnostic(diagnostic) => {
+            panic!("retained-data corruption must not become a source diagnostic: {diagnostic:?}");
+        }
+    }
 }
 
 #[test]

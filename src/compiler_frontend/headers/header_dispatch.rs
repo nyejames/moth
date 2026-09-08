@@ -82,6 +82,7 @@ pub(super) fn create_header(
     context: &mut HeaderBuildContext<'_>,
 ) -> HeaderDispatchResult<Header> {
     let name_location = declaration_token.location.clone();
+    let name_span = declaration_token.span;
     let Some(declaration_name) = full_name.name() else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
@@ -89,7 +90,6 @@ pub(super) fn create_header(
         )
         .into());
     };
-    let _declaration_name_text = context.string_table.resolve(declaration_name).to_owned();
 
     // Conservative local declaration-ordering hints; binding and Stage 3 resolve them.
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
@@ -128,6 +128,7 @@ pub(super) fn create_header(
             export_mode,
             local_ordering_hints,
             name_location,
+            name_span,
             tokens: header_tokens,
             source_file: context.source_file.to_owned(),
             capacity_references,
@@ -250,6 +251,7 @@ pub(super) fn create_header(
             export_mode,
             local_ordering_hints,
             name_location,
+            name_span,
             tokens: header_tokens,
             source_file: context.source_file.to_owned(),
             capacity_references,
@@ -524,6 +526,7 @@ pub(super) fn create_header(
         export_mode,
         local_ordering_hints,
         name_location,
+        name_span,
         tokens: header_tokens,
         source_file: context.source_file.to_owned(),
         capacity_references,

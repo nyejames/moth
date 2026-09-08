@@ -302,14 +302,14 @@ fn parse_export_block_item(
 
         HeaderFileItem::Hash {
             at_statement_boundary,
-        } => Ok(handle_hash_item(
+        } => handle_hash_item(
             token_stream,
             state,
             context,
             current_token,
             current_location,
             at_statement_boundary,
-        )?),
+        ),
 
         HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => Err(
             diagnostic_failure(CompilerDiagnostic::invalid_export_target(current_location)),

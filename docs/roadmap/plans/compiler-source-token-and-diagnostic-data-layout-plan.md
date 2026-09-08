@@ -70,17 +70,16 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5c4, generic parameter and bound anchors.
-- Goal: copy original LocalSpan values into parsed generic parameters and bounds. Synthetic
-  trait `This` reuses its authored trait declaration anchor.
-- Semantic registration consumes local parameter IDs and names, not manufactured parsed syntax.
-  Remove duplicate parsed lists from generic declaration metadata. Keep declaration kinds in the
-  existing map and use canonical TypeEnvironment parameters for semantic names and arity.
+- Phase: 1D5c5, header names, const fragments and source contracts.
+- Goal: copy header-name LocalSpan anchors and retain explicit SourceSpan ownership on detached
+  const fragments and source contracts. Source contracts retain their qualifier `#` anchor.
+- Join const-fragment first-interior and post-close token spans through the original live builder.
+  Keep infrastructure failures on the existing HeaderParseFailure lane.
 - Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `b1e7dcb15` — parsed type/capacity anchors, with full validation and independent review accepted.
+- `8142352cd` — generic anchors and canonical semantic metadata, with full validation and independent review accepted.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -90,7 +89,9 @@ CURRENT_WORKTREE_STATE:
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
   `b1e7dcb15`. Its worktree was clean after verification. 1D5c4 is implemented, validated and
-  independently reviewed, ready for its checkpoint commit. Parsed generic parameters and bounds
+  independently reviewed and committed in `8142352cd`. The worktree was clean after verification.
+  Scripted workers now use the implementation-coordinator launcher at the user's request;
+  plan-orchestrator still owns the workflow. Parsed generic parameters and bounds
   preserve original anchors. Generic declaration maps retain only kinds. Canonical registered
   parameters own semantic names and arity across local, imported and materialised nominals.
 - Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
