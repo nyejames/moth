@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `990d334f1` — reactive template-head diagnostics retain their authored token spans through the
-  existing source owner after the generic-inference payload cleanup and warning handoff. Focused
-  generic, diagnostic, reactive and template-head tests pass; `cargo check -p moth`, formatting and
-  diff checks are clean.
+- `81a79f7c1` — generic-parameter parser diagnostics retain exact token-owned spans, following the
+  provider, template-control, statement-position, else-marker and borrow-payload slices. Focused
+  generic, discovery, template, statement, borrow and diagnostic tests pass; `cargo check -p moth`,
+  formatting and diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -212,6 +212,31 @@ CURRENT_WORKTREE_STATE:
   subscription diagnostics retain the marker, source-symbol or offending-token span through the
   existing `FileTokens.file_id` owner while preserving legacy locations, labels and infrastructure
   behavior. The multibyte unknown-source regression and reactive/template-head suites pass.
+- Accepted the bounded 1E3 control-flow suffix span consumer in `2139c8554`. Missing, unsupported,
+  non-final and unexpected `if`/`loop` suffix diagnostics retain marker, offending-token or scanned
+  terminator spans while preserving the interval bridge. The focused suffix suite (27) and a
+  multibyte separator regression pass.
+- Accepted the bounded 1E2 statement-position span consumer in `0628233ec`. Unexpected statement
+  tokens and scope closes retain their current token spans and source IDs through body dispatch,
+  with legacy locations and error lanes unchanged. The focused statement diagnostics suite (20)
+  passes.
+- Accepted the bounded 1G1 borrow payload simplification in `0dd4b753b`. Existing/conflicting
+  borrow locations are retained once as ordered secondary labels; payload remapping, rendering and
+  cross-source span ownership remain intact. Diagnostic-model (80) and borrow (141) suites pass.
+- Accepted the bounded 1E3 else-marker span consumer in `4f1c54717`. Direct malformed, orphan,
+  duplicate, inline, loop-body and literal-body `[else]` diagnostics carry the marker span and
+  source ID while preserving downstream parser ownership. Malformed-template (15), head (103)
+  and multibyte orphan-marker regressions pass.
+- Accepted the bounded 1E5 provider-capable dependency span consumer in `089042447`. Direct
+  reserved-path, unsupported-package/extension and provider-boundary diagnostics retain the
+  authored dependency path span through the retained shell source ID; provider-owned message and
+  infrastructure lanes remain unchanged. The focused discovery suite (307) and multibyte provider
+  regression pass.
+- Accepted the bounded 1E2 generic-parameter parser span consumer in `81a79f7c1`. Malformed lists,
+  bounds, invalid trait names and scope-validation failures at header preparation retain exact
+  token spans without changing boxing, labels, ordering or infrastructure behavior. Generic (184)
+  and multibyte extended-bound regressions pass. AST-time generic scope validation remains a later
+  semantic consumer slice.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
