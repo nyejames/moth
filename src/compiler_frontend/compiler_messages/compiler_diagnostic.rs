@@ -1217,14 +1217,12 @@ impl CompilerDiagnostic {
         first_location: SourceLocation,
         duplicate_location: SourceLocation,
     ) -> Self {
-        let payload_first_location = first_location.clone();
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateTraitRequirement),
             duplicate_location.clone(),
             DiagnosticPayload::DuplicateTraitRequirement {
                 trait_name,
                 requirement_name,
-                first_location: payload_first_location,
             },
         )
         .with_labels(vec![

@@ -603,11 +603,9 @@ impl DiagnosticPayload {
             DiagnosticPayload::DuplicateTraitRequirement {
                 trait_name,
                 requirement_name,
-                first_location,
             } => {
                 *trait_name = remap.get(*trait_name);
                 *requirement_name = remap.get(*requirement_name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::TraitPrivateSurfaceLeak { trait_name, .. } => {
@@ -686,9 +684,7 @@ impl DiagnosticPayload {
     /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
     pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         match self {
-            DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
-                first_location.rebind_source_identity(logical_path)
-            }
+            DiagnosticPayload::DuplicateTraitRequirement { .. } => {}
 
             DiagnosticPayload::DuplicatePublicExport { .. } => {}
 

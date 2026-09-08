@@ -324,7 +324,6 @@ fn render_payload_message(
         DiagnosticPayload::DuplicateTraitRequirement {
             trait_name,
             requirement_name,
-            ..
         } => format!(
             "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
             string_table.resolve(*trait_name),

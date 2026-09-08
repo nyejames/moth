@@ -546,7 +546,6 @@ pub enum DiagnosticPayload {
     DuplicateTraitRequirement {
         trait_name: StringId,
         requirement_name: StringId,
-        first_location: SourceLocation,
     },
 
     TraitPrivateSurfaceLeak {
