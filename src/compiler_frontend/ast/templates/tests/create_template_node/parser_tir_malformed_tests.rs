@@ -13,6 +13,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Parses a template that is expected to fail and returns the diagnostic.
@@ -27,6 +28,31 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
         Template::new(&mut token_stream, &context, vec![], &mut string_table)
             .expect_err("template source should fail to parse"),
     )
+}
+
+fn parse_template_diagnostic_with_replaced_body_token(
+    source: &str,
+) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source(source, &mut string_table, &mut span_builder);
+    // Normal template-body lexing emits text, newline, nested-template, and close tokens only.
+    // Replace the retained text token to exercise the parser's defensive unexpected-token lane
+    // while keeping its authored UTF-8 span and source identity intact.
+    let body_token = token_stream
+        .tokens
+        .iter_mut()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("template source should contain a body token");
+    body_token.kind = TokenKind::Comma;
+    let context = new_constant_context(token_stream.src_path.clone());
+
+    let diagnostic = expect_template_diagnostic(
+        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("template source should fail to parse"),
+    );
+    (diagnostic, span_builder)
 }
 
 /// Asserts that a diagnostic is an `InvalidTemplateStructure` with the given reason.
@@ -50,6 +76,28 @@ fn assert_location_is_meaningful(diagnostic: &CompilerDiagnostic) {
         "diagnostic should carry a meaningful source location, got {:?}",
         diagnostic.primary_location
     );
+}
+
+#[test]
+fn unexpected_template_body_token_retains_exact_primary_span() {
+    let source = "[:π]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_replaced_body_token(source);
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnexpectedToken { .. }
+    ));
+    let primary_span = diagnostic
+        .primary_span
+        .expect("unexpected body token should retain its exact span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    assert_eq!(range.start(), 2);
+    assert_eq!(range.end(), 4);
+    assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
+    assert_eq!(diagnostic.primary_location.start_byte, range.start());
+    assert_eq!(diagnostic.primary_location.end_byte, range.end());
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
 }
 
 #[test]

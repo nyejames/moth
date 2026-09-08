@@ -40,6 +40,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region;
@@ -304,11 +305,15 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 }
 
                 found => {
-                    return Err(CompilerDiagnostic::unexpected_token(
+                    let current_token = &self.token_stream.tokens[self.token_stream.index];
+                    let mut diagnostic = CompilerDiagnostic::unexpected_token(
                         found.clone(),
-                        self.token_stream.current_location(),
-                    )
-                    .into());
+                        current_token.location.clone(),
+                    );
+                    if let Some(source) = self.token_stream.file_id {
+                        diagnostic.primary_span = Some(SourceSpan::new(source, current_token.span));
+                    }
+                    return Err(diagnostic.into());
                 }
             }
 
