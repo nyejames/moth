@@ -295,12 +295,23 @@ impl SourceDatabase {
                 .get(id)
                 .expect("source slot validated before retaining text");
             let logical_path = self.legacy_logical_path(id);
-            ensure_source_snapshot_fits(
+            let fit_result = ensure_source_snapshot_fits(
                 text.len(),
                 provenance,
                 &logical_path,
                 slot.canonical_os_path.as_deref(),
-            )?;
+            );
+            if let Err(error) = fit_result {
+                // Authored snapshots that exceed the representable source range are source
+                // failures. Record the terminal slot state before returning so every caller,
+                // including discovery's fallible finalization path, leaves no authored slot
+                // pending. Compiler-produced oversize snapshots remain compiler failures and
+                // keep the slot untouched for invariant reporting.
+                if error.error_type == crate::compiler_frontend::compiler_errors::ErrorType::File {
+                    self.record_source_load_error(id, error.clone())?;
+                }
+                return Err(error);
+            }
         }
 
         let line_starts = super::line_index::line_start_offsets(&text);

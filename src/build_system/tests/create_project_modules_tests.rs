@@ -6241,6 +6241,134 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
 }
 
 #[test]
+fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let first_missing = root.join("z_first_missing.md");
+    let loaded = root.join("a_loaded.md");
+    let second_missing = root.join("y_second_missing.md");
+    fs::write(&loaded, "# Loaded sibling\n").expect("should write loaded source");
+
+    let mut string_table = StringTable::new();
+    let messages =
+        match super::source_discovery::load_missing_source_paths_with_registered_paths_for_test(
+            vec![
+                first_missing.clone(),
+                loaded.clone(),
+                second_missing.clone(),
+            ],
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("a serial missing-source failure should be reported"),
+            Err(messages) => messages,
+        };
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("mixed source loading should publish its finalized source context");
+    let first_missing_id = source_files
+        .get_by_canonical_path(&first_missing)
+        .expect("first missing source should retain its registration slot")
+        .id;
+    let loaded_id = source_files
+        .get_by_canonical_path(&loaded)
+        .expect("loaded sibling should retain its registration slot")
+        .id;
+    let second_missing_id = source_files
+        .get_by_canonical_path(&second_missing)
+        .expect("second missing source should retain its registration slot")
+        .id;
+
+    assert_eq!(
+        source_files.retained_text(loaded_id),
+        Some("# Loaded sibling\n"),
+        "a successful sibling must be retained before the terminal read failure is published"
+    );
+    assert!(source_files.retained_text(first_missing_id).is_none());
+    assert!(source_files.retained_text(second_missing_id).is_none());
+    assert!(source_files.source_load_error(first_missing_id).is_some());
+    assert!(source_files.source_load_error(second_missing_id).is_some());
+
+    let (_error_type, _message, location) = messages
+        .first_infrastructure_error_for_tests()
+        .expect("the first read failure should retain the infrastructure error lane");
+    assert!(
+        location
+            .scope
+            .to_portable_string(&messages.string_table)
+            .contains("z_first_missing.md"),
+        "the first input-order read failure should be reported first: {location:?}"
+    );
+}
+
+#[test]
+fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_count = super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES;
+    let source_paths = (0..source_count)
+        .map(|index| {
+            let path = root.join(format!("asset_{index}.md"));
+            if index != 1 && index != source_count - 1 {
+                fs::write(&path, format!("# Asset {index}\n"))
+                    .expect("should write parallel source");
+            }
+            path
+        })
+        .collect::<Vec<_>>();
+    let mut string_table = StringTable::new();
+
+    let messages =
+        match super::source_discovery::load_missing_source_paths_with_registered_paths_for_test(
+            source_paths.clone(),
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("parallel missing-source failures should be reported"),
+            Err(messages) => messages,
+        };
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("parallel source loading should publish its finalized source context");
+    for (index, path) in source_paths.iter().enumerate() {
+        let source_id = source_files
+            .get_by_canonical_path(path)
+            .expect("every parallel source should retain its registration slot")
+            .id;
+        if index == 1 || index == source_count - 1 {
+            assert!(
+                source_files.retained_text(source_id).is_none(),
+                "failed source {index} must not create a loaded record"
+            );
+            assert!(
+                source_files.source_load_error(source_id).is_some(),
+                "failed source {index} must finalize its slot"
+            );
+        } else {
+            assert_eq!(
+                source_files.retained_text(source_id),
+                Some(format!("# Asset {index}\n").as_str()),
+                "successful source {index} must survive a sibling failure"
+            );
+            assert!(source_files.source_load_error(source_id).is_none());
+        }
+    }
+
+    let (_error_type, _message, location) = messages
+        .first_infrastructure_error_for_tests()
+        .expect("the parallel read failure should retain the infrastructure error lane");
+    assert!(
+        location
+            .scope
+            .to_portable_string(&messages.string_table)
+            .contains("asset_1.md"),
+        "parallel failures should be reported in deterministic input order: {location:?}"
+    );
+}
+
+#[test]
 fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

@@ -58,6 +58,8 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::Arc;
 
 use super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileReferenceResolver, SingleFileResolvedReference,
@@ -67,7 +69,6 @@ use super::module_namespace::DirectoryDependencyResolution;
 use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
-use super::source_loading::extract_source_code;
 use super::source_loading::{read_source_code, source_read_error};
 use super::source_preparation::{
     PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
@@ -232,6 +233,18 @@ struct SourceReadFailure {
     input_index: usize,
     path: PathBuf,
     error: std::io::Error,
+}
+
+enum MissingSourceLoadResult {
+    Loaded(LoadedMissingSourceFile),
+    Failed(SourceReadFailure),
+}
+
+fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
+    match result {
+        MissingSourceLoadResult::Loaded(loaded) => loaded.input_index,
+        MissingSourceLoadResult::Failed(failure) => failure.input_index,
+    }
 }
 
 // -------------------------
@@ -762,19 +775,26 @@ fn retain_known_discovery_sources(
     }
 }
 
-/// Move successfully loaded non-Moth sources into the final owner before output rebinding.
-fn retain_loaded_missing_sources(
+/// Settle every missing-source read in the final owner before output rebinding.
+///
+/// Read failures remain infrastructure diagnostics, but their source slots still become terminal
+/// failures. Successful siblings are retained before the first error is published, so finalizing
+/// a diagnosed discovery cannot leave a pending slot or discard a usable snapshot.
+fn finalize_missing_source_loads(
     files: &[ReachableSourceFile],
-    loaded_sources: Vec<LoadedMissingSourceFile>,
+    load_results: Vec<MissingSourceLoadResult>,
     source_builder: &mut SourceDatabaseBuilder,
-) -> Result<(), CompilerError> {
+    string_table: &mut StringTable,
+) -> Result<(), CompilerMessages> {
     let mut first_error = None;
-    for loaded in loaded_sources {
-        let Some(source_file) = files.get(loaded.input_index) else {
+
+    for result in load_results {
+        let input_index = missing_source_load_input_index(&result);
+        let Some(source_file) = files.get(input_index) else {
             first_error.get_or_insert_with(|| {
                 CompilerError::compiler_error(format!(
-                    "loaded source inventory slot {} is out of range",
-                    loaded.input_index
+                    "missing source inventory slot {} is out of range",
+                    input_index
                 ))
             });
             continue;
@@ -786,26 +806,48 @@ fn retain_loaded_missing_sources(
         else {
             first_error.get_or_insert_with(|| {
                 CompilerError::compiler_error(format!(
-                    "loaded discovery source {} has no final registration",
+                    "missing discovery source {} has no final registration",
                     source_file.path.display()
                 ))
             });
             continue;
         };
-        add_frontend_counter(
-            FrontendCounter::Stage0SourceBytesLoaded,
-            loaded.source_code.len(),
-        );
-        if let Err(error) = source_builder
-            .sources_mut()
-            .retain_text(source_id, loaded.source_code)
-        {
-            first_error.get_or_insert(error);
+
+        match result {
+            MissingSourceLoadResult::Loaded(loaded) => {
+                add_frontend_counter(
+                    FrontendCounter::Stage0SourceBytesLoaded,
+                    loaded.source_code.len(),
+                );
+                match source_builder
+                    .sources_mut()
+                    .retain_text(source_id, loaded.source_code)
+                {
+                    Ok(()) => {}
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            MissingSourceLoadResult::Failed(failure) => {
+                let error = source_read_error(&failure.path, failure.error, string_table);
+                let record_result = source_builder
+                    .sources_mut()
+                    .record_source_load_error(source_id, error.clone());
+                match record_result {
+                    Ok(()) => {
+                        first_error.get_or_insert(error);
+                    }
+                    Err(record_error) => {
+                        first_error.get_or_insert(record_error);
+                    }
+                }
+            }
         }
     }
 
     match first_error {
-        Some(error) => Err(error),
+        Some(error) => Err(CompilerMessages::from_error_ref(error, string_table)),
         None => Ok(()),
     }
 }
@@ -887,8 +929,9 @@ fn finalize_reachable_files(
             add_frontend_counter(FrontendCounter::Stage0SourceCacheHitCount, 1);
         }
     }
-    let loaded = match load_missing_sources(missing_sources, string_table) {
-        Ok(loaded) => loaded,
+    let load_results = load_missing_sources(missing_sources);
+    match finalize_missing_source_loads(&files, load_results, &mut source_files, string_table) {
+        Ok(()) => {}
         Err(messages) => {
             let failure = TraversalFailure {
                 error: SourceDiscoveryError::Messages(messages),
@@ -903,13 +946,6 @@ fn finalize_reachable_files(
             )));
         }
     };
-    if let Err(error) = retain_loaded_missing_sources(&files, loaded, &mut source_files) {
-        return Err(discovery_finalization_error(
-            error,
-            source_files,
-            string_table,
-        ));
-    }
 
     // All original tables are owned before this fallible identity transformation. The closure
     // borrows the owner so every error reaches the same consuming finalization boundary.
@@ -1764,12 +1800,9 @@ fn with_provider_dependency_error(
     }
 }
 
-fn load_missing_sources(
-    missing_sources: Vec<MissingSourceFile>,
-    string_table: &mut StringTable,
-) -> Result<Vec<LoadedMissingSourceFile>, CompilerMessages> {
+fn load_missing_sources(missing_sources: Vec<MissingSourceFile>) -> Vec<MissingSourceLoadResult> {
     if missing_sources.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     if missing_sources.len() < STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES {
@@ -1777,49 +1810,51 @@ fn load_missing_sources(
             FrontendCounter::Stage0SerialSourceLoadCount,
             missing_sources.len(),
         );
-        return load_missing_sources_serial(missing_sources, string_table);
+        return load_missing_sources_serial(missing_sources);
     }
 
     add_frontend_counter(
         FrontendCounter::Stage0ParallelSourceLoadCount,
         missing_sources.len(),
     );
-    load_missing_sources_parallel(missing_sources, string_table)
+    load_missing_sources_parallel(missing_sources)
 }
+
 fn load_missing_sources_serial(
     missing_sources: Vec<MissingSourceFile>,
-    string_table: &mut StringTable,
-) -> Result<Vec<LoadedMissingSourceFile>, CompilerMessages> {
-    let mut loaded_sources = Vec::with_capacity(missing_sources.len());
-
-    for missing in missing_sources {
-        let source_code = match extract_source_code(&missing.source_file.path, string_table) {
-            Ok(source_code) => source_code,
-            Err(error) => return Err(SourceDiscoveryError::from(error).into_messages(string_table)),
-        };
-
-        loaded_sources.push(LoadedMissingSourceFile {
-            input_index: missing.input_index,
-            source_code,
-        });
-    }
-
-    Ok(loaded_sources)
+) -> Vec<MissingSourceLoadResult> {
+    let mut load_results = missing_sources
+        .into_iter()
+        .map(
+            |missing| match read_source_code(&missing.source_file.path) {
+                Ok(source_code) => MissingSourceLoadResult::Loaded(LoadedMissingSourceFile {
+                    input_index: missing.input_index,
+                    source_code,
+                }),
+                Err(error) => MissingSourceLoadResult::Failed(SourceReadFailure {
+                    input_index: missing.input_index,
+                    path: missing.source_file.path,
+                    error,
+                }),
+            },
+        )
+        .collect::<Vec<_>>();
+    load_results.sort_by_key(missing_source_load_input_index);
+    load_results
 }
 
 fn load_missing_sources_parallel(
     missing_sources: Vec<MissingSourceFile>,
-    string_table: &mut StringTable,
-) -> Result<Vec<LoadedMissingSourceFile>, CompilerMessages> {
-    let mut loaded_sources = missing_sources
+) -> Vec<MissingSourceLoadResult> {
+    let mut load_results = missing_sources
         .into_par_iter()
         .map(
             |missing| match read_source_code(&missing.source_file.path) {
-                Ok(source_code) => Ok(LoadedMissingSourceFile {
+                Ok(source_code) => MissingSourceLoadResult::Loaded(LoadedMissingSourceFile {
                     input_index: missing.input_index,
                     source_code,
                 }),
-                Err(error) => Err(SourceReadFailure {
+                Err(error) => MissingSourceLoadResult::Failed(SourceReadFailure {
                     input_index: missing.input_index,
                     path: missing.source_file.path,
                     error,
@@ -1828,23 +1863,9 @@ fn load_missing_sources_parallel(
         )
         .collect::<Vec<_>>();
 
-    loaded_sources.sort_by_key(|result| match result {
-        Ok(loaded) => loaded.input_index,
-        Err(failure) => failure.input_index,
-    });
+    load_results.sort_by_key(missing_source_load_input_index);
 
-    let mut ordered_loaded_sources = Vec::with_capacity(loaded_sources.len());
-    for loaded in loaded_sources {
-        match loaded {
-            Ok(loaded) => ordered_loaded_sources.push(loaded),
-            Err(failure) => {
-                let error = source_read_error(&failure.path, failure.error, string_table);
-                return Err(SourceDiscoveryError::from(error).into_messages(string_table));
-            }
-        }
-    }
-
-    Ok(ordered_loaded_sources)
+    load_results
 }
 
 #[cfg(test)]
@@ -1861,7 +1882,18 @@ pub(super) fn load_missing_source_path_for_test(
         },
     }];
 
-    load_missing_sources(missing_sources, string_table).map(|_| ())
+    let load_results = load_missing_sources(missing_sources);
+    match load_results.into_iter().next() {
+        Some(MissingSourceLoadResult::Loaded(_)) => Ok(()),
+        Some(MissingSourceLoadResult::Failed(failure)) => {
+            let error = source_read_error(&failure.path, failure.error, string_table);
+            Err(SourceDiscoveryError::from(error).into_messages(string_table))
+        }
+        None => Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("test source loading produced no result"),
+            string_table,
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1885,43 +1917,90 @@ pub(super) fn load_missing_source_paths_for_test(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let entry_path = canonical_paths.first().ok_or_else(|| {
+    load_missing_source_paths_with_registered_paths_for_test(
+        canonical_paths,
+        source_kind,
+        string_table,
+    )
+}
+
+#[cfg(test)]
+/// Load caller-supplied source identities through the same final owner lifecycle as discovery.
+///
+/// Unlike [`load_missing_source_paths_for_test`], this helper does not canonicalize paths first,
+/// so a test can register a deterministic identity for a source that is intentionally absent.
+pub(super) fn load_missing_source_paths_with_registered_paths_for_test(
+    source_paths: Vec<PathBuf>,
+    source_kind: SourceFileKind,
+    string_table: &mut StringTable,
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+    let entry_path = source_paths.first().ok_or_else(|| {
         CompilerMessages::from_error_ref(
             CompilerError::compiler_error("test source loading requires at least one path"),
             string_table,
         )
     })?;
     let registration_index = SourceRegistrationIndex::from_rows(
-        canonical_paths
+        source_paths
             .iter()
             .map(|path| (path.as_path(), SourceKind::Compiler(source_kind))),
     );
-    let mut source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
         &registration_index,
         entry_path,
         None,
         string_table,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let missing_sources = canonical_paths
+    let source_files_for_load: Vec<ReachableSourceFile> = source_paths
+        .iter()
+        .cloned()
+        .map(|path| ReachableSourceFile {
+            path,
+            kind: source_kind,
+        })
+        .collect();
+    let missing_sources = source_files_for_load
         .iter()
         .cloned()
         .enumerate()
-        .map(|(input_index, path)| MissingSourceFile {
+        .map(|(input_index, source_file)| MissingSourceFile {
             input_index,
-            source_file: ReachableSourceFile {
-                path,
-                kind: source_kind,
-            },
+            source_file,
         })
         .collect();
-    let loaded_sources = load_missing_sources(missing_sources, string_table)?;
-    let mut input_slots = (0..canonical_paths.len())
+    let load_results = load_missing_sources(missing_sources);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    match finalize_missing_source_loads(
+        &source_files_for_load,
+        load_results,
+        &mut source_owner,
+        string_table,
+    ) {
+        Ok(()) => {}
+        Err(mut messages) => {
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            messages.set_source_database(source_files);
+            return Err(messages);
+        }
+    };
+    let source_files = source_owner
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let source_files = Arc::try_unwrap(source_files).map_err(|_| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("test source owner remained shared after loading"),
+            string_table,
+        )
+    })?;
+    let mut input_slots = (0..source_paths.len())
         .map(|_| None)
         .collect::<Vec<Option<PreparedSourceInput>>>();
-    for loaded in loaded_sources {
+    for (input_index, source_path) in source_paths.iter().enumerate() {
         let source_id = source_files
-            .get_by_canonical_path(&canonical_paths[loaded.input_index])
+            .get_by_canonical_path(source_path)
             .map(|record| record.id)
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
@@ -1929,9 +2008,9 @@ pub(super) fn load_missing_source_paths_for_test(
                     string_table,
                 )
             })?;
-        source_files
-            .retain_text(source_id, loaded.source_code)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        if source_files.retained_text(source_id).is_none() {
+            continue;
+        }
         let source = match source_kind {
             SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
             SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
@@ -1944,7 +2023,7 @@ pub(super) fn load_missing_source_paths_for_test(
                 ));
             }
         };
-        input_slots[loaded.input_index] = Some(PreparedSourceInput { source_id, source });
+        input_slots[input_index] = Some(PreparedSourceInput { source_id, source });
     }
     let input_files = input_slots
         .into_iter()
