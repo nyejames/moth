@@ -1091,7 +1091,7 @@ impl ModuleSyntaxDiscovery<'_> {
         }
         let source_file_count = prepared_outputs.len();
         record_successful_prepared_outputs(&prepared_outputs);
-        let prepared_header_syntax = timed_stage_attributed!(
+        let prepared_header_syntax = match timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
             prepare_header_syntax(
@@ -1104,20 +1104,22 @@ impl ModuleSyntaxDiscovery<'_> {
                     result
                 }
             ),
-        )
-        .map_err(|bag| {
-            let mut messages = match bag {
-                HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
-                    bag.into_diagnostics(),
-                    self.string_table.clone(),
-                ),
-                HeaderPreparationFailure::Infrastructure(error) => {
-                    CompilerMessages::from_error_ref(error, &self.string_table)
-                }
-            };
-            messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
-            messages
-        })?;
+        ) {
+            Ok(prepared_header_syntax) => prepared_header_syntax,
+            Err(bag) => {
+                let mut messages = match bag {
+                    HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
+                        bag.into_diagnostics(),
+                        self.string_table.clone(),
+                    ),
+                    HeaderPreparationFailure::Infrastructure(error) => {
+                        CompilerMessages::from_error_ref(error, &self.string_table)
+                    }
+                };
+                messages.prepend_diagnostics_preserving_context(self.warnings);
+                return Err(messages);
+            }
+        };
         let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
             self.context.source_files,
             &self.source_module_origins,
