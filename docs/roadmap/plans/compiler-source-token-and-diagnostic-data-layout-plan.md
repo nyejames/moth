@@ -82,9 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `532526829` — downstream template-else diagnostics retain exact marker-owned spans, following
-  the generic-scope consumer slice. Focused generic, template, malformed-template and head tests
-  pass; `cargo check -p moth`, formatting and diff checks are clean.
+- `c5378c489` — template-head compatibility, expression, path and boundary diagnostics retain
+  exact token-owned spans, following the generic-scope and downstream-else consumers. Focused
+  generic, template, malformed-template and head tests pass; `cargo check -p moth`, formatting and
+  diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -246,6 +247,12 @@ CURRENT_WORKTREE_STATE:
   malformed/inline checks, so missing-condition, malformed-header, inline and fallback diagnostics
   retain exact marker spans while preserving legacy locations, labels, payloads and ordering.
   Malformed-template (19) and template-head (104) suites plus the multibyte regressions pass.
+- Accepted the bounded 1E3 template-head diagnostic span consumer in `c5378c489`. Compatibility,
+  expression-parser, path-value and direct boundary diagnostics retain exact current or scanned
+  token spans through the existing `FileTokens.file_id` owner, while nested diagnostics keep their
+  own locations, identity-free streams remain span-less, and infrastructure failures stay in their
+  lane. The head suite (105) includes multibyte/extended compatibility, unknown-name and
+  extensionless-path regressions; `cargo check -p moth`, formatting and diff checks are clean.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
