@@ -365,6 +365,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let generic_parameter_scope = self.generic_parameter_scope(
             &this_parameters,
             Some(&registered_this.canonical_by_local),
+            header.tokens.file_id,
             &visibility,
             string_table,
         )?;

@@ -786,7 +786,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHAT: names every generic parameter the declaration introduces, gated by the file's
     /// visibility so a parameter cannot shadow a visible declaration.
-    /// WHY: six environment passes were spelling out the same eight-field input, differing only in
+    /// WHY: six environment passes were spelling out the same nine-field input, differing only in
     /// which parameter list and canonical map they pass. The five fields they always agree on -
     /// the three visibility maps, the declaration table and the generic declaration kinds - belong
     /// to the builder, so it supplies them.
@@ -794,12 +794,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         generic_parameters: &GenericParameterList,
         canonical_by_local: Option<&FxHashMap<TypeParameterId, GenericParameterId>>,
+        source_id: Option<SourceId>,
         visibility: &FileVisibility,
         string_table: &StringTable,
     ) -> Result<Option<GenericParameterScope>, CompilerMessages> {
         build_generic_parameter_scope(GenericParameterScopeBuildInput {
             generic_parameters,
             canonical_by_local,
+            source_id,
             visible_source_bindings: &visibility.visible_source_names,
             visible_type_aliases: &visibility.visible_type_alias_names,
             visible_external_symbols: &visibility.visible_external_symbols,
@@ -826,6 +828,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.generic_parameter_lists_by_path
                 .get(&header.tokens.src_path)
                 .map(|registered| &registered.canonical_by_local),
+            header.tokens.file_id,
             visibility,
             string_table,
         )

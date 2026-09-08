@@ -118,6 +118,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 registered_generic_parameters
                     .as_ref()
                     .map(|registered| &registered.canonical_by_local),
+                header.tokens.file_id,
                 &visibility,
                 string_table,
             )?;

@@ -23,8 +23,8 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidMapTypeReason, InvalidTypeAnnotationReason, NameNamespace,
-    TypeAnnotationContext,
+    DiagnosticPayload, InvalidDeclarationReason, InvalidMapTypeReason, InvalidTypeAnnotationReason,
+    NameNamespace, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -83,6 +83,44 @@ fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
             .iter()
             .any(|label| label.span == Some(expected_source_span(source, "WithValue"))),
         "AST choice diagnostics should retain the authored variant anchor"
+    );
+}
+
+#[test]
+fn ast_generic_parameter_collision_retains_exact_multibyte_offset() {
+    let source = "-- é🦋\n\
+Existing = |\n\
+    value Int,\n\
+|\n\
+\n\
+Box type Existing = |\n\
+    value Existing,\n\
+|\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidDeclaration {
+            reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
+            ..
+        }
+    ));
+
+    let parameter_start = source
+        .find("Box type ")
+        .expect("generic declaration should be present")
+        + "Box type ".len();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let parameter_span = LocalSpan::exact(
+        parameter_start as u32,
+        "Existing".len() as u32,
+        &mut span_builder,
+    )
+    .expect("generic parameter span should fit the test span table");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, parameter_span)),
+        "AST scope diagnostics should retain the colliding parameter's exact byte span"
     );
 }
 

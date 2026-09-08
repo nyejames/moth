@@ -13,6 +13,7 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -25,6 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) struct GenericParameterScopeBuildInput<'a> {
     pub(crate) generic_parameters: &'a GenericParameterList,
     pub(crate) canonical_by_local: Option<&'a FxHashMap<TypeParameterId, GenericParameterId>>,
+    pub(crate) source_id: Option<SourceId>,
     pub(crate) visible_source_bindings: &'a FxHashMap<StringId, SourceDeclarationTarget>,
     pub(crate) visible_type_aliases: &'a FxHashMap<StringId, SourceDeclarationTarget>,
     pub(crate) visible_external_symbols: &'a FxHashMap<StringId, ExternalSymbolId>,
@@ -39,6 +41,7 @@ pub(crate) fn build_generic_parameter_scope(
     let GenericParameterScopeBuildInput {
         generic_parameters,
         canonical_by_local,
+        source_id,
         visible_source_bindings,
         visible_type_aliases,
         visible_external_symbols,
@@ -74,6 +77,18 @@ pub(crate) fn build_generic_parameter_scope(
         "AST Construction",
     )
     .map(Some)
+    .map_err(|mut diagnostic| {
+        if diagnostic.primary_span.is_none()
+            && let Some(source) = source_id
+            && let Some(parameter) = generic_parameters
+                .parameters
+                .iter()
+                .find(|parameter| parameter.location == diagnostic.primary_location)
+        {
+            diagnostic.primary_span = Some(SourceSpan::new(source, parameter.span));
+        }
+        diagnostic
+    })
 }
 
 fn path_is_visible_type(
