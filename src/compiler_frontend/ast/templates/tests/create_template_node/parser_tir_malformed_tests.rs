@@ -141,6 +141,30 @@ fn orphan_template_break_retains_exact_marker_span() {
 }
 
 #[test]
+fn orphan_template_else_retains_exact_multibyte_marker_span() {
+    let source = "[: π\n[else] after]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::OrphanTemplateElse,
+    );
+    let primary_span = diagnostic
+        .primary_span
+        .expect("orphan template else should retain its exact marker span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    assert_eq!((range.start(), range.end()), (7, 11));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "else"
+    );
+    assert_eq!(diagnostic.primary_location.start_byte, range.start());
+    assert_eq!(diagnostic.primary_location.end_byte, range.end());
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+}
+
+#[test]
 fn truncated_nested_template_body_reports_eof_with_meaningful_location() {
     let diagnostic = parse_template_diagnostic("[: outer [: inner]");
 

@@ -93,17 +93,25 @@ pub(super) enum DirectElseMarker {
     Sentinel {
         close_index: usize,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
     ElseIf {
         if_index: usize,
         close_index: usize,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
     MalformedElseIf {
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
     Malformed {
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
 }
 
@@ -151,7 +159,10 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
         return None;
     }
 
-    let location = token_stream.tokens[index].location.clone();
+    let else_token = &token_stream.tokens[index];
+    let location = else_token.location.clone();
+    let span = else_token.span;
+    let source = token_stream.file_id;
     index += 1;
 
     while index < token_stream.length
@@ -174,20 +185,36 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
                         if_index,
                         close_index: scan_index,
                         location,
+                        span,
+                        source,
                     });
                 }
                 TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
                 TokenKind::StartTemplateBody | TokenKind::Colon if nested_templates == 0 => {
-                    return Some(DirectElseMarker::MalformedElseIf { location });
+                    return Some(DirectElseMarker::MalformedElseIf {
+                        location,
+                        span,
+                        source,
+                    });
                 }
-                TokenKind::Eof => return Some(DirectElseMarker::MalformedElseIf { location }),
+                TokenKind::Eof => {
+                    return Some(DirectElseMarker::MalformedElseIf {
+                        location,
+                        span,
+                        source,
+                    });
+                }
                 _ => {}
             }
 
             scan_index += 1;
         }
 
-        return Some(DirectElseMarker::MalformedElseIf { location });
+        return Some(DirectElseMarker::MalformedElseIf {
+            location,
+            span,
+            source,
+        });
     }
 
     if index < token_stream.length
@@ -196,10 +223,16 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
         return Some(DirectElseMarker::Sentinel {
             close_index: index,
             location,
+            span,
+            source,
         });
     }
 
-    Some(DirectElseMarker::Malformed { location })
+    Some(DirectElseMarker::Malformed {
+        location,
+        span,
+        source,
+    })
 }
 
 pub(super) fn handle_direct_else_marker(
@@ -217,47 +250,78 @@ pub(super) fn handle_direct_else_marker(
             policy,
             ElseSentinelPolicy::SplitIf | ElseSentinelPolicy::Duplicate
         )
-        && let DirectElseMarker::Sentinel { location, .. } = &else_marker
+        && let DirectElseMarker::Sentinel {
+            location,
+            span,
+            source,
+            ..
+        } = &else_marker
     {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateElseInLiteralBody,
-            location.clone(),
+        return Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateElseInLiteralBody,
+                location.clone(),
+            ),
+            *span,
+            *source,
         ));
     }
 
-    let (close_index, location) = match else_marker {
+    let (close_index, location, span, source) = match else_marker {
         DirectElseMarker::Sentinel {
             close_index,
             location,
-        } => (close_index, location),
+            span,
+            source,
+        } => (close_index, location, span, source),
 
         DirectElseMarker::ElseIf {
             if_index,
             close_index,
             location,
+            span,
+            source,
         } => {
             return handle_direct_else_if_marker(
                 token_stream,
                 if_index,
                 close_index,
                 location,
+                span,
+                source,
                 policy,
                 target,
                 string_table,
             );
         }
 
-        DirectElseMarker::MalformedElseIf { location } => {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::MalformedTemplateElseIf,
-                location,
+        DirectElseMarker::MalformedElseIf {
+            location,
+            span,
+            source,
+        } => {
+            return Err(with_direct_else_marker_span(
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::MalformedTemplateElseIf,
+                    location,
+                ),
+                span,
+                source,
             ));
         }
 
-        DirectElseMarker::Malformed { location } => {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::MalformedTemplateElse,
-                location,
+        DirectElseMarker::Malformed {
+            location,
+            span,
+            source,
+        } => {
+            return Err(with_direct_else_marker_span(
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::MalformedTemplateElse,
+                    location,
+                ),
+                span,
+                source,
             ));
         }
     };
@@ -269,26 +333,39 @@ pub(super) fn handle_direct_else_marker(
                 &location,
                 string_table,
                 InvalidTemplateStructureReason::InlineTemplateElse,
-            )?;
+            )
+            .map_err(|diagnostic| with_direct_else_marker_span(diagnostic, span, source))?;
             target.trim_trailing_whitespace(string_table);
             token_stream.index = close_index;
             token_stream.advance();
             Ok(TemplateBodyBoundary::Else { location })
         }
 
-        ElseSentinelPolicy::Orphan => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::OrphanTemplateElse,
-            location,
+        ElseSentinelPolicy::Orphan => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::OrphanTemplateElse,
+                location,
+            ),
+            span,
+            source,
         )),
 
-        ElseSentinelPolicy::Duplicate => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::DuplicateTemplateElse,
-            location,
+        ElseSentinelPolicy::Duplicate => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::DuplicateTemplateElse,
+                location,
+            ),
+            span,
+            source,
         )),
 
-        ElseSentinelPolicy::LoopBody => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateElseInLoopBody,
-            location,
+        ElseSentinelPolicy::LoopBody => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateElseInLoopBody,
+                location,
+            ),
+            span,
+            source,
         )),
     }
 }
@@ -298,6 +375,8 @@ pub(super) fn handle_direct_else_if_marker(
     if_index: usize,
     close_index: usize,
     location: SourceLocation,
+    span: LocalSpan,
+    source: Option<SourceId>,
     policy: ElseSentinelPolicy,
     mut target: BodySentinelTarget<'_>,
     string_table: &StringTable,
@@ -308,9 +387,13 @@ pub(super) fn handle_direct_else_if_marker(
             ElseSentinelPolicy::SplitIf | ElseSentinelPolicy::Duplicate
         )
     {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateElseIfInLiteralBody,
-            location,
+        return Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateElseIfInLiteralBody,
+                location,
+            ),
+            span,
+            source,
         ));
     }
 
@@ -322,7 +405,8 @@ pub(super) fn handle_direct_else_if_marker(
                 string_table,
                 InvalidTemplateStructureReason::InlineTemplateElse,
             )
-            .map_err(|diagnostic| remap_else_if_inline_diagnostic(diagnostic, &location))?;
+            .map_err(|diagnostic| remap_else_if_inline_diagnostic(diagnostic, &location))
+            .map_err(|diagnostic| with_direct_else_marker_span(diagnostic, span, source))?;
             target.trim_trailing_whitespace(string_table);
 
             Ok(TemplateBodyBoundary::ElseIf {
@@ -332,21 +416,46 @@ pub(super) fn handle_direct_else_if_marker(
             })
         }
 
-        ElseSentinelPolicy::Orphan => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::OrphanTemplateElseIf,
-            location,
+        ElseSentinelPolicy::Orphan => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::OrphanTemplateElseIf,
+                location,
+            ),
+            span,
+            source,
         )),
 
-        ElseSentinelPolicy::Duplicate => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateElseIfAfterElse,
-            location,
+        ElseSentinelPolicy::Duplicate => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateElseIfAfterElse,
+                location,
+            ),
+            span,
+            source,
         )),
 
-        ElseSentinelPolicy::LoopBody => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateElseIfInLoopBody,
-            location,
+        ElseSentinelPolicy::LoopBody => Err(with_direct_else_marker_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateElseIfInLoopBody,
+                location,
+            ),
+            span,
+            source,
         )),
     }
+}
+
+/// Attach the exact source span for a direct `[else]` marker diagnostic while retaining its
+/// legacy location and labels for the interval migration bridge.
+fn with_direct_else_marker_span(
+    mut diagnostic: CompilerDiagnostic,
+    span: LocalSpan,
+    source: Option<SourceId>,
+) -> CompilerDiagnostic {
+    if let Some(source) = source {
+        diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    }
+    diagnostic
 }
 
 pub(super) fn classify_direct_loop_control_marker(
