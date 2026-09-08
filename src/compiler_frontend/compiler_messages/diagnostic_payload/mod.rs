@@ -570,7 +570,6 @@ pub enum DiagnosticPayload {
 
     DuplicatePublicExport {
         name: StringId,
-        first_location: SourceLocation,
     },
 
     PrivateTypeInExportedApi {

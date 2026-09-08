@@ -1316,10 +1316,7 @@ impl CompilerDiagnostic {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicatePublicExport),
             location.clone(),
-            DiagnosticPayload::DuplicatePublicExport {
-                name,
-                first_location: first_location.clone(),
-            },
+            DiagnosticPayload::DuplicatePublicExport { name },
         )
         .with_labels(vec![
             DiagnosticLabel::primary(location),

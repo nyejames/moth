@@ -368,7 +368,7 @@ fn render_payload_message(
         DiagnosticPayload::InvalidTraitKeywordUsage { reason } => {
             invalid_trait_keyword_usage_message(*reason).to_owned()
         }
-        DiagnosticPayload::DuplicatePublicExport { name, .. } => format!(
+        DiagnosticPayload::DuplicatePublicExport { name } => format!(
             "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
             string_table.resolve(*name)
         ),

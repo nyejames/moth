@@ -60,9 +60,6 @@ fn duplicate_public_export_retains_first_owner_location_across_passes() {
     assert_eq!(diagnostic.labels[1].location, first_location);
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::DuplicatePublicExport {
-            first_location: payload_location,
-            ..
-        } if payload_location == first_location
+        DiagnosticPayload::DuplicatePublicExport { .. }
     ));
 }

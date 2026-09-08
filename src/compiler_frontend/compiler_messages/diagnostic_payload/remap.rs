@@ -301,12 +301,8 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidReceiverDeclaration { .. }
             | DiagnosticPayload::InvalidCopyTarget { .. } => {}
 
-            DiagnosticPayload::DuplicatePublicExport {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicatePublicExport { name } => {
                 *name = remap.get(*name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::PrivateTypeInExportedApi { exported_name, .. } => {
@@ -690,10 +686,11 @@ impl DiagnosticPayload {
     /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
     pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         match self {
-            DiagnosticPayload::DuplicatePublicExport { first_location, .. }
-            | DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
+            DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
                 first_location.rebind_source_identity(logical_path)
             }
+
+            DiagnosticPayload::DuplicatePublicExport { .. } => {}
 
             DiagnosticPayload::DuplicateMothTemplateInputPath { first_location, .. } => {
                 first_location.rebind_source_identity(logical_path)
