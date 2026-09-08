@@ -414,7 +414,7 @@ fn run_semantic_stages(
                 prepared_header_syntax,
                 external_dependency_resolution_table,
                 context.source_provider_dependencies,
-                &warnings,
+                &mut warnings,
             )
         }
     )?;
@@ -430,7 +430,7 @@ fn run_semantic_stages(
             compiler,
             module_headers,
             &resolved_file_references,
-            &warnings
+            &mut warnings,
         )
     )?;
 
@@ -866,7 +866,7 @@ fn bind_retained_headers(
     prepared_header_syntax: PreparedHeaderSyntax,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
-    warnings: &[CompilerDiagnostic],
+    warnings: &mut Vec<CompilerDiagnostic>,
 ) -> Result<BoundModuleHeaders, CompilerMessages> {
     let headers = bind_module_headers(
         prepared_header_syntax,
@@ -882,7 +882,7 @@ fn bind_retained_headers(
             bag.into_diagnostics(),
             compiler.string_table.clone(),
         );
-        messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
+        messages.prepend_diagnostics_preserving_context(std::mem::take(warnings));
         messages
     })?;
 
@@ -894,7 +894,7 @@ fn sort_headers(
     compiler: &mut CompilerFrontend<'_>,
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
-    warnings: &[CompilerDiagnostic],
+    warnings: &mut Vec<CompilerDiagnostic>,
 ) -> Result<SortedHeaders, CompilerMessages> {
     compiler
         .sort_headers(module_headers, resolved_file_references)
@@ -903,7 +903,7 @@ fn sort_headers(
                 bag.into_diagnostics(),
                 compiler.string_table.clone(),
             );
-            messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
+            messages.prepend_diagnostics_preserving_context(std::mem::take(warnings));
             messages
         })
 }
