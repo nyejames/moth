@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -189,6 +190,30 @@ fn optional_slot_target_zero_errors() {
             ..
         }
     ));
+}
+
+#[test]
+fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
+    let source = "[$slot(π)]";
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut tokens = directive_tokens(source, &mut string_table, &mut span_builder);
+    let directive_name = string_table.intern("slot");
+    let diagnostic = directive_diagnostic(
+        parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table)
+            .expect_err("a symbol is not a valid slot target"),
+    );
+
+    let primary_span = diagnostic
+        .primary_span
+        .expect("slot target diagnostics should retain the offending token span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    assert_eq!((range.start(), range.end()), (7, 9));
+    assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
+    assert_eq!(diagnostic.primary_location.start_byte, range.start());
+    assert_eq!(diagnostic.primary_location.end_byte, range.end());
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
 }
 
 #[test]
