@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `71c020f15` — duplicate-declaration payload facts are label-owned and immutable assignment
-  diagnostics retain the exact operator span. Focused diagnostic-model, header, signature,
-  mutation and directive-style tests pass; `cargo check -p moth`, the full 4,987-library-test
-  suite and the worktree are clean.
+- `127af8d3c` — trait duplicate payload facts are label-owned and synthetic Stage 0
+  file-reference diagnostics retain their authored source spans. Focused trait, public-export,
+  header, source-reference and diagnostic tests pass; `cargo check -p moth`, the full
+  4,987-library-test suite and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -185,6 +185,16 @@ CURRENT_WORKTREE_STATE:
   retain the current assignment operator's exact token span through the registered `SourceId`,
   while the existing invalid-assignment payload, legacy location and labels remain unchanged. The
   multibyte operator regression and mutation suite (9 tests) pass.
+- Accepted the bounded 1G1 trait-duplicate payload simplification in `a46c20be7`. The previous
+  requirement remains solely in the ordered `PreviousDeclaration` label, including the exact
+  primary/related requirement spans already attached by trait validation. Payload remapping,
+  identity rebinding and rendering no longer duplicate its legacy location; the focused trait
+  environment and diagnostic-model suites pass.
+- Accepted the bounded 1E5 synthetic file-reference consumer in `127af8d3c`. Invalid component,
+  boundary, missing-target, physical-resolution and unsupported-kind diagnostics all retain the
+  `PreparedFileReference` source ID and local span, while infrastructure failures remain
+  `CompilerError` and legacy locations/lanes are unchanged. The synthetic file-reference suite
+  (8 tests) and its exact-span regression pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -340,6 +350,12 @@ VALIDATION_STATE:
 - 1E2 mutation candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`, the
   focused mutation suite (9), assignment suite (30) and the full library suite (4,987) passed.
   The independent Slice review found no required correction.
+- 1G1 trait-duplicate payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, trait environment (12), diagnostic model (78) and exact trait-span
+  coverage passed. The independent Slice review found no required correction.
+- 1E5 synthetic file-reference candidate: `cargo fmt --all`, `git diff --check`,
+  `cargo check -p moth`, synthetic file-reference suite (8), exact-span regression (1) and full
+  library suite (4,987) passed. The independent Slice review found no required correction.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
