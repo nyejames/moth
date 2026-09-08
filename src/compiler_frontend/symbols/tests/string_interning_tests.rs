@@ -5,7 +5,7 @@
 //! WHY: parallel module compilation can merge overlapping local suffixes, so remapping must stay
 //! correct even when inherited IDs remain identity.
 
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 #[test]
 fn shared_fork_resolves_base_strings_without_local_entries() {
@@ -115,4 +115,57 @@ fn overlapping_module_forks_remap_diverging_local_suffixes() {
             "second-only".to_owned(),
         ]
     );
+}
+
+#[test]
+fn freezing_root_table_preserves_ids_and_moves_string_storage() {
+    let mut table = StringTable::new();
+    let first = table.intern("first");
+    let second = table.intern("second");
+    let first_pointer = table.resolve(first).as_ptr();
+    let second_pointer = table.resolve(second).as_ptr();
+
+    let frozen = table.freeze();
+
+    assert_eq!(frozen.len(), 2);
+    assert_eq!(frozen.resolve(first), "first");
+    assert_eq!(frozen.resolve(second), "second");
+    assert_eq!(frozen.resolve(first).as_ptr(), first_pointer);
+    assert_eq!(frozen.resolve(second).as_ptr(), second_pointer);
+    assert_eq!(frozen.try_resolve(first), Some("first"));
+    assert_eq!(frozen.try_resolve(StringId::from_index(2)), None);
+    assert_eq!(
+        frozen.iter().collect::<Vec<_>>(),
+        vec![(first, "first"), (second, "second")]
+    );
+}
+
+#[test]
+fn freezing_after_non_identity_merge_preserves_remapped_ids() {
+    let mut merged = StringTable::new();
+    let shared_id = merged.intern("shared");
+
+    let mut module = StringTable::new();
+    let module_only_id = module.intern("module-only");
+    let module_shared_id = module.intern("shared");
+    let remap = merged.merge_from(&module);
+
+    let merged_module_only_id = remap.get(module_only_id);
+    let merged_shared_id = remap.get(module_shared_id);
+    let frozen = merged.freeze();
+
+    assert_ne!(merged_module_only_id, module_only_id);
+    assert_eq!(merged_shared_id, shared_id);
+    assert_eq!(frozen.resolve(merged_module_only_id), "module-only");
+    assert_eq!(frozen.resolve(merged_shared_id), "shared");
+}
+
+#[test]
+#[should_panic(expected = "StringTable::freeze requires a merged root table")]
+fn freezing_module_fork_requires_merge_into_root_first() {
+    let mut root = StringTable::new();
+    root.intern("inherited");
+    let (fork, _) = root.fork_for_module().into_parts();
+
+    let _ = fork.freeze();
 }

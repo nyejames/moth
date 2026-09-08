@@ -173,6 +173,53 @@ impl StringTableFork {
     }
 }
 
+/// Immutable interned strings for lookup after identity construction freezes.
+///
+/// WHAT: retains the dense string storage and stable [`StringId`] indexes while dropping the
+///       reverse map required only during interning.
+/// WHY: final lookup contexts must move the existing string allocations into immutable storage
+///      without keeping a mutable interner or allocating a second copy of every string.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FrozenStringTable {
+    strings: Box<[Box<str>]>,
+}
+
+impl FrozenStringTable {
+    /// Return the number of strings in this frozen table.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.strings.len()
+    }
+
+    /// Resolve an interned string ID back to its string content.
+    ///
+    /// # Safety
+    /// This uses unchecked indexing for the same stable-ID invariant as [`StringTable::resolve`].
+    /// IDs passed to this method must have been issued by this table before it was frozen.
+    #[inline]
+    pub fn resolve(&self, id: StringId) -> &str {
+        // SAFETY: the table is immutable after freezing, and callers must pass an ID issued by
+        // this table before the consuming freeze operation.
+        unsafe { self.strings.get_unchecked(id.0 as usize).as_ref() }
+    }
+
+    /// Resolve an interned string ID, or `None` when the handle is not in this table.
+    #[inline]
+    pub fn try_resolve(&self, id: StringId) -> Option<&str> {
+        self.strings
+            .get(id.0 as usize)
+            .map(|string| string.as_ref())
+    }
+
+    /// Iterate over all frozen strings with their stable IDs.
+    pub fn iter(&self) -> impl Iterator<Item = (StringId, &str)> + use<'_> {
+        self.strings
+            .iter()
+            .enumerate()
+            .map(|(index, string)| (StringId(index as u32), string.as_ref()))
+    }
+}
+
 /// A centralized string interning system that stores unique strings only once in memory.
 ///
 /// The StringTable uses a dual-mapping approach for optimal performance. A build-owned table
@@ -425,6 +472,24 @@ impl StringTable {
     #[inline]
     pub fn len(&self) -> usize {
         self.base_len() + self.strings.len()
+    }
+
+    /// Consume a merged root table into immutable lookup storage.
+    ///
+    /// Module-local forks retain an inherited base and therefore cannot be frozen without
+    /// flattening or copying that base. Merge all fork deltas into the build-owned root table
+    /// first; this operation then moves the existing string allocations and drops both reverse
+    /// lookup maps.
+    pub fn freeze(self) -> FrozenStringTable {
+        assert!(
+            self.base.is_none(),
+            "StringTable::freeze requires a merged root table"
+        );
+        debug_assert_eq!(self.next_id as usize, self.strings.len());
+
+        FrozenStringTable {
+            strings: self.strings.into_boxed_slice(),
+        }
     }
 
     /// Iterate over all interned strings with their IDs.
