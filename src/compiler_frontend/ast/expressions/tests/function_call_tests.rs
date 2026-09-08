@@ -25,8 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
@@ -387,6 +386,30 @@ fn optional_call_context_is_limited_to_bare_none_arguments() {
             ..
         }
     ));
+}
+
+#[test]
+fn generic_call_diagnostic_retains_exact_multibyte_callee_span() {
+    let function_name = "f".repeat(1024);
+    let source = format!(
+        "{function_name} type T || -> {{T}}:\n    return {{}}\n;\n\nprefix = \"é\"\nvalue = {function_name}()\n"
+    );
+    let diagnostic = parse_single_file_ast_diagnostic(&source);
+    let call_start = source
+        .rfind(&format!("{function_name}()"))
+        .expect("the generic call should be present") as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // The declaration's long name occupies the first extended row in the tokenizer.
+    let _declaration_span =
+        LocalSpan::exact(0, function_name.len() as u32, &mut span_builder).unwrap();
+    let call_span = LocalSpan::exact(call_start, function_name.len() as u32, &mut span_builder)
+        .expect("the callee should fit the extended span table");
+
+    assert_eq!(span_builder.len(), 2);
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
+    );
 }
 
 #[test]

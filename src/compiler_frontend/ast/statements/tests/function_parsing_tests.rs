@@ -12,10 +12,11 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCallShapeReason, InvalidFunctionSignatureReason,
-    InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
-    NameNamespace, TypeMismatchContext,
+    InvalidGenericInstantiationReason, InvalidReceiverCallReason, InvalidReceiverDeclarationReason,
+    InvalidThisUsageReason, NameNamespace, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
@@ -196,10 +197,9 @@ fn parses_generic_function_declaration_without_emitting_executable_function() {
 
 #[test]
 fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
-    let (build_result, string_table) = parse_single_file_ast_build_result(
-        "identity type T |value T| -> T:\n    return value\n;\n\nvalue = identity(1)\n",
-    )
-    .expect("source should parse into a request-only AST");
+    let source = "identity type T |value T| -> T:\n    return value\n;\n\nvalue = identity(1)\n";
+    let (build_result, string_table) = parse_single_file_ast_build_result(source)
+        .expect("source should parse into a request-only AST");
     let ast = build_result.ast;
 
     let generic_template_emitted = ast.nodes.iter().any(|node| match &node.kind {
@@ -235,7 +235,68 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
     };
     assert_eq!(name, &request.instance_path);
     assert_eq!(request.key.type_arguments.as_ref(), result_type_ids);
+    let call_start = source
+        .find("identity(1)")
+        .expect("the generic call should be present") as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let call_span = LocalSpan::exact(call_start, "identity".len() as u32, &mut span_builder)
+        .expect("the generic callee should fit an inline span");
+    assert_eq!(
+        request.call_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
+    );
     assert_eq!(declaration.value.diagnostic_type, DataType::Int);
+}
+
+#[test]
+fn generic_receiver_diagnostic_retains_exact_multibyte_member_span() {
+    let source = "prefix String = \"é\"\n\
+DISPLAY_TEXT must:\n\
+    display |This| -> String\n\
+;\n\
+Plain = |\n\
+    text String,\n\
+|\n\
+display |this Plain| -> String:\n\
+    return this.text\n\
+;\n\
+Box type A = |\n\
+    value A,\n\
+|\n\
+show type A is DISPLAY_TEXT |this Box of A| -> String:\n\
+    return this.value.display()\n\
+;\n\
+box = Box(Plain(\"no evidence\"))\n\
+value = box.show()\n";
+
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let DiagnosticPayload::InvalidGenericInstantiation {
+        reason: InvalidGenericInstantiationReason::MissingTraitEvidence { .. },
+        ..
+    } = &diagnostic.payload
+    else {
+        panic!(
+            "expected missing generic receiver trait evidence, got {:?}",
+            diagnostic.payload
+        );
+    };
+    let member_start = source
+        .find("box.show()")
+        .expect("the generic receiver call should be present") as u32
+        + "box.".len() as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let member_span = LocalSpan::exact(member_start, "show".len() as u32, &mut span_builder)
+        .expect("the generic receiver member should fit an inline span");
+
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, member_span))
+    );
+    assert_eq!(diagnostic.primary_location.start_byte, member_start);
+    assert_eq!(
+        diagnostic.primary_location.end_byte,
+        member_start + "show".len() as u32
+    );
 }
 
 #[test]

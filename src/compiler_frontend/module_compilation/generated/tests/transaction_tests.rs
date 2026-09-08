@@ -9,6 +9,7 @@ use super::*;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
     PublishedBoundary, facts, generated_identity, summary,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
@@ -31,6 +32,7 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
                 CharPosition::default(),
                 CharPosition::default(),
             ),
+            diagnostic_span: None,
         },
     ]);
 
@@ -109,15 +111,21 @@ fn request_records_own_diagnostic_facts() {
             char_column: 9,
         },
     );
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span = LocalSpan::exact(10, 7, &mut span_builder).unwrap();
+    let diagnostic_span = Some(SourceSpan::new(SourceId::from_index(3), local_span));
     let ids = transaction.register_requests([GeneratedRequestFacts {
         identity: generated_identity("make"),
         display_name: "make".to_owned(),
         diagnostic_location: first_location.clone(),
+        diagnostic_span,
     }]);
 
-    let (display_name, diagnostic_location) = transaction.request_facts(ids[0]).unwrap();
+    let (display_name, diagnostic_location, actual_diagnostic_span) =
+        transaction.request_facts(ids[0]).unwrap();
     assert_eq!(display_name, "make");
     assert_eq!(diagnostic_location, first_location);
+    assert_eq!(actual_diagnostic_span, diagnostic_span);
 }
 
 #[test]

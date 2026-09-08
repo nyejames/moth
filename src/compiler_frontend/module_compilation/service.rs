@@ -616,6 +616,7 @@ fn run_semantic_stages(
                     .map(|name| compiler.string_table.resolve(name).to_owned())
                     .unwrap_or_else(|| "<generated>".to_owned()),
                 diagnostic_location: request.call_location.clone(),
+                diagnostic_span: request.call_span,
             }
         }));
     // 4b. Extract validated generic-template body artefacts before HIR consumes AST

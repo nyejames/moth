@@ -18,6 +18,7 @@ use crate::compiler_frontend::module_compilation::generated::artefacts::{
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -44,6 +45,7 @@ struct GeneratedRequestRecord {
     identity: GeneratedFunctionIdentity,
     display_name: String,
     diagnostic_location: SourceLocation,
+    diagnostic_span: Option<SourceSpan>,
     state: GeneratedRequestState,
 }
 
@@ -53,6 +55,7 @@ pub(crate) struct GeneratedRequestFacts {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) display_name: String,
     pub(crate) diagnostic_location: SourceLocation,
+    pub(crate) diagnostic_span: Option<SourceSpan>,
 }
 
 /// Result of attempting to enter one request during depth-first fixed-point materialisation.
@@ -114,6 +117,7 @@ impl<'a> GeneratedFunctionTransaction<'a> {
                     identity: request.identity,
                     display_name: request.display_name,
                     diagnostic_location: request.diagnostic_location,
+                    diagnostic_span: request.diagnostic_span,
                     state: GeneratedRequestState::Pending,
                 });
                 request_id
@@ -137,13 +141,14 @@ impl<'a> GeneratedFunctionTransaction<'a> {
     pub(crate) fn request_facts(
         &self,
         request_id: GeneratedRequestId,
-    ) -> Result<(String, SourceLocation), CompilerError> {
+    ) -> Result<(String, SourceLocation, Option<SourceSpan>), CompilerError> {
         self.records
             .get(request_id.index())
             .map(|record| {
                 (
                     record.display_name.clone(),
                     record.diagnostic_location.clone(),
+                    record.diagnostic_span,
                 )
             })
             .ok_or_else(|| out_of_range(request_id))

@@ -37,6 +37,7 @@ use crate::compiler_frontend::module_compilation::generated::transaction::{
 use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashSet;
@@ -49,6 +50,7 @@ struct MaterialisingRequest {
     identity: GeneratedFunctionIdentity,
     display_name: String,
     diagnostic_location: SourceLocation,
+    diagnostic_span: Option<SourceSpan>,
     #[cfg(feature = "timers")]
     timing_context: Option<crate::timing::TimingContext>,
 }
@@ -70,7 +72,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
             .identity(*request_id)
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
             .clone();
-        let (display_name, diagnostic_location) = transaction
+        let (display_name, diagnostic_location, diagnostic_span) = transaction
             .request_facts(*request_id)
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
         materialise_generated_request(
@@ -80,6 +82,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
                 identity,
                 display_name,
                 diagnostic_location,
+                diagnostic_span,
                 #[cfg(feature = "timers")]
                 timing_context,
             },
@@ -112,6 +115,7 @@ fn materialise_generated_request<'build>(
                 recursive_generic_function_instantiation(
                     Some(compiler.string_table.intern(&request.display_name)),
                     request.diagnostic_location.clone(),
+                    request.diagnostic_span,
                 ),
                 compiler.string_table.clone(),
             ));
@@ -142,6 +146,7 @@ fn materialise_generated_request<'build>(
                 identity: &request.identity,
                 requester_context,
                 requester_call_location: &request.diagnostic_location,
+                requester_call_span: request.diagnostic_span,
                 external_package_registry: context.external_packages.as_ref(),
                 style_directives: context.style_directives,
                 build_profile: context.build_profile,
@@ -157,6 +162,7 @@ fn materialise_generated_request<'build>(
                 &request.identity,
                 requester_context,
                 &request.diagnostic_location,
+                request.diagnostic_span,
                 #[cfg(feature = "timers")]
                 request.timing_context,
             ),
@@ -200,6 +206,7 @@ fn materialise_generated_request<'build>(
                 .map(|name| generated_string_table.resolve(name).to_owned())
                 .unwrap_or_else(|| "<generated>".to_owned()),
             diagnostic_location: request.call_location.clone(),
+            diagnostic_span: request.call_span,
         }
     }));
 
@@ -219,7 +226,7 @@ fn materialise_generated_request<'build>(
                 CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
             })?
             .clone();
-        let (nested_name, nested_location) = transaction
+        let (nested_name, nested_location, nested_span) = transaction
             .request_facts(*nested_request_id)
             .map_err(|error| {
                 CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
@@ -231,6 +238,7 @@ fn materialise_generated_request<'build>(
                 identity: nested_identity,
                 display_name: nested_name,
                 diagnostic_location: nested_location,
+                diagnostic_span: nested_span,
                 #[cfg(feature = "timers")]
                 timing_context: request.timing_context,
             },

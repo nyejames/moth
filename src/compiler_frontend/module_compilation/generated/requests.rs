@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::{GeneratedFunctionIdentity, OriginTypeId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -129,6 +130,7 @@ pub(crate) struct CanonicalGeneratedRequest {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) function_name: Option<StringId>,
     pub(crate) call_location: SourceLocation,
+    pub(crate) call_span: Option<SourceSpan>,
 }
 
 pub(crate) fn install_generated_request_contracts(
@@ -222,6 +224,7 @@ pub(crate) fn install_generated_request_contracts(
             identity: identity.clone(),
             function_name: request.key.function_path.name(),
             call_location: request.call_location.clone(),
+            call_span: request.call_span,
         });
         let contract = AstImportedFunctionContract {
             target: SourceFunctionTarget::Generated {

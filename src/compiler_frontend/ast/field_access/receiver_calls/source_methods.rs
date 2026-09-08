@@ -39,6 +39,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidRec
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -80,6 +81,7 @@ struct GenericReceiverMethodInferenceInput<'a, 'interner> {
     receiver_mutable: bool,
     raw_args: &'a [CallArgument],
     member_location: &'a SourceLocation,
+    member_span: Option<SourceSpan>,
     scope_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'interner>,
     string_table: &'a mut StringTable,
@@ -101,6 +103,7 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         receiver_mutable,
         raw_args,
         member_location,
+        member_span,
         scope_context,
         type_interner,
         string_table,
@@ -136,6 +139,7 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         raw_arguments: &inference_args,
         expected_context: GenericCallExpectedContext::None,
         call_location: member_location.clone(),
+        call_span: member_span,
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
     })?;
@@ -145,12 +149,14 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         scope_context,
         type_interner.environment(),
         member_location.clone(),
+        member_span,
     )?;
 
     if scope_context.is_generic_function_instantiation_active(&inference.key) {
         return Err(recursive_generic_function_instantiation(
             template.function_path.name(),
             member_location.clone(),
+            member_span,
         )
         .into());
     }
@@ -161,6 +167,7 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         key: inference.key,
         instance_path: inference.instance_path.clone(),
         call_location: member_location.clone(),
+        call_span: member_span,
     };
 
     Ok((inference.instance_path, inference.signature, request))
@@ -219,6 +226,9 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         .into());
     }
 
+    let member_span = token_stream
+        .file_id
+        .map(|source| SourceSpan::new(source, token_stream.current_token().span));
     token_stream.advance();
 
     let method_name = string_table.resolve(member_name).to_owned();
@@ -260,6 +270,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         receiver_mutable: method_entry.receiver_mutable,
                         raw_args: &raw_args,
                         member_location: &member_location,
+                        member_span,
                         scope_context,
                         type_interner,
                         string_table,
@@ -286,6 +297,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         receiver_mutable: method.receiver_mutable,
                         raw_args: &raw_args,
                         member_location: &member_location,
+                        member_span,
                         scope_context,
                         type_interner,
                         string_table,

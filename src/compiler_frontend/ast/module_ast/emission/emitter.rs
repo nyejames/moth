@@ -600,6 +600,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 recursive_generic_function_instantiation(
                     request.key.function_path.name(),
                     request.call_location,
+                    request.call_span,
                 ),
                 string_table,
             ));
@@ -735,6 +736,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     *diagnostic,
                     GenericInstantiationDiagnosticContext {
                         call_location: request.call_location.clone(),
+                        call_span: request.call_span,
                         declaration_location: template.declaration_location.clone(),
                         substitutions: substitution_diagnostics,
                     },

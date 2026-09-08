@@ -556,5 +556,7 @@ fn nominal_binding_conflict_diagnostic(
         parameter_name,
         current_evidence_location,
         previous_evidence_location,
+        None,
+        None,
     )
 }

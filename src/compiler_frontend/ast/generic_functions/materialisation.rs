@@ -93,6 +93,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory,
     OriginTypeId, StableModuleOriginIdentity,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{
@@ -142,6 +143,7 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) identity: &'a GeneratedFunctionIdentity,
     pub(crate) requester_context: &'a ModuleMaterialisationPreparation,
     pub(crate) requester_call_location: &'a SourceLocation,
+    pub(crate) requester_call_span: Option<SourceSpan>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
@@ -643,6 +645,7 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             requester_call_location,
+            requester_call_span,
             external_package_registry,
             style_directives,
             build_profile,
@@ -778,6 +781,7 @@ impl GenericTemplateArtefact {
             },
             instance_path: instance_path.clone(),
             call_location,
+            call_span: requester_call_span,
         };
         let emitted = {
             crate::timing_scope_attributed!(
@@ -3605,6 +3609,7 @@ impl ModuleMaterialisationPreparation {
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+        requester_call_span: Option<SourceSpan>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
         let template = self
@@ -3784,6 +3789,7 @@ impl ModuleMaterialisationPreparation {
             },
             instance_path: instance_path.clone(),
             call_location,
+            call_span: requester_call_span,
         };
         let emitted = {
             crate::timing_scope_attributed!(

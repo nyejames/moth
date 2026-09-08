@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
+    with_generic_primary_span,
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -20,6 +21,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -80,6 +82,9 @@ pub(super) fn parse_source_callable_member(
     //  Generic source call
     // ------------------------
     if let Some(template) = generic_template {
+        let call_span = token_stream
+            .file_id
+            .map(|source| SourceSpan::new(source, token_stream.current_token().span));
         match token_stream.peek_next_token() {
             // Explicit call-site type arguments are not part of the Alpha surface.
             // Reject the known foreign spellings before they can be interpreted as
@@ -91,9 +96,18 @@ pub(super) fn parse_source_callable_member(
                     .map(|token| token.location.clone())
                     .unwrap_or_else(|| call_location.clone());
 
-                return Err(explicit_generic_call_type_arguments_error(
-                    visible_name,
-                    explicit_syntax_location,
+                let explicit_syntax_span = token_stream.file_id.and_then(|source| {
+                    token_stream
+                        .tokens
+                        .get(token_stream.index + 1)
+                        .map(|token| SourceSpan::new(source, token.span))
+                });
+                return Err(with_generic_primary_span(
+                    explicit_generic_call_type_arguments_error(
+                        visible_name,
+                        explicit_syntax_location,
+                    ),
+                    explicit_syntax_span,
                 )
                 .into());
             }
@@ -103,10 +117,13 @@ pub(super) fn parse_source_callable_member(
             Some(TokenKind::OpenParenthesis) => {}
 
             _ => {
-                return Err(CompilerDiagnostic::invalid_generic_instantiation(
-                    Some(visible_name),
-                    InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
-                    call_location,
+                return Err(with_generic_primary_span(
+                    CompilerDiagnostic::invalid_generic_instantiation(
+                        Some(visible_name),
+                        InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
+                        call_location,
+                    ),
+                    call_span,
                 )
                 .into());
             }
@@ -132,6 +149,7 @@ pub(super) fn parse_source_callable_member(
             value_required: true,
             allow_boundary_catch: allow_call_boundary_catch,
             call_location,
+            call_span,
             warnings: None,
             type_interner,
             string_table,

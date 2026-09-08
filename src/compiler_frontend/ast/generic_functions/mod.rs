@@ -21,7 +21,7 @@ pub(crate) use calls::{
 };
 pub(crate) use diagnostics::{
     GenericInstantiationDiagnosticContext, recursive_generic_function_instantiation,
-    with_generic_instantiation_context,
+    with_generic_instantiation_context, with_generic_primary_span,
 };
 pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,

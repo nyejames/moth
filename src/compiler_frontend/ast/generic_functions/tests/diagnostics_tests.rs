@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -46,6 +47,7 @@ fn instantiation_context(
 ) -> GenericInstantiationDiagnosticContext {
     GenericInstantiationDiagnosticContext {
         call_location,
+        call_span: None,
         declaration_location,
         substitutions: Vec::new(),
     }
@@ -70,6 +72,39 @@ fn with_generic_instantiation_context_changes_primary_location_to_call_site() {
     );
 
     assert_eq!(transformed.primary_location, call_location);
+}
+
+#[test]
+fn with_generic_instantiation_context_retains_exact_extended_call_span() {
+    let mut string_table = StringTable::new();
+    let body_location = make_location("body.moth", 10, 5, &mut string_table);
+    let call_location = make_location("call.moth", 20, 8, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let call_span = SourceSpan::new(
+        SourceId::from_index(4),
+        LocalSpan::exact(17, 4096, &mut span_builder).unwrap(),
+    );
+
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        builtin_type_ids::INT,
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        body_location.clone(),
+    );
+
+    let transformed = with_generic_instantiation_context(
+        diagnostic,
+        GenericInstantiationDiagnosticContext {
+            call_location: call_location.clone(),
+            call_span: Some(call_span),
+            declaration_location: body_location,
+            substitutions: Vec::new(),
+        },
+    );
+
+    assert_eq!(span_builder.len(), 1);
+    assert_eq!(transformed.primary_span, Some(call_span));
+    assert_eq!(transformed.labels[0].span, Some(call_span));
 }
 
 #[test]
@@ -303,6 +338,7 @@ fn with_generic_instantiation_context_adds_structured_substitution_label() {
         diagnostic,
         GenericInstantiationDiagnosticContext {
             call_location,
+            call_span: None,
             declaration_location: declaration_location.clone(),
             substitutions: vec![GenericSubstitutionDiagnostic {
                 parameter_name,
@@ -351,6 +387,8 @@ fn conflicting_generic_function_argument_keeps_current_evidence_primary_label() 
         parameter_name,
         current_location.clone(),
         Some(previous_location.clone()),
+        None,
+        None,
     );
 
     assert_eq!(diagnostic.primary_location, current_location);
@@ -368,4 +406,40 @@ fn conflicting_generic_function_argument_keeps_current_evidence_primary_label() 
         }),
         "expected previous evidence to be represented by a secondary label"
     );
+}
+
+#[test]
+fn conflicting_generic_function_argument_retains_evidence_spans() {
+    let mut string_table = StringTable::new();
+    let current_location = make_location("call.moth", 12, 4, &mut string_table);
+    let previous_location = make_location("call.moth", 12, 1, &mut string_table);
+    let function_name = string_table.intern("same");
+    let parameter_name = string_table.intern("T");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let current_span = SourceSpan::new(
+        SourceId::from_index(5),
+        LocalSpan::exact(2, 4096, &mut span_builder).unwrap(),
+    );
+    let previous_span = SourceSpan::new(
+        SourceId::from_index(5),
+        LocalSpan::exact(1, 4, &mut span_builder).unwrap(),
+    );
+
+    let diagnostic = conflicting_generic_function_argument(
+        Some(function_name),
+        BindingConflict {
+            parameter_id: GenericParameterId(0),
+            existing_type_id: builtin_type_ids::INT,
+            replacement_type_id: builtin_type_ids::STRING,
+        },
+        parameter_name,
+        current_location,
+        Some(previous_location),
+        Some(current_span),
+        Some(previous_span),
+    );
+
+    assert_eq!(diagnostic.primary_span, Some(current_span));
+    assert_eq!(diagnostic.labels[0].span, Some(current_span));
+    assert_eq!(diagnostic.labels[1].span, Some(previous_span));
 }

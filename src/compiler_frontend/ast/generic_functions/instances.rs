@@ -7,6 +7,7 @@
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -39,6 +40,8 @@ pub(crate) struct GenericFunctionInstantiationRequest {
     pub(crate) key: GenericFunctionInstanceKey,
     pub(crate) instance_path: InternedPath,
     pub(crate) call_location: SourceLocation,
+    /// Exact authored callee/member range when the request came from a source token stream.
+    pub(crate) call_span: Option<SourceSpan>,
 }
 
 /// Half-open slice of provisional generic requests emitted while parsing one branch body.

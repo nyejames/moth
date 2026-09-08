@@ -172,5 +172,6 @@ pub(crate) fn facts(name: &str) -> GeneratedRequestFacts {
             CharPosition::default(),
             CharPosition::default(),
         ),
+        diagnostic_span: None,
     }
 }

@@ -1147,6 +1147,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_location: &requester_call_location,
+                requester_call_span: None,
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
@@ -1342,6 +1343,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_location: &requester_call_location,
+                requester_call_span: None,
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
@@ -1431,6 +1433,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_location: &requester_call_location,
+                    requester_call_span: None,
                     external_package_registry: fixture
                         .preparation
                         .external_package_registry
@@ -1595,6 +1598,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_location: &requester_call_location,
+                    requester_call_span: None,
                     external_package_registry: fixture
                         .preparation
                         .external_package_registry

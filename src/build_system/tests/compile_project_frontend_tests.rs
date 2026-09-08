@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidDependencyClauseReason,
+    InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -1374,6 +1375,75 @@ independent_result Int = independent(42)
         Some(exact_summary),
         "the sidecar should receive the exact active-base public summary"
     );
+}
+
+#[test]
+fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnostic() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    let function_name = "l".repeat(1024);
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+
+    fs::write(
+        dir.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write config");
+    fs::write(
+        dir.join("src/helpers.moth"),
+        format!("{function_name} type T |value T| -> T:\n    return {function_name}(value)\n;\n"),
+    )
+    .expect("should write generic helper");
+    let entry_source =
+        format!("prefix String = \"é\"\n@helpers {function_name}\nvalue = {function_name}(1)\n");
+    fs::write(dir.join("src/@page.moth"), &entry_source).expect("should write entry source");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .expect("diagnosed recursive materialisation should remain a retained frontend outcome");
+    let messages = frontend.into_render_messages(&mut string_table);
+
+    let diagnostic = messages
+        .error_diagnostics()
+        .next()
+        .expect("recursive materialisation should retain one error diagnostic");
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidGenericInstantiation {
+            reason: InvalidGenericInstantiationReason::RecursiveFunctionInstantiation,
+            ..
+        }
+    ));
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("generated diagnostic should retain its source database");
+    let entry_path = fs::canonicalize(dir.join("src/@page.moth"))
+        .expect("entry source path should canonicalize");
+    let entry_id = source_files
+        .get_by_canonical_path(&entry_path)
+        .expect("entry source should remain registered")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("recursive generated diagnostic should retain the request span");
+    assert_eq!(span.source(), entry_id);
+    let range = span.byte_range(source_files);
+    let final_call = format!("{function_name}(1)");
+    let expected_start = entry_source
+        .rfind(&final_call)
+        .expect("the final generic call should be present") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(range.end(), expected_start + function_name.len() as u32);
 }
 
 #[test]

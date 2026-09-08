@@ -1525,6 +1525,8 @@ impl CompilerDiagnostic {
         parameter_name: StringId,
         current_evidence_location: SourceLocation,
         previous_evidence_location: Option<SourceLocation>,
+        current_evidence_span: Option<SourceSpan>,
+        previous_evidence_span: Option<SourceSpan>,
     ) -> Self {
         let mut diagnostic = Self::invalid_generic_instantiation(
             type_name,
@@ -1537,15 +1539,17 @@ impl CompilerDiagnostic {
             },
             current_evidence_location.clone(),
         );
+        diagnostic.primary_span = current_evidence_span;
 
         if let Some(previous_evidence_location) = previous_evidence_location {
-            diagnostic = diagnostic.with_labels(vec![
-                DiagnosticLabel::primary(current_evidence_location),
-                DiagnosticLabel::secondary(
-                    previous_evidence_location,
-                    Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence),
-                ),
-            ]);
+            let mut current_label = DiagnosticLabel::primary(current_evidence_location);
+            current_label.span = current_evidence_span;
+            let mut previous_label = DiagnosticLabel::secondary(
+                previous_evidence_location,
+                Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence),
+            );
+            previous_label.span = previous_evidence_span;
+            diagnostic = diagnostic.with_labels(vec![current_label, previous_label]);
         }
 
         diagnostic
