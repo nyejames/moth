@@ -330,14 +330,14 @@ pub(crate) fn parse_function_body_statements(
                 ContextKind::Expression => {
                     return Err(statement_dispatch_error(unexpected_scope_close(
                         UnexpectedScopeCloseContext::Expression,
-                        token_stream.current_location(),
+                        token_stream,
                     )));
                 }
 
                 ContextKind::Template => {
                     return Err(statement_dispatch_error(unexpected_scope_close(
                         UnexpectedScopeCloseContext::Template,
-                        token_stream.current_location(),
+                        token_stream,
                     )));
                 }
 
@@ -416,8 +416,7 @@ pub(crate) fn parse_function_body_statements(
                 }
 
                 return Err(statement_dispatch_error(unexpected_statement_token(
-                    token_stream.current_token_kind(),
-                    token_stream.current_location(),
+                    token_stream,
                     string_table,
                 )));
             }

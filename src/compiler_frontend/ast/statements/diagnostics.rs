@@ -12,8 +12,27 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidStatementPositionReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+
+/// Attach the exact authored range of the current token when this stream has a source identity.
+///
+/// Statement dispatch still carries the legacy location for the interval migration bridge, but
+/// the token's local span is the authoritative byte range while its file-owned source identity is
+/// available.
+fn with_current_token_span(
+    token_stream: &FileTokens,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none()
+        && let Some(source) = token_stream.file_id
+    {
+        diagnostic.primary_span = Some(SourceSpan::new(source, token_stream.current_token().span));
+    }
+
+    diagnostic
+}
 
 /// Produce a diagnostic for an unexpected token in statement position.
 ///
@@ -21,11 +40,12 @@ use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
 /// WHY: centralizes the decision about which constructor to use so the dispatch
 ///      loop stays readable.
 pub(crate) fn unexpected_statement_token(
-    token_kind: &TokenKind,
-    location: SourceLocation,
+    token_stream: &FileTokens,
     _string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    match token_kind {
+    let token_kind = token_stream.current_token_kind();
+    let location = token_stream.current_location();
+    let diagnostic = match token_kind {
         TokenKind::Comma => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedComma,
             location,
@@ -78,7 +98,9 @@ pub(crate) fn unexpected_statement_token(
         }
 
         _ => CompilerDiagnostic::unexpected_token(token_kind.to_owned(), location),
-    }
+    };
+
+    with_current_token_span(token_stream, diagnostic)
 }
 
 /// Context for an unexpected scope-close (`;`) diagnostic.
@@ -97,7 +119,7 @@ pub(crate) enum UnexpectedScopeCloseContext {
 ///       `End` inside them needs a targeted explanation.
 pub(crate) fn unexpected_scope_close(
     context: UnexpectedScopeCloseContext,
-    location: SourceLocation,
+    token_stream: &FileTokens,
 ) -> CompilerDiagnostic {
     let reason = match context {
         UnexpectedScopeCloseContext::Expression => {
@@ -108,5 +130,12 @@ pub(crate) fn unexpected_scope_close(
         }
     };
 
-    CompilerDiagnostic::invalid_statement_position(reason, location)
+    with_current_token_span(
+        token_stream,
+        CompilerDiagnostic::invalid_statement_position(reason, token_stream.current_location()),
+    )
 }
+
+#[cfg(test)]
+#[path = "tests/diagnostics_tests.rs"]
+mod diagnostics_tests;
