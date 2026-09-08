@@ -131,7 +131,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         None
                     } else {
                         let registered = self.type_environment.register_generic_parameter_list(
-                            generic_parameters,
+                            generic_parameters
+                                .parameters
+                                .iter()
+                                .map(|parameter| (parameter.id, parameter.name)),
                             &FxHashMap::default(),
                         );
                         let list_id = registered.list_id;
@@ -178,7 +181,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         None
                     } else {
                         let registered = self.type_environment.register_generic_parameter_list(
-                            generic_parameters,
+                            generic_parameters
+                                .parameters
+                                .iter()
+                                .map(|parameter| (parameter.id, parameter.name)),
                             &FxHashMap::default(),
                         );
                         let list_id = registered.list_id;

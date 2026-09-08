@@ -29,9 +29,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -890,17 +888,13 @@ fn register_param_list_with_bounds(
     param_name: &str,
     bound_trait_ids: Vec<TraitId>,
 ) -> GenericParameterListId {
-    let parameters = vec![GenericParameter {
-        id: TypeParameterId(0),
-        name: string_table.intern(param_name),
-        location: SourceLocation::default(),
-        trait_bounds: Vec::new(),
-    }];
-    let list = GenericParameterList { parameters };
     let mut bounds_by_local: FxHashMap<TypeParameterId, Vec<TraitId>> = FxHashMap::default();
     bounds_by_local.insert(TypeParameterId(0), bound_trait_ids);
-    env.register_generic_parameter_list(&list, &bounds_by_local)
-        .list_id
+    env.register_generic_parameter_list(
+        [(TypeParameterId(0), string_table.intern(param_name))].into_iter(),
+        &bounds_by_local,
+    )
+    .list_id
 }
 
 /// Register a source trait definition with the given canonical path so bound projection can

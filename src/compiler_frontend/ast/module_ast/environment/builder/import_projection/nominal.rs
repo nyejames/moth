@@ -276,26 +276,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => continue,
             };
             if !generic_parameters.is_empty() {
-                let parameters = GenericParameterList {
-                    parameters: generic_parameters
-                        .iter()
-                        .enumerate()
-                        .map(|(index, parameter)| GenericParameter {
-                            id: TypeParameterId(index as u32),
-                            name: string_table.intern(parameter.identity.authored_name()),
-                            location: Default::default(),
-                            trait_bounds: Vec::new(),
-                        })
-                        .collect(),
-                };
-                let metadata =
-                    crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata {
-                        kind,
-                        parameters,
-                        declaration_location: Default::default(),
-                    };
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(local_path.clone(), metadata.clone());
+                    .insert(local_path.clone(), kind.clone());
 
                 let internal_path = self
                     .type_environment
@@ -307,7 +289,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )
                     })?;
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(internal_path.clone(), metadata);
+                    .insert(internal_path.clone(), kind);
 
                 if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
                     let fields = self
@@ -421,21 +403,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(Some(existing.list_id));
         }
 
-        let parsed = GenericParameterList {
-            parameters: parameters
-                .iter()
-                .enumerate()
-                .map(|(index, parameter)| GenericParameter {
-                    id: TypeParameterId(index as u32),
-                    name: string_table.intern(parameter.identity.authored_name()),
-                    location: Default::default(),
-                    trait_bounds: Vec::new(),
-                })
-                .collect(),
-        };
-        let registered = self
-            .type_environment
-            .register_generic_parameter_list(&parsed, &FxHashMap::default());
+        let registered = self.type_environment.register_generic_parameter_list(
+            parameters.iter().enumerate().map(|(index, parameter)| {
+                (
+                    TypeParameterId(index as u32),
+                    string_table.intern(parameter.identity.authored_name()),
+                )
+            }),
+            &FxHashMap::default(),
+        );
         for (index, parameter) in parameters.iter().enumerate() {
             let local_id = registered
                 .canonical_by_local

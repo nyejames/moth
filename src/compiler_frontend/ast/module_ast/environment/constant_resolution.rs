@@ -44,7 +44,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
-use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -63,7 +63,7 @@ use std::sync::Arc;
 /// what is genuinely module-wide, and keeps `resolve_constant_header` down to the state that
 /// really does change between constants.
 pub(crate) struct ConstantResolutionSessionInput {
-    pub generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    pub generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
     pub nominal_type_ids_by_path: Rc<FxHashMap<InternedPath, TypeId>>,
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,

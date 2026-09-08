@@ -23,9 +23,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId,
@@ -33,9 +31,6 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, PublicFoldedValue,
-};
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
@@ -255,55 +250,6 @@ pub(super) fn materialised_nominal_declaration(
         ),
         config_qualifier: None,
     })
-}
-
-pub(super) fn materialised_generic_nominal_metadata(
-    type_id: TypeId,
-    type_environment: &TypeEnvironment,
-) -> Result<Option<GenericDeclarationMetadata>, CompilerError> {
-    let Some(generic_parameter_list_id) =
-        type_environment.generic_parameter_list_id_for_type(type_id)
-    else {
-        return Ok(None);
-    };
-    let environment_parameters = type_environment
-        .generic_parameters(generic_parameter_list_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Materialised generic nominal has no registered parameter list",
-            )
-        })?
-        .parameters
-        .iter()
-        .enumerate()
-        .map(|(index, parameter)| GenericParameter {
-            id: TypeParameterId(index as u32),
-            name: parameter.name,
-            location: Default::default(),
-            trait_bounds: Vec::new(),
-        })
-        .collect::<Vec<_>>();
-    let kind = match type_environment.get(type_id) {
-        Some(TypeDefinition::Struct(_)) => GenericDeclarationKind::Struct,
-        Some(TypeDefinition::Choice(_)) => GenericDeclarationKind::Choice,
-        Some(TypeDefinition::GenericInstance(_)) => {
-            return Err(CompilerError::compiler_error(
-                "Materialised generic nominal metadata target is an instance",
-            ));
-        }
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "Materialised generic nominal metadata target is not a struct or choice",
-            ));
-        }
-    };
-    Ok(Some(GenericDeclarationMetadata {
-        kind,
-        parameters: GenericParameterList {
-            parameters: environment_parameters,
-        },
-        declaration_location: Default::default(),
-    }))
 }
 
 pub(super) fn materialised_struct_fields(
@@ -1253,23 +1199,22 @@ fn intern_materialisation_nominal(
             ))
         })?;
 
-    let parsed_parameters = GenericParameterList {
-        parameters: blueprint
-            .generic_parameters
-            .iter()
-            .enumerate()
-            .map(|(index, parameter)| GenericParameter {
-                id: TypeParameterId(index as u32),
-                name: string_table.intern(&parameter.name),
-                location: Default::default(),
-                trait_bounds: Vec::new(),
-            })
-            .collect(),
-    };
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
     // nominal for field/variant substitution does not re-run declaration-site evidence solving.
-    let generic_parameter_registration = (!parsed_parameters.parameters.is_empty()).then(|| {
-        type_environment.register_generic_parameter_list(&parsed_parameters, &FxHashMap::default())
+    let generic_parameter_registration = (!blueprint.generic_parameters.is_empty()).then(|| {
+        type_environment.register_generic_parameter_list(
+            blueprint
+                .generic_parameters
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| {
+                    (
+                        TypeParameterId(index as u32),
+                        string_table.intern(&parameter.name),
+                    )
+                }),
+            &FxHashMap::default(),
+        )
     });
     let generic_parameter_list_id = generic_parameter_registration
         .as_ref()

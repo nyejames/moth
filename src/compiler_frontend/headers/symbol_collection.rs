@@ -1,7 +1,7 @@
 //! Order-independent header symbol collection.
 //!
-//! WHAT: validates declared names, builds per-file dependency/export maps, records generic declaration
-//! metadata, and stages builtin declarations during header parsing.
+//! WHAT: validates declared names, builds per-file dependency/export maps, records generic
+//! declaration kinds, and stages builtin declarations during header parsing.
 //! WHY: this work depends only on parsed headers, not dependency order. Keeping it separate lets
 //! `prepare_header_syntax` stay orchestration-first and leaves dependency sorting as the owner of
 //! declaration ordering.
@@ -18,7 +18,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterLis
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols, register_declared_symbol,
+    GenericDeclarationKind, ModuleSymbols, register_declared_symbol,
 };
 use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
@@ -221,7 +221,7 @@ fn register_header_symbol(
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
             );
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -253,7 +253,7 @@ fn register_header_symbol(
             module_symbols
                 .nominal_type_paths
                 .insert(header.tokens.src_path.to_owned());
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -273,7 +273,7 @@ fn register_header_symbol(
             module_symbols
                 .nominal_type_paths
                 .insert(header.tokens.src_path.to_owned());
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -358,7 +358,7 @@ fn register_builtin_symbols(module_symbols: &mut ModuleSymbols, string_table: &m
         .extend(builtin_manifest.ast_struct_nodes);
 }
 
-fn register_generic_declaration_metadata(
+fn register_generic_declaration_kind(
     module_symbols: &mut ModuleSymbols,
     header: &Header,
     generic_parameters: &GenericParameterList,
@@ -368,14 +368,9 @@ fn register_generic_declaration_metadata(
         return;
     }
 
-    // Semantic generic behavior belongs to the generics implementation plan; this header-stage
-    // metadata only preserves parsed declaration facts for later AST work.
-    module_symbols.generic_declarations_by_path.insert(
-        header.tokens.src_path.to_owned(),
-        GenericDeclarationMetadata {
-            kind,
-            parameters: generic_parameters.to_owned(),
-            declaration_location: header.name_location.to_owned(),
-        },
-    );
+    // Header classification records only the declaration kind. Canonical parameter names and
+    // arity are owned by TypeEnvironment once AST registers the declaration.
+    module_symbols
+        .generic_declarations_by_path
+        .insert(header.tokens.src_path.to_owned(), kind);
 }

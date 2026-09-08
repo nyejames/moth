@@ -3444,3 +3444,21 @@ fits were 0.97, 0.79 and 1.57, within budget. Timer erasure passed with a 9,027,
 binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
 Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
 commit containing this subsection.
+
+### Generic parameter and bound anchor checkpoint (1D5c4)
+
+Parsed generic parameters and bounds preserve their original token spans. Synthetic trait `This`
+uses the authored trait declaration's name anchor. Semantic registration consumes ordered IDs and
+names directly. Generic declaration maps no longer duplicate parsed parameter lists or locations.
+The exactness regression preserves nine anchors through string remapping and nonidentity source
+rebinding, resolving the original extended rows after multibyte text. This interval checkpoint
+claims no aggregate retained-memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, the 1,319-file source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +4 ms CLI and 0 ms frontend averages, excluding changed docs workloads.
+Scaling fits were 0.98, 0.77 and 1.61, within budget. Timer erasure passed with a 9,027,216-byte
+no-timer binary. These bounded checks establish neither five-run medians nor phase-wide memory
+evidence. Independent exactness, semantic ownership and regression review is clean. The accepted
+checkpoint is the commit containing this subsection.

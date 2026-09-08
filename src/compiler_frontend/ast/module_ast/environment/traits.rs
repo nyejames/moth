@@ -35,6 +35,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
@@ -333,11 +334,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let visibility = self.header_visibility(header, string_table)?;
 
         let this_name = trait_this_name(string_table);
-        let this_parameters =
-            trait_this_parameter_list(this_name, declaration.name_location.clone());
-        let registered_this = self
-            .type_environment
-            .register_generic_parameter_list(&this_parameters, &FxHashMap::default());
+        let this_parameters = trait_this_parameter_list(
+            this_name,
+            declaration.name_location.clone(),
+            declaration.span,
+        );
+        let registered_this = self.type_environment.register_generic_parameter_list(
+            this_parameters
+                .parameters
+                .iter()
+                .map(|parameter| (parameter.id, parameter.name)),
+            &FxHashMap::default(),
+        );
         let Some(this_canonical_id) = registered_this
             .canonical_by_local
             .get(&TypeParameterId(0))
@@ -827,12 +835,14 @@ fn location_starts_after(left: &SourceLocation, right: &SourceLocation) -> bool 
 fn trait_this_parameter_list(
     this_name: StringId,
     location: SourceLocation,
+    span: LocalSpan,
 ) -> GenericParameterList {
     GenericParameterList {
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: this_name,
             location,
+            span,
             trait_bounds: Vec::new(),
         }],
     }

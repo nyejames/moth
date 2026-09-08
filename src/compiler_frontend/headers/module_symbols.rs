@@ -29,7 +29,6 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
@@ -125,13 +124,6 @@ pub(crate) enum GenericDeclarationKind {
     Function,
     Struct,
     Choice,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GenericDeclarationMetadata {
-    pub(crate) kind: GenericDeclarationKind,
-    pub(crate) parameters: GenericParameterList,
-    pub(crate) declaration_location: SourceLocation,
 }
 
 /// Dense module-local identity assigned when Stage 3 finalises declaration order.
@@ -259,7 +251,7 @@ pub(crate) struct ModuleSymbols {
     pub(crate) type_alias_paths: FxHashSet<InternedPath>,
     pub(crate) nominal_type_paths: FxHashSet<InternedPath>,
     pub(crate) trait_paths: FxHashSet<InternedPath>,
-    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
+    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationKind>,
 
     // Builtin data merged during header parsing.
     pub(crate) builtin_visible_symbol_paths: FxHashSet<InternedPath>,

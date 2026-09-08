@@ -501,12 +501,12 @@ pub(crate) fn resolve_type(
 
             // Attempt lazy instantiation for user-declared generic structs/choices.
             if let GenericBaseType::ResolvedNominal(base_path) = &resolved_base
-                && let Some(metadata) = context
+                && let Some(kind) = context
                     .generic_declarations_by_path
                     .and_then(|decls| decls.get(base_path))
                 && let Some(instantiated) = instantiate_generic_nominal(
                     base_path,
-                    metadata,
+                    kind,
                     &resolved_arguments,
                     location,
                     context,

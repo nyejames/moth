@@ -143,13 +143,13 @@ impl ScopeContext {
         self
     }
 
-    /// Register generic declaration metadata by path.
+    /// Register generic declaration kinds by path.
     ///
-    /// WHAT: records generic parameter metadata for nominal declarations.
+    /// WHAT: records which generic declarations are nominal types or functions.
     /// Used during generic function instantiation and type argument validation.
     pub(crate) fn with_generic_declarations(
         mut self,
-        declarations: Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+        declarations: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).generic_declarations_by_path = Some(declarations);
         self

@@ -9,20 +9,22 @@
 //!      `builtin_for` can find. Tests here pin that contract without
 //!      touching the full builder pipeline.
 
-use super::signature_with_trait_this_as_parameter;
+use super::{signature_with_trait_this_as_parameter, trait_this_parameter_list};
 use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
@@ -345,7 +347,7 @@ fn register_error_nominal_type(
 
 #[test]
 fn trait_this_substitution_preserves_authored_signature_spans() {
-    let source = "|This, other This| -> This\n";
+    let source = "CLONE_VALUE must:\n    clone_value |This, other This| -> This\n;\n";
     let mut strings = StringTable::new();
     let path = std::path::PathBuf::from("requirement.moth");
     let sources =
@@ -366,19 +368,25 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         &mut spans,
     )
     .expect("signature tokens");
-    tokens.index = tokens
-        .tokens
-        .iter()
-        .position(|token| token.kind == TokenKind::TypeParameterBracket)
-        .expect("signature source must contain an opening `|`");
-    let method_path = scope.append(strings.intern("clone_value"));
-    let signature = parse_trait_requirement_signature_syntax(
+    let prepared = parse_file_headers_with_table(
         &mut tokens,
-        &mut Vec::new(),
+        &path,
+        &HeaderParseOptions::default(),
         &mut strings,
-        &method_path,
+        0,
+        0,
+        &mut spans,
     )
-    .expect("trait requirement signature");
+    .expect("trait declaration should prepare");
+    let declaration = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Trait { declaration } => Some(declaration),
+            _ => None,
+        })
+        .expect("authored trait declaration");
+    let signature = &declaration.requirements[0].signature;
     assert_eq!(signature.parameters.len(), 2);
     assert_eq!(signature.returns.len(), 1);
     let concrete_name = strings.intern("Concrete");
@@ -394,7 +402,31 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         ParsedTypeRef::This { span, .. } => *span,
         other => panic!("expected authored This return, got {other:?}"),
     };
-    let substituted = signature_with_trait_this_as_parameter(&signature, concrete_name);
+    let this_name = strings.intern("This");
+    let synthetic_parameters = trait_this_parameter_list(
+        this_name,
+        declaration.name_location.clone(),
+        declaration.span,
+    );
+    let synthetic_parameter = synthetic_parameters
+        .parameters
+        .first()
+        .expect("trait This parameter");
+    assert_eq!(synthetic_parameter.name, this_name);
+    assert_eq!(
+        synthetic_parameter.location, declaration.name_location,
+        "synthetic This must preserve the supplied legacy location"
+    );
+    assert_eq!(
+        synthetic_parameter.span, declaration.span,
+        "synthetic This must preserve the supplied exact span"
+    );
+    let synthetic_range = synthetic_parameter.span.resolve_with(spans.resolver());
+    assert_eq!(
+        &source[synthetic_range.start() as usize..synthetic_range.end() as usize],
+        "CLONE_VALUE"
+    );
+    let substituted = signature_with_trait_this_as_parameter(signature, concrete_name);
     assert_eq!(substituted.parameters.len(), signature.parameters.len());
     assert_eq!(substituted.returns.len(), signature.returns.len());
     for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {

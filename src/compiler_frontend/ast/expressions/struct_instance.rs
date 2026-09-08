@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -111,14 +112,13 @@ pub(super) fn parse_struct_constructor_expression(
     // ------------------------
     let (resolved_fields, generic_instance_key, instance_type_id) = if let Some(generic_decls) =
         &context.generic_declarations_by_path
-        && let Some(metadata) = generic_decls.get(struct_path)
-        && !metadata.parameters.is_empty()
+        && let Some(kind) = generic_decls.get(struct_path)
+        && matches!(kind, GenericDeclarationKind::Struct)
     {
         let inference = infer_generic_nominal_constructor(
             GenericNominalConstructorInput {
                 nominal_path: struct_path,
                 display_name: &struct_name_display,
-                metadata,
                 template: GenericNominalTemplate::StructFields(&constructor_field_views),
                 constructor_fields: Some(&constructor_field_views),
                 raw_args: Some(&raw_args),
@@ -129,22 +129,20 @@ pub(super) fn parse_struct_constructor_expression(
             string_table,
         )?;
 
-        let resolved_fields = if let Some(instance_type_id) = inference.instance_type_id {
+        let resolved_fields = {
             let type_env = type_interner.environment();
             type_env
-                .fields_for(instance_type_id)
+                .fields_for(inference.instance_type_id)
                 .map(|field_defs| {
                     ConstructorField::from_field_definitions_with_defaults(field_defs, fields)
                 })
                 .unwrap_or_else(|| constructor_field_views.clone())
-        } else {
-            constructor_field_views.clone()
         };
 
         (
             resolved_fields,
             inference.instance_key,
-            inference.instance_type_id,
+            Some(inference.instance_type_id),
         )
     } else {
         (constructor_field_views, None, None)

@@ -21,22 +21,18 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation,
 };
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata,
-};
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 
 fn numeric_token(value: &str, string_table: &mut StringTable) -> Token {
@@ -76,21 +72,23 @@ fn assert_diagnostic_payload(
     );
 }
 
-fn single_parameter_metadata(
-    parameter_name: crate::compiler_frontend::symbols::string_interning::StringId,
-) -> GenericDeclarationMetadata {
-    GenericDeclarationMetadata {
-        kind: GenericDeclarationKind::Struct,
-        parameters: GenericParameterList {
-            parameters: vec![GenericParameter {
-                id: TypeParameterId(0),
-                name: parameter_name,
-                location: SourceLocation::default(),
-                trait_bounds: Vec::new(),
-            }],
-        },
-        declaration_location: SourceLocation::default(),
-    }
+fn register_single_parameter_struct(
+    type_environment: &mut TypeEnvironment,
+    path: &InternedPath,
+    parameter_name: StringId,
+) -> TypeId {
+    let parameters = type_environment.register_generic_parameter_list(
+        [(TypeParameterId(0), parameter_name)].into_iter(),
+        &FxHashMap::default(),
+    );
+    let (_, type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: path.clone(),
+        fields: Box::new([]),
+        generic_parameters: Some(parameters.list_id),
+        const_record: false,
+    });
+    type_id
 }
 
 fn resolve_type_annotation_error(
@@ -681,20 +679,21 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     };
 
     let box_path = InternedPath::from_single_str("Box", &mut string_table);
+    let mut type_environment = TypeEnvironment::new();
+    let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
-            DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
+            DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
-    generic_declarations.insert(box_path.to_owned(), single_parameter_metadata(t_name));
+    generic_declarations.insert(box_path.to_owned(), GenericDeclarationKind::Struct);
 
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
-    let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: Some(SourceId::COMPILATION_ROOT),
@@ -743,20 +742,21 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     };
 
     let box_path = InternedPath::from_single_str("Box", &mut string_table);
+    let mut type_environment = TypeEnvironment::new();
+    let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
-            DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
+            DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
-    generic_declarations.insert(box_path, single_parameter_metadata(t_name));
+    generic_declarations.insert(box_path, GenericDeclarationKind::Struct);
 
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
-    let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: Some(SourceId::COMPILATION_ROOT),
@@ -811,20 +811,21 @@ fn bare_generic_type_name_requires_type_arguments() {
     let unresolved = DataType::NamedType(box_name);
 
     let box_path = InternedPath::from_single_str("Box", &mut string_table);
+    let mut type_environment = TypeEnvironment::new();
+    let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
-            DataType::runtime_struct(box_path.to_owned(), builtin_type_ids::NONE),
+            DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
-    generic_declarations.insert(box_path, single_parameter_metadata(t_name));
+    generic_declarations.insert(box_path, GenericDeclarationKind::Struct);
 
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
-    let mut type_environment = TypeEnvironment::new();
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: Some(SourceId::COMPILATION_ROOT),

@@ -32,9 +32,7 @@ use super::generic_bindings::{BindingConflict, GenericTypeBindings};
 use super::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
 };
-use super::generic_parameters::{
-    GenericParameterList as ParsedGenericParameterList, TypeParameterId,
-};
+use super::generic_parameters::TypeParameterId;
 use super::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, ConstructedTypeKey, FunctionTypeKey,
     GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
@@ -189,7 +187,7 @@ pub struct GenericParameter {
     pub(crate) trait_bounds: Vec<TraitId>,
 }
 
-/// Result of registering a parsed generic parameter list.
+/// Result of registering a declaration-local generic parameter list.
 ///
 /// WHAT: gives callers both the canonical list ID and the declaration-local to
 /// canonical parameter mapping.
@@ -518,41 +516,42 @@ impl TypeEnvironment {
             })
     }
 
-    /// Registers a parsed generic parameter list and returns its canonical semantic IDs.
+    /// Registers a generic parameter list and returns its canonical semantic IDs.
     pub(crate) fn register_generic_parameter_list(
         &mut self,
-        parsed_parameters: &ParsedGenericParameterList,
+        parameters: impl ExactSizeIterator<Item = (TypeParameterId, StringId)>,
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
     ) -> RegisteredGenericParameterList {
         let id = GenericParameterListId(self.next_generic_parameter_list_id);
         self.next_generic_parameter_list_id += 1;
 
-        let mut parameters = Vec::with_capacity(parsed_parameters.parameters.len());
+        let mut canonical_parameters = Vec::with_capacity(parameters.len());
         let mut canonical_by_local = FxHashMap::default();
-        for parameter in &parsed_parameters.parameters {
+        for (local_id, name) in parameters {
             let canonical_id = self.allocate_generic_parameter_id();
-            canonical_by_local.insert(parameter.id, canonical_id);
+            canonical_by_local.insert(local_id, canonical_id);
 
             // Registering the list also interns each parameter as a type so later
             // resolution can query a stable TypeId without re-promoting local IDs.
-            self.intern_generic_parameter(canonical_id, parameter.name);
+            self.intern_generic_parameter(canonical_id, name);
             let trait_bounds = resolved_bounds_by_local
-                .get(&parameter.id)
+                .get(&local_id)
                 .cloned()
                 .unwrap_or_default();
 
             self.trait_bounds_by_generic_parameter_id
                 .insert(canonical_id, trait_bounds.clone());
 
-            parameters.push(GenericParameter {
+            canonical_parameters.push(GenericParameter {
                 id: canonical_id,
-                name: parameter.name,
+                name,
                 trait_bounds,
             });
         }
 
-        self.generic_parameter_lists
-            .push(GenericParameterList { parameters });
+        self.generic_parameter_lists.push(GenericParameterList {
+            parameters: canonical_parameters,
+        });
 
         RegisteredGenericParameterList {
             list_id: id,
@@ -640,6 +639,20 @@ impl TypeEnvironment {
                 }),
             _ => None,
         }
+    }
+
+    /// Returns canonical parameters in declaration order, including through nominal path aliases.
+    /// Semantic arity and parameter names come from registration rather than parsed header copies.
+    pub(crate) fn canonical_parameters_for_nominal(
+        &self,
+        nominal_path: &InternedPath,
+    ) -> Option<&[GenericParameter]> {
+        let nominal_id = self.nominal_id_for_path(nominal_path)?;
+        let nominal_type_id = self.type_id_for_nominal_id(nominal_id)?;
+        let parameter_list_id = self.generic_parameter_list_id_for_type(nominal_type_id)?;
+        let parameter_list = self.generic_parameters(parameter_list_id)?;
+
+        Some(parameter_list.parameters.as_slice())
     }
 
     // -----------------

@@ -430,9 +430,9 @@ fn is_nominal_constructor(
     }
 
     // Fallback: generic declarations with struct/choice kinds are also constructors.
-    if let Some(metadata) = module_symbols.generic_declarations_by_path.get(target_path) {
+    if let Some(kind) = module_symbols.generic_declarations_by_path.get(target_path) {
         return matches!(
-            metadata.kind,
+            kind,
             GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
         );
     }

@@ -46,9 +46,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
@@ -339,19 +337,14 @@ fn register_param_list(
     string_table: &mut StringTable,
     param_names: &[&str],
 ) -> GenericParameterListId {
-    let parameters = param_names
-        .iter()
-        .enumerate()
-        .map(|(position, name)| GenericParameter {
-            id: TypeParameterId(position as u32),
-            name: string_table.intern(name),
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        })
-        .collect();
-    let list = GenericParameterList { parameters };
-    env.register_generic_parameter_list(&list, &FxHashMap::default())
-        .list_id
+    env.register_generic_parameter_list(
+        param_names
+            .iter()
+            .enumerate()
+            .map(|(position, name)| (TypeParameterId(position as u32), string_table.intern(name))),
+        &FxHashMap::default(),
+    )
+    .list_id
 }
 
 fn register_single_param_list(
@@ -368,17 +361,13 @@ fn register_param_list_with_bounds(
     param_name: &str,
     bound_trait_ids: Vec<TraitId>,
 ) -> GenericParameterListId {
-    let parameters = vec![GenericParameter {
-        id: TypeParameterId(0),
-        name: string_table.intern(param_name),
-        location: SourceLocation::default(),
-        trait_bounds: Vec::new(),
-    }];
-    let list = GenericParameterList { parameters };
     let mut bounds_by_local: FxHashMap<TypeParameterId, Vec<TraitId>> = FxHashMap::default();
     bounds_by_local.insert(TypeParameterId(0), bound_trait_ids);
-    env.register_generic_parameter_list(&list, &bounds_by_local)
-        .list_id
+    env.register_generic_parameter_list(
+        [(TypeParameterId(0), string_table.intern(param_name))].into_iter(),
+        &bounds_by_local,
+    )
+    .list_id
 }
 
 fn root_table(

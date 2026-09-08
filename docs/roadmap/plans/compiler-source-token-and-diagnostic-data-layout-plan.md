@@ -70,20 +70,17 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5c3, parsed type and collection-capacity anchors.
-- Goal: copy original LocalSpan values into each located parsed type/capacity variant. `Inferred`
-  stays location-free. Preserve first-token atom/qualified anchors, opening-brace collection/map
-  anchors, `of` application anchors, `?` option anchors and capacity-token anchors.
-- Synthetic content types reuse their supplied span; trait `This` substitution preserves every
-  original child and constructor anchor. No new span encoding or source scan is needed.
-- Remove unused parsed `BuiltinNone` and `Result` variants and their dead consumers. Neither has
-  a production constructor, and neither is accepted type syntax. Options and fallible return slots
-  retain their existing semantic owners.
-- Non-goals: generic-parameter metadata, resolved semantic spans, new source owners, diagnostic
+- Phase: 1D5c4, generic parameter and bound anchors.
+- Goal: copy original LocalSpan values into parsed generic parameters and bounds. Synthetic
+  trait `This` reuses its authored trait declaration anchor.
+- Semantic registration consumes local parameter IDs and names, not manufactured parsed syntax.
+  Remove duplicate parsed lists from generic declaration metadata. Keep declaration kinds in the
+  existing map and use canonical TypeEnvironment parameters for semantic names and arity.
+- Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `c79763fec` — trait preparation anchors, with full validation and independent review accepted.
+- `b1e7dcb15` — parsed type/capacity anchors, with full validation and independent review accepted.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -92,14 +89,18 @@ CURRENT_WORKTREE_STATE:
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
-  this checkpoint. The next slice is 1D5c4, generic parameters and bounds.
+  `b1e7dcb15`. Its worktree was clean after verification. 1D5c4 is implemented, validated and
+  independently reviewed, ready for its checkpoint commit. Parsed generic parameters and bounds
+  preserve original anchors. Generic declaration maps retain only kinds. Canonical registered
+  parameters own semantic names and arity across local, imported and materialised nominals.
 - Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
   copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
   redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
   the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
 - Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
-  trait declaration, requirement, reference and conformance-target spans. Remove them in 1E
-  and confirm none survives 1H.
+  trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
+  declaration allowance because synthetic `This` now consumes that span. Remove the remaining
+  three in 1E and confirm none survives 1H.
 - Two 1D5c1 field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
   and `ChoiceVariantSyntax.span`. Remove them in the owning 1E batch and confirm none survives 1H.
 - The user identified `librust_out.rmeta` as an earlier-session Rust metadata artefact;
@@ -190,6 +191,15 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
+- 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
+  5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
+  source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
+  trait `This` (1), type syntax (52), header remap (29), parsed remap (10), generic integrations
+  (186) and trait integrations (110) passed. The nine-anchor regression resolves original extended
+  rows after UTF-8 text, string remapping and nonidentity source rebinding. Synthetic `This`
+  retains the parsed trait declaration's name anchor and legacy location. Independent review is
+  clean with no required findings or material test gaps. An initial Clippy type-complexity failure
+  in the test closure was corrected before the passing full gate.
 - 1D5c3 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused type syntax (52),
@@ -232,7 +242,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint accepted 1D5c3, then implement generic parameter/bound anchors in 1D5c4.
+- next action: commit accepted 1D5c4, then implement header/fragment/source-contract anchors in 1D5c5.
   Continue remaining 1D5c/1D6 and Phase 1, with final review and
   closeout followed by the requested external review pause. Phases 2–7 remain pending.
 
@@ -778,8 +788,9 @@ actual remaining consumer, not blanket suppressions.
       consolidate duplicate name locations without changing synthesized semantic names.
     - [x] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
       anchor and all synthetic/materialized constructors. Resolved types remain 1E2.
-    - [ ] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
-      synthetic metadata without manufacturing source identities.
+    - [x] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
+      synthetic metadata without manufacturing source identities. Semantic registration consumes
+      ordered parameter IDs and names. Canonical type parameters replace duplicated parsed metadata.
     - [ ] **1D5c5 — header names, const fragments and source contracts:** thread the original
       builder only where a joined range needs encoding. Keep const-fragment source ownership
       explicit after module aggregation and preserve the infrastructure failure lane. Source contracts

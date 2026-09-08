@@ -58,7 +58,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
-use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
@@ -391,7 +391,7 @@ pub struct ScopeShared {
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
     pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>>,
     pub(crate) generic_declarations_by_path:
-        Option<Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>>,
+        Option<Rc<FxHashMap<InternedPath, GenericDeclarationKind>>>,
     pub(crate) resolved_struct_fields_by_path:
         Option<Rc<FxHashMap<InternedPath, Vec<Declaration>>>>,
     pub(crate) choice_variant_shells_by_path:

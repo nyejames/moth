@@ -96,6 +96,7 @@ fn make_generic_parameter_list(name: &str, string_table: &mut StringTable) -> Ge
             id: TypeParameterId(0),
             name: string_table.intern(name),
             location: make_location("test.moth", string_table),
+            span: LocalSpan::source_start(),
             trait_bounds: Vec::new(),
         }],
     }

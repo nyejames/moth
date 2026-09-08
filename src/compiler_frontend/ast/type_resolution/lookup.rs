@@ -460,7 +460,7 @@ fn reject_bare_generic_type_name(
     location: &SourceLocation,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<()> {
-    let Some(metadata) = context
+    let Some(kind) = context
         .generic_declarations_by_path
         .and_then(|generic_declarations| generic_declarations.get(canonical_path))
     else {
@@ -468,7 +468,7 @@ fn reject_bare_generic_type_name(
     };
 
     if matches!(
-        metadata.kind,
+        kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
         return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
@@ -494,7 +494,7 @@ fn resolve_generic_base_path(
     location: &SourceLocation,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<GenericBaseType> {
-    let Some(metadata) = context
+    let Some(kind) = context
         .generic_declarations_by_path
         .and_then(|generic_declarations| generic_declarations.get(canonical_path))
     else {
@@ -506,7 +506,7 @@ fn resolve_generic_base_path(
     };
 
     if !matches!(
-        metadata.kind,
+        kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
         return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
@@ -516,7 +516,11 @@ fn resolve_generic_base_path(
         )));
     }
 
-    let expected = metadata.parameters.len();
+    let expected = context
+        .type_environment
+        .canonical_parameters_for_nominal(canonical_path)
+        .expect("generic nominal registration must include canonical parameters")
+        .len();
     let actual = arguments.len();
     if actual != expected {
         return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(

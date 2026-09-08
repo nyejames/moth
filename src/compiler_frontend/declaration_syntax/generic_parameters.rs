@@ -54,10 +54,12 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     loop {
         match token_stream.current_token_kind().to_owned() {
             TokenKind::Symbol(name) if expecting_parameter => {
+                let span = token_stream.tokens[token_stream.index].span;
                 parameters.push(GenericParameter {
                     id: TypeParameterId(parameters.len() as u32),
                     name,
                     location: token_stream.current_location(),
+                    span,
                     trait_bounds: Vec::new(),
                 });
                 token_stream.advance();
@@ -186,6 +188,7 @@ fn parse_trait_bounds_for_current_parameter(
     loop {
         match token_stream.current_token_kind().to_owned() {
             TokenKind::Symbol(trait_name) if expecting_trait_name => {
+                let span = token_stream.tokens[token_stream.index].span;
                 ensure_trait_bound_name_is_all_caps(
                     trait_name,
                     token_stream.current_location(),
@@ -195,6 +198,7 @@ fn parse_trait_bounds_for_current_parameter(
                 parameter.trait_bounds.push(GenericTraitBound {
                     trait_name,
                     location: token_stream.current_location(),
+                    span,
                 });
                 token_stream.advance();
                 expecting_trait_name = false;

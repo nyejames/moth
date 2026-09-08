@@ -44,9 +44,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList as ParsedGenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -462,16 +460,10 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     // Register a generic parameter list with one authored parameter "A".
     let a_name = string_table.intern("A");
-    let parsed_params = ParsedGenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name: a_name,
-            location: SourceLocation::default(),
-            trait_bounds: vec![],
-        }],
-    };
-    let registered_list =
-        env.register_generic_parameter_list(&parsed_params, &FxHashMap::default());
+    let registered_list = env.register_generic_parameter_list(
+        [(TypeParameterId(0), a_name)].into_iter(),
+        &FxHashMap::default(),
+    );
     let list_id = registered_list.list_id;
 
     // Register a generic struct Box<A> whose generic parameter list matches the method

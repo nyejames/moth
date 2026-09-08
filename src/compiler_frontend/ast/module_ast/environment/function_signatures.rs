@@ -99,15 +99,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 )?;
             }
 
-            let registered_generic_parameters =
-                if generic_parameters.is_empty() {
-                    None
-                } else {
-                    Some(self.type_environment.register_generic_parameter_list(
-                        generic_parameters,
+            let registered_generic_parameters = if generic_parameters.is_empty() {
+                None
+            } else {
+                Some(
+                    self.type_environment.register_generic_parameter_list(
+                        generic_parameters
+                            .parameters
+                            .iter()
+                            .map(|parameter| (parameter.id, parameter.name)),
                         &resolved_bounds_by_local,
-                    ))
-                };
+                    ),
+                )
+            };
 
             let generic_parameter_scope = self.generic_parameter_scope(
                 generic_parameters,

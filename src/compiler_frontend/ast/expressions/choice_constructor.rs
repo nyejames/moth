@@ -35,6 +35,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -173,17 +174,17 @@ pub(super) fn parse_choice_construct(
         )?);
     }
 
-    let generic_declaration_metadata = context
+    let generic_declaration_kind = context
         .generic_declarations_by_path
         .as_ref()
         .and_then(|declarations| declarations.get(&nominal_path))
-        .filter(|metadata| !metadata.parameters.is_empty());
+        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
 
     // ---------------------------
     //  Resolve generic parameters
     // ---------------------------
     let (instantiated_variant_defs, choice_type_id, generic_instance_key) =
-        if let Some(metadata) = generic_declaration_metadata {
+        if generic_declaration_kind.is_some() {
             let constructor_fields = match &variant.payload {
                 ChoiceVariantPayloadDefinition::Record { fields } => {
                     Some(ConstructorField::from_choice_payload_fields(fields))
@@ -194,7 +195,6 @@ pub(super) fn parse_choice_construct(
                 GenericNominalConstructorInput {
                     nominal_path: &nominal_path,
                     display_name: &choice_name_str,
-                    metadata,
                     template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
@@ -205,20 +205,17 @@ pub(super) fn parse_choice_construct(
                 string_table,
             )?;
 
-            let instantiated_variant_defs: Vec<ChoiceVariantDefinition> =
-                if let Some(instance_type_id) = inference.instance_type_id {
-                    let type_env = type_interner.environment();
-                    type_env
-                        .variants_for(instance_type_id)
-                        .map(|defs| defs.to_vec())
-                        .unwrap_or_else(|| variant_definitions.clone())
-                } else {
-                    variant_definitions.clone()
-                };
+            let instantiated_variant_defs: Vec<ChoiceVariantDefinition> = {
+                let type_env = type_interner.environment();
+                type_env
+                    .variants_for(inference.instance_type_id)
+                    .map(|defs| defs.to_vec())
+                    .unwrap_or_else(|| variant_definitions.clone())
+            };
 
             (
                 instantiated_variant_defs,
-                inference.instance_type_id.unwrap_or(type_id),
+                inference.instance_type_id,
                 inference.instance_key,
             )
         } else {

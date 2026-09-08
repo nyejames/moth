@@ -23,7 +23,7 @@ use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
-use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -54,8 +54,7 @@ pub(crate) struct TypeResolutionContext<'a> {
     /// Alias consumers use the required target identity directly. The diagnostic spelling and
     /// declaration location remain attached for use-site type text and declaration diagnostics.
     pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub generic_declarations_by_path:
-        Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    pub generic_declarations_by_path: Option<&'a FxHashMap<InternedPath, GenericDeclarationKind>>,
     pub generic_parameters: Option<&'a GenericParameterScope>,
     pub generic_substitutions: Option<&'a FxHashMap<GenericParameterId, TypeId>>,
     /// Resolved struct fields by canonical path, including generic struct templates.
@@ -84,8 +83,7 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub generic_declarations_by_path:
-        Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    pub generic_declarations_by_path: Option<&'a FxHashMap<InternedPath, GenericDeclarationKind>>,
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
     pub type_environment: &'a mut TypeEnvironment,
     /// Visible namespace records for resolving namespace-qualified type names.

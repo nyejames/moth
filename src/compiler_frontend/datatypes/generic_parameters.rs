@@ -7,6 +7,7 @@
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -33,6 +34,7 @@ pub struct GenericParameter {
     pub id: TypeParameterId,
     pub name: StringId,
     pub location: SourceLocation,
+    pub span: LocalSpan,
     pub trait_bounds: Vec<GenericTraitBound>,
 }
 
@@ -45,6 +47,7 @@ pub struct GenericParameter {
 pub struct GenericTraitBound {
     pub trait_name: StringId,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -90,10 +93,6 @@ impl GenericParameterList {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.parameters.is_empty()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.parameters.len()
     }
 
     pub(crate) fn contains_name(&self, name: StringId) -> bool {

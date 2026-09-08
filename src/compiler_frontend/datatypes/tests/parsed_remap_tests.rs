@@ -215,6 +215,7 @@ fn generic_parameter_remaps_name_and_location() {
         id: TypeParameterId(0),
         name: t_name,
         location,
+        span: LocalSpan::source_start(),
         trait_bounds: Vec::new(),
     };
 
@@ -239,12 +240,14 @@ fn generic_parameter_list_remaps_all_parameters() {
                 id: TypeParameterId(0),
                 name: t_name,
                 location: make_location(&mut local),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: u_name,
                 location: make_location(&mut local),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
         ],

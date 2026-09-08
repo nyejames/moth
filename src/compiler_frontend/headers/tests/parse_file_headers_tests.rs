@@ -25,6 +25,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalTypeDef, ExternalTypeId, external_success_returns,
 };
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelectionRange, HeaderExportMode, RetainedDependencyClause,
 };
@@ -1515,7 +1516,7 @@ fn generic_declaration_headers_parse_parameter_lists() {
             }
             | HeaderKind::Choice {
                 generic_parameters, ..
-            } => generic_parameter_counts.push(generic_parameters.len()),
+            } => generic_parameter_counts.push(generic_parameters.parameters.len()),
             _ => {}
         }
     }
@@ -1527,23 +1528,59 @@ fn generic_declaration_headers_parse_parameter_lists() {
         "only declarations with generic parameters should be registered as generic declarations"
     );
 
-    let generic_names = headers
-        .module_symbols
-        .generic_declarations_by_path
-        .values()
-        .flat_map(|metadata| {
-            metadata
-                .parameters
+    let generic_declarations = &headers.module_symbols.generic_declarations_by_path;
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Function))
+            .count(),
+        1,
+        "the generic function must be registered by declaration kind"
+    );
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Struct))
+            .count(),
+        1,
+        "the generic struct must be registered by declaration kind"
+    );
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Choice))
+            .count(),
+        1,
+        "the generic choice must be registered by declaration kind"
+    );
+
+    let parsed_generic_names = headers
+        .headers
+        .iter()
+        .filter_map(|header| match &header.kind {
+            HeaderKind::Function {
+                generic_parameters, ..
+            }
+            | HeaderKind::Struct {
+                generic_parameters, ..
+            }
+            | HeaderKind::Choice {
+                generic_parameters, ..
+            } => Some(generic_parameters),
+            _ => None,
+        })
+        .flat_map(|generic_parameters| {
+            generic_parameters
                 .parameters
                 .iter()
                 .map(|parameter| string_table.resolve(parameter.name).to_owned())
         })
         .collect::<Vec<_>>();
-
-    assert!(generic_names.contains(&"T".to_owned()));
-    assert!(generic_names.contains(&"Item".to_owned()));
-    assert!(generic_names.contains(&"OkType".to_owned()));
-    assert!(generic_names.contains(&"ErrType".to_owned()));
+    assert_eq!(
+        parsed_generic_names,
+        vec!["T", "Item", "OkType", "ErrType"],
+        "parameter names remain owned by the parsed HeaderKind lists"
+    );
 }
 
 #[test]
@@ -6308,5 +6345,213 @@ INFERRED #= 1\n"
             Some(original.expected_text.as_str()),
             "span must resolve to the exact authored UTF-8 bytes"
         );
+    }
+}
+
+#[test]
+fn generic_parameter_and_bound_spans_retain_exact_ranges_after_remapping_and_rebinding() {
+    let parameter_name = format!("Element{}", "E".repeat(1100));
+    let display_trait_name = format!("DISPLAY_TEXT_{}", "D".repeat(1100));
+    let named_trait_name = format!("NAMED_{}", "N".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{display_trait_name} must:\n\
+;\n\
+{named_trait_name} must:\n\
+;\n\
+render_value type {parameter_name} is {display_trait_name} and {named_trait_name} |value {parameter_name}| -> String:\n\
+    return \"ok\"\n\
+;\n\
+Envelope type {parameter_name} is {display_trait_name} and {named_trait_name} = |\n\
+    value {parameter_name},\n\
+|\n\
+State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
+    Ready | value {parameter_name} |,\n\
+;\n"
+    );
+    let canonical = PathBuf::from("generic-anchor-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let tokenizer_extended_span_count = spans.len();
+    assert_eq!(
+        tokenizer_extended_span_count, 14,
+        "trait declarations, generic declarations, bounds and type uses should own the long rows"
+    );
+
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("generic headers should prepare");
+    assert!(
+        prepared.warnings.is_empty(),
+        "valid generic names should not add warning spans"
+    );
+    assert_eq!(
+        spans.len(),
+        tokenizer_extended_span_count,
+        "generic anchors must reuse the tokenizer's original extended rows"
+    );
+
+    let snapshot_anchors = |prepared: &FileFrontendPrepareOutput, table: &StringTable| {
+        let mut owner_counts = [0usize; 3];
+        let mut anchors = Vec::new();
+        for header in &prepared.headers {
+            let (owner_index, generic_parameters) = match &header.kind {
+                HeaderKind::Function {
+                    generic_parameters, ..
+                } => (0, generic_parameters),
+                HeaderKind::Struct {
+                    generic_parameters, ..
+                } => (1, generic_parameters),
+                HeaderKind::Choice {
+                    generic_parameters, ..
+                } => (2, generic_parameters),
+                _ => continue,
+            };
+            if generic_parameters.parameters.is_empty() {
+                continue;
+            }
+            owner_counts[owner_index] += 1;
+            for parameter in &generic_parameters.parameters {
+                anchors.push((
+                    parameter.span,
+                    parameter.location.start_byte,
+                    parameter.location.end_byte,
+                    table.resolve(parameter.name).to_owned(),
+                ));
+                for trait_bound in &parameter.trait_bounds {
+                    anchors.push((
+                        trait_bound.span,
+                        trait_bound.location.start_byte,
+                        trait_bound.location.end_byte,
+                        table.resolve(trait_bound.trait_name).to_owned(),
+                    ));
+                }
+            }
+        }
+        (owner_counts, anchors)
+    };
+
+    let (original_owner_counts, original_anchors) = snapshot_anchors(&prepared, &strings);
+    assert_eq!(
+        original_owner_counts,
+        [1, 1, 1],
+        "the regression must cover function, struct and choice generic owners"
+    );
+    assert_eq!(
+        original_anchors.len(),
+        9,
+        "each generic owner must retain one parameter and two bound anchors"
+    );
+    assert_eq!(
+        original_anchors
+            .iter()
+            .map(|anchor| anchor.3.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+        ]
+    );
+    let original_resolver = spans.resolver();
+    for (span, start_byte, end_byte, expected_text) in &original_anchors {
+        let resolved_range = span.resolve_with(original_resolver);
+        assert_eq!(resolved_range.start(), *start_byte);
+        assert_eq!(resolved_range.end(), *end_byte);
+        assert_eq!(
+            source.get(*start_byte as usize..*end_byte as usize),
+            Some(expected_text.as_str()),
+            "the original span must cover the exact authored UTF-8 bytes"
+        );
+    }
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("generic strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("generic-anchor-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span| {
+        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+        source
+            .get(range.start() as usize..range.end() as usize)
+            .expect("retained source range")
+    };
+
+    let (rebound_owner_counts, rebound_anchors) = snapshot_anchors(&prepared, &merged);
+    assert_eq!(rebound_owner_counts, original_owner_counts);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for (
+        (original_span, original_start, original_end, original_text),
+        (rebound_span, rebound_start, rebound_end, rebound_text),
+    ) in original_anchors.iter().zip(rebound_anchors.iter())
+    {
+        assert_eq!(rebound_span, original_span, "span encoding changed");
+        assert_eq!(rebound_start, original_start, "legacy anchor start changed");
+        assert_eq!(rebound_end, original_end, "legacy anchor end changed");
+        assert_eq!(
+            rebound_text, original_text,
+            "string remap changed anchor name"
+        );
+        let resolved_range = SourceSpan::new(prepared.file_id, *rebound_span).byte_range(&database);
+        assert_eq!(resolved_range.start(), *original_start);
+        assert_eq!(resolved_range.end(), *original_end);
+        assert_eq!(resolve(*rebound_span), original_text);
     }
 }

@@ -14,8 +14,8 @@ mod nominal_blueprints;
 mod semantic_closure;
 use nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
-    intern_materialisation_type_blueprint, materialised_generic_nominal_metadata,
-    materialised_nominal_declaration, materialised_struct_fields,
+    intern_materialisation_type_blueprint, materialised_nominal_declaration,
+    materialised_struct_fields,
 };
 use semantic_closure::{
     StableSemanticClosure, install_private_semantic_closure, stable_body_symbol_names,
@@ -58,9 +58,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     FunctionTypeKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeId,
 };
@@ -78,9 +76,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember, SourceDeclarationTarget,
     SourceFunctionTarget,
 };
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols,
-};
+use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 #[cfg(test)]
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -902,19 +898,34 @@ impl GenericTemplateArtefact {
                         "Materialised nominal binding has no generated environment path",
                     )
                 })?;
-            let generic_metadata =
-                materialised_generic_nominal_metadata(type_id, &environment.type_environment)?;
+            let generic_kind = if environment
+                .type_environment
+                .generic_parameter_list_id_for_type(type_id)
+                .is_some()
+            {
+                Some(match environment.type_environment.get(type_id) {
+                    Some(TypeDefinition::Struct(_)) => GenericDeclarationKind::Struct,
+                    Some(TypeDefinition::Choice(_)) => GenericDeclarationKind::Choice,
+                    _ => {
+                        return Err(CompilerError::compiler_error(
+                            "Materialised generic nominal has no struct or choice definition",
+                        ));
+                    }
+                })
+            } else {
+                None
+            };
             let lookups = Rc::make_mut(&mut environment.lookups);
             Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path.clone(), type_id);
             Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path.clone());
-            if let Some(metadata) = generic_metadata {
+            if let Some(kind) = generic_kind {
                 let declarations = Rc::make_mut(&mut lookups.generic_declarations_by_path);
                 declarations
                     .entry(local_path.clone())
-                    .or_insert_with(|| metadata.clone());
+                    .or_insert_with(|| kind.clone());
                 declarations
                     .entry(generated_nominal_path.clone())
-                    .or_insert(metadata);
+                    .or_insert(kind);
             }
             if !lookups
                 .resolved_struct_fields_by_path
@@ -1305,22 +1316,20 @@ impl GenericTemplateArtefact {
                 )?;
                 (generic_parameter_list_id, generic_parameter_type_ids)
             } else {
-                let parsed_parameters = GenericParameterList {
-                    parameters: nested
-                        .generic_parameters
-                        .iter()
-                        .enumerate()
-                        .map(|(slot, parameter)| GenericParameter {
-                            id: TypeParameterId(slot as u32),
-                            name: string_table.intern(&parameter.name),
-                            location: Default::default(),
-                            trait_bounds: Vec::new(),
-                        })
-                        .collect(),
-                };
-                let registration = environment
-                    .type_environment
-                    .register_generic_parameter_list(&parsed_parameters, &FxHashMap::default());
+                let registration =
+                    environment
+                        .type_environment
+                        .register_generic_parameter_list(
+                            nested.generic_parameters.iter().enumerate().map(
+                                |(slot, parameter)| {
+                                    (
+                                        TypeParameterId(slot as u32),
+                                        string_table.intern(&parameter.name),
+                                    )
+                                },
+                            ),
+                            &FxHashMap::default(),
+                        );
                 let generic_parameter_type_ids = (0..nested.generic_parameters.len())
                     .map(|slot| {
                         let parameter_id = registration
@@ -2142,7 +2151,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) resolved_type_aliases_by_path: FxHashMap<InternedPath, ResolvedTypeAlias>,
     pub(crate) choice_variant_shells_by_path: FxHashMap<InternedPath, Vec<ChoiceVariant>>,
     pub(crate) declaration_semantics: DeclarationSemanticTable,
-    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
+    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationKind>,
     pub(crate) nominal_type_ids_by_path: FxHashMap<InternedPath, TypeId>,
     source_nominal_paths: FxHashSet<InternedPath>,
     public_trait_paths: Vec<InternedPath>,

@@ -12,9 +12,7 @@ use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget;
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata,
-};
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -31,8 +29,7 @@ pub(crate) struct GenericParameterScopeBuildInput<'a> {
     pub(crate) visible_type_aliases: &'a FxHashMap<StringId, SourceDeclarationTarget>,
     pub(crate) visible_external_symbols: &'a FxHashMap<StringId, ExternalSymbolId>,
     pub(crate) declaration_table: &'a TopLevelDeclarationTable,
-    pub(crate) generic_declarations_by_path:
-        &'a FxHashMap<InternedPath, GenericDeclarationMetadata>,
+    pub(crate) generic_declarations_by_path: &'a FxHashMap<InternedPath, GenericDeclarationKind>,
     pub(crate) string_table: &'a StringTable,
 }
 
@@ -82,11 +79,11 @@ pub(crate) fn build_generic_parameter_scope(
 fn path_is_visible_type(
     path: &InternedPath,
     declaration_table: &TopLevelDeclarationTable,
-    generic_declarations_by_path: &FxHashMap<InternedPath, GenericDeclarationMetadata>,
+    generic_declarations_by_path: &FxHashMap<InternedPath, GenericDeclarationKind>,
 ) -> bool {
-    if let Some(metadata) = generic_declarations_by_path.get(path) {
+    if let Some(kind) = generic_declarations_by_path.get(path) {
         return matches!(
-            metadata.kind,
+            kind,
             GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
         );
     }

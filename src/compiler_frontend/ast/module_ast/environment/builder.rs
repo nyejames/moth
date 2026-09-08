@@ -50,7 +50,7 @@ use crate::compiler_frontend::datatypes::environment::{
     RegisteredGenericParameterList, TypeEnvironment,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, GenericParameterScope, TypeParameterId,
+    GenericParameterList, GenericParameterScope, TypeParameterId,
 };
 use crate::compiler_frontend::datatypes::ids::{
     FunctionTypeKey, GenericParameterId, NominalTypeId, TypeId, builtin_type_ids,
@@ -65,7 +65,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment,
 };
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols, OrderedSemanticDeclaration,
+    GenericDeclarationKind, ModuleSymbols, OrderedSemanticDeclaration,
     OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -329,12 +329,11 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
     pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    /// Generic declaration metadata, moved out of `module_symbols` when the builder starts.
+    /// Generic declaration kinds, moved out of `module_symbols` when the builder starts.
     ///
-    /// WHY: it is read by every environment pass and written by none of them, so the builder owns
-    /// the single shared handle rather than copying the map out of `module_symbols` per header.
-    pub(crate) generic_declarations_by_path:
-        Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    /// Import projection adds imported nominal kinds before the environment passes consume the
+    /// shared map, avoiding a separate copy for each header.
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
 
     pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
     pub(crate) choice_source_by_path: FxHashMap<InternedPath, InternedPath>,
@@ -422,7 +421,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_struct_fields_by_path =
             std::mem::take(&mut module_symbols.resolved_struct_fields_by_path);
         let struct_source_by_path = std::mem::take(&mut module_symbols.struct_source_by_path);
-        // Generic declaration metadata has one owner from here on. Import projection adds imported
+        // Generic declaration kinds have one owner from here on. Import projection adds imported
         // generic nominals to it and every environment pass reads it, so taking it now keeps one
         // map behind one handle: the per-header scopes borrow it instead of copying it, and no
         // writer is left holding a different map from the readers.
@@ -789,8 +788,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// visibility so a parameter cannot shadow a visible declaration.
     /// WHY: six environment passes were spelling out the same eight-field input, differing only in
     /// which parameter list and canonical map they pass. The five fields they always agree on -
-    /// the three visibility maps, the declaration table and the generic metadata - belong to the
-    /// builder, so it supplies them.
+    /// the three visibility maps, the declaration table and the generic declaration kinds - belong
+    /// to the builder, so it supplies them.
     pub(crate) fn generic_parameter_scope(
         &self,
         generic_parameters: &GenericParameterList,

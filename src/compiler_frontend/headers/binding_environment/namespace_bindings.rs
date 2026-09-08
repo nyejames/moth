@@ -960,12 +960,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if self.module_symbols.nominal_type_paths.contains(symbol_path) {
             return SymbolKind::Type;
         }
-        if let Some(metadata) = self
+        if let Some(kind) = self
             .module_symbols
             .generic_declarations_by_path
             .get(symbol_path)
         {
-            match metadata.kind {
+            match kind {
                 GenericDeclarationKind::Struct | GenericDeclarationKind::Choice => {
                     return SymbolKind::Type;
                 }

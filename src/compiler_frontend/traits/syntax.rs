@@ -20,10 +20,6 @@ pub struct TraitDeclarationSyntax {
     pub name: StringId,
     pub name_location: SourceLocation,
     pub requirements: Vec<TraitRequirementSyntax>,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 

@@ -14,6 +14,7 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericParameterId, GenericParameterListId,
     NominalTypeId, TypeConstructor, TypeId,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -34,17 +35,11 @@ fn register_single_parameter_list(
     string_table: &mut StringTable,
     name: &str,
 ) -> GenericParameterListId {
-    let parameter_list = GenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name: string_table.intern(name),
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        }],
-    };
-
     type_environment
-        .register_generic_parameter_list(&parameter_list, &Default::default())
+        .register_generic_parameter_list(
+            [(TypeParameterId(0), string_table.intern(name))].into_iter(),
+            &Default::default(),
+        )
         .list_id
 }
 
@@ -84,18 +79,21 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
                 id: TypeParameterId(0),
                 name: item_name,
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: t_name,
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(2),
                 name: error_kind_name,
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
         ],
@@ -199,18 +197,25 @@ fn type_bindings_collect_arguments_in_parameter_order() {
                 id: TypeParameterId(0),
                 name: string_table.intern("First"),
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: string_table.intern("Second"),
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
         ],
     };
-    let registered_parameters =
-        type_environment.register_generic_parameter_list(&parsed_parameters, &Default::default());
+    let registered_parameters = type_environment.register_generic_parameter_list(
+        parsed_parameters
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.name)),
+        &Default::default(),
+    );
     let first = registered_parameters.canonical_by_local[&TypeParameterId(0)];
     let second = registered_parameters.canonical_by_local[&TypeParameterId(1)];
     let list = registered_parameters.list_id;
@@ -242,6 +247,7 @@ fn type_environment_allocates_distinct_canonical_ids_for_local_parameter_ids() {
             id: TypeParameterId(0),
             name: first_name,
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
             trait_bounds: Vec::new(),
         }],
     };
@@ -250,14 +256,25 @@ fn type_environment_allocates_distinct_canonical_ids_for_local_parameter_ids() {
             id: TypeParameterId(0),
             name: second_name,
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
             trait_bounds: Vec::new(),
         }],
     };
 
-    let first_registered =
-        type_environment.register_generic_parameter_list(&first_list, &Default::default());
-    let second_registered =
-        type_environment.register_generic_parameter_list(&second_list, &Default::default());
+    let first_registered = type_environment.register_generic_parameter_list(
+        first_list
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.name)),
+        &Default::default(),
+    );
+    let second_registered = type_environment.register_generic_parameter_list(
+        second_list
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.name)),
+        &Default::default(),
+    );
     let first_canonical = first_registered.canonical_by_local[&TypeParameterId(0)];
     let second_canonical = second_registered.canonical_by_local[&TypeParameterId(0)];
 
@@ -582,12 +599,14 @@ fn trait_bounds_lookup_succeeds_after_registration() {
                 id: TypeParameterId(0),
                 name: string_table.intern("T"),
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
             GenericParameter {
                 id: TypeParameterId(1),
                 name: string_table.intern("U"),
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
                 trait_bounds: Vec::new(),
             },
         ],
@@ -597,8 +616,13 @@ fn trait_bounds_lookup_succeeds_after_registration() {
     resolved_bounds.insert(TypeParameterId(0), vec![TraitId(0), TraitId(1)]);
     resolved_bounds.insert(TypeParameterId(1), vec![TraitId(2)]);
 
-    let registered =
-        type_environment.register_generic_parameter_list(&parsed_parameters, &resolved_bounds);
+    let registered = type_environment.register_generic_parameter_list(
+        parsed_parameters
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.name)),
+        &resolved_bounds,
+    );
     let canonical_t = registered.canonical_by_local[&TypeParameterId(0)];
     let canonical_u = registered.canonical_by_local[&TypeParameterId(1)];
 
@@ -622,13 +646,19 @@ fn trait_bounds_lookup_succeeds_after_update() {
             id: TypeParameterId(0),
             name: string_table.intern("T"),
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
             trait_bounds: Vec::new(),
         }],
     };
 
     // Register with empty bounds initially.
-    let registered =
-        type_environment.register_generic_parameter_list(&parsed_parameters, &Default::default());
+    let registered = type_environment.register_generic_parameter_list(
+        parsed_parameters
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.name)),
+        &Default::default(),
+    );
     let canonical_t = registered.canonical_by_local[&TypeParameterId(0)];
 
     assert_eq!(
@@ -822,25 +852,15 @@ fn register_two_parameter_list(
     first_name: &str,
     second_name: &str,
 ) -> GenericParameterListId {
-    let parameter_list = GenericParameterList {
-        parameters: vec![
-            GenericParameter {
-                id: TypeParameterId(0),
-                name: string_table.intern(first_name),
-                location: SourceLocation::default(),
-                trait_bounds: Vec::new(),
-            },
-            GenericParameter {
-                id: TypeParameterId(1),
-                name: string_table.intern(second_name),
-                location: SourceLocation::default(),
-                trait_bounds: Vec::new(),
-            },
-        ],
-    };
-
     type_environment
-        .register_generic_parameter_list(&parameter_list, &Default::default())
+        .register_generic_parameter_list(
+            [
+                (TypeParameterId(0), string_table.intern(first_name)),
+                (TypeParameterId(1), string_table.intern(second_name)),
+            ]
+            .into_iter(),
+            &Default::default(),
+        )
         .list_id
 }
 
