@@ -55,6 +55,22 @@ fn parse_template_diagnostic_with_replaced_body_token(
     (diagnostic, span_builder)
 }
 
+fn parse_template_diagnostic_with_span_builder(
+    source: &str,
+) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source(source, &mut string_table, &mut span_builder);
+    let context = new_constant_context(token_stream.src_path.clone());
+
+    let diagnostic = expect_template_diagnostic(
+        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("template source should fail to parse"),
+    );
+    (diagnostic, span_builder)
+}
+
 /// Asserts that a diagnostic is an `InvalidTemplateStructure` with the given reason.
 fn assert_invalid_template_structure(
     diagnostic: &CompilerDiagnostic,
@@ -95,6 +111,30 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
     assert_eq!(range.start(), 2);
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
+    assert_eq!(diagnostic.primary_location.start_byte, range.start());
+    assert_eq!(diagnostic.primary_location.end_byte, range.end());
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+}
+
+#[test]
+fn orphan_template_break_retains_exact_marker_span() {
+    let source = "[: before [break] after]";
+    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::OrphanTemplateBreak,
+    );
+    let primary_span = diagnostic
+        .primary_span
+        .expect("orphan loop control should retain its exact marker span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    assert_eq!((range.start(), range.end()), (11, 16));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "break"
+    );
     assert_eq!(diagnostic.primary_location.start_byte, range.start());
     assert_eq!(diagnostic.primary_location.end_byte, range.end());
     assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);

@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -110,10 +111,14 @@ pub(super) enum DirectLoopControlMarker {
     Break {
         close_index: Option<usize>,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
     Continue {
         close_index: Option<usize>,
         location: SourceLocation,
+        span: LocalSpan,
+        source: Option<SourceId>,
     },
 }
 
@@ -355,9 +360,19 @@ pub(super) fn classify_direct_loop_control_marker(
         index += 1;
     }
 
-    let (kind_is_break, location) = match token_stream.tokens.get(index) {
-        Some(token) if matches!(token.kind, TokenKind::Break) => (true, token.location.clone()),
-        Some(token) if matches!(token.kind, TokenKind::Continue) => (false, token.location.clone()),
+    let (kind_is_break, location, span, source) = match token_stream.tokens.get(index) {
+        Some(token) if matches!(token.kind, TokenKind::Break) => (
+            true,
+            token.location.clone(),
+            token.span,
+            token_stream.file_id,
+        ),
+        Some(token) if matches!(token.kind, TokenKind::Continue) => (
+            false,
+            token.location.clone(),
+            token.span,
+            token_stream.file_id,
+        ),
         _ => return None,
     };
     index += 1;
@@ -380,11 +395,15 @@ pub(super) fn classify_direct_loop_control_marker(
         Some(DirectLoopControlMarker::Break {
             close_index,
             location,
+            span,
+            source,
         })
     } else {
         Some(DirectLoopControlMarker::Continue {
             close_index,
             location,
+            span,
+            source,
         })
     }
 }
@@ -427,20 +446,44 @@ pub(super) fn orphan_loop_control_diagnostic(
     marker: &DirectLoopControlMarker,
 ) -> CompilerDiagnostic {
     match marker {
-        DirectLoopControlMarker::Break { location, .. } => {
+        DirectLoopControlMarker::Break {
+            location,
+            span,
+            source,
+            ..
+        } => with_loop_control_marker_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::OrphanTemplateBreak,
                 location.clone(),
-            )
-        }
-
-        DirectLoopControlMarker::Continue { location, .. } => {
+            ),
+            *span,
+            *source,
+        ),
+        DirectLoopControlMarker::Continue {
+            location,
+            span,
+            source,
+            ..
+        } => with_loop_control_marker_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::OrphanTemplateContinue,
                 location.clone(),
-            )
-        }
+            ),
+            *span,
+            *source,
+        ),
     }
+}
+
+fn with_loop_control_marker_span(
+    mut diagnostic: CompilerDiagnostic,
+    span: LocalSpan,
+    source: Option<SourceId>,
+) -> CompilerDiagnostic {
+    if let Some(source) = source {
+        diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    }
+    diagnostic
 }
 
 pub(super) fn ensure_loop_control_boundary_before_sentinel(
