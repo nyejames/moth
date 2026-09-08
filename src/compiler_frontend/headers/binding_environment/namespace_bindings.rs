@@ -22,8 +22,10 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, PublicExportEntry, PublicExportTarget,
 };
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
+use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -223,6 +225,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         };
 
+        let local_name_span = match &clause.binding {
+            DependencyBindingSyntax::Namespace { alias: Some(alias) } => Some(SourceSpan::new(
+                clause.dependency.dependency_shell_id.source,
+                alias.span,
+            )),
+            DependencyBindingSyntax::Namespace { alias: None }
+            | DependencyBindingSyntax::DirectSelections { .. } => None,
+        };
+
         registry.register(
             local_name,
             VisibleNameBinding::NamespaceRecord {
@@ -234,7 +245,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .cloned()
                     .unwrap_or_else(|| clause.dependency.location.clone()),
             ),
-            None,
+            local_name_span,
         )?;
 
         file_visibility

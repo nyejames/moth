@@ -64,10 +64,6 @@ type DependencyClauseResult<T> = Result<T, DependencyClauseParseError>;
 pub struct DependencyAlias {
     pub name: StringId,
     pub location: SourceLocation,
-    #[allow(
-        dead_code,
-        reason = "Phase 1E migrates downstream consumers from legacy locations"
-    )]
     pub span: LocalSpan,
 }
 

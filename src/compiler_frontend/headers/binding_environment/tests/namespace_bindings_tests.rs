@@ -276,6 +276,65 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
 }
 
 #[test]
+fn namespace_dependency_alias_collision_retains_exact_alias_span() {
+    let mut registry = ExternalPackageRegistry::new();
+    register_keyword_test_package(&mut registry, "@test/namespace_alias_collision", "member");
+
+    let mut string_table = StringTable::new();
+    let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
+    let dependency_path = intern_path(&["test", "namespace_alias_collision"], &mut string_table);
+    let mut dependency = test_dependency(dependency_path, &mut string_table);
+    set_namespace_alias(&mut dependency, "existing", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let alias_span = LocalSpan::exact(23, 8, &mut span_builder)
+        .expect("focused namespace alias span should fit the inline representation");
+    if let DependencyBindingSyntax::Namespace { alias: Some(alias) } = &mut dependency.binding {
+        alias.span = alias_span;
+    }
+    let expected_location = dependency
+        .namespace_binding_location()
+        .cloned()
+        .expect("namespace alias should have a binding location");
+    let expected_span =
+        SourceSpan::new(dependency.dependency.dependency_shell_id.source, alias_span);
+
+    let declaration_path = intern_path(&["src", "existing"], &mut string_table);
+    let mut declared_paths = FxHashSet::default();
+    declared_paths.insert(declaration_path.clone());
+
+    let mut module_symbols = ModuleSymbols::empty();
+    module_symbols.module_file_paths.insert(source_file.clone());
+    module_symbols.declaration_locations_by_symbol_path.insert(
+        declaration_path,
+        location_for(&["src", "existing"], &mut string_table),
+    );
+    module_symbols
+        .declared_paths_by_file
+        .insert(source_file.clone(), declared_paths);
+    module_symbols
+        .file_dependency_clauses_by_source
+        .insert(source_file, vec![dependency]);
+
+    let error = prepare_binding_environment(BindingEnvironmentInput {
+        module_symbols: &module_symbols,
+        external_package_registry: &registry,
+        external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
+        source_provider_dependencies: &Default::default(),
+        source_files: &SourceDatabase::empty(),
+        string_table: &mut string_table,
+    })
+    .expect_err("namespace alias should collide with the same-file declaration");
+
+    let diagnostic = &error.diagnostics[0];
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    );
+    assert_eq!(diagnostic.primary_location, expected_location);
+    assert_eq!(diagnostic.primary_span, Some(expected_span));
+}
+
+#[test]
 fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     let mut string_table = StringTable::new();
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
