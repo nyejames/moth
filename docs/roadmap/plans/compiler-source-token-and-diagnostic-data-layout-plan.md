@@ -70,22 +70,21 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1E1, headers and ordering.
-- Goal: migrate downstream header/order consumers onto the exact preparation spans while retaining
-  the interval bridge for untouched consumers. The first bounded consumer, Stage 0 structural
-  file-reference diagnostics, is accepted; dependency-clause, symbol and sorted-header consumers
-  remain open.
+- Phase: 1E1/1E2/1F4, downstream span consumers and render boundary.
+- Goal: migrate downstream header/order and AST consumers onto the exact preparation spans while
+  retaining the interval bridge for untouched consumers, and make renderers resolve retained
+  primary spans through the source snapshot. Dependency-clause and remaining symbol consumers
+  remain open; the accepted renderer slice is the first 1F4 checkpoint.
 - Keep source ownership explicit across dependency and symbol records; do not add a second source
   table or convert legacy locations into guessed spans.
 - Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `3f40b6b48` — Stage 0 structural file-reference diagnostics consume their existing exact
-  source-local spans with final source ownership, and the missing-resource regression resolves the
-  stored range against retained source bytes. Focused Stage 0/file-reference tests pass. The
-  scripted independent audit was attempted but blocked by the configured provider's TLS
-  `UnknownIssuer` failure without changing the worktree.
+- `70a7ce035` — AST signature-member and choice-variant diagnostics retain exact source-owned
+  anchors as primary or related spans, and renderer checkpoint `616d9a864` resolves retained
+  primary spans through `LineIndex` for terminal, terse and dev-server output. Focused AST,
+  renderer, dependency-selection and module-dependency tests pass; the worktree is clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -125,6 +124,17 @@ CURRENT_WORKTREE_STATE:
   diagnostics publish that `SourceSpan` while preserving their legacy primary locations and
   ordering. The focused module-dependency suite (30 tests) passes, and infrastructure errors keep
   their existing location lane.
+- Accepted dependency-selection spans in `1690f8bd0`. Provider-surface diagnostics now publish
+  the selection token's exact `SourceSpan` with its dependency-owned source ID while preserving
+  the legacy primary location. The focused namespace-binding regression passes.
+- Accepted renderer span consumption in `616d9a864`. Terminal, terse and dev-server renderers
+  resolve retained primary spans against the attached source database, derive scalar columns from
+  `LineIndex`, and keep legacy-location fallback for diagnostics without a retained span. Unicode
+  and half-open multibyte caret regressions pass.
+- Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
+  member anchor as a primary or secondary span, choice payload diagnostics retain the variant
+  anchor as a related span, and struct remapping preserves captured primary spans. The two new
+  anchor regressions and all 21 type-resolution tests pass.
 - Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
   trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
   declaration allowance because synthetic `This` now consumes that span. Remove the remaining
@@ -229,6 +239,13 @@ VALIDATION_STATE:
   diagnostic regression checks exact `SourceSpan` ownership and preserved `SourceLocation`; no
   audit worker was available after the coordinator provider block, so parent Slice review is the
   acceptance review for this bounded change.
+- 1E1 dependency-selection candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`
+  and the focused `missing_provider_record_fails_deterministically` test passed.
+- 1F4 renderer candidate: `cargo fmt --all`, `git diff --check` and the focused renderer suite
+  (13 tests) passed. The exact-span path uses retained snapshots and scalar `LineIndex` columns;
+  legacy locations remain a fallback for older diagnostics.
+- 1E2 AST candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and all 21
+  `compiler_frontend::ast::type_resolution_tests` passed, including the two new anchor tests.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
@@ -280,9 +297,9 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: continue 1E1 with dependency-clause, module-symbol and sorted-header consumers,
-  then complete 1E2–1H and the Phase 1 closeout/final review before the requested external review
-  pause. Phases 2–7 remain pending.
+- next action: continue 1E1 with dependency-clause and module-symbol consumers, then expand 1E2–1H
+  and complete the Phase 1 closeout/final review before the requested external review pause.
+  Phases 2–7 remain pending.
 
 ---
 
