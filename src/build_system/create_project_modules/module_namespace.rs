@@ -35,6 +35,7 @@ use crate::compiler_frontend::paths::path_normalization::{
     dependency_contains_dotdot, is_relative_dependency_path,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
@@ -251,12 +252,16 @@ impl<'a> DirectoryDependencyResolution<'a> {
         provider_path: &InternedPath,
         declaring_canonical_path: &Path,
         dependency_location: &SourceLocation,
+        dependency_source: SourceId,
+        dependency_span: LocalSpan,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
         self.namespace_set.resolve_provider_target(
             provider_path,
             declaring_canonical_path,
             dependency_location,
+            dependency_source,
+            dependency_span,
             self.source_tree_index,
             string_table,
         )
@@ -315,6 +320,32 @@ impl ModuleNamespaceSet {
     /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
     /// indexed facts.
     pub(crate) fn resolve_dependency(
+        &self,
+        provider: &RetainedDependencyPath,
+        declaring_canonical_path: &Path,
+        source_tree_index: &SourceTreeIndex,
+        boundary: NamespaceBoundary,
+        package_prefix: Option<&str>,
+        string_table: &mut StringTable,
+    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+        self.resolve_dependency_unspanned(
+            provider,
+            declaring_canonical_path,
+            source_tree_index,
+            boundary,
+            package_prefix,
+            string_table,
+        )
+        .map_err(|diagnostic| {
+            with_dependency_span(
+                diagnostic,
+                provider.dependency_shell_id.source,
+                provider.span,
+            )
+        })
+    }
+
+    fn resolve_dependency_unspanned(
         &self,
         provider: &RetainedDependencyPath,
         declaring_canonical_path: &Path,
@@ -458,6 +489,26 @@ impl ModuleNamespaceSet {
     }
 
     fn resolve_provider_target(
+        &self,
+        provider_path: &InternedPath,
+        declaring_canonical_path: &Path,
+        dependency_location: &SourceLocation,
+        dependency_source: SourceId,
+        dependency_span: LocalSpan,
+        project_source_tree_index: &SourceTreeIndex,
+        string_table: &mut StringTable,
+    ) -> Result<PathBuf, CompilerDiagnostic> {
+        self.resolve_provider_target_unspanned(
+            provider_path,
+            declaring_canonical_path,
+            dependency_location,
+            project_source_tree_index,
+            string_table,
+        )
+        .map_err(|diagnostic| with_dependency_span(diagnostic, dependency_source, dependency_span))
+    }
+
+    fn resolve_provider_target_unspanned(
         &self,
         provider_path: &InternedPath,
         declaring_canonical_path: &Path,
@@ -815,6 +866,20 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 // ---------------------------------------------------------------------------
 // Dependency resolution helpers
 // ---------------------------------------------------------------------------
+
+/// Attach the retained dependency path's exact source-owned span to one direct user diagnostic.
+///
+/// The legacy `SourceLocation` remains the diagnostic's display and compatibility range during
+/// the interval bridge. The retained path's shell source ID and local span are the authoritative
+/// byte range for namespace and provider-target failures.
+fn with_dependency_span(
+    mut diagnostic: CompilerDiagnostic,
+    source: SourceId,
+    span: LocalSpan,
+) -> CompilerDiagnostic {
+    diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    diagnostic
+}
 
 /// Resolve a namespace entry to a `ResolvedDependency`, looking up the canonical path and root file
 /// from the owning boundary's `SourceTreeIndex`.

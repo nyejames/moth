@@ -390,7 +390,7 @@ fn discover_modules_for_test_with_resource_inputs(
         resolution_table: &mut external_dependency_resolution_table,
     };
     let mut resource_inputs = ResourceInputRegistry::new();
-    let schedule = discover_all_modules_in_project(
+    let schedule = match discover_all_modules_in_project(
         config,
         resolver,
         source_files,
@@ -403,7 +403,16 @@ fn discover_modules_for_test_with_resource_inputs(
         &mut string_table,
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
-    )?;
+    ) {
+        Ok(schedule) => schedule,
+        Err(mut messages) => {
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            messages.set_source_database(source_files);
+            return Err(messages);
+        }
+    };
     let source_files = source_owner
         .finish()
         .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
@@ -473,7 +482,7 @@ fn discover_modules_for_test_with_providers(
     };
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    discover_all_modules_in_project(
+    match discover_all_modules_in_project(
         config,
         resolver,
         source_files,
@@ -486,7 +495,16 @@ fn discover_modules_for_test_with_providers(
         &mut string_table,
         #[cfg(feature = "timers")]
         crate::timing::NO_TIMING_BOUNDARY,
-    )
+    ) {
+        Ok(schedule) => Ok(schedule),
+        Err(mut messages) => {
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            messages.set_source_database(source_files);
+            Err(messages)
+        }
+    }
 }
 
 /// Build the Stage 0 namespace resolution context for one project and run a closure against it.
@@ -1564,6 +1582,30 @@ fn first_error_diagnostic(messages: &CompilerMessages) -> &CompilerDiagnostic {
         .error_diagnostics()
         .next()
         .expect("expected at least one typed error diagnostic")
+}
+
+fn assert_primary_span_text(messages: &CompilerMessages, source_path: &Path, expected_text: &str) {
+    let diagnostic = first_error_diagnostic(messages);
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("diagnostic should retain its source database");
+    let source_path = fs::canonicalize(source_path).expect("diagnostic source path should resolve");
+    let source_id = source_files
+        .get_by_canonical_path(&source_path)
+        .expect("diagnostic source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("diagnostic should retain its exact primary span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("diagnostic source snapshot should remain available");
+    assert_eq!(
+        &source_text[range.start() as usize..range.end() as usize],
+        expected_text
+    );
 }
 
 #[test]
@@ -5253,6 +5295,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
             diagnostic.payload
         );
     }
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@drawing.js");
 
     let mut source_string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
@@ -5882,6 +5925,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
             diagnostic.payload
         );
     }
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@intro");
 }
 
 #[test]
@@ -6885,6 +6929,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "expected missing import target diagnostic, got {:?}",
         diagnostic
     );
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@missing.js");
 }
 
 #[test]
@@ -7044,6 +7089,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0006"
     );
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@HELPER");
 }
 
 #[test]
