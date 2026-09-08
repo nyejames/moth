@@ -5625,3 +5625,149 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     assert_eq!(reference.source_file, final_id);
     assert_eq!(resolve(reference.span), "@images/logo.svg");
 }
+
+#[test]
+fn declaration_member_return_and_variant_spans_retain_original_ranges() {
+    let member_name = format!("value_{}", "x".repeat(1100));
+    let return_name = format!("Output{}", "X".repeat(1100));
+    let variant_name = format!("Ready{}", "X".repeat(1100));
+    let source = format!(
+        "-- é🦋\nprocess |{member_name} Int| -> {return_name}:\n;\nState ::\n{variant_name} | field Int |,\n;\nRecord = | member Int |\n"
+    );
+    let canonical = PathBuf::from("member-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("shells should prepare");
+    assert_eq!(
+        spans.len(),
+        3,
+        "member, return and variant retain their original overflow rows"
+    );
+
+    let (original_member_span, original_return_span) = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Function { signature, .. } => Some((
+                signature.parameters[0].span,
+                signature.returns[0].value.span,
+            )),
+            _ => None,
+        })
+        .expect("function shell");
+    let original_variant_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Choice { variants, .. } => Some(variants[0].span),
+            _ => None,
+        })
+        .expect("choice shell");
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("shell strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("member-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+    assert_eq!(prepared.file_id, final_id);
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span| {
+        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    let signature = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Function { signature, .. } => Some(signature),
+            _ => None,
+        })
+        .expect("function shell");
+    assert_eq!(signature.parameters[0].span, original_member_span);
+    assert_eq!(signature.returns[0].value.span, original_return_span);
+    assert_eq!(resolve(signature.parameters[0].span), member_name);
+    assert_eq!(
+        signature.parameters[0]
+            .id
+            .name()
+            .map(|name| merged.resolve(name)),
+        Some(member_name.as_str())
+    );
+    assert_eq!(resolve(signature.returns[0].value.span), return_name);
+    let variants = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Choice { variants, .. } => Some(variants),
+            _ => None,
+        })
+        .expect("choice shell");
+    assert_eq!(variants[0].span, original_variant_span);
+    assert_eq!(resolve(variants[0].span), variant_name);
+    assert_eq!(merged.resolve(variants[0].id), variant_name);
+    let ChoiceVariantPayloadSyntax::Record { fields } = &variants[0].payload else {
+        panic!("record payload");
+    };
+    assert_eq!(resolve(fields[0].span), "field");
+    let fields = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Struct { fields, .. } => Some(fields),
+            _ => None,
+        })
+        .expect("struct shell");
+    assert_eq!(resolve(fields[0].span), "member");
+}

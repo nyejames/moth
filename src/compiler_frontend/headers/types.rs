@@ -1785,7 +1785,6 @@ fn validate_function_signature(
         validate_signature_member(parameter, source_file, path_syntax)?;
     }
     for return_slot in &signature.returns {
-        validate_source_location(&return_slot.location, source_file, "function return slot")?;
         validate_source_location(&return_slot.value.location, source_file, "function return")?;
         validate_parsed_type_ref(&return_slot.value.type_annotation, source_file)?;
     }

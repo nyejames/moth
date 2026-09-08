@@ -79,6 +79,7 @@ fn make_signature_member(name: &str, string_table: &mut StringTable) -> Signatur
     let location = make_location("test.moth", string_table);
 
     SignatureMemberSyntax {
+        span: LocalSpan::source_start(),
         id: InternedPath::from_single_str(name, string_table),
         value_mode: ValueMode::ImmutableOwned,
         is_reactive: false,
@@ -471,6 +472,7 @@ fn header_kind_choice_remaps_generic_parameters_and_variants() {
 
     let generic_parameters = make_generic_parameter_list("T", &mut local);
     let variant = ChoiceVariantSyntax {
+        span: LocalSpan::source_start(),
         id: local.intern("SomeVariant"),
         payload: ChoiceVariantPayloadSyntax::Unit,
         location: make_location("test.moth", &mut local),
@@ -926,6 +928,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
 
     let parameter_name = string_table.intern("parameter");
     let parameter = SignatureMemberSyntax {
+        span: LocalSpan::source_start(),
         id: provisional_source.append(parameter_name),
         value_mode: ValueMode::ImmutableOwned,
         is_reactive: false,
@@ -941,6 +944,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     };
     let return_slot = ReturnSlotSyntax {
         value: FunctionReturnSyntax {
+            span: LocalSpan::source_start(),
             type_annotation: ParsedTypeRef::Named {
                 name: string_table.intern("Output"),
                 location: provisional_location.clone(),
@@ -948,7 +952,6 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             location: provisional_location.clone(),
         },
         channel: ReturnChannelSyntax::Success,
-        location: provisional_location.clone(),
     };
     let function_signature = FunctionSignatureSyntax {
         parameters: vec![parameter],
@@ -983,6 +986,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         this_usage: TraitThisUsage::Immutable,
         signature: FunctionSignatureSyntax {
             parameters: vec![SignatureMemberSyntax {
+                span: LocalSpan::source_start(),
                 id: provisional_source.append(string_table.intern("This")),
                 value_mode: ValueMode::ImmutableOwned,
                 is_reactive: false,

@@ -18,6 +18,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::require_bin
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -58,6 +59,11 @@ pub struct SignatureMemberSyntax {
     pub type_annotation: ParsedTypeRef,
     pub default_tokens: Vec<Token>,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 /// Function return-channel syntax before it becomes an AST `ReturnChannel`.
@@ -72,13 +78,13 @@ pub enum ReturnChannelSyntax {
 pub struct FunctionReturnSyntax {
     pub type_annotation: ParsedTypeRef,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 #[derive(Clone, Debug)]
 pub struct ReturnSlotSyntax {
     pub value: FunctionReturnSyntax,
     pub channel: ReturnChannelSyntax,
-    pub location: SourceLocation,
 }
 
 /// Parsed function signature shell.
@@ -143,23 +149,6 @@ impl FunctionReturnSyntax {
     }
 }
 
-impl ReturnSlotSyntax {
-    /// Remap this return slot's nested syntax.
-    // Called by per-file frontend output remapping before module-wide dependency sorting.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.value.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-    ) {
-        self.value.rebind_source_identity(logical_path);
-        self.location.rebind_source_identity(logical_path);
-    }
-}
-
 impl FunctionSignatureSyntax {
     /// Remap all interned string IDs in the signature shell.
     // Called by per-file frontend output remapping before module-wide dependency sorting.
@@ -168,7 +157,7 @@ impl FunctionSignatureSyntax {
             parameter.remap_string_ids(remap);
         }
         for return_slot in &mut self.returns {
-            return_slot.remap_string_ids(remap);
+            return_slot.value.remap_string_ids(remap);
         }
     }
 
@@ -191,7 +180,7 @@ impl FunctionSignatureSyntax {
             parameter.rebind_source_identity(logical_path, provisional_source_file)?;
         }
         for return_slot in &mut self.returns {
-            return_slot.rebind_source_identity(logical_path);
+            return_slot.value.rebind_source_identity(logical_path);
         }
         Ok(())
     }
@@ -520,6 +509,7 @@ fn parse_signature_member_syntax(
     member_context: SignatureMemberContext,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_location = token_stream.current_location();
+    let member_span = token_stream.tokens[token_stream.index].span;
     let member_name = full_name
         .name()
         .map(|id| string_table.resolve(id).to_owned())
@@ -654,6 +644,7 @@ fn parse_signature_member_syntax(
         type_annotation,
         default_tokens,
         location: member_location,
+        span: member_span,
     })
 }
 
@@ -678,6 +669,7 @@ fn parse_trait_this_member_syntax(
     value_mode: ValueMode,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_location = token_stream.current_location();
+    let member_span = token_stream.tokens[token_stream.index].span;
 
     token_stream.advance(); // past This
 
@@ -697,6 +689,7 @@ fn parse_trait_this_member_syntax(
         type_annotation,
         default_tokens,
         location: member_location,
+        span: member_span,
     })
 }
 
@@ -991,6 +984,7 @@ fn parse_value_return_type_syntax(
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
     let location = token_stream.current_location();
+    let span = token_stream.tokens[token_stream.index].span;
     let type_annotation = parse_type_annotation(token_stream, type_context, string_table)?;
 
     if parsed_type_ref_is_void(&type_annotation, string_table) {
@@ -1011,10 +1005,10 @@ fn parse_value_return_type_syntax(
     Ok(ReturnSlotSyntax {
         value: FunctionReturnSyntax {
             type_annotation,
-            location: location.clone(),
+            location,
+            span,
         },
         channel,
-        location,
     })
 }
 

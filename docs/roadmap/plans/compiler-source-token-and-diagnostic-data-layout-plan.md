@@ -8,7 +8,8 @@
 >
 > **Status:**
 > Active. Phase 1 is in progress. The current continuation reviews the existing implementation
-> and completes Phases 1–3, then pauses for user review. Phases 4–7 remain pending.
+> and completes Phase 1, then pauses for external user review before Phase 2 begins.
+> Resumed on 2026-09-08 during 1D5c1. Phases 2–7 remain pending.
 > Test Suite Hardening was delivered in `03168082d`. Baseline evidence lives in
 > `benchmarks/frontend-optimization-results.md`.
 
@@ -69,28 +70,38 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5b, path and dependency preparation records.
-- Goal: copy exact token-local spans into path rows, dependency providers/selections/aliases and
-  structural file-reference records. Token and path row reuse one encoded span. Existing clause
-  locations remain initial-path anchors, not newly invented whole-clause ranges.
-- Non-goals: header/const-fragment joins, source-contract/signature records, downstream AST/HIR
-  migration, diagnostic storage redesign and token-store migration.
-- Keep explicit enclosing source ownership and wrong-file path-handle checks. Equal byte ranges
-  can occupy different extended rows, so remove unused record equality/hash derives rather than
-  treating encoded handles as semantic dependency identity. Existing shell/selection/name keys stay.
+- Phase: 1D5c1, signature and choice preparation anchors.
+- Goal: copy exact token-local member, return-type and variant anchors; remove the duplicate
+  `ReturnSlotSyntax.location` and use its nested return value as the one anchor owner.
+- Non-goals: trait-shell and parsed-type migration, header/const-fragment joins, source contracts,
+  resolved AST/HIR records, diagnostic storage redesign and token-store migration.
+- Preserve existing token-sized meanings, explicit enclosing source ownership, string remapping
+  and trait `This` substitution. Copy the original span without new encoding or source scans.
 - `SourceLocation` remains the private interval bridge through 1H.
 
 LAST_GOOD_COMMIT:
-- `0f92205c6` — exact declaration anchors and initializer EOF; full gate and independent review passed.
+- `86d4bf508` — exact path/dependency anchors and consolidated clause location; final gate and
+  independent correction verification passed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Continuation order: remaining 1D5 and 1D6, remaining Phase 1, then Phase 2 and Phase 3,
-  final review and pause. Phases 4–7 stay pending.
-- 1D3 (`b1d5a4005`) and 1D5a (`0f92205c6`) are committed and accepted.
-- 1D5b is complete and ready for its checkpoint commit. The duplicate retained clause anchor
-  was consolidated into its mandatory provider; focused verification and the final full gate passed.
-- Untracked `librust_out.rmeta` has unknown ownership and is excluded from checkpoints.
+- Continuation order: remaining 1D5 and 1D6, remaining Phase 1, final review and closeout,
+  then pause for external review. Phases 2–7 stay pending until the user authorizes continuation.
+- 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
+- 1D5c1 is implemented, validated and independently accepted across shared signature/choice
+  producers, return-slot consumers and focused fixtures. Its checkpoint is being recorded.
+- Resumed after the requested restart. The complete uncommitted 1D5c1 diff was inspected.
+  The substitution regression satisfies the parser entry contract. The long-anchor test now
+  preserves encoded spans through nonidentity source rebinding and resolves the original table.
+  Focused independent verification is clean.
+- Current 1D5c1 edits: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
+  copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
+  redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
+  the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
+- Two new field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
+  and `ChoiceVariantSyntax.span`. Remove them in the owning 1E batch and confirm none survives 1H.
+- The user identified `librust_out.rmeta` as an earlier-session Rust metadata artefact;
+  it was inspected and removed at their request before this continuation.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -177,6 +188,12 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
+- 1D5c1 final candidate: `cargo fmt --all && just validate` passed native featured all-target
+  Clippy, 5,074 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
+  source audit, 82 benchmark preflights, scaling and timer erasure. Focused substitution (1),
+  traits (9), shared signature (5) and long-anchor preparation (1) tests passed.
+  Independent review's rebind coverage correction is implemented and focused verification is
+  clean. The stale capsule is refreshed here. No required finding remains.
 - 1D5b final candidate: `cargo fmt --all && just validate` passed after the anchor consolidation.
   Native featured all-target Clippy, 5,072 compiler tests, 17 CLI tests, 825 xtask tests,
   1,951 integrations, docs check, source audit, 82 benchmark preflights, scaling and timer erasure
@@ -198,7 +215,9 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: commit accepted 1D5b, then continue with 1D5c1 signature and choice anchors.
+- next action: checkpoint accepted 1D5c1, then migrate trait-shell anchors in 1D5c2.
+  Continue remaining 1D5c/1D6 and Phase 1, with final review and
+  closeout followed by the requested external review pause. Phases 2–7 remain pending.
 
 ---
 
@@ -735,7 +754,7 @@ actual remaining consumer, not blanket suppressions.
   - [ ] **1D5c — remaining preparation records:** header names and joined const fragments,
     source contracts and signature shells. Preserve each record's existing range meaning;
     runtime fragments already use retained tokens and need no new record.
-    - [ ] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
+    - [x] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
       remove `ReturnSlotSyntax.location`, which duplicates its nested return value's location.
       Preserve anchors through remapping and trait `This` substitution.
     - [ ] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
@@ -860,6 +879,13 @@ Complete the common phase close, plus:
 - [ ] old location/file identity types are gone
 - [ ] current boxed-diagnostic workarounds are gone
 - [ ] full CI is green before Phase 2 begins
+
+### Phase 1 external review checkpoint
+
+- [ ] complete the remaining 1D, 1E, 1F, 1G and 1H slices and reconcile the open 1B4 lifecycle gate
+- [ ] complete Phase 1's independent final reviews and required measurement/validation gates
+- [ ] commit final corrections and closeout, verify the checkpoint sequence and worktree state
+- [ ] pause for external user review before starting Phase 2
 
 ---
 

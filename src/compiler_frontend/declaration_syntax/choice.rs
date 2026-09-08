@@ -24,6 +24,7 @@ use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -52,6 +53,11 @@ pub struct ChoiceVariantSyntax {
     pub id: StringId,
     pub payload: ChoiceVariantPayloadSyntax,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates AST declaration consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 #[derive(Clone, Debug)]
@@ -180,6 +186,7 @@ pub(crate) fn parse_choice_shell(
     loop {
         token_stream.skip_newlines();
         let current_location = token_stream.current_location();
+        let current_span = token_stream.tokens[token_stream.index].span;
         let current_token = token_stream.current_token_kind().to_owned();
 
         match current_token {
@@ -323,6 +330,7 @@ pub(crate) fn parse_choice_shell(
                     id: variant_name,
                     payload,
                     location: current_location.clone(),
+                    span: current_span,
                 });
 
                 // Handle the separator after the variant (or after its record body).

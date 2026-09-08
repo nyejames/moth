@@ -874,9 +874,9 @@ fn return_slot_with_trait_this(
                 this_name,
             ),
             location: return_slot.value.location.clone(),
+            span: return_slot.value.span,
         },
         channel: return_slot.channel,
-        location: return_slot.location.clone(),
     }
 }
 

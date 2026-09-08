@@ -3392,3 +3392,20 @@ budgets. Timer erasure passed with a 9,043,728-byte no-timer binary. These obser
 gate checks, not five-run medians or phase-wide retained-memory evidence.
 Independent focused verification of the correction was clean. The accepted checkpoint is the
 commit containing this subsection.
+
+### Signature and choice anchor checkpoint (1D5c1)
+
+Member, return-type and choice-variant shells copy their original token anchors. Return slots
+now use the nested return value as their sole location owner. Focused tests preserve authored
+anchors through trait `This` substitution, string remapping and nonidentity source rebinding,
+including three extended rows after multibyte text. The original table resolves every range.
+The interval bridge remains until 1H, so this checkpoint claims no aggregate memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, final `cargo fmt --all && just validate` passed
+native featured all-target Clippy, 5,074 compiler tests, 17 CLI tests, 825 xtask tests,
+1,951 integrations, docs checking, source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +3 ms CLI averages and 0 ms frontend averages, excluding changed docs
+workloads. Scaling fits were 0.99, 0.80 and 1.61, within their budgets. Timer erasure passed
+with a 9,043,728-byte no-timer binary. These bounded checks establish neither five-run medians
+nor phase-wide memory evidence. Independent review's rebind test correction passed focused
+verification. The accepted checkpoint is the commit containing this subsection.

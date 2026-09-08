@@ -1,4 +1,4 @@
-//! Core trait registration unit tests for the AST environment builder.
+//! Trait registration and requirement substitution tests for the AST environment builder.
 //!
 //! WHAT: covers the unified `register_core_cast_traits` path and the
 //!      `core_trait_id_for_name` lookup for both `DISPLAYABLE` and the
@@ -9,12 +9,19 @@
 //!      `builtin_for` can find. Tests here pin that contract without
 //!      touching the full builder pipeline.
 
+use super::signature_with_trait_this_as_parameter;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
@@ -339,4 +346,83 @@ fn register_error_nominal_type(
     };
     let (_, error_type_id) = type_environment.register_nominal_struct(struct_def);
     error_type_id
+}
+
+#[test]
+fn trait_this_substitution_preserves_authored_signature_spans() {
+    let source = "|This, other This| -> This\n";
+    let mut strings = StringTable::new();
+    let path = std::path::PathBuf::from("requirement.moth");
+    let sources =
+        SourceDatabase::build([&path], &path, None, &mut strings).expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&path)
+        .expect("source identity")
+        .id;
+    let scope = InternedPath::try_from_filesystem_path(&path, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("signature tokens");
+    tokens.index = tokens
+        .tokens
+        .iter()
+        .position(|token| token.kind == TokenKind::TypeParameterBracket)
+        .expect("signature source must contain an opening `|`");
+    let method_path = scope.append(strings.intern("clone_value"));
+    let signature = parse_trait_requirement_signature_syntax(
+        &mut tokens,
+        &mut Vec::new(),
+        &mut strings,
+        &method_path,
+    )
+    .expect("trait requirement signature");
+    assert_eq!(signature.parameters.len(), 2);
+    assert_eq!(signature.returns.len(), 1);
+    let concrete_name = strings.intern("Concrete");
+    let substituted = signature_with_trait_this_as_parameter(&signature, concrete_name);
+    assert_eq!(substituted.parameters.len(), signature.parameters.len());
+    assert_eq!(substituted.returns.len(), signature.returns.len());
+    assert!(matches!(
+        &substituted.parameters[0].type_annotation,
+        ParsedTypeRef::Named { name, .. } if *name == concrete_name
+    ));
+    assert!(matches!(
+        &substituted.returns[0].value.type_annotation,
+        ParsedTypeRef::Named { name, .. } if *name == concrete_name
+    ));
+    for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {
+        assert_eq!(parameter.span, original.span);
+        assert_eq!(parameter.location, original.location);
+    }
+    assert_eq!(
+        substituted.returns[0].value.span,
+        signature.returns[0].value.span
+    );
+    assert_eq!(
+        substituted.returns[0].value.location,
+        signature.returns[0].value.location
+    );
+    let receiver = substituted.parameters[0]
+        .span
+        .resolve_with(spans.resolver());
+    let result = substituted.returns[0]
+        .value
+        .span
+        .resolve_with(spans.resolver());
+    assert_eq!(
+        &source[receiver.start() as usize..receiver.end() as usize],
+        "This"
+    );
+    assert_eq!(
+        &source[result.start() as usize..result.end() as usize],
+        "This"
+    );
 }
