@@ -413,7 +413,7 @@ impl CompilerDiagnostic {
         location: SourceLocation,
     ) -> Self {
         let mut labels = vec![DiagnosticLabel::primary(location.clone())];
-        if let Some(existing_location) = existing_location.clone() {
+        if let Some(existing_location) = existing_location {
             labels.push(DiagnosticLabel::secondary(
                 existing_location,
                 Some(DiagnosticLabelMessage::ConflictingAccess),
@@ -426,7 +426,6 @@ impl CompilerDiagnostic {
             DiagnosticPayload::MultipleMutableBorrows {
                 place,
                 conflicting_place,
-                existing_location,
             },
         )
         .with_labels(labels)
@@ -441,7 +440,7 @@ impl CompilerDiagnostic {
         location: SourceLocation,
     ) -> Self {
         let mut labels = vec![DiagnosticLabel::primary(location.clone())];
-        if let Some(existing_location) = existing_location.clone() {
+        if let Some(existing_location) = existing_location {
             labels.push(DiagnosticLabel::secondary(
                 existing_location,
                 Some(DiagnosticLabelMessage::ConflictingAccess),
@@ -456,7 +455,6 @@ impl CompilerDiagnostic {
                 existing_access,
                 requested_access,
                 conflicting_place,
-                existing_location,
             },
         )
         .with_labels(labels)
@@ -494,7 +492,7 @@ impl CompilerDiagnostic {
         location: SourceLocation,
     ) -> Self {
         let mut labels = vec![DiagnosticLabel::primary(location.clone())];
-        if let Some(conflicting_location) = conflicting_location.clone() {
+        if let Some(conflicting_location) = conflicting_location {
             labels.push(DiagnosticLabel::secondary(
                 conflicting_location,
                 Some(DiagnosticLabelMessage::ConflictingAccess),
@@ -508,7 +506,6 @@ impl CompilerDiagnostic {
                 place,
                 reason,
                 conflicting_place,
-                conflicting_location,
             },
         )
         .with_labels(labels)

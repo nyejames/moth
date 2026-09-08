@@ -176,7 +176,6 @@ pub enum DiagnosticPayload {
     MultipleMutableBorrows {
         place: DiagnosticPlace,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
     },
 
     SharedMutableConflict {
@@ -184,7 +183,6 @@ pub enum DiagnosticPayload {
         existing_access: BorrowAccessKind,
         requested_access: BorrowAccessKind,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
     },
 
     UseAfterPossibleMove {
@@ -207,7 +205,6 @@ pub enum DiagnosticPayload {
         place: DiagnosticPlace,
         reason: InvalidMutableAccessReason,
         conflicting_place: Option<DiagnosticPlace>,
-        conflicting_location: Option<SourceLocation>,
     },
 
     UseOfUninitializedLocal {

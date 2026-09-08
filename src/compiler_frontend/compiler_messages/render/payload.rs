@@ -901,14 +901,12 @@ fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
         DiagnosticPayload::MultipleMutableBorrows {
             place,
             conflicting_place,
-            ..
         } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), string_table),
         DiagnosticPayload::SharedMutableConflict {
             place,
             existing_access,
             requested_access,
             conflicting_place,
-            ..
         } => shared_mutable_conflict_message(
             place,
             *existing_access,
@@ -933,7 +931,6 @@ fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             place,
             reason,
             conflicting_place,
-            ..
         } => {
             invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), string_table)
         }

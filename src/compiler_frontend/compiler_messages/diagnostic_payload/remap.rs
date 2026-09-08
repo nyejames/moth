@@ -90,15 +90,9 @@ impl DiagnosticPayload {
             DiagnosticPayload::SharedMutableConflict {
                 place,
                 conflicting_place,
-                existing_location,
                 ..
             } => {
-                remap_shared_mutable_conflict_payload(
-                    place,
-                    conflicting_place,
-                    existing_location,
-                    remap,
-                );
+                remap_shared_mutable_conflict_payload(place, conflicting_place, remap);
             }
 
             DiagnosticPayload::WholeObjectBorrowConflict {
@@ -117,10 +111,8 @@ impl DiagnosticPayload {
             DiagnosticPayload::MultipleMutableBorrows {
                 place,
                 conflicting_place,
-                existing_location,
             } => {
                 remap_place_with_optional_conflict(place, conflicting_place, remap);
-                remap_optional_location(existing_location, remap);
             }
 
             DiagnosticPayload::UseAfterPossibleMove { place } => {
@@ -138,11 +130,9 @@ impl DiagnosticPayload {
             DiagnosticPayload::InvalidMutableAccess {
                 place,
                 conflicting_place,
-                conflicting_location,
                 ..
             } => {
                 remap_place_with_optional_conflict(place, conflicting_place, remap);
-                remap_optional_location(conflicting_location, remap);
             }
 
             DiagnosticPayload::InvalidConfig { key, reason } => {
@@ -677,24 +667,13 @@ impl DiagnosticPayload {
 
             DiagnosticPayload::DuplicateMothTemplateInputPath { .. } => {}
 
-            DiagnosticPayload::MultipleMutableBorrows {
-                existing_location, ..
-            }
-            | DiagnosticPayload::MoveWhileBorrowed {
+            DiagnosticPayload::MoveWhileBorrowed {
                 borrow_location: existing_location,
                 ..
             }
             | DiagnosticPayload::WholeObjectBorrowConflict {
                 part_location: existing_location,
                 ..
-            }
-            | DiagnosticPayload::InvalidMutableAccess {
-                conflicting_location: existing_location,
-                ..
-            } => rebind_optional_location(existing_location, logical_path),
-
-            DiagnosticPayload::SharedMutableConflict {
-                existing_location, ..
             } => rebind_optional_location(existing_location, logical_path),
 
             DiagnosticPayload::InvalidAssignmentTarget {
@@ -734,6 +713,9 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedExternalExtension { .. }
             | DiagnosticPayload::InvalidExternalModule { .. }
             | DiagnosticPayload::BorrowConflict { .. }
+            | DiagnosticPayload::MultipleMutableBorrows { .. }
+            | DiagnosticPayload::SharedMutableConflict { .. }
+            | DiagnosticPayload::InvalidMutableAccess { .. }
             | DiagnosticPayload::UseAfterPossibleMove { .. }
             | DiagnosticPayload::UseOfUninitializedLocal { .. }
             | DiagnosticPayload::InvalidConfig { .. }
@@ -844,12 +826,10 @@ fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &String
 fn remap_shared_mutable_conflict_payload(
     place: &mut DiagnosticPlace,
     conflicting_place: &mut Option<DiagnosticPlace>,
-    existing_location: &mut Option<SourceLocation>,
     remap: &StringIdRemap,
 ) {
     place.remap_string_ids(remap);
     remap_optional_place(conflicting_place, remap);
-    remap_optional_location(existing_location, remap);
 }
 
 fn remap_whole_object_borrow_conflict_payload(

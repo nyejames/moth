@@ -9,14 +9,15 @@ use super::{
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
     InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidMapTypeReason, InvalidOutputFolderReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind, NumberLiteralErrorReason,
-    PathKind, ReceiverCallKind, RuleDiagnosticKind, SymbolicSpacingConstruct, SymbolicSpacingError,
-    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
+    InvalidImportPathReason, InvalidMapTypeReason, InvalidMutableAccessReason,
+    InvalidOutputFolderReason, InvalidReceiverCallReason, InvalidSignatureMemberReason,
+    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
+    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason,
+    InvalidTypeAnnotationReason, MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind,
+    NumberLiteralErrorReason, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind, TypeAnnotationContext,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, merge_stage_messages,
@@ -2683,6 +2684,163 @@ fn borrow_conflict_rendering_hides_payload_debug_names() {
         "{terminal_guidance}"
     );
     assert!(!terse_line.contains("BorrowConflict"), "{terse_line}");
+}
+
+#[test]
+fn borrow_conflict_labels_preserve_order_and_cross_source_ranges_after_remap_and_rebind() {
+    let mut local_table = StringTable::new();
+    let primary_path = InternedPath::from_single_str("main.moth", &mut local_table);
+    let existing_path = InternedPath::from_single_str("borrow-source.moth", &mut local_table);
+    let rebound_path = InternedPath::from_single_str("final.moth", &mut local_table);
+    let value_name = local_table.intern("value");
+    let conflicting_name = local_table.intern("other_value");
+
+    let primary_location = SourceLocation::with_byte_range(
+        primary_path.clone(),
+        Default::default(),
+        Default::default(),
+        40,
+        48,
+    );
+    let existing_location = SourceLocation::with_byte_range(
+        existing_path.clone(),
+        Default::default(),
+        Default::default(),
+        11,
+        18,
+    );
+
+    let multiple = CompilerDiagnostic::multiple_mutable_borrows(
+        DiagnosticPlace::Local(value_name),
+        None,
+        Some(existing_location.clone()),
+        primary_location.clone(),
+    );
+    let shared = CompilerDiagnostic::shared_mutable_conflict(
+        DiagnosticPlace::Local(value_name),
+        BorrowAccessKind::Shared,
+        BorrowAccessKind::Mutable,
+        Some(DiagnosticPlace::Local(conflicting_name)),
+        Some(existing_location.clone()),
+        primary_location.clone(),
+    );
+    let invalid = CompilerDiagnostic::invalid_mutable_access(
+        DiagnosticPlace::Local(value_name),
+        InvalidMutableAccessReason::OverlappingAccess,
+        Some(DiagnosticPlace::Local(conflicting_name)),
+        Some(existing_location.clone()),
+        primary_location.clone(),
+    );
+
+    let mut diagnostics = vec![multiple, shared, invalid];
+    for diagnostic in &diagnostics {
+        assert_eq!(diagnostic.labels.len(), 2);
+        assert_eq!(diagnostic.labels[0].location, primary_location);
+        assert_eq!(
+            diagnostic.labels[0].style,
+            super::DiagnosticLabelStyle::Primary
+        );
+        assert_eq!(diagnostic.labels[1].location, existing_location);
+        assert_eq!(
+            diagnostic.labels[1].style,
+            super::DiagnosticLabelStyle::Secondary
+        );
+        assert_eq!(
+            diagnostic.labels[1].message,
+            Some(DiagnosticLabelMessage::ConflictingAccess)
+        );
+    }
+
+    assert!(matches!(
+        &diagnostics[0].payload,
+        DiagnosticPayload::MultipleMutableBorrows {
+            place: DiagnosticPlace::Local(name),
+            conflicting_place: None,
+        } if *name == value_name
+    ));
+    assert!(matches!(
+        &diagnostics[1].payload,
+        DiagnosticPayload::SharedMutableConflict {
+            place: DiagnosticPlace::Local(name),
+            existing_access: BorrowAccessKind::Shared,
+            requested_access: BorrowAccessKind::Mutable,
+            conflicting_place: Some(DiagnosticPlace::Local(conflict)),
+        } if *name == value_name && *conflict == conflicting_name
+    ));
+    assert!(matches!(
+        &diagnostics[2].payload,
+        DiagnosticPayload::InvalidMutableAccess {
+            place: DiagnosticPlace::Local(name),
+            conflicting_place: Some(DiagnosticPlace::Local(conflict)),
+            reason: InvalidMutableAccessReason::OverlappingAccess,
+        } if *name == value_name && *conflict == conflicting_name
+    ));
+
+    let mut merged_table = StringTable::new();
+    merged_table.intern("preexisting string");
+    let remap = merged_table.merge_from(&local_table);
+    assert!(
+        !remap.is_identity(),
+        "the fixture must exercise a shifting remap"
+    );
+
+    let mut expected_primary = primary_location.clone();
+    expected_primary.remap_string_ids(&remap);
+    let mut expected_existing = existing_location.clone();
+    expected_existing.remap_string_ids(&remap);
+    let mut expected_rebound = rebound_path.clone();
+    expected_rebound.remap_string_ids(&remap);
+
+    let mut bag = DiagnosticBag::from_diagnostics(diagnostics);
+    bag.remap_string_ids(&remap);
+    diagnostics = bag.into_diagnostics();
+    for diagnostic in &diagnostics {
+        assert_eq!(diagnostic.labels[0].location, expected_primary);
+        assert_eq!(diagnostic.labels[1].location, expected_existing);
+    }
+    assert_eq!(
+        merged_table.resolve(match &diagnostics[2].payload {
+            DiagnosticPayload::InvalidMutableAccess {
+                place: DiagnosticPlace::Local(name),
+                ..
+            } => *name,
+            payload => panic!("unexpected invalid mutable access payload: {payload:?}"),
+        }),
+        "value"
+    );
+
+    let mut shared = diagnostics.remove(1);
+    let primary_source = SourceId::from_index(7);
+    let existing_source = SourceId::from_index(8);
+    let rebound_source = SourceId::from_index(9);
+    let mut existing_builder = ExtendedSpanBuilder::new();
+    let existing_span = SourceSpan::new(
+        existing_source,
+        LocalSpan::exact(11, 7, &mut existing_builder).unwrap(),
+    );
+    shared.labels[1].span = Some(existing_span);
+
+    let mut primary_builder = ExtendedSpanBuilder::new();
+    shared
+        .capture_preparation_span(primary_source, &mut primary_builder)
+        .unwrap();
+    shared.rebind_source_identity(Some(primary_source), rebound_source, &expected_rebound);
+
+    assert_eq!(shared.labels[0].location.scope, expected_rebound);
+    assert_eq!(shared.labels[1].location, expected_existing);
+    assert_eq!(shared.primary_span.unwrap().source(), rebound_source);
+    assert_eq!(shared.labels[0].span.unwrap().source(), rebound_source);
+    assert_eq!(shared.labels[1].span, Some(existing_span));
+    let primary_range = shared.labels[0]
+        .span
+        .unwrap()
+        .resolve_with(primary_builder.resolver());
+    let existing_range = shared.labels[1]
+        .span
+        .unwrap()
+        .resolve_with(existing_builder.resolver());
+    assert_eq!((primary_range.start(), primary_range.end()), (40, 48));
+    assert_eq!((existing_range.start(), existing_range.end()), (11, 18));
 }
 
 #[test]
