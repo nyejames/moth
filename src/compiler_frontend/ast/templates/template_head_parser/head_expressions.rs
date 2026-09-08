@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -61,12 +62,17 @@ fn is_unresolved_constant_placeholder_reference(
 fn validate_template_head_value_type(
     expression: &Expression,
     location: &SourceLocation,
+    source_span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> HeadExpressionResult<()> {
     if type_environment.is_fallible_carrier(expression.type_id) {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::FallibleValueInTemplateHead,
-            location.to_owned(),
+        return Err(with_source_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::FallibleValueInTemplateHead,
+                location.to_owned(),
+            ),
+            source_span,
+            location,
         )
         .into());
     }
@@ -81,13 +87,28 @@ fn validate_template_head_value_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::invalid_template_structure(
-        InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead {
-            type_id: expression.type_id,
-        },
-        location.to_owned(),
+    Err(with_source_span(
+        CompilerDiagnostic::invalid_template_structure(
+            InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead {
+                type_id: expression.type_id,
+            },
+            location.to_owned(),
+        ),
+        source_span,
+        location,
     )
     .into())
+}
+
+fn with_source_span(
+    mut diagnostic: CompilerDiagnostic,
+    source_span: Option<SourceSpan>,
+    expected_location: &SourceLocation,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
+        diagnostic.primary_span = source_span;
+    }
+    diagnostic
 }
 
 /// Handles a template-typed value found in the template head.
@@ -97,6 +118,7 @@ pub(super) fn handle_template_value_in_template_head(
     context: &ScopeContext,
     construction_context: &mut TemplateConstructionContext,
     location: &SourceLocation,
+    source_span: Option<SourceSpan>,
 ) -> HeadExpressionResult<()> {
     let template_kind = {
         let store = context.template_ir_store.borrow();
@@ -114,9 +136,13 @@ pub(super) fn handle_template_value_in_template_head(
 
     if context.kind.is_constant_context() && matches!(&template_kind, TemplateType::StringFunction)
     {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::RuntimeTemplateInConst,
-            location.to_owned(),
+        return Err(with_source_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::RuntimeTemplateInConst,
+                location.to_owned(),
+            ),
+            source_span,
+            location,
         )
         .into());
     }
@@ -126,9 +152,13 @@ pub(super) fn handle_template_value_in_template_head(
     }
 
     if matches!(&template_kind, TemplateType::SlotDefinition(_)) {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::SlotInHead,
-            location.to_owned(),
+        return Err(with_source_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::SlotInHead,
+                location.to_owned(),
+            ),
+            source_span,
+            location,
         )
         .into());
     }
@@ -156,6 +186,7 @@ pub(super) fn push_template_head_expression(
     expression: Expression,
     target: TemplateHeadExpressionContext<'_>,
     location: &SourceLocation,
+    source_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
     if let ExpressionKind::Template(template_value) = &expression.kind {
@@ -164,6 +195,7 @@ pub(super) fn push_template_head_expression(
             target.context,
             target.construction_context,
             location,
+            source_span,
         );
     }
 
@@ -171,7 +203,12 @@ pub(super) fn push_template_head_expression(
         is_unresolved_constant_placeholder_reference(&expression, target.context);
 
     if !defer_inferred_type_validation {
-        validate_template_head_value_type(&expression, location, target.type_environment)?;
+        validate_template_head_value_type(
+            &expression,
+            location,
+            source_span,
+            target.type_environment,
+        )?;
     }
 
     let expression_needs_constness =
@@ -190,9 +227,13 @@ pub(super) fn push_template_head_expression(
         && !expression_is_compile_time_constant
         && !is_unresolved_constant_placeholder_reference(&expression, target.context)
     {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead,
-            location.to_owned(),
+        return Err(with_source_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead,
+                location.to_owned(),
+            ),
+            source_span,
+            location,
         )
         .into());
     }
@@ -235,17 +276,22 @@ pub(super) fn push_template_head_reactive_subscription(
     source: ReactiveSource,
     target: TemplateHeadExpressionContext<'_>,
     location: &SourceLocation,
+    source_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
     if target.context.kind.is_constant_context() {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate,
-            location.to_owned(),
+        return Err(with_source_span(
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate,
+                location.to_owned(),
+            ),
+            source_span,
+            location,
         )
         .into());
     }
 
-    validate_template_head_value_type(&expression, location, target.type_environment)?;
+    validate_template_head_value_type(&expression, location, source_span, target.type_environment)?;
 
     let subscription = ReactiveSubscription {
         source,
@@ -292,6 +338,9 @@ pub(super) fn push_template_head_path_expression(
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
     let location = token_stream.current_location();
+    let source_span = token_stream
+        .file_id
+        .map(|source| SourceSpan::new(source, token_stream.current_token().span));
     let expression = resolve_file_value(
         path_syntax,
         token_stream,
@@ -300,7 +349,7 @@ pub(super) fn push_template_head_path_expression(
         &value_mode,
         string_table,
     )
-    .map_err(TemplateError::from)?;
+    .map_err(|error| with_source_span_error(source_span, &location, TemplateError::from(error)))?;
 
     push_template_head_expression(
         expression,
@@ -310,6 +359,20 @@ pub(super) fn push_template_head_path_expression(
             construction_context,
         },
         &location,
+        source_span,
         string_table,
     )
+}
+
+fn with_source_span_error(
+    source_span: Option<SourceSpan>,
+    expected_location: &SourceLocation,
+    error: TemplateError,
+) -> TemplateError {
+    error.map_diagnostic(|mut diagnostic| {
+        if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
+            diagnostic.primary_span = source_span;
+        }
+        diagnostic
+    })
 }

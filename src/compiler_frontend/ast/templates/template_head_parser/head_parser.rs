@@ -35,9 +35,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 
 use crate::ast_log;
+use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
 };
@@ -83,12 +85,58 @@ fn enforce_head_compatibility(
     {
         Ok(())
     } else {
-        Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::IncompatibleHeadItem,
-            token_stream.current_location(),
+        Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::IncompatibleHeadItem,
+                token_stream.current_location(),
+            ),
         )
         .into())
     }
+}
+
+/// Attach the current authored head-item span while retaining the legacy location bridge.
+fn with_current_token_span(
+    token_stream: &FileTokens,
+    diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    let location = token_stream.current_location();
+    with_source_span(diagnostic, current_source_span(token_stream), &location)
+}
+
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    source_span_for(token_stream, token_stream.current_token().span)
+}
+
+fn source_span_for(token_stream: &FileTokens, span: LocalSpan) -> Option<SourceSpan> {
+    token_stream
+        .file_id
+        .map(|source| SourceSpan::new(source, span))
+}
+
+fn with_source_span(
+    mut diagnostic: CompilerDiagnostic,
+    source_span: Option<SourceSpan>,
+    expected_location: &SourceLocation,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
+        diagnostic.primary_span = source_span;
+    }
+    diagnostic
+}
+
+fn with_source_span_error(
+    source_span: Option<SourceSpan>,
+    expected_location: &SourceLocation,
+    error: TemplateError,
+) -> TemplateError {
+    error.map_diagnostic(|mut diagnostic| {
+        if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
+            diagnostic.primary_span = source_span;
+        }
+        diagnostic
+    })
 }
 
 fn apply_head_compatibility(
@@ -182,8 +230,10 @@ pub fn parse_template_head(
     token_stream.advance();
 
     let mut last_known_location = token_stream.current_location();
+    let mut last_known_span = token_stream.current_token().span;
     while token_stream.index < token_stream.length {
         last_known_location = token_stream.current_location();
+        last_known_span = token_stream.current_token().span;
         let token = token_stream.current_token_kind().to_owned();
 
         ast_log!("Parsing template head: ", #token);
@@ -197,9 +247,12 @@ pub fn parse_template_head(
         // closing ] delimiter. This is a malformed template, not a valid stream
         // boundary; the user needs a structured diagnostic.
         if token == TokenKind::Eof {
-            return Err(CompilerDiagnostic::unexpected_end_of_file(
-                Some(string_table.intern("]")),
-                token_stream.current_location(),
+            return Err(with_current_token_span(
+                token_stream,
+                CompilerDiagnostic::unexpected_end_of_file(
+                    Some(string_table.intern("]")),
+                    token_stream.current_location(),
+                ),
             )
             .into());
         }
@@ -217,9 +270,12 @@ pub fn parse_template_head(
                 .seen_tags
                 .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
             {
-                return Err(CompilerDiagnostic::invalid_template_structure(
-                    InvalidTemplateStructureReason::SlotInHead,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::SlotInHead,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -233,11 +289,16 @@ pub fn parse_template_head(
 
         if separator_state == TemplateHeadSeparatorState::ExpectItem
             && !matches!(token, TokenKind::If | TokenKind::Loop)
-            && let Some(control_flow_location) = find_unseparated_control_flow_suffix(token_stream)
+            && let Some((control_flow_location, control_flow_span)) =
+                find_unseparated_control_flow_suffix(token_stream)
         {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
-                control_flow_location,
+            return Err(with_source_span(
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
+                    control_flow_location.clone(),
+                ),
+                source_span_for(token_stream, control_flow_span),
+                &control_flow_location,
             )
             .into());
         }
@@ -245,18 +306,24 @@ pub fn parse_template_head(
         // Make sure there is a comma before the next token.
         if separator_state == TemplateHeadSeparatorState::ExpectSeparatorOrBody {
             if matches!(token, TokenKind::If | TokenKind::Loop) {
-                return Err(CompilerDiagnostic::invalid_template_structure(
-                    InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
 
             if token != TokenKind::Comma {
-                return Err(CompilerDiagnostic::expected_token(
-                    TokenKind::Comma,
-                    Some(token),
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::expected_token(
+                        TokenKind::Comma,
+                        Some(token),
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -274,9 +341,12 @@ pub fn parse_template_head(
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
                 {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::SlotInHead,
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::SlotInHead,
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 }
@@ -296,9 +366,12 @@ pub fn parse_template_head(
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
                 {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::SlotInHead,
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::SlotInHead,
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 }
@@ -314,9 +387,12 @@ pub fn parse_template_head(
             }
 
             TokenKind::Else => {
-                return Err(CompilerDiagnostic::invalid_template_structure(
-                    InvalidTemplateStructureReason::ElseInTemplateHead,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::ElseInTemplateHead,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -352,6 +428,7 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_location = token_stream.current_location();
+                let value_span = current_source_span(token_stream);
 
                 // Extract an inlinable template before the mutable expression parse.
                 // The borrow from get_reference is released once the template is cloned.
@@ -377,6 +454,7 @@ pub fn parse_template_head(
                         context,
                         construction_context,
                         &value_location,
+                        value_span,
                     )?;
                 } else {
                     // Resolve value_mode from the reference before the mutable
@@ -396,7 +474,13 @@ pub fn parse_template_head(
                         false,
                         string_table,
                     )
-                    .map_err(TemplateError::from)?;
+                    .map_err(|error| {
+                        with_source_span_error(
+                            value_span,
+                            &value_location,
+                            TemplateError::from(error),
+                        )
+                    })?;
 
                     push_template_head_expression(
                         expression,
@@ -406,6 +490,7 @@ pub fn parse_template_head(
                             construction_context,
                         },
                         &value_location,
+                        value_span,
                         string_table,
                     )?;
                     defer_comma_advance = true;
@@ -424,6 +509,7 @@ pub fn parse_template_head(
                         token_stream,
                     )?;
                     let value_location = token_stream.current_location();
+                    let value_span = current_source_span(token_stream);
                     let mut inferred = ExpectedType::Infer;
                     let expression = create_expression(
                         token_stream,
@@ -434,7 +520,13 @@ pub fn parse_template_head(
                         false,
                         string_table,
                     )
-                    .map_err(TemplateError::from)?;
+                    .map_err(|error| {
+                        with_source_span_error(
+                            value_span,
+                            &value_location,
+                            TemplateError::from(error),
+                        )
+                    })?;
 
                     push_template_head_expression(
                         expression,
@@ -444,14 +536,18 @@ pub fn parse_template_head(
                             construction_context,
                         },
                         &value_location,
+                        value_span,
                         string_table,
                     )?;
                     defer_comma_advance = true;
                     apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
                 } else {
-                    return Err(CompilerDiagnostic::unexpected_token(
-                        TokenKind::This,
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::unexpected_token(
+                            TokenKind::This,
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 }
@@ -469,6 +565,7 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_location = token_stream.current_location();
+                let value_span = current_source_span(token_stream);
                 let mut inferred = ExpectedType::Infer;
                 let expression = create_expression(
                     token_stream,
@@ -479,7 +576,9 @@ pub fn parse_template_head(
                     false,
                     string_table,
                 )
-                .map_err(TemplateError::from)?;
+                .map_err(|error| {
+                    with_source_span_error(value_span, &value_location, TemplateError::from(error))
+                })?;
 
                 push_template_head_expression(
                     expression,
@@ -489,6 +588,7 @@ pub fn parse_template_head(
                         construction_context,
                     },
                     &value_location,
+                    value_span,
                     string_table,
                 )?;
                 defer_comma_advance = true;
@@ -521,6 +621,7 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_location = token_stream.current_location();
+                let value_span = current_source_span(token_stream);
                 let mut inferred = ExpectedType::Infer;
                 let expression = create_expression(
                     token_stream,
@@ -531,7 +632,9 @@ pub fn parse_template_head(
                     true,
                     string_table,
                 )
-                .map_err(TemplateError::from)?;
+                .map_err(|error| {
+                    with_source_span_error(value_span, &value_location, TemplateError::from(error))
+                })?;
 
                 push_template_head_expression(
                     expression,
@@ -541,6 +644,7 @@ pub fn parse_template_head(
                         construction_context,
                     },
                     &value_location,
+                    value_span,
                     string_table,
                 )?;
                 defer_comma_advance = true;
@@ -554,10 +658,13 @@ pub fn parse_template_head(
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();
                 let Some(spec) = context.style_directives.find(&directive_name) else {
-                    return Err(CompilerDiagnostic::invalid_template_directive(
-                        Some(directive),
-                        InvalidTemplateDirectiveReason::UnknownDirective,
-                        token_stream.current_location(),
+                    return Err(with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::invalid_template_directive(
+                            Some(directive),
+                            InvalidTemplateDirectiveReason::UnknownDirective,
+                            token_stream.current_location(),
+                        ),
                     )
                     .into());
                 };
@@ -590,9 +697,12 @@ pub fn parse_template_head(
             // Separators
             TokenKind::Comma => {
                 // Multiple commas in succession.
-                return Err(CompilerDiagnostic::unexpected_token(
-                    TokenKind::Comma,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::unexpected_token(
+                        TokenKind::Comma,
+                        token_stream.current_location(),
+                    ),
                 )
                 .into());
             }
@@ -605,9 +715,9 @@ pub fn parse_template_head(
             }
 
             _ => {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token,
-                    token_stream.current_location(),
+                return Err(with_current_token_span(
+                    token_stream,
+                    CompilerDiagnostic::unexpected_token(token, token_stream.current_location()),
                 )
                 .into());
             }
@@ -615,9 +725,13 @@ pub fn parse_template_head(
 
         // Guard against malformed or truncated synthetic token streams.
         if token_stream.index >= token_stream.length {
-            return Err(CompilerDiagnostic::unexpected_end_of_file(
-                Some(string_table.intern("]")),
-                last_known_location,
+            return Err(with_source_span(
+                CompilerDiagnostic::unexpected_end_of_file(
+                    Some(string_table.intern("]")),
+                    last_known_location.clone(),
+                ),
+                source_span_for(token_stream, last_known_span),
+                &last_known_location,
             )
             .into());
         }
@@ -631,9 +745,12 @@ pub fn parse_template_head(
         }
 
         if token_stream.current_token_kind() == &TokenKind::Eof {
-            return Err(CompilerDiagnostic::unexpected_end_of_file(
-                Some(string_table.intern("]")),
-                token_stream.current_location(),
+            return Err(with_current_token_span(
+                token_stream,
+                CompilerDiagnostic::unexpected_end_of_file(
+                    Some(string_table.intern("]")),
+                    token_stream.current_location(),
+                ),
             )
             .into());
         }
@@ -651,9 +768,13 @@ pub fn parse_template_head(
         }
     }
 
-    Err(CompilerDiagnostic::unexpected_end_of_file(
-        Some(string_table.intern("]")),
-        last_known_location,
+    Err(with_source_span(
+        CompilerDiagnostic::unexpected_end_of_file(
+            Some(string_table.intern("]")),
+            last_known_location.clone(),
+        ),
+        source_span_for(token_stream, last_known_span),
+        &last_known_location,
     )
     .into())
 }
@@ -708,7 +829,10 @@ fn parse_style_directive_from_spec(
 /// Early returns make the first top-level boundary or suffix location explicit.
 fn find_unseparated_control_flow_suffix(
     token_stream: &FileTokens,
-) -> Option<crate::compiler_frontend::tokenizer::tokens::SourceLocation> {
+) -> Option<(
+    crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    LocalSpan,
+)> {
     let mut nesting_depth = NestingDepth::default();
     let mut index = token_stream.index + 1;
 
@@ -721,7 +845,7 @@ fn find_unseparated_control_flow_suffix(
                     return None;
                 }
                 TokenKind::If | TokenKind::Loop => {
-                    return Some(token.location.clone());
+                    return Some((token.location.clone(), token.span));
                 }
                 _ => {}
             }

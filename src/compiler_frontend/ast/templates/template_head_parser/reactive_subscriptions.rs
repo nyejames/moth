@@ -138,6 +138,9 @@ pub(super) fn parse_reactive_subscription(
             construction_context,
         },
         &subscription_location,
+        token_stream
+            .file_id
+            .map(|source| SourceSpan::new(source, subscription_span)),
         string_table,
     )?;
 
