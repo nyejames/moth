@@ -8,7 +8,8 @@
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, NameNamespace, RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, NameNamespace,
+    RuleDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, TypeParameterId,
@@ -1247,14 +1248,12 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             .iter()
             .all(|label| label.location.scope == output.source_file)
     );
-    let DiagnosticPayload::ImportNameCollision {
-        previous_location: Some(previous_location),
-        ..
-    } = &warning.payload
-    else {
-        panic!("expected collision payload with previous location");
-    };
-    assert_eq!(previous_location.scope, output.source_file);
+    let previous_label = warning
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected collision label with previous declaration");
+    assert_eq!(previous_label.location.scope, output.source_file);
 
     let clause = &output.file_dependency_clauses[0];
     assert_eq!(

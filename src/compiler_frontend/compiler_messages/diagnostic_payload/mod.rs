@@ -80,7 +80,6 @@ pub enum DiagnosticPayload {
 
     ImportNameCollision {
         name: StringId,
-        previous_location: Option<SourceLocation>,
     },
 
     NotExportedBySourceFile {

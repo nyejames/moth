@@ -794,7 +794,7 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
                 "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
             )
         }
-        DiagnosticPayload::ImportNameCollision { name, .. } => {
+        DiagnosticPayload::ImportNameCollision { name } => {
             format!(
                 "Dependency binding name collision: '{}' is already visible in this file.",
                 string_table.resolve(*name)

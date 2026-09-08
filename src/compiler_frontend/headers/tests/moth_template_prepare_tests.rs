@@ -1245,14 +1245,13 @@ fn same_directory_root_constants_collide_with_html_constants() {
             crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
         )
     ));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ImportNameCollision {
-            previous_location: Some(_),
-            ..
-        }
-    ));
     assert_eq!(diagnostic.labels.len(), 2);
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .any(|label| label.style == DiagnosticLabelStyle::Secondary)
+    );
     assert!(
         diagnostic
             .labels

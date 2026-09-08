@@ -175,10 +175,7 @@ impl CompilerDiagnostic {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision),
             location,
-            DiagnosticPayload::ImportNameCollision {
-                name,
-                previous_location,
-            },
+            DiagnosticPayload::ImportNameCollision { name },
         )
         .with_labels(labels)
     }

@@ -80,14 +80,8 @@ impl DiagnosticPayload {
                 remap_invalid_import_path_payload(path, reason, remap);
             }
 
-            DiagnosticPayload::ImportNameCollision {
-                name,
-                previous_location,
-            } => {
+            DiagnosticPayload::ImportNameCollision { name } => {
                 *name = remap.get(*name);
-                if let Some(location) = previous_location {
-                    location.remap_string_ids(remap);
-                }
             }
 
             DiagnosticPayload::MissingPackageSymbol {
@@ -706,11 +700,9 @@ impl DiagnosticPayload {
     /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
     pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         match self {
-            DiagnosticPayload::DuplicateDeclaration { first_location, .. }
-            | DiagnosticPayload::ImportNameCollision {
-                previous_location: first_location,
-                ..
-            } => rebind_optional_location(first_location, logical_path),
+            DiagnosticPayload::DuplicateDeclaration { first_location, .. } => {
+                rebind_optional_location(first_location, logical_path)
+            }
 
             DiagnosticPayload::ShadowedName { first_location, .. }
             | DiagnosticPayload::DuplicatePublicExport { first_location, .. }
@@ -763,6 +755,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnknownName { .. }
             | DiagnosticPayload::TypeMismatch { .. }
             | DiagnosticPayload::MissingImportTarget { .. }
+            | DiagnosticPayload::ImportNameCollision { .. }
             | DiagnosticPayload::AmbiguousImportTarget { .. }
             | DiagnosticPayload::BareFileImport { .. }
             | DiagnosticPayload::DirectSpecialFileImport { .. }

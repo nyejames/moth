@@ -744,15 +744,19 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     }
 
     match &diagnostics[2].payload {
-        DiagnosticPayload::ImportNameCollision {
-            name,
-            previous_location,
-        } => {
+        DiagnosticPayload::ImportNameCollision { name } => {
             assert_eq!(merged_table.resolve(*name), "AliasButton");
-            assert!(previous_location.is_some());
         }
         payload => panic!("unexpected import payload: {payload:?}"),
     }
+
+    assert_eq!(
+        diagnostics[2].labels[0]
+            .location
+            .scope
+            .to_string(&merged_table),
+        "lib.moth"
+    );
 
     match &diagnostics[2].labels[0].message {
         Some(DiagnosticLabelMessage::RenderedText(message)) => {

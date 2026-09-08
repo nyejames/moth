@@ -8,11 +8,11 @@
 use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind, DiagnosticPayload,
-    InvalidChoiceVariantReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidDependencyClauseReason, InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
-    InvalidThisUsageReason, InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind,
-    SyntaxDiagnosticKind,
+    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
+    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason, InvalidConfigReason,
+    InvalidDeclarationReason, InvalidDependencyClauseReason, InvalidFunctionSignatureReason,
+    InvalidSignatureMemberReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
+    ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
@@ -5462,13 +5462,12 @@ fn declaration_followed_by_selection_preserves_declaration_and_selection_spans()
             )
         });
 
-    let DiagnosticPayload::ImportNameCollision {
-        previous_location: Some(previous_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the declaration to be the previous location");
-    };
+    let previous_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the declaration to be the previous location")
+        .location;
     assert_eq!(previous_location.start_pos.line_number, 0);
     assert_eq!(previous_location.start_pos.char_column, 1);
     assert_eq!(previous_location.end_pos.char_column, 4);
@@ -5501,13 +5500,12 @@ fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
             )
         });
 
-    let DiagnosticPayload::ImportNameCollision {
-        previous_location: Some(previous_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the first selected alias to be the previous location");
-    };
+    let previous_location = &diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .expect("expected the first selected alias to be the previous location")
+        .location;
     assert_eq!(previous_location.start_pos.line_number, 0);
     assert_eq!(previous_location.start_pos.char_column, 18);
     assert_eq!(previous_location.end_pos.char_column, 22);

@@ -11,7 +11,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, ReservedNameOwner,
+    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
+    ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
@@ -301,13 +302,19 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     let declaration_path = intern_path(&["src", "existing"], &mut string_table);
     let mut declared_paths = FxHashSet::default();
     declared_paths.insert(declaration_path.clone());
+    let declaration_span = LocalSpan::exact(5, 8, &mut span_builder)
+        .expect("focused declaration span should fit the inline representation");
+    let expected_previous_span = SourceSpan::new(SourceId::COMPILATION_ROOT, declaration_span);
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file.clone());
     module_symbols.declaration_locations_by_symbol_path.insert(
-        declaration_path,
+        declaration_path.clone(),
         location_for(&["src", "existing"], &mut string_table),
     );
+    module_symbols
+        .declaration_spans_by_symbol_path
+        .insert(declaration_path, expected_previous_span);
     module_symbols
         .declared_paths_by_file
         .insert(source_file.clone(), declared_paths);
@@ -332,6 +339,12 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     );
     assert_eq!(diagnostic.primary_location, expected_location);
     assert_eq!(diagnostic.primary_span, Some(expected_span));
+    let previous_label = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.style == DiagnosticLabelStyle::Secondary)
+        .expect("collision should retain the previous declaration label");
+    assert_eq!(previous_label.span, Some(expected_previous_span));
 }
 
 #[test]
