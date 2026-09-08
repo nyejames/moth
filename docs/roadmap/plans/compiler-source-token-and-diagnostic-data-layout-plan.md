@@ -70,20 +70,22 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5c5, header names, const fragments and source contracts.
-- Goal: copy header-name LocalSpan anchors and retain explicit SourceSpan ownership on detached
-  const fragments and source contracts. Source contracts retain their qualifier `#` anchor.
-- Join const-fragment first-interior and post-close token spans through the original live builder.
-  Keep infrastructure failures on the existing HeaderParseFailure lane.
+- Phase: 1E1, headers and ordering.
+- Goal: migrate the first downstream header/order consumers onto the exact preparation spans while
+  retaining the interval bridge for untouched consumers.
+- Keep source ownership explicit across dependency and symbol records; do not add a second source
+  table or convert legacy locations into guessed spans.
 - Non-goals: resolved semantic spans, new source owners, diagnostic
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `8142352cd` — generic anchors and canonical semantic metadata, with full validation and independent review accepted.
+- `cefb61634` — focused Rust tests share one test-only source identity/span-builder context, with
+  helper and c5 regression tests passing. The scripted independent audit was attempted but blocked
+  by provider sandbox/TLS failures without changing the worktree.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Continuation order: remaining 1D5 and 1D6, remaining Phase 1, final review and closeout,
+- Continuation order: remaining 1E, 1F, 1G and 1H, Phase 1 closeout and final review,
   then pause for external review. Phases 2–7 stay pending until the user authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
@@ -98,6 +100,16 @@ CURRENT_WORKTREE_STATE:
   copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
   redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
   the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
+- Accepted 1D5c5 is committed in `6afa29848`. Header names retain exact local anchors; const
+  fragments retain explicit final-source `SourceSpan` ownership and join their first-interior
+  through post-close bounds through the original live builder; source contracts retain the
+  qualifier `#` anchor. Focused coverage includes long multibyte/extended ranges, infrastructure-
+  lane selection failure, related labels and joined dependency-clause ends. The scripted
+  independent audit could not run because its providers failed before inspection; no files changed
+  during those attempts.
+- Accepted 1D6 is committed in `cefb61634`. The test-only `source::test_support::TestSourceContext`
+  owns an explicit source identity, interned path, string table and live extended-span builder;
+  focused header span regressions now share it, and its own test covers a long live-table span.
 - Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
   trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
   declaration allowance because synthetic `This` now consumes that span. Remove the remaining
@@ -792,13 +804,13 @@ actual remaining consumer, not blanket suppressions.
     - [x] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
       synthetic metadata without manufacturing source identities. Semantic registration consumes
       ordered parameter IDs and names. Canonical type parameters replace duplicated parsed metadata.
-    - [ ] **1D5c5 — header names, const fragments and source contracts:** thread the original
+    - [x] **1D5c5 — header names, const fragments and source contracts:** thread the original
       builder only where a joined range needs encoding. Keep const-fragment source ownership
       explicit after module aggregation and preserve the infrastructure failure lane. Source contracts
       retain the qualifier `#` anchor already copied into `DeclarationSyntax.span`, not the header
       name anchor. Const-template joins preserve the existing first-interior-token through post-close-token
       bounds by joining those original token spans through the original live builder.
-- **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
+- [x] **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
   repeated ad hoc path/location constructors in Rust tests.
 
 **Interval bridge.** A token cannot switch representation and migrate its consumers in the same
