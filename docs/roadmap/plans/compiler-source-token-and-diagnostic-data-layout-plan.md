@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `c5378c489` — template-head compatibility, expression, path and boundary diagnostics retain
-  exact token-owned spans, following the generic-scope and downstream-else consumers. Focused
-  generic, template, malformed-template and head tests pass; `cargo check -p moth`, formatting and
-  diff checks are clean.
+- `62808f4eb` — directory module-namespace and provider-target diagnostics retain the retained
+  dependency's final `SourceId` and exact local span, with diagnosed test helpers preserving the
+  finalized source database. The focused create-project-modules suite (149 tests), `cargo check
+  -p moth`, formatting and diff checks pass.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -253,6 +253,12 @@ CURRENT_WORKTREE_STATE:
   own locations, identity-free streams remain span-less, and infrastructure failures stay in their
   lane. The head suite (105) includes multibyte/extended compatibility, unknown-name and
   extensionless-path regressions; `cargo check -p moth`, formatting and diff checks are clean.
+- Accepted the bounded 1E5 module-namespace span consumer in `62808f4eb`. Indexed namespace and
+  provider-target diagnostics retain the dependency shell's source ID and exact local span while
+  preserving legacy locations, labels, ordering and infrastructure lanes. Diagnosed Stage 0 test
+  helpers retain the finalized source database so the span can be resolved. The focused
+  create-project-modules suite (149) covers multibyte missing, ambiguous, unsupported-source and
+  unsupported-provider diagnostics; `cargo check -p moth`, formatting and diff checks are clean.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -401,6 +407,10 @@ VALIDATION_STATE:
 - 1E3 template-head candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
   the focused multibyte regression (1), directive-style suite (52), diagnostic model (78) and
   full library suite (4,986) passed. The independent Slice review found no required correction.
+- 1E5 module-namespace candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  and the focused `cargo test -p moth --lib create_project_modules_tests --quiet` suite (149)
+  passed. Namespace and provider-target diagnostics resolve their retained source snapshots in
+  multibyte regressions; a fresh read-only audit found no required correction.
 - 1G1 duplicate-declaration payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, diagnostic model (78), signature duplicate (5), header parsing (179)
   and the full library suite (4,987) passed. The independent Slice review found no required
