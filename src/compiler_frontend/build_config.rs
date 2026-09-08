@@ -30,7 +30,7 @@ use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -821,6 +821,12 @@ pub(crate) struct BuildConfigContractFact {
     required: bool,
     default: Option<PrimitiveBuildValue>,
     location: SourceLocation,
+    /// Exact source ownership when this fact came from a prepared source contract.
+    ///
+    /// Project-owned provider facts retain only their legacy location because they have no
+    /// authored source anchor. The source-contract adapter fills this field from the retained
+    /// declaration qualifier span without reconstructing a range at the build boundary.
+    source_span: Option<SourceSpan>,
     resolved_provider: Option<ResolvedBuildConfigProvider>,
 }
 
@@ -839,8 +845,15 @@ impl BuildConfigContractFact {
             required,
             default,
             location,
+            source_span: None,
             resolved_provider: None,
         }
+    }
+
+    /// Retain the exact source anchor carried by one prepared source contract.
+    pub(crate) fn with_source_span(mut self, source_span: SourceSpan) -> Self {
+        self.source_span = Some(source_span);
+        self
     }
 
     /// Attach the value already selected while a direct project contract folded.
@@ -881,6 +894,10 @@ impl BuildConfigContractFact {
 
     pub(crate) fn location(&self) -> &SourceLocation {
         &self.location
+    }
+
+    pub(crate) fn source_span(&self) -> Option<SourceSpan> {
+        self.source_span
     }
 
     fn resolved_provider(&self) -> Option<&ResolvedBuildConfigProvider> {

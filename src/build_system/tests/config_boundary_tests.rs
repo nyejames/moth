@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, InvalidConfigReason,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -323,4 +324,53 @@ fn mapped_config_input_type_mismatch_preserves_contract_location_and_argument_in
     assert_eq!(messages.string_table.resolve(*provided), "String");
     assert_eq!(messages.string_table.resolve(*expected), "Int");
     assert_eq!(*provided_argument_index, Some(23));
+}
+
+#[test]
+fn mapped_missing_source_contract_publishes_exact_primary_span() {
+    let mut boundary_table = StringTable::new();
+    boundary_table.intern("boundary-table-prefix");
+    let contract_location =
+        location_in_boundary_table(&mut boundary_table, "source-contract.moth", 4, 7, 7);
+    let fallback_location =
+        location_in_boundary_table(&mut boundary_table, "config-fallback.moth", 1, 0, 1);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span = LocalSpan::exact(37, 12, &mut span_builder)
+        .expect("the focused source contract span should fit the local encoding");
+    let source_span = SourceSpan::new(SourceId::COMPILATION_ROOT, local_span);
+
+    let source_facts = [BuildConfigContractFact::new(
+        BuildInputName::new("count").expect("test input name should be valid"),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        true,
+        None,
+        contract_location.clone(),
+    )
+    .with_source_span(source_span)];
+    let error = resolve_build_config_values(
+        &source_facts,
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &BuilderConfigGlobalSet::new(),
+    )
+    .expect_err("a required source contract without a value should fail");
+    assert!(matches!(
+        &error,
+        BuildConfigResolutionError::MissingRequiredValue { .. }
+    ));
+
+    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
+    let diagnostic = messages
+        .first_error()
+        .expect("mapped missing config input should contain one error");
+    assert_eq!(diagnostic.primary_location, contract_location);
+    assert_eq!(diagnostic.primary_span, Some(source_span));
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::MissingConfigInput,
+            ..
+        }
+    ));
 }

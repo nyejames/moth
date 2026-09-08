@@ -68,6 +68,7 @@ pub(super) fn source_contract_facts_from_prepared(
                 contract.default.clone(),
                 location,
             )
+            .with_source_span(contract.span)
         })
         .collect()
 }
@@ -125,6 +126,7 @@ pub(super) fn source_contract_facts_for_current_module(
                 contract.default.clone(),
                 contract.location.clone(),
             )
+            .with_source_span(contract.span)
         })
         .collect()
 }
@@ -800,11 +802,18 @@ pub(super) fn build_config_resolution_messages(
             )
             .with_labels(labels)
         } else {
-            CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::MissingConfigInput,
                 contract.location().clone(),
-            )
+            );
+            if matches!(
+                &error,
+                BuildConfigResolutionError::MissingRequiredValue { .. }
+            ) {
+                diagnostic.primary_span = contract.source_span();
+            }
+            diagnostic
         }
     } else {
         CompilerDiagnostic::invalid_config_reason(
