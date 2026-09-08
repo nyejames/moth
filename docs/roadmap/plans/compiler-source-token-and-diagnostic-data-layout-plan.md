@@ -82,10 +82,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `3b36306cd` — shadowed declaration and import-collision diagnostics retain exact primary and
-  related source facts while redundant collision payload storage is removed. Focused declaration,
-  namespace, diagnostic-model, header-remap, header-parsing and template tests pass; `cargo check
-  -p moth`, the full 4,985-library-test suite and the worktree are clean.
+- `ebe54fea5` — template-head directive diagnostics retain current-token spans, completing the
+  accepted shadowed-name payload reduction and declaration anchor slice. Focused directive-style,
+  diagnostic-model and declaration tests pass; `cargo check -p moth`, the full 4,986-library-test
+  suite and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -172,6 +172,10 @@ CURRENT_WORKTREE_STATE:
   token's existing `LocalSpan` and `FileTokens.file_id` become the diagnostic primary span while
   the legacy location, payload and both labels remain unchanged. The multibyte declaration
   regression and the full declaration test module (23 tests) pass.
+- Accepted the bounded 1E3 template-head consumer in `ebe54fea5`. Directive argument syntax
+  diagnostics use one current-token helper to retain exact spans from `FileTokens.file_id`, while
+  legacy locations, labels, payloads and ordering remain unchanged. The multibyte slot-target
+  regression and directive-style suite (52 tests) pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -317,6 +321,9 @@ VALIDATION_STATE:
 - 1E2 shadowed-declaration candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, the focused regression (1), declaration test module (23) and the full
   library suite (4,985) passed. The independent Slice review found no required correction.
+- 1E3 template-head candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  the focused multibyte regression (1), directive-style suite (52), diagnostic model (78) and
+  full library suite (4,986) passed. The independent Slice review found no required correction.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
