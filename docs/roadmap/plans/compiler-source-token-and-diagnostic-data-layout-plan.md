@@ -70,7 +70,7 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1E1/1E2/1F4, downstream span consumers and render boundary.
+- Phase: 1E1/1E2/1E3/1E5/1F4, downstream span consumers and render boundary.
 - Goal: migrate downstream header/order and AST consumers onto the exact preparation spans while
   retaining the interval bridge for untouched consumers, and make renderers resolve retained
   primary spans through the source snapshot. Dependency-clause and remaining symbol consumers
@@ -81,10 +81,12 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `715c17ca9` — dependency aliases and trait diagnostics retain exact source-owned anchors,
-  extending the accepted header, AST and renderer consumers through the current Phase 1 slice.
-  Focused namespace, trait, renderer, dependency-selection, module-dependency and AST tests pass;
-  `cargo check -p moth` and the worktree are clean.
+- `3b4ae4b26` — template body parser and source-build-config diagnostics retain exact
+  source-owned anchors, extending the accepted header, AST, template, config and renderer
+  consumers through the current Phase 1 slice. Focused namespace, trait, template, config,
+  renderer, dependency-selection, module-dependency and AST tests pass; source loading now has
+  explicit no-copy ownership coverage, `cargo check -p moth`, the full 4,979-library-test baseline
+  and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -141,6 +143,15 @@ CURRENT_WORKTREE_STATE:
 - Accepted dependency-alias span consumption in `715c17ca9`. Namespace alias collisions attach
   the authored alias span through the dependency shell's source ID while preserving the legacy
   collision location. The obsolete alias field-level allowance is removed.
+- Accepted template body span consumption in `fd4829a4d`. The parser's defensive unexpected-token
+  lane publishes the retained current-token span and source ID while preserving the legacy
+  location and primary label; a multibyte regression exercises the retained token boundary.
+- Accepted source config span consumption in `a33729819`. Prepared source-contract facts carry
+  their declaration span through the build-config boundary, and missing required inputs publish
+  that exact primary span while provider-only facts retain their location-only contract.
+- Accepted the open 1B4 loading evidence in `3b4ae4b26`. A source-loading regression verifies that
+  `retain_text` moves the original allocation into the loaded source record while preserving its
+  exact contents; production lifecycle code is unchanged.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -263,6 +274,12 @@ VALIDATION_STATE:
   unknown-reference span regressions.
 - 1E1 dependency-alias candidate: `cargo fmt --all`, `git diff --check` and the focused namespace
   binding suite (38 tests) passed, including exact alias collision ownership.
+- 1E3 template candidate: `cargo fmt --all`, `git diff --check` and the focused malformed-template
+  suite (13 tests) passed, including the multibyte defensive unexpected-token span regression.
+- 1E5 config candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`, the focused
+  config-boundary suite (4 tests) and the full library test baseline (4,976 tests) passed.
+- 1B4 lifecycle candidate: `cargo fmt --all`, `git diff --check`, the focused no-copy source-loading
+  test (1 test) and the full library suite (4,979 tests) passed.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
