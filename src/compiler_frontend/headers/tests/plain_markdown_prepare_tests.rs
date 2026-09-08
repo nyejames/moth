@@ -88,13 +88,11 @@ fn declaration_is_private_compile_time_string_constant() {
         declaration.binding_mode,
         BindingMode::CompileTimeConstant
     ));
-    assert!(
-        matches!(
-            declaration.type_annotation,
-            ParsedTypeRef::BuiltinString { .. }
-        ),
-        "expected builtin String annotation"
-    );
+    let ParsedTypeRef::BuiltinString { span, location } = &declaration.type_annotation else {
+        panic!("expected builtin String annotation");
+    };
+    assert_eq!(*span, declaration.span);
+    assert_eq!(location, &declaration.location);
 }
 
 #[test]

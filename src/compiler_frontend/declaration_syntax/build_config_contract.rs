@@ -91,17 +91,15 @@ pub(crate) fn parsed_type_location(parsed: &ParsedTypeRef) -> SourceLocation {
     match parsed {
         ParsedTypeRef::Named { location, .. }
         | ParsedTypeRef::Qualified { location, .. }
-        | ParsedTypeRef::BuiltinBool { location }
-        | ParsedTypeRef::BuiltinInt { location }
-        | ParsedTypeRef::BuiltinFloat { location }
-        | ParsedTypeRef::BuiltinString { location }
-        | ParsedTypeRef::BuiltinChar { location }
-        | ParsedTypeRef::BuiltinNone { location }
-        | ParsedTypeRef::This { location }
+        | ParsedTypeRef::BuiltinBool { location, .. }
+        | ParsedTypeRef::BuiltinInt { location, .. }
+        | ParsedTypeRef::BuiltinFloat { location, .. }
+        | ParsedTypeRef::BuiltinString { location, .. }
+        | ParsedTypeRef::BuiltinChar { location, .. }
+        | ParsedTypeRef::This { location, .. }
         | ParsedTypeRef::Optional { location, .. }
         | ParsedTypeRef::Collection { location, .. }
         | ParsedTypeRef::Map { location, .. }
-        | ParsedTypeRef::Result { location, .. }
         | ParsedTypeRef::Applied { location, .. } => location.clone(),
         ParsedTypeRef::Inferred => SourceLocation::default(),
     }

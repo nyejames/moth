@@ -33,6 +33,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -177,11 +178,14 @@ fn literal_capacity_resolves_to_fixed_collection() {
     let parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 64,
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
     };
 
@@ -240,11 +244,14 @@ fn constant_capacity_resolves_to_fixed_collection() {
     let parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
         fixed_capacity: Some(ParsedCollectionCapacity::BareConstant {
             name: capacity_name,
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
     };
 
@@ -279,19 +286,24 @@ fn nested_fixed_collections_fold_both_capacities() {
     let inner = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 4,
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
     };
     let outer = ParsedTypeRef::Collection {
         element: Box::new(inner),
         location: location.clone(),
+        span: LocalSpan::source_start(),
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 8,
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
     };
 
@@ -753,11 +765,14 @@ fn map_type_resolves_for_supported_key() {
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         value: Box::new(ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
     };
 
     let resolved = resolve_parsed_type_annotation(
@@ -793,11 +808,14 @@ fn map_type_rejects_unsupported_key() {
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinFloat {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         value: Box::new(ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
     };
 
     let error = resolve_parsed_type_annotation(
@@ -858,23 +876,30 @@ fn map_type_rejects_excessive_inline_nesting() {
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         value: Box::new(ParsedTypeRef::Map {
             key: Box::new(ParsedTypeRef::BuiltinString {
                 location: location.clone(),
+                span: LocalSpan::source_start(),
             }),
             value: Box::new(ParsedTypeRef::Map {
                 key: Box::new(ParsedTypeRef::BuiltinString {
                     location: location.clone(),
+                    span: LocalSpan::source_start(),
                 }),
                 value: Box::new(ParsedTypeRef::BuiltinInt {
                     location: location.clone(),
+                    span: LocalSpan::source_start(),
                 }),
                 location: location.clone(),
+                span: LocalSpan::source_start(),
             }),
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
     };
 
     let error = resolve_parsed_type_annotation(
@@ -912,17 +937,22 @@ fn map_type_allows_two_level_nesting() {
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         value: Box::new(ParsedTypeRef::Map {
             key: Box::new(ParsedTypeRef::BuiltinString {
                 location: location.clone(),
+                span: LocalSpan::source_start(),
             }),
             value: Box::new(ParsedTypeRef::BuiltinInt {
                 location: location.clone(),
+                span: LocalSpan::source_start(),
             }),
             location: location.clone(),
+            span: LocalSpan::source_start(),
         }),
         location: location.clone(),
+        span: LocalSpan::source_start(),
     };
 
     let resolved = resolve_parsed_type_annotation(

@@ -46,11 +46,14 @@ fn collection_capacity_bare_constant_remap() {
     let mut parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::BuiltinInt {
             location: make_location(&mut local),
+            span: LocalSpan::source_start(),
         }),
         location: make_location(&mut local),
+        span: LocalSpan::source_start(),
         fixed_capacity: Some(ParsedCollectionCapacity::BareConstant {
             name: cap_name,
             location: make_location(&mut local),
+            span: LocalSpan::source_start(),
         }),
     };
 
@@ -67,11 +70,12 @@ fn collection_capacity_bare_constant_remap() {
                 *element,
                 ParsedTypeRef::BuiltinInt {
                     location: make_location(&mut global),
+                    span: LocalSpan::source_start(),
                 }
             );
             let capacity = fixed_capacity.expect("capacity should be present");
             match capacity {
-                ParsedCollectionCapacity::BareConstant { name, location } => {
+                ParsedCollectionCapacity::BareConstant { name, location, .. } => {
                     assert_test_location(&location, &global);
                     assert_eq!(global.resolve(name), "capacity");
                 }
@@ -124,6 +128,7 @@ fn declaration_syntax_remaps_all_fields() {
         type_annotation: ParsedTypeRef::Named {
             name: type_name,
             location: make_location(&mut local),
+            span: LocalSpan::source_start(),
         },
         config_qualifier: None,
         initializer_tokens: vec![make_symbol_token(init_name, &mut local)],

@@ -83,6 +83,7 @@ fn make_signature_member(name: &str, string_table: &mut StringTable) -> Signatur
         is_reactive: false,
         type_annotation: ParsedTypeRef::BuiltinInt {
             location: location.clone(),
+            span: LocalSpan::source_start(),
         },
         default_tokens: vec![],
         location,
@@ -412,6 +413,7 @@ fn header_kind_constant_remaps_declaration() {
         type_annotation: ParsedTypeRef::Named {
             name: type_name,
             location: make_location("test.moth", &mut local),
+            span: LocalSpan::source_start(),
         },
         config_qualifier: None,
         initializer_tokens: vec![],
@@ -428,7 +430,7 @@ fn header_kind_constant_remaps_declaration() {
         panic!("expected Constant kind");
     };
 
-    let ParsedTypeRef::Named { name, location } = &declaration.type_annotation else {
+    let ParsedTypeRef::Named { name, location, .. } = &declaration.type_annotation else {
         panic!("expected Named type annotation");
     };
     assert_eq!(global.resolve(*name), "MyType");
@@ -504,6 +506,7 @@ fn header_kind_type_alias_remaps_target() {
     let target = ParsedTypeRef::Named {
         name: local.intern("TargetType"),
         location: make_location("test.moth", &mut local),
+        span: LocalSpan::source_start(),
     };
 
     let mut kind = HeaderKind::TypeAlias { target };
@@ -515,7 +518,7 @@ fn header_kind_type_alias_remaps_target() {
         panic!("expected TypeAlias kind");
     };
 
-    let ParsedTypeRef::Named { name, location } = target else {
+    let ParsedTypeRef::Named { name, location, .. } = target else {
         panic!("expected Named target");
     };
     assert_eq!(global.resolve(name), "TargetType");
@@ -933,6 +936,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         type_annotation: ParsedTypeRef::Named {
             name: string_table.intern("Input"),
             location: provisional_location.clone(),
+            span: LocalSpan::source_start(),
         },
         default_tokens: vec![Token::new(
             TokenKind::Symbol(string_table.intern("default")),
@@ -946,6 +950,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
             type_annotation: ParsedTypeRef::Named {
                 name: string_table.intern("Output"),
                 location: provisional_location.clone(),
+                span: LocalSpan::source_start(),
             },
             location: provisional_location.clone(),
         },
@@ -962,6 +967,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         type_annotation: ParsedTypeRef::Named {
             name: string_table.intern("Value"),
             location: provisional_location.clone(),
+            span: LocalSpan::source_start(),
         },
         config_qualifier: None,
         initializer_tokens: vec![Token::new(
@@ -989,6 +995,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
                 is_reactive: false,
                 type_annotation: ParsedTypeRef::This {
                     location: provisional_location.clone(),
+                    span: LocalSpan::source_start(),
                 },
                 default_tokens: Vec::new(),
                 location: provisional_location.clone(),

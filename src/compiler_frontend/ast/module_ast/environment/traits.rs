@@ -884,15 +884,17 @@ fn return_slot_with_trait_this(
 
 fn parsed_type_with_trait_this(parsed_type: &ParsedTypeRef, this_name: StringId) -> ParsedTypeRef {
     match parsed_type {
-        ParsedTypeRef::This { location } => ParsedTypeRef::Named {
+        ParsedTypeRef::This { location, span } => ParsedTypeRef::Named {
             name: this_name,
             location: location.clone(),
+            span: *span,
         },
 
         ParsedTypeRef::Applied {
             base,
             arguments,
             location,
+            span,
         } => ParsedTypeRef::Applied {
             base: Box::new(parsed_type_with_trait_this(base, this_name)),
             arguments: arguments
@@ -900,27 +902,29 @@ fn parsed_type_with_trait_this(parsed_type: &ParsedTypeRef, this_name: StringId)
                 .map(|argument| parsed_type_with_trait_this(argument, this_name))
                 .collect(),
             location: location.clone(),
+            span: *span,
         },
 
         ParsedTypeRef::Collection {
             element,
             location,
+            span,
             fixed_capacity,
         } => ParsedTypeRef::Collection {
             element: Box::new(parsed_type_with_trait_this(element, this_name)),
             location: location.clone(),
+            span: *span,
             fixed_capacity: fixed_capacity.clone(),
         },
 
-        ParsedTypeRef::Optional { inner, location } => ParsedTypeRef::Optional {
+        ParsedTypeRef::Optional {
+            inner,
+            location,
+            span,
+        } => ParsedTypeRef::Optional {
             inner: Box::new(parsed_type_with_trait_this(inner, this_name)),
             location: location.clone(),
-        },
-
-        ParsedTypeRef::Result { ok, err, location } => ParsedTypeRef::Result {
-            ok: Box::new(parsed_type_with_trait_this(ok, this_name)),
-            err: Box::new(parsed_type_with_trait_this(err, this_name)),
-            location: location.clone(),
+            span: *span,
         },
 
         _ => parsed_type.clone(),

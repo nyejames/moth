@@ -70,31 +70,34 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5c2, trait preparation anchors.
-- Goal: copy original token spans into trait declarations, requirements, references and conformance
-  targets. Remove duplicated outer locations and receiver classification already owned by the signature.
-- Replace temporary trait-reference construction in generic-bound lookup with the existing resolver
-  accepting a name and borrowed diagnostic location. Change header dispatch to receive the original token.
-- Preserve synthesized semantic names, exact token-sized anchors, diagnostics and source ordering.
-- Non-goals: parsed types and generic-parameter spans, resolved semantic spans, new source owners,
-  diagnostic storage redesign and token-store migration. The private location bridge ends at 1H.
+- Phase: 1D5c3, parsed type and collection-capacity anchors.
+- Goal: copy original LocalSpan values into each located parsed type/capacity variant. `Inferred`
+  stays location-free. Preserve first-token atom/qualified anchors, opening-brace collection/map
+  anchors, `of` application anchors, `?` option anchors and capacity-token anchors.
+- Synthetic content types reuse their supplied span; trait `This` substitution preserves every
+  original child and constructor anchor. No new span encoding or source scan is needed.
+- Remove unused parsed `BuiltinNone` and `Result` variants and their dead consumers. Neither has
+  a production constructor, and neither is accepted type syntax. Options and fallible return slots
+  retain their existing semantic owners.
+- Non-goals: generic-parameter metadata, resolved semantic spans, new source owners, diagnostic
+  storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `835253c32` — signature and choice anchors, with final validation and independent review accepted.
+- `c79763fec` — trait preparation anchors, with full validation and independent review accepted.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
 - Continuation order: remaining 1D5 and 1D6, remaining Phase 1, final review and closeout,
   then pause for external review. Phases 2–7 stay pending until the user authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
-- 1D5c1 is accepted in `835253c32`. The worktree was clean after checkpoint verification.
-  The complete 1D5c2 worker diff and integrated regression have been inspected. The full gate
-  passed and independent review is clean. The accepted checkpoint is being recorded.
+- 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
+  after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
+  this checkpoint. The next slice is 1D5c4, generic parameters and bounds.
 - Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
   copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
   redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
   the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
-- The 1D5c2 candidate adds four field-level allowances for the remaining 1E AST consumers:
+- Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
   trait declaration, requirement, reference and conformance-target spans. Remove them in 1E
   and confirm none survives 1H.
 - Two 1D5c1 field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
@@ -187,6 +190,15 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
+- 1D5c3 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
+  5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
+  source audit, 82 benchmark preflights, scaling and timer erasure. Focused type syntax (52),
+  parsed remap (10), shell remap (3), type resolution (19), header remap (29), substitution (1),
+  synthetic adapters (2) and the 29-anchor exactness regression (1) passed.
+  Independent review is clean. Its non-blocking coverage limitation is that the substitution
+  test covers direct `This`, not constructed sibling types traversing recursive reconstruction.
+  Composed `This` is rejected by the canonical language contract; the recursive copies were
+  inspected and preserve their spans. No additional synthetic fixture is required for this slice.
 - 1D5c2 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, benchmark preflights, scaling and timer erasure. Focused trait (9), remap (29),
@@ -220,7 +232,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: checkpoint accepted trait-shell anchors, then implement parsed types and capacities in 1D5c3.
+- next action: checkpoint accepted 1D5c3, then implement generic parameter/bound anchors in 1D5c4.
   Continue remaining 1D5c/1D6 and Phase 1, with final review and
   closeout followed by the requested external review pause. Phases 2–7 remain pending.
 
@@ -764,7 +776,7 @@ actual remaining consumer, not blanket suppressions.
       Preserve anchors through remapping and trait `This` substitution.
     - [x] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
       consolidate duplicate name locations without changing synthesized semantic names.
-    - [ ] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
+    - [x] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
       anchor and all synthetic/materialized constructors. Resolved types remain 1E2.
     - [ ] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
       synthetic metadata without manufacturing source identities.

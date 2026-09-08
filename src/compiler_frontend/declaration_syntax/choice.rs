@@ -504,10 +504,6 @@ fn contains_non_generic_choice_self_reference(
         ParsedTypeRef::Applied { arguments, .. } => arguments
             .iter()
             .any(|argument| contains_non_generic_choice_self_reference(argument, choice_name)),
-        ParsedTypeRef::Result { ok, err, .. } => {
-            contains_non_generic_choice_self_reference(ok, choice_name)
-                || contains_non_generic_choice_self_reference(err, choice_name)
-        }
         _ => false,
     }
 }

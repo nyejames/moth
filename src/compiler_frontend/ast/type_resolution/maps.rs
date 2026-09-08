@@ -48,7 +48,6 @@ pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
         ParsedTypeRef::Applied { arguments, .. } => {
             arguments.iter().map(map_nesting_depth).max().unwrap_or(0)
         }
-        ParsedTypeRef::Result { ok, err, .. } => map_nesting_depth(ok).max(map_nesting_depth(err)),
         _ => 0,
     }
 }

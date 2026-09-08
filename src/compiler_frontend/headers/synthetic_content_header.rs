@@ -72,6 +72,7 @@ pub(crate) fn synthetic_content_header(
         binding_mode: BindingMode::CompileTimeConstant,
         type_annotation: ParsedTypeRef::BuiltinString {
             location: input.location.clone(),
+            span: input.span,
         },
         config_qualifier: None,
         initializer_tokens: input.initializer_tokens,

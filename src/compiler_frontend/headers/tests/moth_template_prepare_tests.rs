@@ -918,10 +918,11 @@ fn moth_template_preparation_produces_private_content_constant() {
     );
     assert_eq!(header.tokens.canonical_os_path, output.canonical_os_path);
     assert_eq!(declaration.binding_mode, BindingMode::CompileTimeConstant);
-    assert!(matches!(
-        declaration.type_annotation,
-        ParsedTypeRef::BuiltinString { .. }
-    ));
+    let ParsedTypeRef::BuiltinString { span, location } = &declaration.type_annotation else {
+        panic!("expected builtin String annotation");
+    };
+    assert_eq!(*span, declaration.span);
+    assert_eq!(location, &declaration.location);
 }
 
 #[test]

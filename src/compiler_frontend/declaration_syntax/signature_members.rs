@@ -677,6 +677,7 @@ fn parse_trait_this_member_syntax(
     // the type is implicitly the implementing concrete type.
     let type_annotation = ParsedTypeRef::This {
         location: member_location.clone(),
+        span: member_span,
     };
 
     // Default values are not allowed in trait requirements.

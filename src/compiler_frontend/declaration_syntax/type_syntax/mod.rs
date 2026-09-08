@@ -51,7 +51,6 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
         ParsedTypeRef::BuiltinFloat { .. } => DataType::Float,
         ParsedTypeRef::BuiltinString { .. } => DataType::StringSlice,
         ParsedTypeRef::BuiltinChar { .. } => DataType::Char,
-        ParsedTypeRef::BuiltinNone { .. } => DataType::None,
         ParsedTypeRef::Named { name, .. } => DataType::NamedType(*name),
         ParsedTypeRef::Qualified { path, .. } => DataType::NamespacedType { path: path.clone() },
         ParsedTypeRef::Applied {
@@ -78,9 +77,6 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
         }
         ParsedTypeRef::Optional { inner, .. } => {
             DataType::Option(Box::new(parsed_ref_to_data_type(inner)))
-        }
-        ParsedTypeRef::Result { ok, err, .. } => {
-            DataType::fallible_carrier(parsed_ref_to_data_type(ok), parsed_ref_to_data_type(err))
         }
 
         ParsedTypeRef::This { .. } => DataType::Inferred,

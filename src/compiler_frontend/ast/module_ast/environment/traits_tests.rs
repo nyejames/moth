@@ -382,17 +382,21 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     assert_eq!(signature.parameters.len(), 2);
     assert_eq!(signature.returns.len(), 1);
     let concrete_name = strings.intern("Concrete");
+    let original_parameter_type_spans: Vec<_> = signature
+        .parameters
+        .iter()
+        .map(|parameter| match &parameter.type_annotation {
+            ParsedTypeRef::This { span, .. } => *span,
+            other => panic!("expected authored This parameter, got {other:?}"),
+        })
+        .collect();
+    let original_return_type_span = match &signature.returns[0].value.type_annotation {
+        ParsedTypeRef::This { span, .. } => *span,
+        other => panic!("expected authored This return, got {other:?}"),
+    };
     let substituted = signature_with_trait_this_as_parameter(&signature, concrete_name);
     assert_eq!(substituted.parameters.len(), signature.parameters.len());
     assert_eq!(substituted.returns.len(), signature.returns.len());
-    assert!(matches!(
-        &substituted.parameters[0].type_annotation,
-        ParsedTypeRef::Named { name, .. } if *name == concrete_name
-    ));
-    assert!(matches!(
-        &substituted.returns[0].value.type_annotation,
-        ParsedTypeRef::Named { name, .. } if *name == concrete_name
-    ));
     for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {
         assert_eq!(parameter.span, original.span);
         assert_eq!(parameter.location, original.location);
@@ -418,6 +422,35 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     );
     assert_eq!(
         &source[result.start() as usize..result.end() as usize],
+        "This"
+    );
+    for (parameter, expected_span) in substituted
+        .parameters
+        .iter()
+        .zip(&original_parameter_type_spans)
+    {
+        let (span, range) = match &parameter.type_annotation {
+            ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
+                (*span, span.resolve_with(spans.resolver()))
+            }
+            other => panic!("expected substituted Named parameter, got {other:?}"),
+        };
+        assert_eq!(span, *expected_span);
+        assert_eq!(
+            &source[range.start() as usize..range.end() as usize],
+            "This"
+        );
+    }
+    let (return_type_span, return_type_range) = match &substituted.returns[0].value.type_annotation
+    {
+        ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
+            (*span, span.resolve_with(spans.resolver()))
+        }
+        other => panic!("expected substituted Named return, got {other:?}"),
+    };
+    assert_eq!(return_type_span, original_return_type_span);
+    assert_eq!(
+        &source[return_type_range.start() as usize..return_type_range.end() as usize],
         "This"
     );
 }

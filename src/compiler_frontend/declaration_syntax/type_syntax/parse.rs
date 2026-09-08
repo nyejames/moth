@@ -77,31 +77,32 @@ fn parse_type_atom(
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
     let location = token_stream.current_location();
+    let span = token_stream.tokens[token_stream.index].span;
 
     match token_stream.current_token_kind() {
         TokenKind::DatatypeInt => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinInt { location })
+            Ok(ParsedTypeRef::BuiltinInt { location, span })
         }
 
         TokenKind::DatatypeFloat => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinFloat { location })
+            Ok(ParsedTypeRef::BuiltinFloat { location, span })
         }
 
         TokenKind::DatatypeBool => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinBool { location })
+            Ok(ParsedTypeRef::BuiltinBool { location, span })
         }
 
         TokenKind::DatatypeString => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinString { location })
+            Ok(ParsedTypeRef::BuiltinString { location, span })
         }
 
         TokenKind::DatatypeChar => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinChar { location })
+            Ok(ParsedTypeRef::BuiltinChar { location, span })
         }
 
         TokenKind::DatatypeNone => Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
@@ -114,9 +115,8 @@ fn parse_type_atom(
             if matches!(context, TypeAnnotationContext::TraitRequirement)
                 && token_stream.current_token_kind() == &TokenKind::TraitThis
             {
-                let location = token_stream.current_location();
                 token_stream.advance();
-                return Ok(ParsedTypeRef::This { location });
+                return Ok(ParsedTypeRef::This { location, span });
             }
 
             let _keyword = reserved_trait_keyword_or_dispatch_mismatch(
@@ -186,12 +186,14 @@ fn parse_type_atom(
                 return Ok(ParsedTypeRef::Qualified {
                     path,
                     location: path_location,
+                    span,
                 });
             }
 
             Ok(ParsedTypeRef::Named {
                 name: type_name,
                 location,
+                span,
             })
         }
         TokenKind::Colon if matches!(context, TypeAnnotationContext::DeclarationTarget) => {
@@ -263,7 +265,9 @@ fn parse_collection_type(
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
+    let opening_token_index = token_stream.index;
     let location = token_stream.current_location();
+    let span = token_stream.tokens[opening_token_index].span;
     token_stream.advance(); // consume '{'
 
     let inner_tokens = collect_collection_inner_tokens(token_stream)?;
@@ -273,6 +277,7 @@ fn parse_collection_type(
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
             location,
+            span,
             fixed_capacity: None,
         });
     }
@@ -298,7 +303,7 @@ fn parse_collection_type(
                 token_stream,
                 context,
                 string_table,
-                &location,
+                &token_stream.tokens[opening_token_index],
             );
         }
         TopLevelAssignScan::Multiple => {
@@ -333,6 +338,7 @@ fn parse_collection_type(
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(element),
             location,
+            span,
             fixed_capacity: None,
         });
     }
@@ -352,6 +358,7 @@ fn parse_collection_type(
             return Ok(ParsedTypeRef::Collection {
                 element: Box::new(element),
                 location,
+                span,
                 fixed_capacity: parsed_capacity(&inner_tokens[..split_idx], string_table)?,
             });
         }
@@ -362,6 +369,7 @@ fn parse_collection_type(
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
             location,
+            span,
             fixed_capacity: parsed_capacity(&inner_tokens, string_table)?,
         });
     }
@@ -455,12 +463,14 @@ fn parsed_capacity(
                 return Ok(Some(ParsedCollectionCapacity::Literal {
                     value,
                     location: tokens[0].location.clone(),
+                    span: tokens[0].span,
                 }));
             }
             TokenKind::Symbol(name) => {
                 return Ok(Some(ParsedCollectionCapacity::BareConstant {
                     name: *name,
                     location: tokens[0].location.clone(),
+                    span: tokens[0].span,
                 }));
             }
             _ => {}
@@ -523,8 +533,9 @@ fn parse_map_type_from_inner_tokens(
     token_stream: &FileTokens,
     context: TypeAnnotationContext,
     string_table: &StringTable,
-    location: &SourceLocation,
+    opening_token: &Token,
 ) -> TypeParseResult<ParsedTypeRef> {
+    let location = &opening_token.location;
     let key_tokens = &inner_tokens[..assign_idx];
     let value_tokens = &inner_tokens[assign_idx + 1..];
 
@@ -552,6 +563,7 @@ fn parse_map_type_from_inner_tokens(
         key: Box::new(key),
         value: Box::new(value),
         location: location.clone(),
+        span: opening_token.span,
     })
 }
 
@@ -776,6 +788,7 @@ fn parse_generic_arguments(
     allow_generic_application: bool,
 ) -> TypeParseResult<ParsedTypeRef> {
     let location = token_stream.current_location();
+    let span = token_stream.tokens[token_stream.index].span;
     if token_stream.current_token_kind() != &TokenKind::Of {
         return Ok(parsed_type);
     }
@@ -854,6 +867,7 @@ fn parse_generic_arguments(
         base: Box::new(parsed_type),
         arguments,
         location,
+        span,
     })
 }
 
@@ -915,6 +929,7 @@ fn parse_optional_type_suffix(
     context: TypeAnnotationContext,
 ) -> TypeParseResult<ParsedTypeRef> {
     let location = token_stream.current_location();
+    let span = token_stream.tokens[token_stream.index].span;
     if token_stream.current_token_kind() != &TokenKind::QuestionMark {
         return Ok(parsed_type);
     }
@@ -941,12 +956,13 @@ fn parse_optional_type_suffix(
     Ok(ParsedTypeRef::Optional {
         inner: Box::new(parsed_type),
         location,
+        span,
     })
 }
 
 /// Recursively check whether a parsed type contains `This` anywhere in its structure.
 ///
-/// WHAT: walks through applied generics, collections, optionals, and results to find
+/// WHAT: walks through applied generics, collections and optionals to find
 ///      a `ParsedTypeRef::This` node.
 /// WHY: `This` is only valid as a bare trait requirement; it must not appear nested.
 fn parsed_type_contains_trait_this(parsed_type: &ParsedTypeRef) -> bool {
@@ -963,10 +979,6 @@ fn parsed_type_contains_trait_this(parsed_type: &ParsedTypeRef) -> bool {
         ParsedTypeRef::Collection { element, .. }
         | ParsedTypeRef::Optional { inner: element, .. } => {
             parsed_type_contains_trait_this(element)
-        }
-
-        ParsedTypeRef::Result { ok, err, .. } => {
-            parsed_type_contains_trait_this(ok) || parsed_type_contains_trait_this(err)
         }
 
         _ => false,

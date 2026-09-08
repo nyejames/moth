@@ -3427,3 +3427,20 @@ were 0.98, 0.78 and 1.64, within their budgets. Timer erasure passed with a 9,02
 binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
 Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
 commit containing this subsection.
+
+### Parsed type and capacity anchor checkpoint (1D5c3)
+
+Located parsed type constructors and collection capacities copy their original token anchors.
+Synthetic content and trait substitution preserve supplied spans. Unused parsed `BuiltinNone`
+and `Result` variants and their dead consumers are removed. The regression preserves 29 anchors
+through string remapping and nonidentity source rebinding, resolving the same five extended rows
+and exact UTF-8 byte ranges. This interval checkpoint claims no aggregate memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, the 1,319-file source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +3 ms CLI and frontend averages, excluding changed docs workloads. Scaling
+fits were 0.97, 0.79 and 1.57, within budget. Timer erasure passed with a 9,027,216-byte no-timer
+binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
+Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
+commit containing this subsection.

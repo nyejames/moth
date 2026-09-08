@@ -34,7 +34,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, GenericDeclarationMetadata,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -145,6 +145,7 @@ fn resolved_type_annotation_carries_canonical_type_id() {
     let resolved = resolve_parsed_type_annotation(
         ParsedTypeRef::BuiltinInt {
             location: location.to_owned(),
+            span: LocalSpan::source_start(),
         },
         &location,
         &mut resolution_context,
@@ -204,9 +205,11 @@ fn declaration_context_parses_named_optional_type() {
         ParsedTypeRef::Optional {
             inner: Box::new(ParsedTypeRef::Named {
                 name: point,
-                location: SourceLocation::default()
+                location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             }),
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
         }
     );
 }
@@ -335,12 +338,15 @@ fn parses_generic_type_application() {
         ParsedTypeRef::Applied {
             base: Box::new(ParsedTypeRef::Named {
                 name: box_name,
-                location: SourceLocation::default()
+                location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             }),
             arguments: vec![ParsedTypeRef::BuiltinString {
-                location: SourceLocation::default()
+                location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             }],
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
         }
     );
 }
@@ -463,14 +469,18 @@ fn parses_collection_of_generic_type_application() {
             element: Box::new(ParsedTypeRef::Applied {
                 base: Box::new(ParsedTypeRef::Named {
                     name: box_name,
-                    location: SourceLocation::default()
+                    location: SourceLocation::default(),
+                    span: LocalSpan::source_start(),
                 }),
                 arguments: vec![ParsedTypeRef::BuiltinString {
-                    location: SourceLocation::default()
+                    location: SourceLocation::default(),
+                    span: LocalSpan::source_start(),
                 }],
                 location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             }),
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
             fixed_capacity: None,
         }
     );
@@ -1009,7 +1019,10 @@ fn parses_collection_with_capacity() {
         }
     ));
     assert!(matches!(&parsed, ParsedTypeRef::Collection { element, .. }
-        if **element == ParsedTypeRef::BuiltinInt { location: SourceLocation::default() }
+        if **element == ParsedTypeRef::BuiltinInt {
+            location: SourceLocation::default(),
+            span: LocalSpan::source_start()
+        }
     ));
 }
 
@@ -1037,9 +1050,11 @@ fn parses_collection_without_capacity() {
         parsed,
         ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::BuiltinInt {
-                location: SourceLocation::default()
+                location: SourceLocation::default(),
+                span: LocalSpan::source_start(),
             }),
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
             fixed_capacity: None,
         }
     );
@@ -1210,7 +1225,8 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
     assert_eq!(
         *inner_element,
         ParsedTypeRef::BuiltinInt {
-            location: SourceLocation::default()
+            location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
         }
     );
 }
@@ -1893,12 +1909,15 @@ fn map_type_walker_visits_named_types_in_key_and_value() {
         key: Box::new(ParsedTypeRef::Named {
             name: key_name,
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
         }),
         value: Box::new(ParsedTypeRef::Named {
             name: value_name,
             location: SourceLocation::default(),
+            span: LocalSpan::source_start(),
         }),
         location: SourceLocation::default(),
+        span: LocalSpan::source_start(),
     };
 
     let mut found = Vec::new();
@@ -1924,6 +1943,7 @@ fn named_type_walker_preserves_qualified_path() {
     let parsed = ParsedTypeRef::Qualified {
         path: vec![root, member],
         location: SourceLocation::default(),
+        span: LocalSpan::source_start(),
     };
 
     let mut found = Vec::new();

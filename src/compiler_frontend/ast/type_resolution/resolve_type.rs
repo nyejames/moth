@@ -77,6 +77,7 @@ fn resolve_parsed_type_annotation_inner(
             element,
             fixed_capacity,
             location: collection_location,
+            ..
         } => {
             let element_annotation = resolve_parsed_type_annotation_inner(
                 *element.clone(),
@@ -141,6 +142,7 @@ fn resolve_parsed_type_annotation_inner(
             key,
             value,
             location: map_location,
+            ..
         } => {
             // Validate inline nesting depth before resolution.
             let nesting_depth = map_nesting_depth(&source_ref);

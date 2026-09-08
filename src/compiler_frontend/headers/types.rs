@@ -1853,19 +1853,19 @@ fn validate_parsed_type_ref(
         ParsedTypeRef::Inferred => {}
         ParsedTypeRef::Named { location, .. }
         | ParsedTypeRef::Qualified { location, .. }
-        | ParsedTypeRef::BuiltinBool { location }
-        | ParsedTypeRef::BuiltinInt { location }
-        | ParsedTypeRef::BuiltinFloat { location }
-        | ParsedTypeRef::BuiltinString { location }
-        | ParsedTypeRef::BuiltinChar { location }
-        | ParsedTypeRef::BuiltinNone { location }
-        | ParsedTypeRef::This { location } => {
+        | ParsedTypeRef::BuiltinBool { location, .. }
+        | ParsedTypeRef::BuiltinInt { location, .. }
+        | ParsedTypeRef::BuiltinFloat { location, .. }
+        | ParsedTypeRef::BuiltinString { location, .. }
+        | ParsedTypeRef::BuiltinChar { location, .. }
+        | ParsedTypeRef::This { location, .. } => {
             validate_source_location(location, source_file, "parsed type")?;
         }
         ParsedTypeRef::Applied {
             base,
             arguments,
             location,
+            ..
         } => {
             validate_parsed_type_ref(base, source_file)?;
             for argument in arguments {
@@ -1877,6 +1877,7 @@ fn validate_parsed_type_ref(
             element,
             location,
             fixed_capacity,
+            ..
         } => {
             validate_parsed_type_ref(element, source_file)?;
             validate_source_location(location, source_file, "collection type")?;
@@ -1893,19 +1894,17 @@ fn validate_parsed_type_ref(
             key,
             value,
             location,
+            ..
         } => {
             validate_parsed_type_ref(key, source_file)?;
             validate_parsed_type_ref(value, source_file)?;
             validate_source_location(location, source_file, "map type")?;
         }
-        ParsedTypeRef::Optional { inner, location } => {
+        ParsedTypeRef::Optional {
+            inner, location, ..
+        } => {
             validate_parsed_type_ref(inner, source_file)?;
             validate_source_location(location, source_file, "optional type")?;
-        }
-        ParsedTypeRef::Result { ok, err, location } => {
-            validate_parsed_type_ref(ok, source_file)?;
-            validate_parsed_type_ref(err, source_file)?;
-            validate_source_location(location, source_file, "result type")?;
         }
     }
     Ok(())

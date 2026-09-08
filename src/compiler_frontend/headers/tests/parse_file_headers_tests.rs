@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidThisUsageReason, InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind,
     SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
@@ -5973,6 +5973,340 @@ Generic of A must {trait_name}\n"
             resolve(*rebound_span),
             expected_text,
             "span no longer resolves to the exact authored UTF-8 bytes"
+        );
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedTypeAnchorSnapshot {
+    span: LocalSpan,
+    legacy_start: u32,
+    legacy_end: u32,
+    expected_text: String,
+}
+
+fn push_parsed_type_anchor(
+    span: LocalSpan,
+    location: &SourceLocation,
+    expected_text: String,
+    snapshots: &mut Vec<ParsedTypeAnchorSnapshot>,
+) {
+    snapshots.push(ParsedTypeAnchorSnapshot {
+        span,
+        legacy_start: location.start_byte,
+        legacy_end: location.end_byte,
+        expected_text,
+    });
+}
+
+fn collect_parsed_type_anchor_snapshots(
+    parsed_type: &ParsedTypeRef,
+    string_table: &StringTable,
+    snapshots: &mut Vec<ParsedTypeAnchorSnapshot>,
+) {
+    match parsed_type {
+        ParsedTypeRef::Inferred => {}
+        ParsedTypeRef::Named {
+            name,
+            location,
+            span,
+        } => push_parsed_type_anchor(
+            *span,
+            location,
+            string_table.resolve(*name).to_owned(),
+            snapshots,
+        ),
+        ParsedTypeRef::Qualified {
+            path,
+            location,
+            span,
+        } => push_parsed_type_anchor(
+            *span,
+            location,
+            string_table.resolve(path[0]).to_owned(),
+            snapshots,
+        ),
+        ParsedTypeRef::Applied {
+            base,
+            arguments,
+            location,
+            span,
+        } => {
+            push_parsed_type_anchor(*span, location, "of".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(base, string_table, snapshots);
+            for argument in arguments {
+                collect_parsed_type_anchor_snapshots(argument, string_table, snapshots);
+            }
+        }
+        ParsedTypeRef::BuiltinBool { location, span }
+        | ParsedTypeRef::BuiltinInt { location, span }
+        | ParsedTypeRef::BuiltinFloat { location, span }
+        | ParsedTypeRef::BuiltinString { location, span }
+        | ParsedTypeRef::BuiltinChar { location, span } => {
+            let expected_text = match parsed_type {
+                ParsedTypeRef::BuiltinBool { .. } => "Bool",
+                ParsedTypeRef::BuiltinInt { .. } => "Int",
+                ParsedTypeRef::BuiltinFloat { .. } => "Float",
+                ParsedTypeRef::BuiltinString { .. } => "String",
+                ParsedTypeRef::BuiltinChar { .. } => "Char",
+                _ => unreachable!("matched builtin or This type"),
+            };
+            push_parsed_type_anchor(*span, location, expected_text.to_owned(), snapshots);
+        }
+        ParsedTypeRef::Collection {
+            element,
+            location,
+            span,
+            fixed_capacity,
+        } => {
+            push_parsed_type_anchor(*span, location, "{".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(element, string_table, snapshots);
+            if let Some(capacity) = fixed_capacity {
+                match capacity {
+                    ParsedCollectionCapacity::Literal {
+                        value,
+                        location,
+                        span,
+                    } => push_parsed_type_anchor(*span, location, value.to_string(), snapshots),
+                    ParsedCollectionCapacity::BareConstant {
+                        name,
+                        location,
+                        span,
+                    } => push_parsed_type_anchor(
+                        *span,
+                        location,
+                        string_table.resolve(*name).to_owned(),
+                        snapshots,
+                    ),
+                }
+            }
+        }
+        ParsedTypeRef::Map {
+            key,
+            value,
+            location,
+            span,
+        } => {
+            push_parsed_type_anchor(*span, location, "{".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(key, string_table, snapshots);
+            collect_parsed_type_anchor_snapshots(value, string_table, snapshots);
+        }
+        ParsedTypeRef::Optional {
+            inner,
+            location,
+            span,
+        } => {
+            push_parsed_type_anchor(*span, location, "?".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(inner, string_table, snapshots);
+        }
+        ParsedTypeRef::This { .. } => {}
+    }
+}
+
+fn snapshot_prepared_type_anchors(
+    prepared: &FileFrontendPrepareOutput,
+    string_table: &StringTable,
+) -> (usize, usize, Vec<ParsedTypeAnchorSnapshot>) {
+    let mut type_alias_count = 0;
+    let mut inferred_count = 0;
+    let mut anchors = Vec::new();
+    for header in &prepared.headers {
+        match &header.kind {
+            HeaderKind::TypeAlias { target } => {
+                type_alias_count += 1;
+                collect_parsed_type_anchor_snapshots(target, string_table, &mut anchors);
+            }
+            HeaderKind::Constant { declaration } => {
+                inferred_count += usize::from(matches!(
+                    declaration.type_annotation,
+                    ParsedTypeRef::Inferred
+                ));
+                collect_parsed_type_anchor_snapshots(
+                    &declaration.type_annotation,
+                    string_table,
+                    &mut anchors,
+                );
+            }
+            _ => {}
+        }
+    }
+    (type_alias_count, inferred_count, anchors)
+}
+
+#[test]
+fn parsed_type_and_capacity_spans_retain_exact_ranges_after_remapping_and_rebinding() {
+    let long_named = format!("Named{}", "N".repeat(1100));
+    let long_qualified = format!("Qualified{}", "Q".repeat(1100));
+    let long_generic = format!("Generic{}", "G".repeat(1100));
+    let long_capacity = format!("capacity_{}", "c".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{long_capacity} #Int = 7\n\
+NamedAlias as {long_named}\n\
+QualifiedAlias as {long_qualified}.Child\n\
+AppliedAlias as {long_generic} of Child, String\n\
+CollectionAlias as {{Child}}\n\
+FixedLiteralAlias as {{7 Child}}\n\
+FixedNameAlias as {{{long_capacity} Child}}\n\
+MapAlias as {{Key = Value}}\n\
+NestedAlias as {{Key = {{Child}}}}\n\
+OptionalAlias as Child?\n\
+BoolAlias as Bool\n\
+IntAlias as Int\n\
+FloatAlias as Float\n\
+StringAlias as String\n\
+CharAlias as Char\n\
+INFERRED #= 1\n"
+    );
+    let canonical = PathBuf::from("parsed-type-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let tokenizer_extended_span_count = spans.len();
+    assert_eq!(
+        tokenizer_extended_span_count, 5,
+        "only the long named, qualified, generic and capacity identifier tokens should overflow"
+    );
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("parsed type headers should prepare");
+    assert!(
+        prepared.warnings.is_empty(),
+        "warning-free preparation must not add diagnostic span rows"
+    );
+    assert_eq!(
+        spans.len(),
+        tokenizer_extended_span_count,
+        "parsed type anchors must reuse tokenizer rows without adding extended spans"
+    );
+
+    let (type_alias_count, inferred_count, original_anchors) =
+        snapshot_prepared_type_anchors(&prepared, &strings);
+    assert_eq!(
+        type_alias_count, 14,
+        "the source should produce one header per type shape"
+    );
+    assert_eq!(
+        inferred_count, 1,
+        "inferred declarations remain location-free"
+    );
+    assert_eq!(
+        original_anchors.len(),
+        29,
+        "the snapshot should cover every authored constructor and child type anchor"
+    );
+    let expected_texts = vec![
+        "Int".to_owned(),
+        long_named.clone(),
+        long_qualified.clone(),
+        "of".to_owned(),
+        long_generic.clone(),
+        "Child".to_owned(),
+        "String".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "7".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        long_capacity.clone(),
+        "{".to_owned(),
+        "Key".to_owned(),
+        "Value".to_owned(),
+        "{".to_owned(),
+        "Key".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "?".to_owned(),
+        "Child".to_owned(),
+        "Bool".to_owned(),
+        "Int".to_owned(),
+        "Float".to_owned(),
+        "String".to_owned(),
+        "Char".to_owned(),
+    ];
+    assert_eq!(
+        original_anchors
+            .iter()
+            .map(|anchor| anchor.expected_text.clone())
+            .collect::<Vec<_>>(),
+        expected_texts,
+        "each parsed type variant must retain its contract-defined anchor"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("parsed type strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("parsed-type-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+
+    let (_, rebound_inferred_count, rebound_anchors) =
+        snapshot_prepared_type_anchors(&prepared, &merged);
+    assert_eq!(rebound_inferred_count, inferred_count);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for (original, rebound) in original_anchors.iter().zip(rebound_anchors.iter()) {
+        assert_eq!(rebound.span, original.span, "span encoding changed");
+        assert_eq!(rebound.expected_text, original.expected_text);
+        assert_eq!(rebound.legacy_start, original.legacy_start);
+        assert_eq!(rebound.legacy_end, original.legacy_end);
+        let resolved_range = SourceSpan::new(prepared.file_id, rebound.span).byte_range(&database);
+        assert_eq!(resolved_range.start(), original.legacy_start);
+        assert_eq!(resolved_range.end(), original.legacy_end);
+        assert_eq!(
+            source.get(resolved_range.start() as usize..resolved_range.end() as usize),
+            Some(original.expected_text.as_str()),
+            "span must resolve to the exact authored UTF-8 bytes"
         );
     }
 }

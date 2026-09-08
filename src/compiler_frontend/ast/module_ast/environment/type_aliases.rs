@@ -282,17 +282,15 @@ fn parsed_type_location(parsed_type: &ParsedTypeRef) -> SourceLocation {
     match parsed_type {
         ParsedTypeRef::Named { location, .. }
         | ParsedTypeRef::Qualified { location, .. }
-        | ParsedTypeRef::BuiltinBool { location }
-        | ParsedTypeRef::BuiltinInt { location }
-        | ParsedTypeRef::BuiltinFloat { location }
-        | ParsedTypeRef::BuiltinString { location }
-        | ParsedTypeRef::BuiltinChar { location }
-        | ParsedTypeRef::BuiltinNone { location }
-        | ParsedTypeRef::This { location }
+        | ParsedTypeRef::BuiltinBool { location, .. }
+        | ParsedTypeRef::BuiltinInt { location, .. }
+        | ParsedTypeRef::BuiltinFloat { location, .. }
+        | ParsedTypeRef::BuiltinString { location, .. }
+        | ParsedTypeRef::BuiltinChar { location, .. }
+        | ParsedTypeRef::This { location, .. }
         | ParsedTypeRef::Collection { location, .. }
         | ParsedTypeRef::Map { location, .. }
         | ParsedTypeRef::Optional { location, .. }
-        | ParsedTypeRef::Result { location, .. }
         | ParsedTypeRef::Applied { location, .. } => location.clone(),
         ParsedTypeRef::Inferred => SourceLocation::default(),
     }

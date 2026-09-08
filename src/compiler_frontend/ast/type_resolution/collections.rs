@@ -47,11 +47,11 @@ pub(crate) fn fold_collection_capacity(
     type_environment: &mut TypeEnvironment,
 ) -> CollectionCapacityResult<usize> {
     match capacity {
-        ParsedCollectionCapacity::Literal { value, location } => {
-            validate_capacity_value(*value, location)
-        }
+        ParsedCollectionCapacity::Literal {
+            value, location, ..
+        } => validate_capacity_value(*value, location),
 
-        ParsedCollectionCapacity::BareConstant { name, location } => {
+        ParsedCollectionCapacity::BareConstant { name, location, .. } => {
             let Some(scope_context) = scope_context else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
