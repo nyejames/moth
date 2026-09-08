@@ -3356,3 +3356,19 @@ Scaling fits passed at nominal members \(n^{0.98}\), constant chains \(n^{0.79}\
 instantiation \(n^{1.62}\). Timer erasure passed with a 9,043,728-byte no-timer binary.
 Independent span-ownership and failure-lane reviews and focused correction verification were
 clean before acceptance. The accepted commit is the commit containing this checkpoint section.
+
+### Declaration anchor checkpoint (1D5a)
+
+The declaration-shell anchor now reaches initializer EOF unchanged, including an extended
+1,200-byte type anchor after a multibyte literal. The old source-start terminator constructor is
+deleted. Synthetic content retains explicit source-start anchors under its own source identity.
+No new extended rows or heap owners are introduced. The legacy location bridge remains until 1H.
+
+On the same host/toolchain, `cargo fmt --all && just validate` passed 5,070 compiler tests,
+17 CLI tests, 825 xtask tests, 1,951 integration cases, native featured all-target Clippy,
+documentation checking, source audit and all 82 benchmark preflights. Quick history comparisons
+reported +3 ms CLI averages and +1 ms frontend averages, excluding changed docs workloads.
+Scaling fits were 0.97, 0.79 and 1.61, within all three budgets. Timer erasure passed with the
+same 9,043,728-byte binary size. These are bounded gate observations, not five-run medians or
+aggregate memory evidence. Independent exactness/ownership and test review was clean.
+The accepted checkpoint is the commit containing this subsection.

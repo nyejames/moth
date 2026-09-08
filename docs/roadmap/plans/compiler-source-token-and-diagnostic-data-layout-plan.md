@@ -69,36 +69,30 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D3, exact source spans on preparation diagnostics.
-- Goal: retain the producer's exact `SourceSpan` on tokenizer and preparation diagnostics,
-  normalizing private discovery identities before publication without changing `SourceLocation`.
+- Phase: 1D5a, declaration anchors and initializer terminators.
+- Goal: copy the exact existing token anchor into declaration/binding-target shells and
+  initializer EOF tokens, then delete `Token::terminator_at`. Synthetic content keeps its
+  explicit source-start anchor under the real registered source identity.
 - Non-goals: downstream AST/HIR migration, diagnostic storage redesign and token-store migration.
-- The source ownership prerequisite is committed and audit-accepted in `4ca3a018c`.
-- Current implementation encodes producer-owned exact byte bounds at lexical/file-preparation
-  boundaries while the original builder is live. Escape byte anchors and legacy-clause byte ends
-  are corrected at their producers; no source rescanning or end inference is permitted.
-- `CompilerDiagnostic::primary_span` and `DiagnosticLabel::span` carry exact ranges. Their private
-  `capture_preparation_span` bridge ends with `SourceLocation` in 1H. Non-preparation diagnostics
-  remain unmigrated. Existing discovery rebinding also normalizes the compact source identity.
-- Repeated directory/check-only sources are Normal: namespace entries exclude root files.
-  Preserve check-only semantic isolation. No-reparse source syntax ownership remains open.
+- Remaining 1D5 records are pending separate slices. Existing declaration locations are token
+  anchors, not full declaration ranges; this slice preserves that contract without joined spans.
+- `SourceLocation` remains the private interval bridge through 1H. Tokenizer/preparation
+  diagnostics already carry authoritative compact spans; later diagnostic stages remain open.
+- Repeated canonical/check-only syntax preparation remains 3E work.
 
 LAST_GOOD_COMMIT:
-- `4ca3a018c` — original source/span ownership through frontend outcomes; full validation and independent audits passed.
+- `b1d5a4005` — exact preparation diagnostic spans; full validation and independent reviews passed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Continuation order: finish and accept 1D3, then 1D5/1D6 and remaining Phase 1,
-  accept Phase 2, accept Phase 3, run final review and pause. Phases 4–7 stay pending.
-- 1D3 is implemented, independently reviewed and fully validated, ready for its checkpoint.
-  Lexical, per-file and aggregation diagnostics retain exact primary and related ranges through
-  the original source builder. Joined-clause and multibyte escape bounds are checked at production
-  boundaries. Cross-source labels retain explicit ownership during discovery normalization.
-- Independent review required separate tokenizer failure lanes and a real exhaustion regression.
-  Both corrections passed focused verification. Token minting infrastructure failures stay in
-  that lane; exhaustion during diagnostic capture preserves the original diagnosis.
-- No required 1D3 review finding remains. The legacy location bridge ends in 1H.
-- Untracked `librust_out.rmeta` has unknown ownership and is excluded from the checkpoint.
+- Continuation order: 1D5/1D6 and remaining Phase 1, then Phase 2 and Phase 3, final review and pause.
+  Phases 4–7 stay pending.
+- 1D3 is committed. Required tokenizer failure-lane and production exhaustion-test findings are
+  resolved and independently verified. Related spans preserve source ownership through discovery.
+- 1D5a is implemented, fully validated and independently reviewed, ready for its checkpoint.
+  Declaration anchors and initializer EOF use the same original span. The regression registers
+  a real source and includes an extended 1,200-byte type anchor after a multibyte literal.
+- Untracked `librust_out.rmeta` has unknown ownership and is excluded from checkpoints.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
 RELEVANT_DOCS_THIS_SLICE:
@@ -185,17 +179,14 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
-- Current 1D3 candidate: `cargo fmt --all && just validate` passed after the final corrections.
-  Native featured all-target Clippy, 5,069 compiler tests, 17 CLI tests, 825 xtask tests,
-  1,951 integration cases, docs check and the 1,319-file source audit passed.
-- All 82 benchmark preflights, three scaling budgets and timer erasure passed.
-  Quick CLI averages were +3 ms and frontend averages 0 ms against recorded history, excluding
-  changed docs workloads. This is bounded gate evidence, not a five-run median or memory claim.
-- Focused tokenizer, header, config, module-preparation, diagnostic-carrier and synthetic
-  diagnosed-discovery coverage passed. The real exhausted-table test exercises both production
-  failure paths; ordinary lexical coverage separately proves capture is reached.
-- Independent carrier/failure-lane and aggregation reviews, plus focused correction verification,
-  are clean. No new structured-audit coverage is claimed.
+- Current 1D5a candidate: `cargo fmt --all && just validate` passed. Native featured all-target
+  Clippy, 5,070 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integration cases,
+  docs check, source audit, 82 benchmark preflights, three scaling budgets and timer erasure passed.
+- Focused 263 declaration tests, 41 Moth-template tests, seven Markdown tests and the updated
+  real-source/extended-anchor regression passed. Featured all-target compilation passed.
+- Independent 1D5a review is clean with no required finding. The checkpoint follows acceptance.
+- The earlier 1D3 carrier/failure-lane and aggregation reviews and focused correction verification
+  were clean. No new structured-audit coverage is claimed.
 - Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
   it starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
   all-target Clippy gate before accepting a slice.
@@ -204,7 +195,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: commit the accepted 1D3 candidate, then scope preparation-record migration in 1D5.
+- next action: review, validate and independently audit the bounded 1D5a candidate.
 
 ---
 
@@ -728,6 +719,12 @@ actual remaining consumer, not blanket suppressions.
     capture alone does not complete 1D3.
 - **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
   shells, source contracts, const fragments and source-kind adapters carry spans.
+  - [x] **1D5a — declaration anchors and initializer terminators:** copy the existing exact
+    token anchor into shared declaration/binding-target shells, preserve synthetic source-start
+    anchors under their real source identity and delete `Token::terminator_at`.
+  - [ ] **1D5b — remaining preparation records:** header names and joined const fragments,
+    dependency/path/alias records, source contracts and signature shells. Preserve each record's
+    existing range meaning; runtime fragments already use retained tokens and need no new record.
 - **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
   repeated ad hoc path/location constructors in Rust tests.
 
@@ -735,9 +732,9 @@ actual remaining consumer, not blanket suppressions.
 slice: the tokenizer has hundreds of downstream location readers, and 1E exists precisely to move
 them. So from 1D2 until 1H a token carries both its exact span and the legacy `SourceLocation`. The
 span is authoritative for tokenizer-minted tokens, and the legacy range is derived from it.
-The explicitly temporary `Token::terminator_at` is an exception: it carries the declaration's
-legacy anchor but a source-start local span. 1D5 must replace it with the shell's exact span,
-and 1H deletes the legacy field after all consumers have migrated.
+1D5a replaces the former `Token::terminator_at` exception with the declaration shell's exact
+local anchor and deletes that constructor. The anchor keeps its existing token-sized meaning;
+it is not widened to the whole declaration. 1H deletes the legacy field after consumers migrate.
 
 **1D3 prerequisite.** The 1D4 ownership cutover keeps original builders outside preparation results,
 retains them before fallible aggregation and defers installation until all producers have ended.

@@ -18,7 +18,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -150,6 +150,7 @@ impl MothTemplatePrepareContext {
                 file_id: self.file_id,
                 canonical_os_path: self.canonical_os_path.clone(),
                 location: self.synthetic_location.clone(),
+                span: LocalSpan::source_start(),
                 initializer_tokens,
                 initializer_references,
             },

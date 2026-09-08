@@ -129,17 +129,6 @@ impl Token {
             span,
         }
     }
-
-    /// Construct a sub-stream terminator anchored at an authored position the caller can name
-    /// only as a [`SourceLocation`].
-    ///
-    /// WHY: a declaration shell hands its initializer parser a location but not yet a span, and
-    /// that location is what anchors every diagnostic the sub-stream raises, so it must not be
-    /// re-derived from whichever token happened to come last. The span is zero-width until slice
-    /// 1D5 gives the shells spans of their own, which is where this constructor dies.
-    pub fn terminator_at(location: SourceLocation) -> Self {
-        Self::with_span(TokenKind::Eof, location, LocalSpan::source_start())
-    }
 }
 
 /// The path-table lifecycle for one token stream.

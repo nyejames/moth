@@ -11,7 +11,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -76,6 +76,14 @@ fn declaration_is_private_compile_time_string_constant() {
         panic!("expected constant header, got {:?}", header.kind);
     };
 
+    assert_eq!(declaration.span, LocalSpan::source_start());
+    assert_eq!(
+        (
+            declaration.location.start_byte,
+            declaration.location.end_byte
+        ),
+        (0, 0)
+    );
     assert!(matches!(
         declaration.binding_mode,
         BindingMode::CompileTimeConstant

@@ -11,6 +11,7 @@ use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, InitializerReference,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
@@ -118,6 +119,7 @@ fn declaration_syntax_remaps_all_fields() {
     let ref_name = local.intern("ref_value");
 
     let mut declaration = DeclarationSyntax {
+        span: LocalSpan::source_start(),
         binding_mode: BindingMode::MutableRuntime,
         type_annotation: ParsedTypeRef::Named {
             name: type_name,

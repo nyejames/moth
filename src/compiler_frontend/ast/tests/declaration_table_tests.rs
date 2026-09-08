@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -333,6 +334,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
         },
         HeaderKind::Constant {
             declaration: DeclarationSyntax {
+                span: LocalSpan::source_start(),
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
                 config_qualifier: None,

@@ -15,7 +15,7 @@ use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
 };
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, Token, TokenKind};
@@ -65,6 +65,7 @@ pub(crate) fn prepare_plain_markdown_file(
             file_id: input.file_id,
             canonical_os_path: canonical_os_path.clone(),
             location: file_start_location,
+            span: LocalSpan::source_start(),
             initializer_tokens,
             initializer_references: Vec::new(),
         },

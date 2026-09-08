@@ -889,9 +889,18 @@ fn folded_constant_value(ast: &Ast, string_table: &StringTable, name: &str) -> S
 
 #[test]
 fn moth_template_preparation_produces_private_content_constant() {
-    let (output, string_table, _span_builder) = prepare_directly("# Heading");
+    let (output, string_table, span_builder) = prepare_directly("# Heading");
     let header = &output.headers[0];
     let declaration = content_constant(&output);
+    let span = declaration.span.resolve_with(span_builder.resolver());
+    assert_eq!((span.start(), span.end()), (0, 0));
+    assert_eq!(
+        (
+            declaration.location.start_byte,
+            declaration.location.end_byte
+        ),
+        (0, 0)
+    );
 
     assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());

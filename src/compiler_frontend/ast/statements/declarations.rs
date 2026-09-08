@@ -52,6 +52,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::{
 use crate::compiler_frontend::declaration_syntax::r#struct::{
     parse_struct_shell, validate_struct_default_values,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -440,6 +441,7 @@ pub fn resolve_declaration_syntax(
             &qualified_name,
             declaration_syntax.initializer_tokens.clone(),
             &declaration_location,
+            declaration_syntax.span,
             path_syntax,
             context,
         )?;
@@ -598,6 +600,7 @@ pub fn resolve_declaration_syntax(
         &qualified_name,
         declaration_syntax.initializer_tokens,
         &declaration_location,
+        declaration_syntax.span,
         path_syntax,
         context,
     )?;
@@ -853,10 +856,15 @@ fn declaration_initializer_stream(
     qualified_name: &InternedPath,
     mut initializer_tokens: Vec<Token>,
     declaration_location: &SourceLocation,
+    declaration_span: LocalSpan,
     path_syntax: &FilePathSyntax,
     context: &ScopeContext,
 ) -> DeclarationResult<FileTokens> {
-    initializer_tokens.push(Token::terminator_at(declaration_location.to_owned()));
+    initializer_tokens.push(Token::with_span(
+        TokenKind::Eof,
+        declaration_location.to_owned(),
+        declaration_span,
+    ));
     FileTokens::new_from_slice(
         qualified_name.to_owned(),
         context.shared.declaring_file_id,

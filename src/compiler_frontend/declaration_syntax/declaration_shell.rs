@@ -5,6 +5,8 @@
 //! `BindingTargetSyntax` shells.
 //! WHY: header parsing stores these shells so that dependency sorting can see initializer
 //! references, while AST resolves the full expression semantics later.
+//! Each shell retains the exact local span of its binding target anchor. The enclosing file
+//! owns that span's source identity and extended table; AST forwards the anchor to initializer EOF.
 //! MUST NOT: perform type checking, constant folding, or semantic validation.
 
 use crate::compiler_frontend::compiler_messages::{
@@ -18,6 +20,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -45,6 +48,7 @@ pub struct DeclarationSyntax {
     pub initializer_tokens: Vec<Token>,
     pub initializer_references: Vec<InitializerReference>,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +57,7 @@ pub struct BindingTargetSyntax {
     pub binding_mode: BindingMode,
     pub type_annotation: ParsedTypeRef,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 impl DeclarationSyntax {
@@ -105,6 +110,7 @@ pub fn parse_declaration_syntax(
     // `#Config of T` is declaration-owned syntax, not an ordinary `#` binding followed by a
     // type named `Config`. Detect it before the generic target parser so all declaration stages
     // retain one qualifier representation.
+    let target_span = token_stream.tokens[token_stream.index].span;
     let config_qualifier = if starts_build_config_qualifier(token_stream, string_table) {
         Some(parse_build_config_qualifier(token_stream, string_table)?)
     } else {
@@ -117,6 +123,7 @@ pub fn parse_declaration_syntax(
             binding_mode: BindingMode::CompileTimeConstant,
             type_annotation: qualifier.type_annotation.clone(),
             location: qualifier.qualifier_location.clone(),
+            span: target_span,
         }
     } else {
         // This checks for mutability marker first (in the case of mutable methods), or whether
@@ -140,6 +147,7 @@ pub fn parse_declaration_syntax(
             initializer_tokens: Vec::new(),
             initializer_references: Vec::new(),
             location: target.location,
+            span: target.span,
         });
     }
 
@@ -200,6 +208,7 @@ pub fn parse_declaration_syntax(
         initializer_references: collect_symbol_references(&initializer_tokens),
         initializer_tokens,
         location: target.location,
+        span: target.span,
     })
 }
 
@@ -208,7 +217,9 @@ pub fn parse_binding_target_syntax(
     token_stream: &mut FileTokens,
     string_table: &StringTable,
 ) -> DeclarationShellResult<BindingTargetSyntax> {
-    let target_location = token_stream.current_location();
+    let target_token = &token_stream.tokens[token_stream.index];
+    let target_location = target_token.location.clone();
+    let target_span = target_token.span;
 
     let binding_mode = if token_stream.current_token_kind() == &TokenKind::Mutable {
         require_binding_marker_adjacent(token_stream, BindingMode::MutableRuntime)?;
@@ -237,6 +248,7 @@ pub fn parse_binding_target_syntax(
         binding_mode,
         type_annotation,
         location: target_location,
+        span: target_span,
     })
 }
 

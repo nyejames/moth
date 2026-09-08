@@ -39,6 +39,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::Declaration
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -103,6 +104,7 @@ fn alias_kind() -> HeaderKind {
 fn constant_kind() -> HeaderKind {
     HeaderKind::Constant {
         declaration: DeclarationSyntax {
+            span: LocalSpan::source_start(),
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
             config_qualifier: None,

@@ -12,7 +12,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::types::{FileRole, Header, HeaderExportMode, HeaderKind};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
@@ -31,6 +31,7 @@ pub(crate) struct SyntheticContentHeaderInput {
     pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
     pub(crate) location: SourceLocation,
+    pub(crate) span: LocalSpan,
     pub(crate) initializer_tokens: Vec<Token>,
     pub(crate) initializer_references: Vec<InitializerReference>,
 }
@@ -76,6 +77,7 @@ pub(crate) fn synthetic_content_header(
         initializer_tokens: input.initializer_tokens,
         initializer_references: input.initializer_references,
         location: input.location.clone(),
+        span: input.span,
     };
 
     Header {

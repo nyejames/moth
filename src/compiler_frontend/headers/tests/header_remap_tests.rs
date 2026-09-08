@@ -42,6 +42,7 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -411,6 +412,7 @@ fn header_kind_constant_remaps_declaration() {
 
     let type_name = local.intern("MyType");
     let declaration = DeclarationSyntax {
+        span: LocalSpan::source_start(),
         binding_mode: BindingMode::ImmutableRuntime,
         type_annotation: ParsedTypeRef::Named {
             name: type_name,
@@ -957,6 +959,7 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     };
 
     let constant_declaration = DeclarationSyntax {
+        span: LocalSpan::source_start(),
         binding_mode: BindingMode::ImmutableRuntime,
         type_annotation: ParsedTypeRef::Named {
             name: string_table.intern("Value"),

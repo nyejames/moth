@@ -5,14 +5,26 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
+use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ReservedNameOwner, RuleDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceSpan};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -361,4 +373,107 @@ items {2 Int} = three
         "expected TypeMismatch, got {:?}",
         diagnostic.payload
     );
+}
+
+#[test]
+fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
+    let padding = "🦋".repeat(600);
+    let long_type = "LongType".repeat(150);
+    let long_target = format!("{long_type} = 1");
+    for (target, expected_anchor) in [
+        ("= 1", "="),
+        ("Int = 1", "Int"),
+        ("~= 1", "~"),
+        ("#= 1", "#"),
+        ("#Config of Int = 1", "#"),
+        (long_target.as_str(), long_type.as_str()),
+    ] {
+        let source = format!("padding #= \"{padding}\"\nvalue {target}\n");
+        let mut strings = StringTable::new();
+        let source_path = InternedPath::from_single_str("declarations.moth", &mut strings);
+        let canonical_path = source_path.to_path_buf(&strings);
+        let mut sources =
+            SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
+                .expect("the authored source must register before tokenization");
+        let file_id = sources.get_by_canonical_path(&canonical_path).unwrap().id;
+        sources
+            .retain_text(file_id, source)
+            .expect("the original source snapshot must load");
+        let source = sources.retained_text(file_id).unwrap();
+        let mut builder = ExtendedSpanBuilder::new();
+        let mut tokens = tokenize(
+            source,
+            &source_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut strings,
+            file_id,
+            &mut builder,
+        )
+        .expect("the source must tokenize");
+        let name = strings.intern("value");
+        tokens.index = tokens
+            .tokens
+            .iter()
+            .position(|token| token.kind == TokenKind::Symbol(name))
+            .unwrap()
+            + 1;
+        let declaration = parse_declaration_syntax(&mut tokens, name, &mut strings)
+            .expect("the authored declaration must produce its shell");
+        let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
+        let expected_range = (
+            expected_start,
+            expected_start + expected_anchor.len() as u32,
+        );
+        let range = declaration.span.resolve_with(builder.resolver());
+        assert_eq!(
+            (range.start(), range.end()),
+            expected_range,
+            "target {target}"
+        );
+        assert_eq!(
+            (
+                declaration.location.start_byte,
+                declaration.location.end_byte
+            ),
+            expected_range
+        );
+        assert!(
+            !builder.is_empty(),
+            "the preceding long literal must use the original span table"
+        );
+
+        tokens.freeze_path_syntax_for_test();
+        let context = ScopeContext::new_for_tests(
+            ContextKind::Function,
+            source_path.clone(),
+            Rc::new(TopLevelDeclarationTable::new(vec![])),
+            Arc::new(ExternalPackageRegistry::new()),
+            vec![],
+            0,
+        )
+        .with_declaring_file_id(Some(file_id));
+        let initializer = super::declaration_initializer_stream(
+            &source_path.append(name),
+            declaration.initializer_tokens,
+            &declaration.location,
+            declaration.span,
+            &tokens.path_syntax,
+            &context,
+        )
+        .expect("initializer must retain its declaration's source owner");
+        let terminator = initializer.tokens.last().unwrap();
+        assert_eq!(terminator.kind, TokenKind::Eof);
+        assert_eq!(initializer.file_id, Some(file_id));
+        sources
+            .install_extended_spans(file_id, builder.freeze())
+            .expect("the original table must install after the final span producer");
+        let range = SourceSpan::new(file_id, terminator.span).byte_range(&sources);
+        assert_eq!(
+            (range.start(), range.end()),
+            expected_range,
+            "target {target}"
+        );
+        assert_eq!(terminator.location, declaration.location);
+    }
 }
