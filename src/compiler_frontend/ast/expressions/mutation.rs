@@ -55,6 +55,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
@@ -233,7 +234,7 @@ fn build_mutation_from_target(
             }
         };
 
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        let mut diagnostic = CompilerDiagnostic::invalid_assignment_target(
             reason,
             variable_declaration.id.name(),
             Some(target_type_id),
@@ -241,8 +242,12 @@ fn build_mutation_from_target(
             root_binding_name,
             declaration_location,
             location,
-        )
-        .into());
+        );
+        if let Some(source) = token_stream.file_id {
+            diagnostic.primary_span =
+                Some(SourceSpan::new(source, token_stream.current_token().span));
+        }
+        return Err(diagnostic.into());
     }
 
     // -----------------------
