@@ -39,6 +39,8 @@ mod span;
 mod span_encoding;
 
 #[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use database::{SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders};

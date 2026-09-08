@@ -33,6 +33,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
@@ -1647,20 +1648,20 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
     let source = format!("value #Config of Int = 1\n#[{long_fragment_name}]\n");
-    let file_path = PathBuf::from("src/@page.moth");
-    let mut string_table = StringTable::new();
-    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
-        .expect("test path should be UTF-8");
-    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let file_path = source_context.path().to_path_buf();
+    let interned_path = source_context.source_path().clone();
+    let source_id = source_context.source_id();
     let tokenizer_span_count = {
+        let (string_table, span_builder) = source_context.preparation_parts();
         let file_tokens = tokenize(
             &source,
             &interned_path,
             TokenizerEntryMode::SourceFile,
             &StyleDirectiveRegistry::built_ins(),
-            &mut string_table,
-            SourceId::COMPILATION_ROOT,
-            &mut span_builder,
+            string_table,
+            source_id,
+            span_builder,
         )
         .expect("source should tokenize");
         let count = span_builder.len();
@@ -1668,10 +1669,10 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             file_tokens,
             &file_path,
             &HeaderParseOptions::default(),
-            &mut string_table,
+            string_table,
             0,
             0,
-            &mut span_builder,
+            span_builder,
         )
         .expect("headers should prepare");
 
@@ -1688,14 +1689,11 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             .expect("const fragment metadata")
             .span;
         let mut outputs = [output];
-        let prepared = prepare_header_syntax(
-            &mut outputs,
-            &mut string_table,
-            &mut |source, diagnostic| {
-                diagnostic.capture_preparation_span(source, &mut span_builder)
-            },
-        )
-        .expect("header syntax should aggregate");
+        let prepared =
+            prepare_header_syntax(&mut outputs, string_table, &mut |source, diagnostic| {
+                diagnostic.capture_preparation_span(source, span_builder)
+            })
+            .expect("header syntax should aggregate");
 
         let resolver = span_builder.resolver();
         let header_range = header_name_span.resolve_with(resolver);
@@ -1735,7 +1733,7 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     };
 
     assert_eq!(
-        span_builder.len(),
+        source_context.span_builder().len(),
         tokenizer_span_count + 1,
         "joining the long const fragment should append exactly one source-owned row"
     );
@@ -1744,19 +1742,18 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
 #[test]
 fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     let source = "#[value]\n";
-    let file_path = PathBuf::from("src/@page.moth");
-    let mut string_table = StringTable::new();
-    let scope = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
-        .expect("test path should be UTF-8");
-    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let scope = source_context.source_path().clone();
+    let source_id = source_context.source_id();
+    let (string_table, span_builder) = source_context.preparation_parts();
     let mut token_stream = tokenize(
         source,
         &scope,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
-        &mut string_table,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
+        string_table,
+        source_id,
+        span_builder,
     )
     .expect("source should tokenize");
     let opening_index = token_stream
@@ -1774,7 +1771,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         source_file: &scope,
         file_dependency_clauses: std::slice::from_ref(&malformed_clause),
         dependency_selections: &[],
-        string_table: &mut string_table,
+        string_table,
         file_role: FileRole::ActiveModuleRoot,
     };
     let failure = create_top_level_const_template(
@@ -1783,7 +1780,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         0,
         &mut token_stream,
         &mut context,
-        &mut span_builder,
+        span_builder,
     )
     .expect_err("malformed retained selection should fail");
 
