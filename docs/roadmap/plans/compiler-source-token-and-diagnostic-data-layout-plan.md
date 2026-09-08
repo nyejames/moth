@@ -82,10 +82,9 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `81a79f7c1` — generic-parameter parser diagnostics retain exact token-owned spans, following the
-  provider, template-control, statement-position, else-marker and borrow-payload slices. Focused
-  generic, discovery, template, statement, borrow and diagnostic tests pass; `cargo check -p moth`,
-  formatting and diff checks are clean.
+- `532526829` — downstream template-else diagnostics retain exact marker-owned spans, following
+  the generic-scope consumer slice. Focused generic, template, malformed-template and head tests
+  pass; `cargo check -p moth`, formatting and diff checks are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -237,6 +236,16 @@ CURRENT_WORKTREE_STATE:
   token spans without changing boxing, labels, ordering or infrastructure behavior. Generic (184)
   and multibyte extended-bound regressions pass. AST-time generic scope validation remains a later
   semantic consumer slice.
+- Accepted the bounded 1E2 AST generic-scope span consumer in `4842e80f6`. AST environment scope
+  construction carries each header's `FileTokens.file_id`, and forbidden-name collisions retain
+  the offending generic parameter's exact span while preserving legacy locations, labels, payloads,
+  ordering and infrastructure behavior. Type-resolution (22), datatype-generic (24), and the
+  multibyte collision regression pass.
+- Accepted the bounded 1E3 downstream template-else span consumer in `532526829`. Valid else and
+  else-if boundaries carry the direct marker's local span and source ID through fallback and
+  malformed/inline checks, so missing-condition, malformed-header, inline and fallback diagnostics
+  retain exact marker spans while preserving legacy locations, labels, payloads and ordering.
+  Malformed-template (19) and template-head (104) suites plus the multibyte regressions pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
