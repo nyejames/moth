@@ -82,9 +82,9 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `ebe54fea5` — template-head directive diagnostics retain current-token spans, completing the
-  accepted shadowed-name payload reduction and declaration anchor slice. Focused directive-style,
-  diagnostic-model and declaration tests pass; `cargo check -p moth`, the full 4,986-library-test
+- `71c020f15` — duplicate-declaration payload facts are label-owned and immutable assignment
+  diagnostics retain the exact operator span. Focused diagnostic-model, header, signature,
+  mutation and directive-style tests pass; `cargo check -p moth`, the full 4,987-library-test
   suite and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
@@ -176,6 +176,15 @@ CURRENT_WORKTREE_STATE:
   diagnostics use one current-token helper to retain exact spans from `FileTokens.file_id`, while
   legacy locations, labels, payloads and ordering remain unchanged. The multibyte slot-target
   regression and directive-style suite (52 tests) pass.
+- Accepted the bounded 1G1 duplicate-declaration payload simplification in `742dc7665`. The
+  previous declaration remains solely in the ordered secondary label; payload remapping, identity
+  rebinding and renderer matches no longer duplicate its legacy location. Diagnostic-model (78),
+  signature-duplicate (5) and header parsing (179) tests preserve the previous-declaration label
+  and existing exact-span checks.
+- Accepted the bounded 1E2 mutation consumer in `71c020f15`. Immutable assignment diagnostics
+  retain the current assignment operator's exact token span through the registered `SourceId`,
+  while the existing invalid-assignment payload, legacy location and labels remain unchanged. The
+  multibyte operator regression and mutation suite (9 tests) pass.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -324,6 +333,13 @@ VALIDATION_STATE:
 - 1E3 template-head candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
   the focused multibyte regression (1), directive-style suite (52), diagnostic model (78) and
   full library suite (4,986) passed. The independent Slice review found no required correction.
+- 1G1 duplicate-declaration payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
+  `cargo check -p moth`, diagnostic model (78), signature duplicate (5), header parsing (179)
+  and the full library suite (4,987) passed. The independent Slice review found no required
+  correction.
+- 1E2 mutation candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`, the
+  focused mutation suite (9), assignment suite (30) and the full library suite (4,987) passed.
+  The independent Slice review found no required correction.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
