@@ -13,7 +13,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceSpan};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -131,6 +133,40 @@ fn rejects_keyword_shadow_variable_declarations() {
             ..
         }
     ));
+}
+
+#[test]
+fn shadowed_declaration_retains_exact_duplicate_name_span() {
+    let source = "value = \"π\"\nvalue Int = 2\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::ShadowedName { .. }
+    ));
+
+    let duplicate_start = source
+        .rfind("value Int")
+        .expect("the duplicate declaration should be present") as u32;
+    let mut expected_builder = ExtendedSpanBuilder::new();
+    let expected_span =
+        LocalSpan::exact(duplicate_start, "value".len() as u32, &mut expected_builder)
+            .expect("the duplicate name span should fit the inline representation");
+
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, expected_span))
+    );
+    assert_eq!(diagnostic.primary_location.start_byte, duplicate_start);
+    assert_eq!(
+        diagnostic.primary_location.end_byte,
+        duplicate_start + "value".len() as u32
+    );
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert_eq!(
+        diagnostic.labels[0].location, diagnostic.primary_location,
+        "the primary legacy label must remain the duplicate declaration"
+    );
 }
 
 #[test]

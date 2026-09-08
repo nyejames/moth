@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -319,12 +320,18 @@ pub(crate) fn parse_symbol_statement(
             | Some(TokenKind::DatatypeString)
             | Some(TokenKind::DatatypeChar)
             | Some(TokenKind::Mutable) => {
-                return Err(CompilerDiagnostic::shadowed_name(
+                let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
                     existing_reference.value.location.clone(),
                     token_stream.current_location(),
-                )
-                .into());
+                );
+                if let Some(source) = token_stream.file_id {
+                    diagnostic.primary_span = Some(SourceSpan::new(
+                        source,
+                        token_stream.tokens[token_stream.index].span,
+                    ));
+                }
+                return Err(diagnostic.into());
             }
 
             // Otherwise, parse the symbol as the start of a general expression statement.
