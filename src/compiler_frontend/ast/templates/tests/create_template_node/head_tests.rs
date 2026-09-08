@@ -728,6 +728,43 @@ fn template_if_suffix_requires_condition() {
 }
 
 #[test]
+fn template_if_suffix_separator_retains_exact_multibyte_span() {
+    let source = "[if true -- π\n, value: Visible]";
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source(source, &mut string_table, &mut span_builder);
+    let context = new_constant_context(token_stream.src_path.clone());
+
+    let diagnostic = expect_template_diagnostic(
+        Template::new(&mut token_stream, &context, vec![], &mut string_table)
+            .expect_err("a separator after an if suffix should fail"),
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidTemplateStructure {
+            reason: InvalidTemplateStructureReason::ControlFlowSuffixNotFinal
+        }
+    ));
+
+    let primary_span = diagnostic
+        .primary_span
+        .expect("the suffix separator should retain its exact source span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver());
+    let expected_start = source
+        .find(',')
+        .expect("the fixture should contain a comma") as u32;
+    assert_eq!(
+        (range.start(), range.end()),
+        (expected_start, expected_start + 1)
+    );
+    assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
+    assert_eq!(diagnostic.primary_location.start_byte, range.start());
+    assert_eq!(diagnostic.primary_location.end_byte, range.end());
+}
+
+#[test]
 fn template_loop_suffix_requires_header() {
     let diagnostic = parse_template_error("[loop: Visible]");
 

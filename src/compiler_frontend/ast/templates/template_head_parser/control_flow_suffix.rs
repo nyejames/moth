@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
@@ -39,12 +40,17 @@ pub(crate) fn parse_if_suffix(
     string_table: &mut StringTable,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
     let location = token_stream.current_location();
+    let marker_span = token_stream.current_token().span;
     token_stream.advance(); // consume `if`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::MissingTemplateIfCondition,
-            location,
+        return Err(with_token_span(
+            token_stream,
+            marker_span,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::MissingTemplateIfCondition,
+                location,
+            ),
         )
         .into());
     }
@@ -77,9 +83,13 @@ pub(crate) fn parse_if_suffix(
         }
 
         ParsedIfHeader::MatchStyle { scrutinee } => {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
-                scrutinee.location,
+            return Err(with_token_span(
+                token_stream,
+                marker_span,
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
+                    scrutinee.location,
+                ),
             )
             .into());
         }
@@ -111,12 +121,17 @@ pub(crate) fn parse_loop_suffix(
     string_table: &mut StringTable,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
     let location = token_stream.current_location();
+    let marker_span = token_stream.current_token().span;
     token_stream.advance(); // consume `loop`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::MissingTemplateLoopHeader,
-            location,
+        return Err(with_token_span(
+            token_stream,
+            marker_span,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::MissingTemplateLoopHeader,
+                location,
+            ),
         )
         .into());
     }
@@ -125,9 +140,13 @@ pub(crate) fn parse_loop_suffix(
     let suffix_tokens = &token_stream.tokens[token_stream.index..body_start_index];
 
     if has_top_level_suffix_separator(suffix_tokens) {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-            location,
+        return Err(with_token_span(
+            token_stream,
+            marker_span,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+                location,
+            ),
         )
         .into());
     }
@@ -201,14 +220,20 @@ fn next_meaningful_token_is_body_boundary(token_stream: &FileTokens) -> bool {
 fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<()> {
     match token_stream.current_token_kind() {
         TokenKind::StartTemplateBody => Ok(()),
-        TokenKind::Comma => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-            token_stream.current_location(),
+        TokenKind::Comma => Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+                token_stream.current_location(),
+            ),
         )
         .into()),
-        _ => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-            token_stream.current_location(),
+        _ => Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
+                token_stream.current_location(),
+            ),
         )
         .into()),
     }
@@ -227,9 +252,13 @@ fn find_template_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResul
         if nesting_depth.is_top_level()
             && matches!(token.kind, TokenKind::TemplateClose | TokenKind::Eof)
         {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-                token.location.clone(),
+            return Err(with_token_span(
+                token_stream,
+                token.span,
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
+                    token.location.clone(),
+                ),
             )
             .into());
         }
@@ -238,11 +267,36 @@ fn find_template_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResul
         index += 1;
     }
 
-    Err(CompilerDiagnostic::invalid_template_structure(
-        InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-        token_stream.current_location(),
+    Err(with_current_token_span(
+        token_stream,
+        CompilerDiagnostic::invalid_template_structure(
+            InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
+            token_stream.current_location(),
+        ),
     )
     .into())
+}
+
+/// Attach the exact source span for a direct suffix diagnostic while retaining its legacy
+/// location and labels for the interval migration bridge.
+fn with_current_token_span(
+    token_stream: &FileTokens,
+    diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    with_token_span(token_stream, token_stream.current_token().span, diagnostic)
+}
+
+fn with_token_span(
+    token_stream: &FileTokens,
+    span: LocalSpan,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none()
+        && let Some(source) = token_stream.file_id
+    {
+        diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    }
+    diagnostic
 }
 
 fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {
