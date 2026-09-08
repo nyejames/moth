@@ -55,12 +55,8 @@ impl DiagnosticPayload {
                 remap_path_import_payload(path, remap);
             }
 
-            DiagnosticPayload::DuplicateMothTemplateInputPath {
-                path,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicateMothTemplateInputPath { path } => {
                 remap_path_import_payload(path, remap);
-                first_location.remap_string_ids(remap);
             }
             DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
                 first_path,
@@ -127,11 +123,8 @@ impl DiagnosticPayload {
                 remap_optional_location(existing_location, remap);
             }
 
-            DiagnosticPayload::UseAfterPossibleMove {
-                place,
-                move_location,
-            } => {
-                remap_place_with_optional_location(place, move_location, remap);
+            DiagnosticPayload::UseAfterPossibleMove { place } => {
+                remap_single_place_borrow_payload(place, remap);
             }
 
             DiagnosticPayload::MoveWhileBorrowed {
@@ -688,16 +681,10 @@ impl DiagnosticPayload {
 
             DiagnosticPayload::DuplicatePublicExport { .. } => {}
 
-            DiagnosticPayload::DuplicateMothTemplateInputPath { first_location, .. } => {
-                first_location.rebind_source_identity(logical_path)
-            }
+            DiagnosticPayload::DuplicateMothTemplateInputPath { .. } => {}
 
             DiagnosticPayload::MultipleMutableBorrows {
                 existing_location, ..
-            }
-            | DiagnosticPayload::UseAfterPossibleMove {
-                move_location: existing_location,
-                ..
             }
             | DiagnosticPayload::MoveWhileBorrowed {
                 borrow_location: existing_location,
@@ -757,6 +744,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedExternalExtension { .. }
             | DiagnosticPayload::InvalidExternalModule { .. }
             | DiagnosticPayload::BorrowConflict { .. }
+            | DiagnosticPayload::UseAfterPossibleMove { .. }
             | DiagnosticPayload::UseOfUninitializedLocal { .. }
             | DiagnosticPayload::InvalidConfig { .. }
             | DiagnosticPayload::DeferredFeature { .. }

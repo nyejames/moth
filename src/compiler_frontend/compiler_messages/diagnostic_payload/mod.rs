@@ -152,7 +152,6 @@ pub enum DiagnosticPayload {
 
     DuplicateMothTemplateInputPath {
         path: InternedPath,
-        first_location: SourceLocation,
     },
 
     UnsupportedExternalExtension {
@@ -190,7 +189,6 @@ pub enum DiagnosticPayload {
 
     UseAfterPossibleMove {
         place: DiagnosticPlace,
-        move_location: Option<SourceLocation>,
     },
 
     MoveWhileBorrowed {

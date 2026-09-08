@@ -11,8 +11,8 @@ use crate::build_system::create_project_modules::resource_inputs::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidConfigReason,
-    SyntaxDiagnosticKind,
+    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
+    InvalidConfigReason, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -979,6 +979,10 @@ fn duplicate_source_paths_are_diagnostics() {
         diagnostic.payload,
         DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
     ));
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
+    assert_eq!(diagnostic.labels[1].style, DiagnosticLabelStyle::Secondary);
+    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
 }
 
 #[test]

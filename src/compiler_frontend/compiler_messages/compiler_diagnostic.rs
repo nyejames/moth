@@ -367,14 +367,10 @@ impl CompilerDiagnostic {
         first_location: SourceLocation,
         duplicate_location: SourceLocation,
     ) -> Self {
-        let payload_first_location = first_location.clone();
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
             duplicate_location.clone(),
-            DiagnosticPayload::DuplicateMothTemplateInputPath {
-                path,
-                first_location: payload_first_location,
-            },
+            DiagnosticPayload::DuplicateMothTemplateInputPath { path },
         )
         .with_labels(vec![
             DiagnosticLabel::primary(duplicate_location),
@@ -475,7 +471,7 @@ impl CompilerDiagnostic {
         location: SourceLocation,
     ) -> Self {
         let mut labels = vec![DiagnosticLabel::primary(location.clone())];
-        if let Some(move_location) = move_location.clone() {
+        if let Some(move_location) = move_location {
             labels.push(DiagnosticLabel::secondary(
                 move_location,
                 Some(DiagnosticLabelMessage::ValueMovedHere),
@@ -485,10 +481,7 @@ impl CompilerDiagnostic {
         Self::new(
             DiagnosticKind::Borrow(BorrowDiagnosticKind::UseAfterPossibleMove),
             location,
-            DiagnosticPayload::UseAfterPossibleMove {
-                place,
-                move_location,
-            },
+            DiagnosticPayload::UseAfterPossibleMove { place },
         )
         .with_labels(labels)
     }

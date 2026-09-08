@@ -2688,6 +2688,35 @@ fn borrow_conflict_rendering_hides_payload_debug_names() {
 }
 
 #[test]
+fn use_after_possible_move_keeps_move_location_on_related_label() {
+    let mut string_table = StringTable::new();
+    let primary_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let moved_path = InternedPath::from_single_str("moves.moth", &mut string_table);
+    let value_name = string_table.intern("value");
+    let primary_location = location(primary_path);
+    let moved_location = location(moved_path);
+
+    let diagnostic = CompilerDiagnostic::use_after_possible_move(
+        DiagnosticPlace::Local(value_name),
+        Some(moved_location.clone()),
+        primary_location,
+    );
+
+    match &diagnostic.payload {
+        DiagnosticPayload::UseAfterPossibleMove {
+            place: DiagnosticPlace::Local(name),
+        } => assert_eq!(*name, value_name),
+        payload => panic!("unexpected use-after-move payload: {payload:?}"),
+    }
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert_eq!(diagnostic.labels[1].location, moved_location);
+    assert_eq!(
+        diagnostic.labels[1].message,
+        Some(DiagnosticLabelMessage::ValueMovedHere)
+    );
+}
+
+#[test]
 fn diagnostic_display_order_buckets_errors_before_warnings_before_notes() {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
