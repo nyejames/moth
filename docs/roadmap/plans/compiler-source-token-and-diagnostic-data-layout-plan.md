@@ -81,10 +81,10 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-- `70a7ce035` — AST signature-member and choice-variant diagnostics retain exact source-owned
-  anchors as primary or related spans, and renderer checkpoint `616d9a864` resolves retained
-  primary spans through `LineIndex` for terminal, terse and dev-server output. Focused AST,
-  renderer, dependency-selection and module-dependency tests pass; the worktree is clean.
+- `715c17ca9` — dependency aliases and trait diagnostics retain exact source-owned anchors,
+  extending the accepted header, AST and renderer consumers through the current Phase 1 slice.
+  Focused namespace, trait, renderer, dependency-selection, module-dependency and AST tests pass;
+  `cargo check -p moth` and the worktree are clean.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
@@ -131,6 +131,16 @@ CURRENT_WORKTREE_STATE:
   resolve retained primary spans against the attached source database, derive scalar columns from
   `LineIndex`, and keep legacy-location fallback for diagnostics without a retained span. Unicode
   and half-open multibyte caret regressions pass.
+- Accepted module-symbol span consumption in `5e722fc07`. Declaration records retain exact
+  `SourceSpan` anchors, and same-file visible-name collisions attach the current and previous
+  declaration spans while preserving the legacy location and diagnostic ordering.
+- Accepted trait diagnostic anchors in `953cb928f`. Trait requirement duplicates retain exact
+  primary and related spans, conformance targets retain their target span, and both evidence and
+  AST-only trait-reference resolution retain the authored reference span. Legacy locations and
+  labels remain available as the interval bridge.
+- Accepted dependency-alias span consumption in `715c17ca9`. Namespace alias collisions attach
+  the authored alias span through the dependency shell's source ID while preserving the legacy
+  collision location. The obsolete alias field-level allowance is removed.
 - Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
   member anchor as a primary or secondary span, choice payload diagnostics retain the variant
   anchor as a related span, and struct remapping preserves captured primary spans. The two new
@@ -246,6 +256,13 @@ VALIDATION_STATE:
   legacy locations remain a fallback for older diagnostics.
 - 1E2 AST candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and all 21
   `compiler_frontend::ast::type_resolution_tests` passed, including the two new anchor tests.
+- 1E1 module-symbol candidate: `cargo fmt --all`, `git diff --check` and the focused namespace
+  binding suite (37 tests) passed, including the exact same-file declaration collision anchor.
+- 1E2 trait candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and the
+  focused trait environment suite (12 tests) passed, including duplicate requirement, target and
+  unknown-reference span regressions.
+- 1E1 dependency-alias candidate: `cargo fmt --all`, `git diff --check` and the focused namespace
+  binding suite (38 tests) passed, including exact alias collision ownership.
 - 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
   5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
   source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
@@ -297,8 +314,9 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: continue 1E1 with dependency-clause and module-symbol consumers, then expand 1E2–1H
-  and complete the Phase 1 closeout/final review before the requested external review pause.
+- next action: continue 1E1/1E2 with remaining declaration, template and frontend consumers, then
+  expand 1F–1H and complete the Phase 1 closeout/final review before the requested external review
+  pause.
   Phases 2–7 remain pending.
 
 ---
