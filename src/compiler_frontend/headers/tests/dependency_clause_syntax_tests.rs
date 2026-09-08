@@ -222,6 +222,7 @@ fn corrupted_path_lookup_is_infrastructure_error() {
     one_row_table.push(
         InternedPath::from_single_str("only", &mut StringTable::new()),
         tokens.tokens[path_index].location.clone(),
+        tokens.tokens[path_index].span,
     );
     let empty_table = PathSyntaxTable::new();
 

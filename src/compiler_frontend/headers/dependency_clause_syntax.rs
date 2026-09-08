@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -60,10 +60,15 @@ type DependencyClauseResult<T> = Result<T, DependencyClauseParseError>;
 /// WHAT: keeps an alias name and its diagnostic span inseparable while dependency syntax is
 ///       transferred from path scanning into retained header facts.
 /// WHY: collision diagnostics must point at the alias itself, not at the whole dependency clause.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct DependencyAlias {
     pub name: StringId,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates downstream consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 impl DependencyAlias {
@@ -79,24 +84,30 @@ impl DependencyAlias {
 
 /// One provider root produced by the shared clause scanner before header preparation stamps the
 /// retained shell identity.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ScannedDependencyProvider {
     pub path: InternedPath,
     pub path_syntax: PathSyntaxId,
     pub path_location: SourceLocation,
+    pub path_span: LocalSpan,
 }
 
 /// The consolidated path authority for one retained dependency clause.
 ///
 /// WHAT: stores one shell, one structural path, one target classification and one path location.
 /// WHY: later stages must not rediscover the provider boundary from path spelling.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct RetainedDependencyPath {
     pub dependency_shell_id: DependencyShellId,
     pub path: InternedPath,
     pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
     pub location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates downstream consumers from legacy locations"
+    )]
+    pub span: LocalSpan,
 }
 
 impl RetainedDependencyPath {
@@ -115,15 +126,16 @@ impl RetainedDependencyPath {
 }
 
 /// One direct public-surface name selected from a provider root.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ScannedDependencySelection {
     pub source_name: StringId,
     pub source_location: SourceLocation,
+    pub source_span: LocalSpan,
     pub local_alias: Option<DependencyAlias>,
 }
 
 /// Mutually exclusive binding modes produced by the shared dependency-clause scanner.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ScannedDependencyBinding {
     Namespace {
         alias: Option<DependencyAlias>,
@@ -135,7 +147,7 @@ pub enum ScannedDependencyBinding {
 
 /// The complete syntax payload of one authored dependency clause before string-table remapping
 /// and shell assignment.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ScannedDependencyClause {
     pub provider: ScannedDependencyProvider,
     pub binding: ScannedDependencyBinding,
@@ -171,6 +183,7 @@ pub(crate) fn parse_dependency_clause(
         path: path_syntax_row.root.clone(),
         path_syntax: *path_id,
         path_location: path_syntax_row.location.clone(),
+        path_span: path_token.span,
     };
 
     if clause_ended(tokens.get(index)) {
@@ -206,6 +219,7 @@ pub(crate) fn parse_dependency_clause(
         let alias = DependencyAlias {
             name: alias_name,
             location: alias_token.location.clone(),
+            span: alias_token.span,
         };
         index += 1;
         if !clause_ended(tokens.get(index)) {
@@ -284,6 +298,7 @@ pub(crate) fn parse_dependency_clause(
             Some(DependencyAlias {
                 name: alias_name,
                 location: alias_token.location.clone(),
+                span: alias_token.span,
             })
         } else {
             None
@@ -310,6 +325,7 @@ pub(crate) fn parse_dependency_clause(
         selections.push(ScannedDependencySelection {
             source_name,
             source_location: source_location.clone(),
+            source_span: selection_token.span,
             local_alias,
         });
 

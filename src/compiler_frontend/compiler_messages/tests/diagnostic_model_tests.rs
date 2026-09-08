@@ -665,7 +665,11 @@ fn remap_string_ids_updates_locations_payloads_labels_and_tokens() {
     // The path token now carries a dense handle into a file-owned path syntax table;
     // the table remaps alongside the diagnostic bag exactly as `FileTokens` does.
     let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(import_path.clone(), first_location.clone());
+    let path_id = path_syntax.push(
+        import_path.clone(),
+        first_location.clone(),
+        LocalSpan::source_start(),
+    );
     let expected_token = CompilerDiagnostic::expected_token(
         TokenKind::Symbol(name),
         Some(TokenKind::Path(path_id)),

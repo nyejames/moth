@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenStream};
+use crate::compiler_frontend::tokenizer::tokens::TokenStream;
 
 use super::PathComponents;
 
@@ -22,7 +22,6 @@ type ComponentResult<T> = Result<T, Box<CompilerDiagnostic>>;
 pub(super) struct ParsedComponent {
     pub(super) value: String,
     pub(super) was_quoted: bool,
-    pub(super) end_position: CharPosition,
 }
 
 /// WHAT: Parses exactly one path component (bare or quoted) from the current stream position.
@@ -66,7 +65,6 @@ fn parse_quoted_component(
             return Ok(ParsedComponent {
                 value,
                 was_quoted: true,
-                end_position: stream.position,
             });
         }
 
@@ -126,12 +124,9 @@ pub(super) fn parse_bare_component(
         )));
     }
 
-    let end_position = stream.position;
-
     Ok(ParsedComponent {
         value,
         was_quoted: false,
-        end_position,
     })
 }
 

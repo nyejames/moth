@@ -1,8 +1,9 @@
 //! Path-only syntax tests.
 
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, PathKind};
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -193,4 +194,75 @@ fn path_errors_remain_structured() {
             path_kind: PathKind::OnlyRootSlashSupported
         }
     ));
+}
+
+/// Long path rows and persistent subsets retain the token's single source-owned encoding.
+#[test]
+fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
+    let path_text = format!("@docs/\"{}.md\"", "é".repeat(700));
+    let source = format!("-- 🦋\n{path_text}\n");
+    let mut strings = StringTable::new();
+    let scope = InternedPath::from_single_str("long-path.moth", &mut strings);
+    let canonical_path = scope.to_path_buf(&strings);
+    let sources = SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
+        .expect("source should register");
+    let source_id = sources
+        .get_by_canonical_path(&canonical_path)
+        .expect("registered source")
+        .id;
+    let mut spans = ExtendedSpanBuilder::new();
+    let tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("quoted multibyte path should tokenize");
+    let token = tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::Path(_)))
+        .expect("path token");
+    let TokenKind::Path(path_id) = token.kind else {
+        unreachable!()
+    };
+    let row = tokens
+        .path_syntax
+        .try_path_for_token(path_id, &token.location)
+        .expect("owned path");
+    assert_eq!(
+        spans.len(),
+        1,
+        "the path token and row share one overflow row"
+    );
+    assert_eq!(row.span, token.span);
+
+    let mut captured_tokens = vec![token.clone()];
+    let (subset, _) = tokens
+        .path_syntax
+        .capture_persistent_generic_subset(&mut captured_tokens)
+        .expect("persistent capture should preserve the path");
+    let TokenKind::Path(captured_id) = captured_tokens[0].kind else {
+        unreachable!()
+    };
+    let captured = subset.try_path(captured_id).expect("captured path row");
+    assert_eq!(captured.span, row.span);
+    assert_eq!(captured_tokens[0].span, row.span);
+
+    let retained_span = SourceSpan::new(source_id, captured.span);
+    let mut database = SourceDatabaseBuilder::new(sources);
+    database
+        .sources_mut()
+        .retain_text(source_id, source.clone())
+        .expect("retain source snapshot");
+    database.retain_span_builder(source_id, spans);
+    let database = database.finish().expect("install original span table");
+    let range = retained_span.byte_range(&database);
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        path_text
+    );
 }

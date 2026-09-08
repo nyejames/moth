@@ -59,7 +59,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -559,6 +559,7 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
         path.push_str(segment, string_table);
     }
     RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -668,7 +669,6 @@ fn synthetic_prepared_identity_snapshot(
             let shell_ids = clauses
                 .iter()
                 .map(|clause| {
-                    assert_eq!(clause.location.scope, logical_path);
                     assert_eq!(clause.dependency.location.scope, logical_path);
                     assert_eq!(
                         clause.dependency.dependency_shell_id.source, file_id,
@@ -8535,7 +8535,7 @@ mod file_reference_resolution_tests {
         PreparedFileReference, PreparedFileReferenceClass,
     };
     use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-    use crate::compiler_frontend::source::SourceId;
+    use crate::compiler_frontend::source::{LocalSpan, SourceId};
     use crate::compiler_frontend::symbols::interned_path::InternedPath;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::fs;
@@ -8575,8 +8575,13 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceLocation::default(),
+            LocalSpan::source_start(),
+        );
         let reference = PreparedFileReference {
+            span: LocalSpan::source_start(),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
@@ -8617,8 +8622,13 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("missing.moth", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceLocation::default(),
+            LocalSpan::source_start(),
+        );
         let reference = PreparedFileReference {
+            span: LocalSpan::source_start(),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
@@ -8659,8 +8669,13 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceLocation::default(),
+            LocalSpan::source_start(),
+        );
         let reference = PreparedFileReference {
+            span: LocalSpan::source_start(),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
@@ -8711,8 +8726,13 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceLocation::default(),
+            LocalSpan::source_start(),
+        );
         let reference = PreparedFileReference {
+            span: LocalSpan::source_start(),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
@@ -8771,8 +8791,13 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceLocation::default(),
+            LocalSpan::source_start(),
+        );
         let reference = PreparedFileReference {
+            span: LocalSpan::source_start(),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
             location: SourceLocation::default(),
@@ -8838,8 +8863,13 @@ mod file_reference_resolution_tests {
                        strings: &mut StringTable,
                        path_syntax: &mut PathSyntaxTable| {
             let authored_path = InternedPath::from_single_str(path, strings);
-            let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
+            let path_syntax_id = path_syntax.push(
+                authored_path.clone(),
+                SourceLocation::default(),
+                LocalSpan::source_start(),
+            );
             let reference = PreparedFileReference {
+                span: LocalSpan::source_start(),
                 source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),
@@ -8929,8 +8959,13 @@ mod file_reference_resolution_tests {
                        strings: &mut StringTable,
                        path_syntax: &mut PathSyntaxTable| {
             let authored_path = InternedPath::from_single_str(path, strings);
-            let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
+            let path_syntax_id = path_syntax.push(
+                authored_path.clone(),
+                SourceLocation::default(),
+                LocalSpan::source_start(),
+            );
             let reference = PreparedFileReference {
+                span: LocalSpan::source_start(),
                 source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
                 location: SourceLocation::default(),

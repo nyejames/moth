@@ -194,10 +194,10 @@ fn file_dependency_clause_remaps_all_fields_without_alias() {
     let mut global = StringTable::new();
 
     let header_path = InternedPath::from_single_str("@html/head", &mut local);
-    let location = make_location("test.moth", &mut local);
     let path_location = make_location("test.moth", &mut local);
 
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: header_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -207,7 +207,6 @@ fn file_dependency_clause_remaps_all_fields_without_alias() {
     let mut dependency = RetainedDependencyClause {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location,
         export_mode: HeaderExportMode::Private,
     };
 
@@ -222,7 +221,6 @@ fn file_dependency_clause_remaps_all_fields_without_alias() {
         dependency.binding,
         DependencyBindingSyntax::Namespace { alias: None }
     ));
-    assert_location_resolves_to(&dependency.location, "test.moth", &global);
     assert_location_resolves_to(&dependency.dependency.location, "test.moth", &global);
     assert_eq!(dependency.export_mode, HeaderExportMode::Private);
 }
@@ -234,11 +232,11 @@ fn file_dependency_clause_remaps_all_fields_with_alias() {
 
     let alias_name = local.intern("h");
     let header_path = InternedPath::from_single_str("@html/head", &mut local);
-    let location = make_location("test.moth", &mut local);
     let path_location = make_location("test.moth", &mut local);
     let alias_location = make_location("test.moth", &mut local);
 
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: header_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -249,11 +247,11 @@ fn file_dependency_clause_remaps_all_fields_with_alias() {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace {
             alias: Some(DependencyAlias {
+                span: LocalSpan::source_start(),
                 name: alias_name,
                 location: alias_location,
             }),
         },
-        location,
         export_mode: HeaderExportMode::Public,
     };
 
@@ -268,7 +266,6 @@ fn file_dependency_clause_remaps_all_fields_with_alias() {
         panic!("expected namespace binding with alias");
     };
     assert_eq!(global.resolve(alias.name), "h");
-    assert_location_resolves_to(&dependency.location, "test.moth", &global);
     assert_location_resolves_to(&dependency.dependency.location, "test.moth", &global);
     assert_location_resolves_to(&alias.location, "test.moth", &global);
     assert_eq!(dependency.export_mode, HeaderExportMode::Public);
@@ -288,12 +285,12 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     header_path.push_str("utils", &mut local);
     header_path.push_str("helpers", &mut local);
     let local_path_components = header_path.as_components().to_vec();
-    let location = make_location("file.moth", &mut local);
     let path_location = make_location("file.moth", &mut local);
     let alias_location = make_location("file.moth", &mut local);
     let original_shell = DependencyShellId::new(SourceId::from_index(0), 2);
 
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: header_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -304,11 +301,11 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace {
             alias: Some(DependencyAlias {
+                span: LocalSpan::source_start(),
                 name: alias_name,
                 location: alias_location,
             }),
         },
-        location,
         export_mode: HeaderExportMode::Public,
     };
 
@@ -365,7 +362,6 @@ fn remap_preserves_correct_ids_when_global_has_preexisting_strings() {
     );
 
     // Verify all locations still resolve.
-    assert_location_resolves_to(&dependency.location, "file.moth", &global);
     assert_location_resolves_to(&dependency.dependency.location, "file.moth", &global);
     assert_location_resolves_to(&alias.location, "file.moth", &global);
     assert_location_resolves_to(&fragment.location, "file.moth", &global);
@@ -748,6 +744,7 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
     let warning = make_unknown_name_diagnostic("warn_name", &mut local);
 
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: InternedPath::from_single_str("@html/head", &mut local),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -758,11 +755,11 @@ fn file_frontend_prepare_output_remaps_all_string_id_fields() {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace {
             alias: Some(DependencyAlias {
+                span: LocalSpan::source_start(),
                 name: local.intern("h"),
                 location: make_location("test.moth", &mut local),
             }),
         },
-        location: make_location("test.moth", &mut local),
         export_mode: HeaderExportMode::Public,
     };
 
@@ -1008,13 +1005,13 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
     let provider_name = string_table.intern("provider");
     let provider_path = InternedPath::from_components(vec![provider_name]);
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: provider_path.clone(),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
         location: provisional_location.clone(),
         dependency_shell_id: DependencyShellId::new(SourceId::from_index(7), 0),
     };
-    let clause_location = provisional_location.clone();
 
     let mut output = FileFrontendPrepareOutput {
         source_file: provisional_source.clone(),
@@ -1026,7 +1023,6 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         file_dependency_clauses: vec![RetainedDependencyClause {
             dependency: provider,
             binding: DependencyBindingSyntax::Namespace { alias: None },
-            location: clause_location,
             export_mode: HeaderExportMode::Private,
         }],
         structural_file_references: Default::default(),
@@ -1246,7 +1242,6 @@ fn file_frontend_prepare_output_rebinds_complete_nested_payload_atomically() {
         clause.dependency.dependency_shell_id,
         DependencyShellId::new(SourceId::from_index(42), 0)
     );
-    assert_eq!(clause.location.scope, output.source_file);
     assert_eq!(clause.dependency.path, provider_path);
     assert_eq!(
         clause.dependency.path.to_portable_string(&string_table),
@@ -1262,6 +1257,7 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
     let final_source = InternedPath::from_single_str("logical/main.moth", &mut string_table);
     let location = make_location("src/main.moth", &mut string_table);
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: InternedPath::from_single_str("provider", &mut string_table),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1278,7 +1274,6 @@ fn rebased_prepared_shell_joins_one_provider_interface() {
         file_dependency_clauses: vec![RetainedDependencyClause {
             dependency: provider.clone(),
             binding: DependencyBindingSyntax::Namespace { alias: None },
-            location,
             export_mode: HeaderExportMode::Private,
         }],
         structural_file_references: Default::default(),
@@ -1344,6 +1339,7 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
     let source_file = InternedPath::from_single_str("src/main.moth", &mut local);
     let dependency_location = make_location("src/main.moth", &mut local);
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: InternedPath::from_single_str("provider", &mut local),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1355,7 +1351,6 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
         binding: DependencyBindingSyntax::DirectSelections {
             range: DependencySelectionRange::new(0, 1),
         },
-        location: dependency_location.clone(),
         export_mode: HeaderExportMode::Private,
     };
     let mut output = FileFrontendPrepareOutput {
@@ -1368,9 +1363,11 @@ fn file_frontend_prepare_output_remaps_flat_dependency_selections() {
         file_dependency_clauses: vec![dependency],
         structural_file_references: Default::default(),
         dependency_selections: vec![DependencySelection {
+            source_span: LocalSpan::source_start(),
             source_name: local.intern("source"),
             source_location: dependency_location.clone(),
             local_alias: Some(DependencyAlias {
+                span: LocalSpan::source_start(),
                 name: local.intern("local"),
                 location: dependency_location,
             }),
@@ -1457,6 +1454,7 @@ fn prepared_file_invariant_anchors_clause_shell_identity_to_file_id() {
         CharPosition::default(),
     );
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: InternedPath::from_single_str("@core/math", &mut string_table),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1474,7 +1472,6 @@ fn prepared_file_invariant_anchors_clause_shell_identity_to_file_id() {
         .push(RetainedDependencyClause {
             dependency: provider.clone(),
             binding: DependencyBindingSyntax::Namespace { alias: None },
-            location,
             export_mode: HeaderExportMode::Private,
         });
 
@@ -1500,6 +1497,7 @@ fn prepared_file_invariant_rejects_duplicate_clause_shell_ordinals() {
     );
     let provider_path = InternedPath::from_single_str("@core/math", &mut string_table);
     let provider = |ordinal| RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: provider_path.clone(),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1509,7 +1507,6 @@ fn prepared_file_invariant_rejects_duplicate_clause_shell_ordinals() {
     let clause = |provider: RetainedDependencyPath| RetainedDependencyClause {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location: location.clone(),
         export_mode: HeaderExportMode::Private,
     };
     let mut output = make_prepared_output(
@@ -1577,6 +1574,7 @@ fn prepared_file_invariant_rejects_unclaimed_dependency_selection_rows() {
         Vec::new(),
     );
     output.dependency_selections.push(DependencySelection {
+        source_span: LocalSpan::source_start(),
         source_name: string_table.intern("sin"),
         source_location: location,
         local_alias: None,
@@ -1610,6 +1608,7 @@ fn prepared_file_invariant_rejects_malformed_provider_prefix_count() {
     );
     output.file_dependency_clauses.push(RetainedDependencyClause {
         dependency: RetainedDependencyPath {
+            span: LocalSpan::source_start(),
             path: InternedPath::from_single_str("drawing.js", &mut string_table),
             path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
             target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
@@ -1620,7 +1619,6 @@ fn prepared_file_invariant_rejects_malformed_provider_prefix_count() {
             dependency_shell_id: DependencyShellId::new(SourceId::from_index(6), 0),
         },
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location,
         export_mode: HeaderExportMode::Private,
     });
 
@@ -1652,6 +1650,7 @@ fn prepared_file_invariant_rejects_empty_retained_dependency_path() {
         .file_dependency_clauses
         .push(RetainedDependencyClause {
         dependency: RetainedDependencyPath {
+            span: LocalSpan::source_start(),
             path: InternedPath::new(),
             path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
             target:
@@ -1660,7 +1659,6 @@ fn prepared_file_invariant_rejects_empty_retained_dependency_path() {
             dependency_shell_id: DependencyShellId::new(SourceId::from_index(6), 0),
         },
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location,
         export_mode: HeaderExportMode::Private,
     });
 

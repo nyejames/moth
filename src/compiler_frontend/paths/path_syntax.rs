@@ -10,6 +10,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
@@ -46,6 +47,7 @@ impl PathSyntaxId {
 pub struct PathSyntax {
     pub root: InternedPath,
     pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 /// Dense file-local store of authored path rows.
@@ -118,8 +120,17 @@ impl PathSyntaxTable {
     }
 
     /// Append one authored path row and return its handle.
-    pub fn push(&mut self, root: InternedPath, location: SourceLocation) -> PathSyntaxId {
-        self.paths.push(PathSyntax { root, location });
+    pub fn push(
+        &mut self,
+        root: InternedPath,
+        location: SourceLocation,
+        span: LocalSpan,
+    ) -> PathSyntaxId {
+        self.paths.push(PathSyntax {
+            root,
+            location,
+            span,
+        });
         add_frontend_counter(FrontendCounter::PathSyntaxRowCount, 1);
         PathSyntaxId::from_index(self.paths.len() - 1)
     }
@@ -281,6 +292,7 @@ impl PathSyntaxTable {
         self.paths.push(PathSyntax {
             root: source_path.root.clone(),
             location: source_path.location.clone(),
+            span: source_path.span,
         });
         Ok(PathSyntaxId::from_index(self.paths.len() - 1))
     }

@@ -27,7 +27,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -494,7 +494,6 @@ impl RetainedDependencyClause {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.dependency.remap_string_ids(remap);
         self.binding.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
@@ -503,7 +502,6 @@ impl RetainedDependencyClause {
         self.dependency
             .commit_source_rebinding(file_id, logical_path);
         self.binding.rebind_source_identity(logical_path);
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -867,7 +865,7 @@ impl DependencySelectionRange {
 /// WHAT: represents either one namespace alias or one direct-selection range.
 /// WHY: the parser and header consumers must not be able to represent a clause that combines a
 ///      namespace alias with direct selections or carries an alias without its source span.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum DependencyBindingSyntax {
     Namespace { alias: Option<DependencyAlias> },
     DirectSelections { range: DependencySelectionRange },
@@ -909,10 +907,15 @@ impl DependencyBindingSyntax {
 ///       the provider root or creating a provider identity per selected name.
 /// WHY: one authored clause owns one dependency shell. Selection identity is only needed when a
 ///      later public-interface projection refers back to one selected binding.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct DependencySelection {
     pub source_name: StringId,
     pub source_location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates downstream consumers from legacy locations"
+    )]
+    pub source_span: LocalSpan,
     pub local_alias: Option<DependencyAlias>,
 }
 
@@ -946,8 +949,6 @@ pub struct RetainedDependencyClause {
     pub dependency: RetainedDependencyPath,
     /// The mutually exclusive namespace/direct-selection binding owned by this clause.
     pub binding: DependencyBindingSyntax,
-    /// Location of the dependency clause that introduced this record.
-    pub location: SourceLocation,
     /// Whether this dependency clause is part of the module public surface.
     ///
     /// WHAT: `Public` for direct selections inside an `export:` block;
@@ -1509,7 +1510,6 @@ fn validate_dependency_clauses(
                 "prepared file contains more dependency clauses than its dense shell identity can represent",
             )
         })?;
-        validate_source_location(&clause.location, source_file, "dependency clause")?;
         validate_dependency_path(&clause.dependency, file_id, source_file, string_table)?;
         if clause.dependency.dependency_shell_id.ordinal != expected_ordinal {
             return Err(CompilerError::compiler_error(

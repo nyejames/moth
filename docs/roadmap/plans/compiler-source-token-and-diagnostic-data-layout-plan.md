@@ -69,29 +69,27 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: 1D5a, declaration anchors and initializer terminators.
-- Goal: copy the exact existing token anchor into declaration/binding-target shells and
-  initializer EOF tokens, then delete `Token::terminator_at`. Synthetic content keeps its
-  explicit source-start anchor under the real registered source identity.
-- Non-goals: downstream AST/HIR migration, diagnostic storage redesign and token-store migration.
-- Remaining 1D5 records are pending separate slices. Existing declaration locations are token
-  anchors, not full declaration ranges; this slice preserves that contract without joined spans.
-- `SourceLocation` remains the private interval bridge through 1H. Tokenizer/preparation
-  diagnostics already carry authoritative compact spans; later diagnostic stages remain open.
-- Repeated canonical/check-only syntax preparation remains 3E work.
+- Phase: 1D5b, path and dependency preparation records.
+- Goal: copy exact token-local spans into path rows, dependency providers/selections/aliases and
+  structural file-reference records. Token and path row reuse one encoded span. Existing clause
+  locations remain initial-path anchors, not newly invented whole-clause ranges.
+- Non-goals: header/const-fragment joins, source-contract/signature records, downstream AST/HIR
+  migration, diagnostic storage redesign and token-store migration.
+- Keep explicit enclosing source ownership and wrong-file path-handle checks. Equal byte ranges
+  can occupy different extended rows, so remove unused record equality/hash derives rather than
+  treating encoded handles as semantic dependency identity. Existing shell/selection/name keys stay.
+- `SourceLocation` remains the private interval bridge through 1H.
 
 LAST_GOOD_COMMIT:
-- `b1d5a4005` — exact preparation diagnostic spans; full validation and independent reviews passed.
+- `0f92205c6` — exact declaration anchors and initializer EOF; full gate and independent review passed.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Continuation order: 1D5/1D6 and remaining Phase 1, then Phase 2 and Phase 3, final review and pause.
-  Phases 4–7 stay pending.
-- 1D3 is committed. Required tokenizer failure-lane and production exhaustion-test findings are
-  resolved and independently verified. Related spans preserve source ownership through discovery.
-- 1D5a is implemented, fully validated and independently reviewed, ready for its checkpoint.
-  Declaration anchors and initializer EOF use the same original span. The regression registers
-  a real source and includes an extended 1,200-byte type anchor after a multibyte literal.
+- Continuation order: remaining 1D5 and 1D6, remaining Phase 1, then Phase 2 and Phase 3,
+  final review and pause. Phases 4–7 stay pending.
+- 1D3 (`b1d5a4005`) and 1D5a (`0f92205c6`) are committed and accepted.
+- 1D5b is complete and ready for its checkpoint commit. The duplicate retained clause anchor
+  was consolidated into its mandatory provider; focused verification and the final full gate passed.
 - Untracked `librust_out.rmeta` has unknown ownership and is excluded from checkpoints.
 - One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
 
@@ -179,12 +177,17 @@ BLOCKERS / RISKS:
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
 VALIDATION_STATE:
-- Current 1D5a candidate: `cargo fmt --all && just validate` passed. Native featured all-target
+- 1D5b final candidate: `cargo fmt --all && just validate` passed after the anchor consolidation.
+  Native featured all-target Clippy, 5,072 compiler tests, 17 CLI tests, 825 xtask tests,
+  1,951 integrations, docs check, source audit, 82 benchmark preflights, scaling and timer erasure
+  passed. Focused paths (60), headers (328), frozen generics (25) and config-filter (192) passed.
+  Independent review's duplicate-anchor finding is resolved; fresh focused verification is clean.
+- Accepted `0f92205c6`: `cargo fmt --all && just validate` passed. Native featured all-target
   Clippy, 5,070 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integration cases,
   docs check, source audit, 82 benchmark preflights, three scaling budgets and timer erasure passed.
 - Focused 263 declaration tests, 41 Moth-template tests, seven Markdown tests and the updated
   real-source/extended-anchor regression passed. Featured all-target compilation passed.
-- Independent 1D5a review is clean with no required finding. The checkpoint follows acceptance.
+- Independent 1D5a review is clean with no required finding.
 - The earlier 1D3 carrier/failure-lane and aggregation reviews and focused correction verification
   were clean. No new structured-audit coverage is claimed.
 - Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
@@ -195,7 +198,7 @@ DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
 - other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: review, validate and independently audit the bounded 1D5a candidate.
+- next action: commit accepted 1D5b, then continue with 1D5c1 signature and choice anchors.
 
 ---
 
@@ -722,9 +725,28 @@ actual remaining consumer, not blanket suppressions.
   - [x] **1D5a — declaration anchors and initializer terminators:** copy the existing exact
     token anchor into shared declaration/binding-target shells, preserve synthetic source-start
     anchors under their real source identity and delete `Token::terminator_at`.
-  - [ ] **1D5b — remaining preparation records:** header names and joined const fragments,
-    dependency/path/alias records, source contracts and signature shells. Preserve each record's
-    existing range meaning; runtime fragments already use retained tokens and need no new record.
+  - [x] **1D5b — path and dependency records:** source-local path rows, provider/selection/alias
+    anchors and structural file references. Reuse the minted path token's encoded span and preserve
+    source ownership, remapping and wrong-table checks. The mandatory provider owns the clause's
+    path-token anchor; remove the outer clause's duplicated location/span. Four field-level
+    dead-code allowances name their planned 1E consumers: dependency alias, selection, provider
+    and structural file-reference
+    spans. Remove each allowance in its owning 1E batch and confirm none survives 1H.
+  - [ ] **1D5c — remaining preparation records:** header names and joined const fragments,
+    source contracts and signature shells. Preserve each record's existing range meaning;
+    runtime fragments already use retained tokens and need no new record.
+    - [ ] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
+      remove `ReturnSlotSyntax.location`, which duplicates its nested return value's location.
+      Preserve anchors through remapping and trait `This` substitution.
+    - [ ] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
+      consolidate duplicate name locations without changing synthesized semantic names.
+    - [ ] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
+      anchor and all synthetic/materialized constructors. Resolved types remain 1E2.
+    - [ ] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
+      synthetic metadata without manufacturing source identities.
+    - [ ] **1D5c5 — header names, const fragments and source contracts:** thread the original
+      builder only where a joined range needs encoding. Keep const-fragment source ownership
+      explicit after module aggregation and preserve the infrastructure failure lane.
 - **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
   repeated ad hoc path/location constructors in Rust tests.
 

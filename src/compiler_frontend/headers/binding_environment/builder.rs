@@ -356,7 +356,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ) {
                     return Err(Box::new(super::diagnostics::direct_special_file_dependency(
                         &dependency.dependency.path,
-                        dependency.location.clone(),
+                        dependency.dependency.location.clone(),
                     ))
                     .into());
                 }
@@ -828,7 +828,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
                 Box::new(super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
-                    dependency.location.clone(),
+                    dependency.dependency.location.clone(),
                 ))
             })?;
             let name = self.string_table.intern(binding.public_name());
@@ -848,7 +848,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &structure.receiver_methods,
                         provider_id,
-                        &dependency.location,
+                        &dependency.dependency.location,
                     )?;
                 }
                 PublicDeclarationSemantics::Choice(choice) => {
@@ -860,7 +860,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &choice.receiver_methods,
                         provider_id,
-                        &dependency.location,
+                        &dependency.dependency.location,
                     )?;
                 }
                 PublicDeclarationSemantics::TransparentAlias(_) => {
@@ -910,7 +910,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             else {
                 return Err(Box::new(super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
-                    dependency.location.clone(),
+                    dependency.dependency.location.clone(),
                 ))
                 .into());
             };
@@ -939,7 +939,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 dependency
                     .namespace_binding_location()
                     .cloned()
-                    .unwrap_or_else(|| dependency.location.clone()),
+                    .unwrap_or_else(|| dependency.dependency.location.clone()),
             ),
         )?;
         file_visibility
@@ -1667,7 +1667,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if has_explicit_moth_extension(&dependency.dependency.path, self.string_table) {
             return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
                 dependency.dependency.path.clone(),
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             ))
             .into());
         }
@@ -1722,7 +1722,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // direct symbol-path dependencies that are now invalid.
         let target = resolve_dependency_target(DependencyTargetResolutionInput {
             dependency_path: &dependency.dependency.path,
-            location: &dependency.location,
+            location: &dependency.dependency.location,
             module_file_paths: &self.module_symbols.module_file_paths,
             dependency_bindable_symbol_paths: &self
                 .module_symbols
@@ -1736,14 +1736,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             ResolvedDependencyTarget::Source { symbol_path, .. } => {
                 Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                     symbol_path,
-                    dependency.location.clone(),
+                    dependency.dependency.location.clone(),
                 ))
                 .into())
             }
             ResolvedDependencyTarget::External { .. } => {
                 Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                     dependency.dependency.path.clone(),
-                    dependency.location.clone(),
+                    dependency.dependency.location.clone(),
                 ))
                 .into())
             }

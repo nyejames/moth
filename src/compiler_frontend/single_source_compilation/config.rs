@@ -635,7 +635,7 @@ fn prepare_config_file(
         diagnostics.push(config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
-            dependency_clause.location.clone(),
+            dependency_clause.dependency.location.clone(),
         ));
     }
     for file_reference in output.structural_file_references.iter() {

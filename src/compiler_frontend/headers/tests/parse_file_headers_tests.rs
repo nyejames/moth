@@ -30,7 +30,9 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -5349,6 +5351,7 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
 
 fn malformed_direct_selection_clause(range: DependencySelectionRange) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: InternedPath::new(),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -5359,7 +5362,6 @@ fn malformed_direct_selection_clause(range: DependencySelectionRange) -> Retaine
         dependency: provider,
 
         binding: DependencyBindingSyntax::DirectSelections { range },
-        location: SourceLocation::default(),
         export_mode: HeaderExportMode::Private,
     }
 }
@@ -5489,4 +5491,137 @@ fn retained_clause_uses_one_shell_for_the_provider_binding_index() {
             .iter()
             .all(|clause| clause.dependency.dependency_shell_id == shell)
     );
+}
+
+/// Preparation retains exact dependency and file-path ranges across identity normalization.
+#[test]
+fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
+    let long_name = "é".repeat(700);
+    let path_text = format!("@vendor/\"{long_name}.js\"");
+    let source = format!(
+        "-- 🦋\n{path_text} render as render_other, Button as UiButton\n@core/math as maths\nlogo #= @images/logo.svg\n"
+    );
+    let canonical = PathBuf::from("dependency-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("source should register");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("registered source")
+        .id;
+    let options = HeaderParseOptions::default();
+    let directives = StyleDirectiveRegistry::built_ins();
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &directives,
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &options,
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("dependency preparation should succeed");
+    let original_span = prepared.file_dependency_clauses[0].dependency.span;
+    assert_eq!(
+        spans.len(),
+        1,
+        "retained dependency records reuse the lexical overflow row"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    prepared
+        .remap_string_ids(&remap)
+        .expect("prepared strings should remap");
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("dependency-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+    assert_eq!(
+        prepared.file_dependency_clauses[0].dependency.span,
+        original_span
+    );
+    assert_eq!(
+        prepared.file_dependency_clauses[0]
+            .dependency
+            .dependency_shell_id
+            .source,
+        final_id
+    );
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain source snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span| {
+        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    assert_eq!(resolve(original_span), path_text);
+    let selections = &prepared.dependency_selections;
+    assert_eq!(resolve(selections[0].source_span), "render");
+    assert_eq!(
+        resolve(
+            selections[0]
+                .local_alias
+                .as_ref()
+                .expect("entry alias")
+                .span
+        ),
+        "render_other"
+    );
+    assert_eq!(resolve(selections[1].source_span), "Button");
+    assert_eq!(
+        resolve(
+            selections[1]
+                .local_alias
+                .as_ref()
+                .expect("entry alias")
+                .span
+        ),
+        "UiButton"
+    );
+    let DependencyBindingSyntax::Namespace { alias: Some(alias) } =
+        &prepared.file_dependency_clauses[1].binding
+    else {
+        panic!("expected namespace alias");
+    };
+    assert_eq!(resolve(alias.span), "maths");
+    let reference = prepared
+        .structural_file_references
+        .iter()
+        .next()
+        .expect("structural file reference");
+    assert_eq!(reference.source_file, final_id);
+    assert_eq!(resolve(reference.span), "@images/logo.svg");
 }

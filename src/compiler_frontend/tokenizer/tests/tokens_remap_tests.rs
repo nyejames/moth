@@ -8,6 +8,7 @@
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -85,6 +86,7 @@ fn path_syntax_rows_remap_all_fields() {
             local_table.intern("Button"),
         ]),
         make_location(scope),
+        LocalSpan::source_start(),
     );
 
     let _alpha_global = global_table.intern("alpha");
@@ -199,6 +201,7 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
     let ui_button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
         make_location(token_scope_local.clone()),
+        LocalSpan::source_start(),
     );
     let utils_helper = path_syntax.push(
         InternedPath::from_components(vec![
@@ -206,6 +209,7 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
             local_table.intern("helper"),
         ]),
         make_location(token_scope_local.clone()),
+        LocalSpan::source_start(),
     );
 
     let tokens = vec![
@@ -265,6 +269,7 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
     let button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
         make_location(source_path.clone()),
+        LocalSpan::source_start(),
     );
     let tokens = vec![make_token(TokenKind::Path(button), source_path.clone())];
     let mut file_tokens = FileTokens::new_with_identity(
@@ -306,6 +311,7 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     let helper_util = path_syntax.push(
         InternedPath::from_components(vec![table.intern("helper"), table.intern("util")]),
         make_location(original_scope.clone()),
+        LocalSpan::source_start(),
     );
     let tokens = vec![
         make_token(
@@ -365,6 +371,7 @@ fn token_kind_path_handle_is_a_remap_no_op_while_table_rows_remap() {
     let button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
         make_location(InternedPath::from_single_str("test.moth", &mut local_table)),
+        LocalSpan::source_start(),
     );
     let mut kind = TokenKind::Path(button);
     let handle_before = match &kind {
@@ -403,6 +410,7 @@ fn path_table_root_components_keep_their_allocation_under_remap() {
             local_table.intern("Button"),
         ]),
         make_location(InternedPath::from_single_str("test.moth", &mut local_table)),
+        LocalSpan::source_start(),
     );
     let components_ptr = path_syntax
         .try_path(button)

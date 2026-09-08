@@ -3372,3 +3372,23 @@ Scaling fits were 0.97, 0.79 and 1.61, within all three budgets. Timer erasure p
 same 9,043,728-byte binary size. These are bounded gate observations, not five-run medians or
 aggregate memory evidence. Independent exactness/ownership and test review was clean.
 The accepted checkpoint is the commit containing this subsection.
+
+### Path and dependency anchor checkpoint (1D5b)
+
+Path tokens and path rows share one exact encoding. Dependency providers, selections, aliases
+and structural file references preserve their token anchors through string remapping and source
+identity finalization. Long multibyte path coverage resolves the original overflow row after
+persistent subset capture and after rebinding to a different registered source identity.
+The legacy location bridge remains until 1H, so this checkpoint claims no aggregate memory win.
+
+The mandatory provider now owns the retained clause anchor, removing its duplicated location.
+After this independent review correction, `cargo fmt --all && just validate` passed native featured all-target
+Clippy, 5,072 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integration cases, docs checking,
+source audit and all 82 benchmark preflights. Focused runs passed 60 path, 328 header and 25
+frozen-generic tests; correction checks also passed 192 config-filter tests. Quick history
+comparisons reported +3 ms CLI averages and +1 ms frontend averages, excluding changed docs
+workloads. Scaling fits were 0.98, 0.81 and 1.62, within their
+budgets. Timer erasure passed with a 9,043,728-byte no-timer binary. These observations are bounded
+gate checks, not five-run medians or phase-wide retained-memory evidence.
+Independent focused verification of the correction was clean. The accepted checkpoint is the
+commit containing this subsection.

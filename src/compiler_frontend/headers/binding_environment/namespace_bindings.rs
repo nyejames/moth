@@ -202,13 +202,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             exported_entries,
                             clause
                                 .namespace_binding_location()
-                                .unwrap_or(&clause.location),
+                                .unwrap_or(&clause.dependency.location),
                         )?,
-                    _ => self.build_source_namespace_record(file_path, &clause.location)?,
+                    _ => {
+                        self.build_source_namespace_record(file_path, &clause.dependency.location)?
+                    }
                 }
             }
             ResolvedNamespaceTarget::ExternalPackage { package_path } => {
-                self.build_external_namespace_record(package_path, &clause.location)?
+                self.build_external_namespace_record(package_path, &clause.dependency.location)?
             }
         };
 
@@ -230,7 +232,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 clause
                     .namespace_binding_location()
                     .cloned()
-                    .unwrap_or_else(|| clause.location.clone()),
+                    .unwrap_or_else(|| clause.dependency.location.clone()),
             ),
         )?;
 
@@ -248,7 +250,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         file_visibility,
                         file_path,
                         access,
-                        clause.location.clone(),
+                        clause.dependency.location.clone(),
                     );
                 }
             }
@@ -481,7 +483,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     &clause.dependency.path,
                     public_surface_name_id,
                     ImportPublicSurfaceType::SourcePackage,
-                    clause.location.clone(),
+                    clause.dependency.location.clone(),
                 ))
                 .into());
             }
@@ -512,14 +514,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         {
             return Err(Box::new(diagnostics::cross_module_dependency_not_exported(
                 &clause.dependency.path,
-                clause.location.clone(),
+                clause.dependency.location.clone(),
             ))
             .into());
         }
 
         Err(Box::new(diagnostics::missing_module_root_public_surface(
             &clause.dependency.path,
-            clause.location.clone(),
+            clause.dependency.location.clone(),
         ))
         .into())
     }
@@ -540,7 +542,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let Some(local_name) = clause.effective_namespace_local_name(self.string_table) else {
             return Err(Box::new(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path.clone(),
-                clause.location.clone(),
+                clause.dependency.location.clone(),
             ))
             .into());
         };
@@ -548,7 +550,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if !is_valid_identifier(self.string_table.resolve(local_name)) {
             return Err(Box::new(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path.clone(),
-                clause.location.clone(),
+                clause.dependency.location.clone(),
             ))
             .into());
         }
@@ -556,7 +558,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let local_name_location = clause
             .namespace_binding_location()
             .cloned()
-            .unwrap_or_else(|| clause.location.clone());
+            .unwrap_or_else(|| clause.dependency.location.clone());
         ensure_not_keyword_shadow_identifier(local_name, local_name_location, self.string_table)?;
 
         Ok(local_name)

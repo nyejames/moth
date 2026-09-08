@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -34,16 +34,21 @@ pub(crate) enum PreparedFileReferenceClass {
 }
 
 /// One graph-active file-value path occurrence.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct PreparedFileReference {
     pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) location: SourceLocation,
+    #[allow(
+        dead_code,
+        reason = "Phase 1E migrates downstream consumers from legacy locations"
+    )]
+    pub(crate) span: LocalSpan,
     pub(crate) class: PreparedFileReferenceClass,
 }
 
 /// File-local table of structural file references, in authored path-row order.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct PreparedFileReferenceTable {
     references: Vec<PreparedFileReference>,
 }
@@ -102,6 +107,7 @@ pub(crate) fn classify_prepared_file_references(
             source_file,
             path_syntax: path_id,
             location: row.location.clone(),
+            span: row.span,
             class: classify_authored_path(&row.root, string_table),
         });
     }

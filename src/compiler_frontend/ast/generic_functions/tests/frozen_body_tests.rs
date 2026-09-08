@@ -54,7 +54,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
@@ -95,6 +95,7 @@ fn sample_tokens(string_table: &mut StringTable) -> (Vec<Token>, PathSyntaxTable
             string_table.intern("CONST"),
         ]),
         location("src/@mod.moth", string_table),
+        LocalSpan::source_start(),
     );
     let tokens = vec![
         Token::new(
@@ -262,6 +263,7 @@ fn direct_content_body_fixture() -> (
     let path_id = path_syntax.push(
         InternedPath::from_single_str("@private.mtf", &mut string_table),
         path_location.clone(),
+        LocalSpan::source_start(),
     );
     let tokens = vec![Token::new(TokenKind::Path(path_id), path_location)];
     let body =
@@ -538,10 +540,12 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
             source_table.intern("first"),
         ]),
         base_location.clone(),
+        LocalSpan::source_start(),
     );
     let _unreferenced_donor_path = path_syntax.push(
         InternedPath::from_single_str("provider/unused", &mut source_table),
         base_location.clone(),
+        LocalSpan::source_start(),
     );
     let second_donor_path = path_syntax.push(
         InternedPath::from_components(vec![
@@ -549,6 +553,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
             source_table.intern("second"),
         ]),
         base_location.clone(),
+        LocalSpan::source_start(),
     );
     let source_file = InternedPath::from_single_str("src/@mod.moth", &mut source_table);
     let original = FileTokens::new_with_identity(
@@ -684,6 +689,7 @@ fn repeated_spellings_share_one_frozen_string_entry() {
     let path_id = path_syntax.push(
         InternedPath::from_components(vec![symbol_id]),
         location("src/@mod.moth", &mut source_table),
+        LocalSpan::source_start(),
     );
     let tokens = vec![
         Token::new(
@@ -983,6 +989,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         let path_id = path_syntax.push(
             InternedPath::from_components(vec![assets_component, logo_component]),
             placeholder_location,
+            LocalSpan::source_start(),
         );
         let mut tokens = body.tokens.clone();
         let mut replaced = false;
@@ -1232,6 +1239,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let path_id = path_syntax.push(
             InternedPath::from_single_str("@resource.bin", &mut source_table),
             path_location.clone(),
+            LocalSpan::source_start(),
         );
         let body = FileTokens::new_with_identity(
             source_file.clone(),
@@ -1757,7 +1765,11 @@ fn ordinary_stage0_lookup_rejects_absent_source_identity() {
 #[test]
 fn frozen_generic_rejects_duplicate_compact_path_handle() {
     let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(InternedPath::default(), SourceLocation::default());
+    let path_id = path_syntax.push(
+        InternedPath::default(),
+        SourceLocation::default(),
+        LocalSpan::source_start(),
+    );
     let error = match Stage0ResolutionFacts::frozen_generic(vec![
         frozen_resource_reference(path_id, "assets/first.svg"),
         frozen_resource_reference(path_id, "assets/second.svg"),

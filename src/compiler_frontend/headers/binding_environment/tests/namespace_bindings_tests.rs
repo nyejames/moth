@@ -47,7 +47,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -86,6 +86,7 @@ fn test_dependency(
     string_table: &mut StringTable,
 ) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: header_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -95,7 +96,6 @@ fn test_dependency(
     RetainedDependencyClause {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location: location_for(&["src", "@page.moth"], string_table),
         export_mode: HeaderExportMode::Private,
     }
 }
@@ -107,8 +107,9 @@ fn set_namespace_alias(
 ) {
     dependency.binding = DependencyBindingSyntax::Namespace {
         alias: Some(DependencyAlias {
+            span: LocalSpan::source_start(),
             name: string_table.intern(alias),
-            location: dependency.location.clone(),
+            location: dependency.dependency.location.clone(),
         }),
     };
 }
@@ -125,12 +126,14 @@ fn add_selection(
         .selection_range()
         .map_or(selection_store.len(), |range| range.start as usize);
     let local_alias = local_alias.map(|alias| DependencyAlias {
+        span: LocalSpan::source_start(),
         name: string_table.intern(alias),
-        location: dependency.location.clone(),
+        location: dependency.dependency.location.clone(),
     });
     selection_store.push(DependencySelection {
+        source_span: LocalSpan::source_start(),
         source_name: string_table.intern(source_name),
-        source_location: dependency.location.clone(),
+        source_location: dependency.dependency.location.clone(),
         local_alias,
     });
     dependency.binding = DependencyBindingSyntax::DirectSelections {
@@ -1016,6 +1019,7 @@ fn explicit_external_symbol_binding_retains_authored_location() {
     let source_file = intern_path(&["src", "@page.moth"], &mut string_table);
     let dependency_location = location_for(&["src", "@page.moth"], &mut string_table);
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: intern_path(&["test", "explicit_symbols"], &mut string_table),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1024,6 +1028,7 @@ fn explicit_external_symbol_binding_retains_authored_location() {
     };
     let dependency_selections = vec![
         crate::compiler_frontend::headers::types::DependencySelection {
+            source_span: LocalSpan::source_start(),
             source_name: string_table.intern("run"),
             source_location: dependency_location.clone(),
             local_alias: None,
@@ -1034,7 +1039,6 @@ fn explicit_external_symbol_binding_retains_authored_location() {
         binding: DependencyBindingSyntax::DirectSelections {
             range: DependencySelectionRange::new(0, 1),
         },
-        location: dependency_location.clone(),
         export_mode: HeaderExportMode::Private,
     };
 
@@ -1189,6 +1193,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
     let dependency_path = intern_path(&["test", "prelude_ns"], &mut string_table);
 
     let provider = RetainedDependencyPath {
+        span: LocalSpan::source_start(),
         path: dependency_path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
@@ -1198,7 +1203,6 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
     let dependency = RetainedDependencyClause {
         dependency: provider.clone(),
         binding: DependencyBindingSyntax::Namespace { alias: None },
-        location: location_for(&["src", "@page.moth"], &mut string_table),
         export_mode: HeaderExportMode::Private,
     };
 

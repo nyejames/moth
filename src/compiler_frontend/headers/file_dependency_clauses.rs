@@ -146,7 +146,6 @@ fn parse_and_record_dependency_clause(
         clause_shell_id,
         parsed,
         target,
-        clause_location,
         export_mode,
         context.string_table,
     );
@@ -161,7 +160,6 @@ fn retain_scanned_clause(
     clause_shell_id: DependencyShellId,
     scanned: ScannedDependencyClause,
     target: DependencyTargetKind,
-    clause_location: SourceLocation,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
 ) {
@@ -187,6 +185,7 @@ fn retain_scanned_clause(
                 state.dependency_selections.push(DependencySelection {
                     source_name: selection.source_name,
                     source_location: selection.source_location,
+                    source_span: selection.source_span,
                     local_alias: selection.local_alias,
                 });
             }
@@ -202,12 +201,12 @@ fn retain_scanned_clause(
         path_syntax: scanned.provider.path_syntax,
         target,
         location: scanned.provider.path_location,
+        span: scanned.provider.path_span,
     };
 
     let retained_clause = RetainedDependencyClause {
         dependency,
         binding,
-        location: clause_location.clone(),
         export_mode,
     };
 

@@ -409,7 +409,7 @@ fn build_module_root_public_dependencies(
             return Err(Box::new(CompilerDiagnostic::invalid_dependency_clause(
                 clause_kind,
                 InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed,
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             )));
         }
 

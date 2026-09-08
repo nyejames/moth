@@ -53,7 +53,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if !remaining.is_empty() {
             return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                 dependency.dependency.path.clone(),
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             ))
             .into());
         }
@@ -64,7 +64,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let Some(package) = package else {
             return Err(Box::new(super::diagnostics::missing_dependency_target(
                 &dependency.dependency.path,
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             ))
             .into());
         };
@@ -120,7 +120,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if !remaining.is_empty() {
             return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
                 dependency.dependency.path.clone(),
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             ))
             .into());
         }
@@ -131,14 +131,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let Some(package) = package else {
             return Err(Box::new(super::diagnostics::missing_dependency_target(
                 &dependency.dependency.path,
-                dependency.location.clone(),
+                dependency.dependency.location.clone(),
             ))
             .into());
         };
 
         let package_path_id = self.string_table.intern(&package.path);
         let namespace_record =
-            self.build_external_namespace_record(package_path_id, &dependency.location)?;
+            self.build_external_namespace_record(package_path_id, &dependency.dependency.location)?;
 
         let local_name = self.derive_namespace_name(dependency)?;
 
@@ -151,7 +151,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 dependency
                     .namespace_binding_location()
                     .cloned()
-                    .unwrap_or_else(|| dependency.location.clone()),
+                    .unwrap_or_else(|| dependency.dependency.location.clone()),
             ),
         )?;
 
