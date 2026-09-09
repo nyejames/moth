@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
@@ -42,6 +43,8 @@ pub(super) struct StableBodySyntax {
     /// Retained verbatim so materialisation can restore a concrete `FileTokens::file_id` and a
     /// matching frozen-facts owner.
     pub(super) donor_file_id: crate::compiler_frontend::source::SourceId,
+    /// Required late-bound frozen identity for the donor source domain.
+    pub(super) frozen_identity_handle: FrozenIdentityHandle,
     pub(super) pool: Box<[String]>,
     pub(super) tokens: Box<[Token]>,
     /// Canonical table vocabulary retained only for the path rows referenced by this body.
@@ -54,11 +57,16 @@ pub(super) struct StableBodySyntax {
 pub(super) struct MaterialisedBody {
     pub(super) file_tokens: FileTokens,
     pub(super) resolution_facts: Arc<Stage0ResolutionFacts>,
+    pub(super) frozen_identity_handle: FrozenIdentityHandle,
 }
 
 impl MaterialisedBody {
     pub(super) fn into_generic_body(self) -> GenericFunctionBody {
-        GenericFunctionBody::materialised(self.file_tokens, self.resolution_facts)
+        GenericFunctionBody::materialised(
+            self.file_tokens,
+            self.resolution_facts,
+            self.frozen_identity_handle,
+        )
     }
 }
 
@@ -76,6 +84,7 @@ impl StableBodySyntax {
         source_file: &InternedPath,
         string_table: &StringTable,
         stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
+        frozen_identity_handle: FrozenIdentityHandle,
         content_value_at_path: &impl Fn(
             &InternedPath,
         ) -> Result<
@@ -141,6 +150,7 @@ impl StableBodySyntax {
         Ok(Self {
             declaration_path: stable_path(&tokens.src_path, string_table),
             donor_file_id: tokens.file_id,
+            frozen_identity_handle,
             pool: pool.finish(),
             tokens: frozen_tokens.into_boxed_slice(),
             path_syntax,
@@ -205,6 +215,7 @@ impl StableBodySyntax {
                 path_syntax,
             ),
             resolution_facts,
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
     }
 }

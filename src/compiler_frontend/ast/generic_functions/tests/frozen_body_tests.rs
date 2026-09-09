@@ -54,7 +54,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
@@ -230,6 +230,7 @@ fn capture_test_body(
         source_file,
         source_table,
         Some(&facts),
+        FrozenIdentityHandle::new(),
         &no_content_value,
     )
     .expect("test body path rows should be resolved before capture")
@@ -308,14 +309,20 @@ fn direct_content_body_fixture() -> (
 fn frozen_content_value_captures_and_reinterns_resource_pieces() {
     let (body, source_file, source_table, facts, path_id, resource_origin) =
         direct_content_body_fixture();
-    let frozen =
-        StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
+    let frozen = StableBodySyntax::capture(
+        &body,
+        &source_file,
+        &source_table,
+        Some(&facts),
+        FrozenIdentityHandle::new(),
+        &|_| {
             Ok(PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text("private content: ".to_owned()),
                 OwnedFoldedStringPiece::Resource(resource_origin.clone()),
             ])))
-        })
-        .expect("ordinary content value should be captured before freezing");
+        },
+    )
+    .expect("ordinary content value should be captured before freezing");
     let StableResolvedFileReferenceOutcome::Content { value } =
         &frozen.resolved_file_references[0].outcome
     else {
@@ -380,15 +387,21 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
 #[test]
 fn missing_content_fold_fails_loudly_during_capture() {
     let (body, source_file, source_table, facts, _, _) = direct_content_body_fixture();
-    let error =
-        match StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
+    let error = match StableBodySyntax::capture(
+        &body,
+        &source_file,
+        &source_table,
+        Some(&facts),
+        FrozenIdentityHandle::new(),
+        &|_| {
             Err(CompilerError::compiler_error(
                 "synthetic content constant was not folded before capture",
             ))
-        }) {
-            Ok(_) => panic!("capture must reject content without a folded value"),
-            Err(error) => error,
-        };
+        },
+    ) {
+        Ok(_) => panic!("capture must reject content without a folded value"),
+        Err(error) => error,
+    };
     assert!(
         error
             .msg
@@ -400,13 +413,17 @@ fn missing_content_fold_fails_loudly_during_capture() {
 #[test]
 fn non_string_content_fold_fails_loudly_during_capture() {
     let (body, source_file, source_table, facts, _, _) = direct_content_body_fixture();
-    let error =
-        match StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
-            Ok(PublicFoldedValue::Int(7))
-        }) {
-            Ok(_) => panic!("capture must reject a non-string content value"),
-            Err(error) => error,
-        };
+    let error = match StableBodySyntax::capture(
+        &body,
+        &source_file,
+        &source_table,
+        Some(&facts),
+        FrozenIdentityHandle::new(),
+        &|_| Ok(PublicFoldedValue::Int(7)),
+    ) {
+        Ok(_) => panic!("capture must reject a non-string content value"),
+        Err(error) => error,
+    };
     assert!(
         error
             .msg
@@ -440,10 +457,12 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
         SourceId::COMPILATION_ROOT,
         "materialised generic syntax must retain its concrete donor identity",
     );
-    assert_eq!(
-        materialised.resolution_facts.frozen_owner(),
-        Some(SourceId::COMPILATION_ROOT),
-        "materialised facts must carry the same explicit owner as the token stream",
+    assert!(
+        materialised
+            .resolution_facts
+            .lookup(SourceId::COMPILATION_ROOT, path_id)
+            .is_ok(),
+        "materialised facts must accept the same concrete owner as the token stream",
     );
 
     let original_text = tokens
@@ -601,6 +620,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         &source_file,
         &source_table,
         Some(&facts),
+        FrozenIdentityHandle::new(),
         &|_| {
             Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(
                 "remapping fixture has no content values",
@@ -1271,13 +1291,19 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .expect("collision fixture path rows should be unique");
         let facts =
             Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
-        let frozen =
-            StableBodySyntax::capture(&body, &source_file, &source_table, Some(&facts), &|_| {
+        let frozen = StableBodySyntax::capture(
+            &body,
+            &source_file,
+            &source_table,
+            Some(&facts),
+            FrozenIdentityHandle::new(),
+            &|_| {
                 Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(
                     "collision fixture has no content values",
                 ))
-            })
-            .expect("collision fixture body should freeze");
+            },
+        )
+        .expect("collision fixture body should freeze");
         let compact_path_id = frozen
             .resolved_file_references
             .first()
@@ -1300,7 +1326,11 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let materialised = frozen
             .materialise(&generated_source_file, &mut generated_table)
             .expect("collision fixture body should materialise");
-        GenericFunctionBody::materialised(materialised.file_tokens, materialised.resolution_facts)
+        GenericFunctionBody::materialised(
+            materialised.file_tokens,
+            materialised.resolution_facts,
+            FrozenIdentityHandle::new(),
+        )
     };
     let first_body = materialise(first_frozen);
     let second_body = materialise(second_frozen);
@@ -1779,7 +1809,13 @@ fn frozen_generic_lookup_requires_retained_owner() {
     let owner = SourceId::COMPILATION_ROOT;
     let facts = Stage0ResolutionFacts::frozen_generic(owner, Vec::new())
         .expect("empty frozen facts should build");
-    assert_eq!(facts.frozen_owner(), Some(owner));
+    assert!(
+        facts
+            .lookup(owner, PathSyntaxId::NONE)
+            .expect("frozen lookup with its owner should succeed")
+            .is_none(),
+        "frozen lookup with the retained owner should remain valid",
+    );
     assert!(
         facts
             .lookup(SourceId::from_index(7), PathSyntaxId::NONE)
@@ -1818,6 +1854,7 @@ fn invalid_frozen_token_index_returns_compiler_error() {
     let frozen = StableBodySyntax {
         declaration_path: Box::new([]),
         donor_file_id: SourceId::COMPILATION_ROOT,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
         pool: Box::new([]),
         tokens: Box::new([Token::new(
             TokenKind::Symbol(StringId::from_index(0)),
@@ -1842,6 +1879,7 @@ fn invalid_frozen_location_index_returns_compiler_error() {
     let frozen = StableBodySyntax {
         declaration_path: Box::new([]),
         donor_file_id: SourceId::COMPILATION_ROOT,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
         pool: Box::new([]),
         tokens: Box::new([Token::new(
             TokenKind::Eof,
@@ -1870,6 +1908,7 @@ fn frozen_body_rejects_token_scope_outside_the_materialised_source_identity() {
     let frozen = StableBodySyntax {
         declaration_path: Box::new(["src/@mod.moth".to_owned()]),
         donor_file_id: SourceId::COMPILATION_ROOT,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
         pool: Box::new(["other.moth".to_owned()]),
         tokens: Box::new([Token::new(
             TokenKind::Eof,

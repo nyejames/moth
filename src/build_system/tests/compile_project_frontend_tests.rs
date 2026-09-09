@@ -296,9 +296,9 @@ fn unselected_preload_read_failure_stays_inert() {
     // diagnostics in the payload, so an invented failure for the unselected file would pass an
     // expect-only assertion. Inert means the build reports nothing at all about it.
     assert!(
-        frontend.transient_messages.is_empty(),
+        frontend.transient_batches.is_empty(),
         "preloading an unreadable unselected source must not report anything: {:?}",
-        frontend.transient_messages
+        frontend.transient_batches
     );
     assert_eq!(
         frontend.successful_module_views().count(),

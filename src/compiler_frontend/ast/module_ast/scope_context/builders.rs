@@ -222,12 +222,21 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self
     }
-    /// Attach Stage 0 file-value resolution facts and the module-local resource table.
     pub(crate) fn with_file_value_resolution(
         mut self,
         services: Rc<FileValueResolutionServices>,
     ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).file_value_resolution = Some(services);
+        let shared = Rc::make_mut(&mut self.shared);
+        shared.frozen_identity_handle = services.frozen_identity_handle.clone();
+        shared.file_value_resolution = Some(services);
+        self
+    }
+    /// Switch a materialised scope to its donor source identity owner.
+    pub(crate) fn with_frozen_identity_handle(
+        mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).frozen_identity_handle = frozen_identity_handle;
         self
     }
     /// Attach immutable source `#Config` values for constant-header materialization.

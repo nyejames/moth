@@ -72,7 +72,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -224,13 +224,6 @@ impl Stage0ResolutionFacts {
         })
     }
 
-    pub(crate) fn frozen_owner(&self) -> Option<SourceId> {
-        match &self.backing {
-            Stage0ResolutionFactsBacking::Ordinary { .. } => None,
-            Stage0ResolutionFactsBacking::FrozenGeneric { owner, .. } => Some(*owner),
-        }
-    }
-
     pub(crate) fn lookup(
         &self,
         source_file: SourceId,
@@ -364,6 +357,7 @@ pub(crate) struct FileValueResolutionServices {
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
 }
 
 impl FileValueResolutionServices {
@@ -380,6 +374,7 @@ impl FileValueResolutionServices {
             stage0_resolution_facts: Some(stage0_resolution_facts),
             module_resources: Rc::clone(&self.module_resources),
             module_origin: self.module_origin.clone(),
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
     }
 }
@@ -430,8 +425,9 @@ pub struct ScopeShared {
     /// WHAT: the exact `SourceId` that owns this scope's token spans and path-table rows
     ///      (for materialised generics, the retained donor owner).
     /// WHY: every live scope joins `Stage0` facts and builds spans against this identity,
-    ///      so donor ranges never alias a requester call-site source.
     pub(crate) declaring_file_id: SourceId,
+    /// Required late-bound frozen identity for every source-owned scope chain.
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     /// Per-scope compile-time template expansion limit shared by child contexts.
     pub(crate) template_const_loop_iteration_limit: usize,
 
@@ -742,6 +738,7 @@ impl ScopeContext {
             source_build_config_contract_names: None,
             config_resolution: None,
             declaring_file_id: SourceId::COMPILATION_ROOT,
+            frozen_identity_handle: FrozenIdentityHandle::new(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),

@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use std::fmt;
@@ -27,13 +28,12 @@ use std::sync::Arc;
 pub(crate) enum GenericFunctionBody {
     /// Source templates still use the active module's ordinary Stage 0 services.
     Source(FileTokens),
-    /// Materialised templates own the compact facts for their frozen token table.
-    ///
-    /// INVARIANT: `tokens.file_id` equals `resolution_facts.frozen_owner()`. Emission threads
-    /// both into `declaring_file_id`/`Stage0` lookups together.
+    /// The materialised token stream and frozen Stage 0 facts retain one concrete donor owner.
+    /// Emission threads that owner through `declaring_file_id` and the late-bound identity handle.
     Materialised {
         tokens: FileTokens,
         resolution_facts: Arc<Stage0ResolutionFacts>,
+        frozen_identity_handle: FrozenIdentityHandle,
     },
 }
 
@@ -45,10 +45,12 @@ impl GenericFunctionBody {
     pub(crate) fn materialised(
         tokens: FileTokens,
         resolution_facts: Arc<Stage0ResolutionFacts>,
+        frozen_identity_handle: FrozenIdentityHandle,
     ) -> Self {
         Self::Materialised {
             tokens,
             resolution_facts,
+            frozen_identity_handle,
         }
     }
 
@@ -64,6 +66,16 @@ impl GenericFunctionBody {
             Self::Materialised {
                 resolution_facts, ..
             } => Some(resolution_facts),
+        }
+    }
+
+    pub(crate) fn frozen_identity_handle(&self) -> Option<&FrozenIdentityHandle> {
+        match self {
+            Self::Source(_) => None,
+            Self::Materialised {
+                frozen_identity_handle,
+                ..
+            } => Some(frozen_identity_handle),
         }
     }
 }

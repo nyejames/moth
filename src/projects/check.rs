@@ -7,7 +7,8 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, validate_frontend_facade_boundaries,
+    BuildBootstrap, ProjectAssemblyError, ProjectBuilder, bootstrap_project_build,
+    validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -183,15 +184,25 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
         FrontendCompilationMode::Check,
     ) {
         Ok(frontend) => {
-            let facade_validation = validate_frontend_facade_boundaries(&frontend);
-            let mut messages = frontend.into_render_messages(&mut string_table);
-            if let Err(error) = facade_validation {
-                let facade_messages = error.into_messages(&mut string_table);
-                messages.string_table = string_table.clone();
-                messages.append_messages_preserving_context(facade_messages);
+            let facade_messages = validate_frontend_facade_boundaries(&frontend)
+                .err()
+                .map(ProjectAssemblyError::into_owned_messages);
+            match frontend.into_render_messages_with_frozen_identity(
+                &mut string_table,
+                project_source_files.take(),
+                facade_messages,
+            ) {
+                Ok(messages) => messages,
+                Err(error) => {
+                    return CheckOutcome {
+                        messages: CompilerMessages::from_error(
+                            error,
+                            std::mem::take(&mut string_table),
+                        ),
+                        status: CommandStatus::Failure,
+                    };
+                }
             }
-            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
-            messages
         }
         Err(mut messages) => {
             attach_source_database_if_missing(&mut messages, project_source_files.as_ref());

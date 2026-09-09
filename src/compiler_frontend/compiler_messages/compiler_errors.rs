@@ -10,8 +10,8 @@
 //! Frontend/compiler stages
 //!   -> CompilerDiagnostic { kind, severity, primary_location, labels, payload }
 //!   -> DiagnosticBag accumulates one or many diagnostics locally
-//!   -> CompilerMessages owns ordered diagnostics + StringTable + range-bound render contexts
-//!      at stage/build boundaries
+//!   -> CompilerMessages owns ordered diagnostics + frozen identity range rows plus
+//!      transitional table/source rows at stage/build boundaries
 //!   -> renderers produce terminal/dev-server/terse output
 //!
 //! CompilerError
@@ -42,9 +42,10 @@
 //!
 //! ## Design Principles
 //!
-//! ### Shared StringTable Context
+//! ### Frozen Identity Contexts Plus Transitional StringTable Rows
 //! Diagnostics preserve interned path scopes, so top-level renderers and file-adjacent helpers
-//! resolve paths through the shared `StringTable` for the current build or parse lifecycle.
+//! resolve paths through range-bound frozen identity snapshots when present, falling back to
+//! the shared transitional `StringTable` for the current build or parse lifecycle.
 //!
 //! ### Structured Payloads
 //! `CompilerDiagnostic` carries typed payloads (`DiagnosticPayload`) instead of rendered strings.
@@ -74,7 +75,7 @@
 //!     ↓
 //! Backend Lowering → CompilerError (Backend) — internal only
 //!     ↓
-//! CompilerMessages (ordered diagnostics + StringTable)
+//! CompilerMessages (ordered diagnostics + frozen identity rows + transitional StringTable)
 //! ```
 
 pub use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
@@ -83,7 +84,9 @@ use crate::compiler_frontend::compiler_messages::{
     InfrastructureDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::{SourceDatabase, SpanCapacityError, SpanCapacityReason};
+use crate::compiler_frontend::source::{
+    FrozenIdentityContext, SourceDatabase, SpanCapacityError, SpanCapacityReason,
+};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
@@ -95,7 +98,7 @@ use std::sync::Arc;
 //  Compiler Message Set
 // -------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CompilerMessages {
     /// Ordered diagnostics at a build/render boundary.
     ///
@@ -106,7 +109,16 @@ pub struct CompilerMessages {
 
     pub string_table: StringTable,
 
-    /// Per-diagnostic source snapshots used by diagnostic renderers.
+    /// Per-diagnostic frozen identity snapshots used by diagnostic renderers.
+    ///
+    /// WHAT: owns one or many immutable identity contexts with range-aligned lookup. Each row
+    /// pairs an `Arc<FrozenIdentityContext>` with the diagnostic range produced against it.
+    /// WHY: the frozen context is authoritative for retained source spans and path/string
+    /// resolution; ranges shift alongside diagnostics during aggregation with first-match
+    /// precedence. Frozen IDs are already final and must never be remapped.
+    pub(crate) render_frozen_contexts: Vec<RenderFrozenContext>,
+
+    /// Per-diagnostic source snapshots used by diagnostic renderers (transitional).
     ///
     /// A message set may aggregate diagnostics from several independently retained source
     /// databases, so this association is range-bound rather than one flat database for the whole
@@ -131,6 +143,11 @@ pub(crate) struct RenderTypeContext {
     pub(crate) type_environment: TypeEnvironment,
 }
 #[derive(Debug, Clone)]
+pub(crate) struct RenderFrozenContext {
+    pub(crate) diagnostic_range: Range<usize>,
+    pub(crate) identity: Arc<FrozenIdentityContext>,
+}
+#[derive(Debug, Clone)]
 pub(crate) struct RenderSourceContext {
     pub(crate) diagnostic_range: Range<usize>,
     pub(crate) source_database: Arc<SourceDatabase>,
@@ -141,6 +158,7 @@ impl CompilerMessages {
         Self {
             diagnostics: Vec::new(),
             string_table,
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -153,6 +171,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table,
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -311,6 +330,7 @@ impl CompilerMessages {
         Self {
             diagnostics: vec![diagnostic],
             string_table,
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -342,6 +362,7 @@ impl CompilerMessages {
         Self {
             diagnostics: vec![diagnostic],
             string_table,
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -381,6 +402,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table: merged_table,
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -403,6 +425,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             string_table: string_table.clone(),
+            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
         }
@@ -451,6 +474,26 @@ impl CompilerMessages {
             }));
     }
 
+    /// Install precomputed frozen identity contexts for diagnostics appended at `diagnostic_offset`.
+    ///
+    /// WHAT: offsets each incoming frozen range by the diagnostic offset, mirroring
+    /// `install_source_contexts`.
+    /// WHY: frozen rows are range-aligned exactly like the transitional source rows, so the same
+    /// offset keeps each identity row tied to its diagnostics whether warnings or failures are
+    /// appended around them.
+    pub(crate) fn install_frozen_identity_contexts(
+        &mut self,
+        frozen_contexts: impl IntoIterator<Item = RenderFrozenContext>,
+        diagnostic_offset: usize,
+    ) {
+        self.render_frozen_contexts
+            .extend(frozen_contexts.into_iter().map(|mut frozen_context| {
+                frozen_context.diagnostic_range.start += diagnostic_offset;
+                frozen_context.diagnostic_range.end += diagnostic_offset;
+                frozen_context
+            }));
+    }
+
     pub(crate) fn with_type_context_for_all_diagnostics(
         mut self,
         type_environment: TypeEnvironment,
@@ -466,10 +509,11 @@ impl CompilerMessages {
 
     /// Prepend diagnostics that were produced before this message set.
     ///
-    /// WHAT: shifts every stored source/type-context range forward by the prepended length.
+    /// WHAT: shifts every stored frozen/source/type-context range forward by the prepended length.
     /// WHY: frontend/build aggregation often carries warnings from earlier stages into a later
     /// failure. Those warnings must stay before the failure without disconnecting diagnostics from
-    /// their retained source snapshot or render type table.
+    /// their frozen identity snapshot, retained source snapshot or render type table. Frozen IDs
+    /// are already final and are only shifted, never remapped.
     pub(crate) fn prepend_diagnostics_preserving_context(
         &mut self,
         prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
@@ -484,6 +528,11 @@ impl CompilerMessages {
         prior_diagnostics.append(&mut self.diagnostics);
         self.diagnostics = prior_diagnostics;
 
+        for frozen_context in &mut self.render_frozen_contexts {
+            frozen_context.diagnostic_range.start += shift;
+            frozen_context.diagnostic_range.end += shift;
+        }
+
         for source_context in &mut self.render_source_contexts {
             source_context.diagnostic_range.start += shift;
             source_context.diagnostic_range.end += shift;
@@ -496,24 +545,59 @@ impl CompilerMessages {
     }
     /// Append another boundary message set while preserving its diagnostic render contexts.
     ///
-    /// WHAT: moves diagnostics and both render-context ranges from `messages` into this set and
-    ///       offsets the appended ranges by the current diagnostic count.
-    /// WHY: directory builds aggregate failed modules and independent source-package boundaries;
-    ///      each diagnostic must continue using the snapshot database that produced it.
-    pub(crate) fn append_messages_preserving_context(&mut self, mut messages: CompilerMessages) {
-        let shift = self.diagnostics.len();
-        self.diagnostics.append(&mut messages.diagnostics);
+    /// WHAT: moves diagnostics and all frozen/source/type render-context ranges from `messages`
+    ///       into this set, offsets the appended ranges by the current diagnostic count, and
+    ///       remaps the incoming table-owned IDs into this set's table.
+    /// WHY: final aggregation consumes module-local message owners without cloning their
+    ///       diagnostics or string tables. Each incoming table is merged exactly once before its
+    ///       diagnostics and type environments are appended.
+    pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
+        let CompilerMessages {
+            mut diagnostics,
+            string_table,
+            mut render_frozen_contexts,
+            mut render_source_contexts,
+            mut render_type_contexts,
+        } = messages;
+        let remap = self.string_table.merge_from(&string_table);
+        if !remap.is_identity() {
+            for diagnostic in &mut diagnostics {
+                diagnostic.remap_string_ids(&remap);
+            }
+            for type_context in &mut render_type_contexts {
+                type_context.type_environment.remap_string_ids(&remap);
+            }
+        }
 
-        for mut source_context in messages.render_source_contexts {
+        let shift = self.diagnostics.len();
+        self.diagnostics.append(&mut diagnostics);
+
+        for mut frozen_context in render_frozen_contexts.drain(..) {
+            frozen_context.diagnostic_range.start += shift;
+            frozen_context.diagnostic_range.end += shift;
+            self.render_frozen_contexts.push(frozen_context);
+        }
+
+        for mut source_context in render_source_contexts.drain(..) {
             source_context.diagnostic_range.start += shift;
             source_context.diagnostic_range.end += shift;
             self.render_source_contexts.push(source_context);
         }
 
-        for mut type_context in messages.render_type_contexts {
+        for mut type_context in render_type_contexts {
             type_context.diagnostic_range.start += shift;
             type_context.diagnostic_range.end += shift;
             self.render_type_contexts.push(type_context);
+        }
+    }
+
+    /// Attach one frozen identity owner to every current diagnostic.
+    pub(crate) fn set_frozen_identity_context(&mut self, identity: Arc<FrozenIdentityContext>) {
+        if !self.diagnostics.is_empty() {
+            self.render_frozen_contexts.push(RenderFrozenContext {
+                diagnostic_range: 0..self.diagnostics.len(),
+                identity,
+            });
         }
     }
 
@@ -533,6 +617,21 @@ impl CompilerMessages {
             .map(|source_context| source_context.source_database.as_ref())
     }
 
+    /// Resolve the frozen identity context that produced one diagnostic.
+    ///
+    /// The first matching association wins, matching `source_database_for_diagnostic` semantics:
+    /// a package's own association must already be present to take precedence over a
+    /// whole-set fallback attached later.
+    pub(crate) fn frozen_identity_context_for_diagnostic(
+        &self,
+        diagnostic_index: usize,
+    ) -> Option<&FrozenIdentityContext> {
+        self.render_frozen_contexts
+            .iter()
+            .find(|frozen_context| frozen_context.diagnostic_range.contains(&diagnostic_index))
+            .map(|frozen_context| frozen_context.identity.as_ref())
+    }
+
     pub(crate) fn type_environment_for_diagnostic(
         &self,
         diagnostic_index: usize,
@@ -547,11 +646,13 @@ impl CompilerMessages {
         &self,
         diagnostic_index: usize,
     ) -> crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext<'_> {
+        let frozen_identity = self.frozen_identity_context_for_diagnostic(diagnostic_index);
         crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
             &self.string_table,
         )
         .with_optional_type_environment(self.type_environment_for_diagnostic(diagnostic_index))
         .with_optional_source_database(self.source_database_for_diagnostic(diagnostic_index))
+        .with_optional_frozen_identity(frozen_identity)
     }
 
     #[cfg(test)]
@@ -560,6 +661,7 @@ impl CompilerMessages {
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        // Frozen identity rows are intentionally left untouched: frozen IDs are already final.
         for diagnostic in self.diagnostics.iter_mut() {
             diagnostic.remap_string_ids(remap);
         }

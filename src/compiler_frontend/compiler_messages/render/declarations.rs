@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidReceiverDeclarationReason, InvalidSignatureMemberReason,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberReason) -> String {
     match reason {
@@ -56,7 +56,7 @@ pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberRea
 
 pub(crate) fn invalid_function_signature_message(
     reason: &InvalidFunctionSignatureReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         InvalidFunctionSignatureReason::MissingArrowOrColon { found } => {
@@ -114,7 +114,7 @@ pub(crate) fn invalid_function_signature_message(
 pub(crate) fn invalid_declaration_message(
     reason: InvalidDeclarationReason,
     name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name_text = name
         .map(|name| format!("'{}'", string_table.resolve(name)))
@@ -316,7 +316,7 @@ pub(crate) fn invalid_generic_instantiation_message(
 
 pub(crate) fn invalid_receiver_declaration_message(
     reason: InvalidReceiverDeclarationReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     use InvalidReceiverDeclarationReason;
 

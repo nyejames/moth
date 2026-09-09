@@ -688,6 +688,30 @@ impl FrozenSourceDatabase {
         &self.paths
     }
 
+    /// Reconstruct the legacy path view for a frozen source identity.
+    ///
+    /// This is the frozen equivalent of [`SourceDatabase::legacy_logical_path`]. The frozen
+    /// slot stores only its `PathId`, so the component vector is rebuilt from the frozen
+    /// [`PathTable`] parent links and is never retained by the database. Component IDs are
+    /// reused verbatim, so ambiguity semantics match the mutable bridge: the view is
+    /// returned even when several slots share the same spelling.
+    pub(crate) fn legacy_logical_path(&self, source: SourceId) -> InternedPath {
+        let path_id = self
+            .slots
+            .get(source.index())
+            .unwrap_or_else(|| {
+                panic!(
+                    "source identity {} is absent from the frozen source database; this is a compiler bug",
+                    source.index()
+                )
+            })
+            .logical_path;
+        let table = self.paths();
+        let mut components = Vec::with_capacity(table.depth(path_id) as usize);
+        table.resolve_components(path_id, &mut components);
+        InternedPath::from_components(components)
+    }
+
     /// Return the compact logical path identity assigned to one physical source.
     pub(crate) fn source_logical_path(&self, id: SourceId) -> Option<PathId> {
         self.get(id).map(|slot| slot.logical_path)

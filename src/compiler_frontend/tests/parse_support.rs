@@ -32,7 +32,9 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -107,6 +109,7 @@ fn test_file_value_resolution_services(
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
     })
 }
 

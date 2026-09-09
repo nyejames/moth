@@ -58,7 +58,7 @@ pub(crate) mod test_support;
 pub(crate) use database::{
     FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders,
 };
-pub(crate) use frozen_identity::FrozenIdentityContext;
+pub(crate) use frozen_identity::{FrozenIdentityContext, FrozenIdentityHandle};
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;

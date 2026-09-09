@@ -823,7 +823,7 @@ pub(super) fn compile_check_only_batches(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
-    string_table: &mut StringTable,
+    _string_table: &mut StringTable,
 ) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
@@ -868,19 +868,17 @@ pub(super) fn compile_check_only_batches(
                         .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
                 );
                 if !warnings.is_empty() {
-                    // Merge the module-local delta exactly once through the batch owner;
-                    // conversion happens once at the outer final tail.
-                    let mut batch =
+                    // Retain the module-local table; the final render tail merges it
+                    // exactly once via `append_messages_preserving_context`.
+                    let batch =
                         PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-                    batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
                     transient_batches.push(batch);
                 }
             }
             DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                // Remap through the batch owner without round-tripping through the final
-                // vessel; conversion happens once at the outer final tail.
-                let mut batch = diagnostics.into_batch()?;
-                batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
+                // Retain the local table without a premerge remap; the final tail owns
+                // the single merge. No `CompilerMessages` vessel is built here.
+                let batch = diagnostics.into_batch()?;
                 transient_batches.push(batch);
             }
             DirectoryModuleTaskOutcome::Blocked => {
@@ -1045,9 +1043,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store.mark_diagnosed(outcome.module_id)?;
+                    // Retain the local table without a premerge remap; the final tail owns
+                    // the single merge via `append_messages_preserving_context`.
                     // then classify back without round-tripping through the final vessel.
-                    let mut batch = diagnostics.into_batch()?;
-                    batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
+                    let batch = diagnostics.into_batch()?;
                     let diagnostics = ModuleDiagnostics::from_batch(batch)?;
                     diagnosed.push(DiagnosedModule {
                         module_id: outcome.module_id,

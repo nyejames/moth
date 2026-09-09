@@ -713,6 +713,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 services.with_stage0_resolution_facts(Arc::clone(facts)),
             );
         }
+        if let Some(frozen_identity_handle) = body.frozen_identity_handle() {
+            context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
+        }
         context.expected_result_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
         context.current_function_return_type_ids = context.expected_result_type_ids.clone();

@@ -12,14 +12,17 @@
 //! MUST NOT: concatenate package artefacts into one vector with a count, place build-local
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, RenderFrozenContext,
+};
+use crate::compiler_frontend::compiler_messages::PremergeDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -290,6 +293,18 @@ impl CompiledGraphBoundary {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
+    }
+
+    pub(crate) fn install_frozen_identity(
+        &self,
+        identity: Arc<FrozenIdentityContext>,
+    ) -> Result<(), CompilerError> {
+        for module in self.successful_module_views() {
+            if let Some(context) = module.metadata.materialisation_context.as_ref() {
+                context.install_frozen_identity(Arc::clone(&identity))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -869,6 +884,35 @@ pub(crate) fn compilation_module_views<'a>(
     Ok(views)
 }
 
+/// Move-only domain-tagged premerge batch lane for transient check-only diagnostics.
+///
+/// WHAT: retains a [`PremergeDiagnosticBatch`] with its local [`StringTable`] alongside the
+///       package domain that produced it (`None` for project transients).
+/// WHY: transient units have no graph slot, so their diagnostics must cross into the final
+///      render tail as move-only owners with domain tags; the final tail merges each local
+///      table exactly once and installs the matching frozen identity.
+#[derive(Debug)]
+pub(crate) struct TransientPremergeBatch {
+    pub(crate) package_id: Option<PackageBoundaryId>,
+    pub(crate) batch: PremergeDiagnosticBatch,
+}
+
+impl TransientPremergeBatch {
+    pub(crate) fn project(batch: PremergeDiagnosticBatch) -> Self {
+        Self {
+            package_id: None,
+            batch,
+        }
+    }
+
+    pub(crate) fn package(package_id: PackageBoundaryId, batch: PremergeDiagnosticBatch) -> Self {
+        Self {
+            package_id: Some(package_id),
+            batch,
+        }
+    }
+}
+
 /// Typed frontend outcome carrying every project and source-package graph boundary.
 ///
 /// WHAT: the `Ok` payload of [`compile_project_frontend`](super::compile_project_frontend).
@@ -882,7 +926,10 @@ pub(crate) struct ProjectFrontendCompilation {
     /// Build-only physical resource inputs and missing-target watches discovered before AST.
     pub(crate) resource_inputs: ResourceInputRegistry,
     /// Diagnostics and warnings from transient check-only units, which have no canonical graph slot.
-    pub(crate) transient_messages: Vec<CompilerMessages>,
+    ///
+    /// WHAT: move-only premerge batches tagged by domain; local tables merge exactly once
+    ///       at the final render tail.
+    pub(crate) transient_batches: Vec<TransientPremergeBatch>,
 }
 
 impl ProjectFrontendCompilation {
@@ -898,7 +945,7 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
-        transient_messages: Vec<CompilerMessages>,
+        transient_batches: Vec<TransientPremergeBatch>,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
@@ -931,7 +978,7 @@ impl ProjectFrontendCompilation {
             project,
             source_packages,
             resource_inputs,
-            transient_messages,
+            transient_batches,
         })
     }
 
@@ -943,9 +990,9 @@ impl ProjectFrontendCompilation {
         !self.project.diagnosed.is_empty()
             || !self.project.blocked.is_empty()
             || self
-                .transient_messages
+                .transient_batches
                 .iter()
-                .any(|messages| messages.error_count() > 0)
+                .any(|transient| transient.batch.has_errors())
             || self.source_packages.iter().any(|package| {
                 !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
             })
@@ -967,11 +1014,18 @@ impl ProjectFrontendCompilation {
     /// Warnings from every successful boundary are retained first, then diagnosed module
     /// messages in deterministic `ModuleId` order. Blocked modules produce no cascade
     /// diagnostics and are not rendered.
+    ///
+    /// WHAT: legacy test-facing compatibility wrapper. Each retained local table merges
+    ///       exactly once through [`CompilerMessages::append_messages_preserving_context`];
+    ///       the caller aggregate is merged without cloning.
+    /// WHY: tests keep using the transitional source fallback while production
+    ///      build/check/benchmark use
+    ///      [`Self::into_render_messages_with_frozen_identity`].
     pub(crate) fn into_render_messages(self, string_table: &mut StringTable) -> CompilerMessages {
         let Self {
             project,
             source_packages,
-            transient_messages,
+            transient_batches,
             ..
         } = self;
         let project_warnings = project
@@ -980,9 +1034,13 @@ impl ProjectFrontendCompilation {
             .collect::<Vec<_>>();
         let (source_packages, source_databases) =
             source_packages.into_packages_with_source_databases();
-        let mut messages =
-            CompilerMessages::from_diagnostics(project_warnings, string_table.clone());
-
+        // Merge the caller aggregate into a fresh vessel without cloning it, so warnings
+        // already in that domain stay valid and each local table still merges exactly once
+        // below. The caller table stays intact for legacy test callers.
+        let mut messages = CompilerMessages::empty(StringTable::new());
+        let aggregate_remap = messages.string_table.merge_from(string_table);
+        debug_assert!(aggregate_remap.is_identity());
+        messages.extend_diagnostics(project_warnings);
         for (package_index, package) in source_packages.iter().enumerate() {
             let package_warnings = package
                 .boundary
@@ -991,7 +1049,7 @@ impl ProjectFrontendCompilation {
                 .collect::<Vec<_>>();
             if !package_warnings.is_empty() {
                 let mut package_messages =
-                    CompilerMessages::from_diagnostics(package_warnings, string_table.clone());
+                    CompilerMessages::from_diagnostics(package_warnings, StringTable::new());
                 if let Some(Some(source_database)) = source_databases.get(package_index) {
                     package_messages.set_source_database(Arc::clone(source_database));
                 }
@@ -1010,11 +1068,189 @@ impl ProjectFrontendCompilation {
                 messages.append_messages_preserving_context(package_messages);
             }
         }
-
-        for transient in transient_messages {
-            messages.append_messages_preserving_context(transient);
+        for transient in transient_batches {
+            let mut transient_messages = transient.batch.into_messages();
+            if let Some(package_id) = transient.package_id {
+                if let Some(Some(source_database)) = source_databases.get(package_id.index()) {
+                    transient_messages.set_source_database(Arc::clone(source_database));
+                }
+            }
+            messages.append_messages_preserving_context(transient_messages);
         }
-
         messages
+    }
+
+    /// Build the frozen-identity render-boundary message set for this outcome.
+    ///
+    /// WHAT: merges every retained local table exactly once into the caller aggregate,
+    ///       freezes that aggregate with the project snapshot as the root identity, shares
+    ///       the frozen strings with each package snapshot, and installs one frozen range
+    ///       per nonempty diagnostic span. Order is project warnings, package warnings,
+    ///       project diagnosed, package diagnosed, then transient batches.
+    /// WHY: production build/check/benchmark render against exact snapshots with no table
+    ///      clones and no filesystem rereads; `diagnostic_render_context` resolves every
+    ///      covered row through its frozen strings.
+    pub(crate) fn into_render_messages_with_frozen_identity(
+        self,
+        string_table: &mut StringTable,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_project_messages: Option<CompilerMessages>,
+    ) -> Result<CompilerMessages, CompilerError> {
+        let Self {
+            mut project,
+            source_packages,
+            transient_batches,
+            ..
+        } = self;
+        let project_warnings = project
+            .successful_module_views()
+            .flat_map(|module| module.metadata.warnings.iter().cloned())
+            .collect::<Vec<_>>();
+        let (mut source_packages, package_source_arcs) =
+            source_packages.into_packages_with_source_databases();
+        let project_diagnosed = std::mem::take(&mut project.diagnosed);
+        let package_diagnosed = source_packages
+            .iter_mut()
+            .map(|package| std::mem::take(&mut package.boundary.diagnosed))
+            .collect::<Vec<_>>();
+        let package_warnings = source_packages
+            .iter()
+            .map(|package| {
+                package
+                    .boundary
+                    .successful_module_views()
+                    .flat_map(|module| module.metadata.warnings.iter().cloned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        // Consume the caller aggregate without cloning; success warnings already live in
+        // this domain while each local batch merges exactly once below before freezing.
+        let mut messages = CompilerMessages::empty(std::mem::take(string_table));
+        // Pending frozen rows as (range, package_index). `None` package means project/root.
+        let mut frozen_spans: Vec<(std::ops::Range<usize>, Option<usize>)> = Vec::new();
+        let start = messages.diagnostic_slice().len();
+        messages.extend_diagnostics(project_warnings);
+        if messages.diagnostic_slice().len() != start {
+            frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+        }
+        for (package_index, warnings) in package_warnings.into_iter().enumerate() {
+            if warnings.is_empty() {
+                continue;
+            }
+            let start = messages.diagnostic_slice().len();
+            // Warnings already live in the aggregate domain, so no local merge is needed;
+            // the frozen row below still binds them to their package snapshot.
+            messages.extend_diagnostics(warnings);
+            frozen_spans.push((
+                start..messages.diagnostic_slice().len(),
+                Some(package_index),
+            ));
+        }
+        if !project_diagnosed.is_empty() {
+            let start = messages.diagnostic_slice().len();
+            for diagnosed in project_diagnosed {
+                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
+            }
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+            }
+        }
+        for (package_index, diagnosed_modules) in package_diagnosed.into_iter().enumerate() {
+            if diagnosed_modules.is_empty() {
+                continue;
+            }
+            let start = messages.diagnostic_slice().len();
+            for diagnosed in diagnosed_modules {
+                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
+            }
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((
+                    start..messages.diagnostic_slice().len(),
+                    Some(package_index),
+                ));
+            }
+        }
+        for transient in transient_batches {
+            let domain = transient.package_id.map(|id| id.index());
+            let start = messages.diagnostic_slice().len();
+            messages.append_messages_preserving_context(transient.batch.into_messages());
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), domain));
+            }
+        }
+        if let Some(trailing_project_messages) = trailing_project_messages {
+            let start = messages.diagnostic_slice().len();
+            messages.append_messages_preserving_context(trailing_project_messages);
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+            }
+        }
+        // Consume owners without cloning. An unexpectedly shared Arc is a caller bug.
+        let project_database = match project_source {
+            Some(source) => Arc::try_unwrap(source).map_err(|_| {
+                CompilerError::compiler_error(
+                    "project source database was unexpectedly shared at the frozen render tail",
+                )
+            })?,
+            None => SourceDatabase::empty(),
+        };
+        let mut package_databases: Vec<Option<SourceDatabase>> =
+            Vec::with_capacity(package_source_arcs.len());
+        for source in package_source_arcs {
+            match source {
+                Some(source) => package_databases
+                    .push(Some(Arc::try_unwrap(source).map_err(|_| {
+                    CompilerError::compiler_error(
+                        "package source database was unexpectedly shared at the frozen render tail",
+                    )
+                })?)),
+                None => package_databases.push(None),
+            }
+        }
+        // Freeze only after every local table has been appended/remapped above.
+        let frozen_root = Arc::new(FrozenIdentityContext::from_parts(
+            std::mem::take(&mut messages.string_table),
+            project_database,
+        ));
+        let mut package_identities: Vec<Option<Arc<FrozenIdentityContext>>> =
+            Vec::with_capacity(package_databases.len());
+        for database in package_databases {
+            match database {
+                Some(database) => package_identities.push(Some(Arc::new(
+                    FrozenIdentityContext::from_shared_strings(
+                        frozen_root.shared_strings(),
+                        database,
+                    ),
+                ))),
+                None => package_identities.push(None),
+            }
+        }
+        project.install_frozen_identity(Arc::clone(&frozen_root))?;
+        for (package, identity) in source_packages.iter().zip(package_identities.iter()) {
+            let identity = identity
+                .as_ref()
+                .map(Arc::clone)
+                .unwrap_or_else(|| Arc::clone(&frozen_root));
+            package.boundary.install_frozen_identity(identity)?;
+        }
+        let mut frozen_contexts = Vec::with_capacity(frozen_spans.len());
+        for (range, domain) in frozen_spans {
+            if range.is_empty() {
+                continue;
+            }
+            let identity = match domain {
+                Some(package_index) => package_identities
+                    .get(package_index)
+                    .and_then(|identity| identity.clone())
+                    .unwrap_or_else(|| Arc::clone(&frozen_root)),
+                None => Arc::clone(&frozen_root),
+            };
+            frozen_contexts.push(RenderFrozenContext {
+                diagnostic_range: range,
+                identity,
+            });
+        }
+        messages.install_frozen_identity_contexts(frozen_contexts, 0);
+        Ok(messages)
     }
 }

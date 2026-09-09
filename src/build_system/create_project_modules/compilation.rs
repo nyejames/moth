@@ -40,7 +40,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::FrontendCompilationMode;
 use super::compiled_boundary::{
     CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
-    ProjectFrontendCompilation,
+    ProjectFrontendCompilation, TransientPremergeBatch,
 };
 use super::config_boundary;
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -718,16 +718,20 @@ fn compile_directory_frontend_in_premerge_lane(
     };
     let project_path_resolver = project_setup.resolver;
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
-    let mut project_sources = SourceDatabaseBuilder::new(
-        project_source_files
-            .take()
-            .map(|cached| {
-                Arc::try_unwrap(cached).expect(
-                    "source registration changed while snapshots were shared; this is a compiler bug",
-                )
-            })
-            .unwrap_or_else(SourceDatabase::empty),
-    );
+    let cached_source = match project_source_files.take() {
+        Some(cached) => match Arc::try_unwrap(cached) {
+            Ok(database) => database,
+            Err(_) => {
+                return Err(DirectoryPremergeFailure::project(
+                    PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                        "project source database was unexpectedly shared before registration",
+                    )),
+                ));
+            }
+        },
+        None => SourceDatabase::empty(),
+    };
+    let mut project_sources = SourceDatabaseBuilder::new(cached_source);
     let result = (|| -> Result<ProjectFrontendCompilation, DirectoryPremergeFailure> {
         project_sources
             .sources_mut()
@@ -1026,7 +1030,7 @@ fn compile_directory_frontend_in_premerge_lane(
             crate::timing::TimingMetric::Stage0DirectoryCompile
         );
         let mut completed_source_packages = CompletedSourcePackageRegistry::new();
-        let mut transient_messages = Vec::new();
+        let mut transient_batches: Vec<TransientPremergeBatch> = Vec::new();
         let mut source_package_check_only_inventories = Vec::new();
         for inventory in source_package_inventories {
             let SourcePackageModuleInventory {
@@ -1205,21 +1209,22 @@ fn compile_directory_frontend_in_premerge_lane(
             let (package_id, check_only_batches) = match result {
                 Ok(value) => value,
                 Err(failure) => {
-                    return Err(DirectoryPremergeFailure::package(
-                        failure,
-                        Arc::try_unwrap(finalized)
-                            .expect("package snapshot shared before failure attach"),
-                    ));
+                    let database = Arc::try_unwrap(finalized).map_err(|_| {
+                        CompilerError::compiler_error(
+                            "package source database was unexpectedly shared before failure attach",
+                        )
+                    })?;
+                    return Err(DirectoryPremergeFailure::package(failure, database));
                 }
             };
-            completed_source_packages.set_source_database(package_id, Arc::clone(&finalized))?;
+            // Publish the package snapshot for later frozen-identity extraction. The
+            // registry holds the sole owner; transient batches retain only their local
+            // tables and domain tags until the final render tail merges them exactly once.
+            completed_source_packages.set_source_database(package_id, finalized)?;
             batches.extend(check_only_batches);
-            // Each batch converts exactly once with its package snapshot.
-            let mut package_messages = batches
-                .into_iter()
-                .map(|batch| batch.into_messages_with_source(Arc::clone(&finalized)))
-                .collect::<Vec<_>>();
-            transient_messages.append(&mut package_messages);
+            for batch in batches {
+                transient_batches.push(TransientPremergeBatch::package(package_id, batch));
+            }
         }
 
         timing_scope_attributed!(
@@ -1229,8 +1234,8 @@ fn compile_directory_frontend_in_premerge_lane(
                 project_timing_boundary
             )),
         );
-        // The typed lane returns batches; convert each exactly once without a source here.
-        // The outer tail attaches the finalized project snapshot below.
+        // The typed lane returns premerge batches with local tables; retain each with a
+        // project domain tag. No `CompilerMessages` vessel is built here.
         let (project_boundary, project_batches) = canonical::compile_module_waves_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
@@ -1257,11 +1262,9 @@ fn compile_directory_frontend_in_premerge_lane(
             &mut resource_inputs,
             string_table,
         )?;
-        let mut project_transient_messages = project_batches
-            .into_iter()
-            .map(PremergeDiagnosticBatch::into_messages)
-            .collect::<Vec<_>>();
-        transient_messages.append(&mut project_transient_messages);
+        for batch in project_batches {
+            transient_batches.push(TransientPremergeBatch::project(batch));
+        }
         #[cfg(feature = "timers")]
         timing_guard_build_boundary_compile_2.finish();
         #[cfg(feature = "timers")]
@@ -1270,10 +1273,10 @@ fn compile_directory_frontend_in_premerge_lane(
             project_boundary,
             completed_source_packages,
             resource_inputs,
-            transient_messages,
+            transient_batches,
         )?)
     })();
-    // Final project source owner beside the semantic result. A finished source keeps
+    // Finalize the project source owner beside the semantic result. A finished source keeps
     // current attachment behavior; a failed finish has no snapshot, so the semantic
     // failure stays authoritative and the finish failure chains beside it for the
     // public tail to render. A successful result with a failed finish surfaces only
@@ -1294,21 +1297,9 @@ fn compile_directory_frontend_in_premerge_lane(
             });
         }
     };
-    *project_source_files = Some(Arc::clone(&finalized));
+    *project_source_files = Some(finalized);
     match result {
-        Ok(mut compilation) => {
-            for diagnosed in &mut compilation.project.diagnosed {
-                diagnosed
-                    .diagnostics
-                    .set_source_database(Arc::clone(&finalized));
-            }
-            for messages in &mut compilation.transient_messages {
-                if messages.source_database_for_diagnostic(0).is_none() {
-                    messages.set_source_database(Arc::clone(&finalized));
-                }
-            }
-            Ok(compilation)
-        }
+        Ok(compilation) => Ok(compilation),
         Err(directory_failure) => Err(directory_failure),
     }
 }

@@ -49,6 +49,7 @@ use crate::compiler_frontend::paths::file_references::{
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::{
@@ -396,6 +397,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);
 
@@ -468,6 +470,7 @@ fn template_head_extensionless_path_retains_exact_span() {
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);
 

@@ -4,7 +4,7 @@
 //! WHY: diagnostics should centralize filesystem-adjacent rendering at the render boundary.
 
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::StringTableResolver;
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 use std::path::{Path, PathBuf};
 
@@ -19,7 +19,10 @@ pub(crate) fn relative_display_path_from_root(scope: &Path, root: &Path) -> Stri
     portable_path_text(display_path)
 }
 
-pub(crate) fn resolved_display_path(scope: &InternedPath, string_table: &StringTable) -> String {
+pub(crate) fn resolved_display_path(
+    scope: &InternedPath,
+    string_table: &dyn StringTableResolver,
+) -> String {
     let source_file = resolve_source_file_path(scope, string_table);
 
     match std::env::current_dir() {
@@ -35,7 +38,7 @@ pub(crate) fn resolved_display_path(scope: &InternedPath, string_table: &StringT
 
 pub(crate) fn resolve_source_file_path(
     scope: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> PathBuf {
     let mut source_file = normalize_path(&scope.to_path_buf(string_table));
 

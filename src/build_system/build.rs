@@ -211,6 +211,15 @@ impl ProjectAssemblyError {
             }
         }
     }
+    pub(crate) fn into_owned_messages(self) -> CompilerMessages {
+        match self {
+            Self::Diagnostic {
+                diagnostic,
+                string_table,
+            } => CompilerMessages::from_diagnostics(vec![*diagnostic], string_table),
+            Self::Infrastructure(error) => CompilerMessages::from_error(error, StringTable::new()),
+        }
+    }
 }
 /// WHAT: every lookup for an empty package boundary returns the same immutable map instead of
 ///       allocating a fresh `Arc<HashMap>` per call.
@@ -226,7 +235,7 @@ impl ProjectCompilation {
             project,
             source_packages,
             resource_inputs,
-            transient_messages: _,
+            transient_batches: _,
         } = frontend;
         Self::from_successful_boundaries(project, source_packages, resource_inputs)
     }
@@ -1717,8 +1726,15 @@ pub fn build_project(
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
-        let mut messages = frontend_compilation.into_render_messages(&mut string_table);
-        attach_source_database(&mut messages, project_source_files.as_ref());
+        let messages = frontend_compilation
+            .into_render_messages_with_frozen_identity(
+                &mut string_table,
+                project_source_files.take(),
+                None,
+            )
+            .map_err(|error| {
+                CompilerMessages::from_error(error, std::mem::take(&mut string_table))
+            })?;
         return Err(messages);
     }
     let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {

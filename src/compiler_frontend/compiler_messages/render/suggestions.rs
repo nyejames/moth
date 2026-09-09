@@ -4,7 +4,7 @@
 //! named-argument, field-access, and choice-variant renderers.
 //! WHY: renderers with known candidates should share one deterministic policy.
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 /// Find the closest candidate name for a misspelled identifier.
 ///
@@ -18,7 +18,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 pub(crate) fn closest_name_suggestion(
     name: &str,
     candidates: &[StringId],
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> Option<String> {
     let lower_name = name.to_lowercase();
     let mut best: Option<(usize, &str)> = None;

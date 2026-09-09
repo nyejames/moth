@@ -45,8 +45,8 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex,
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseBuilder, SourceId,
+    SourceKind, SourceRegistrationIndex,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -511,6 +511,7 @@ fn fold_template_semantics(
                 ))),
                 module_resources: Rc::clone(&module_resources),
                 module_origin,
+                frozen_identity_handle: FrozenIdentityHandle::new(),
             })
         });
         fold_template_ast(

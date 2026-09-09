@@ -559,10 +559,9 @@ fn compile_single_file_frontend_with_target(
                 Vec::new()
             }
             ModuleCompilationOutcome::Diagnosed(diagnostics) => {
-                // Merge the module-local delta exactly once through the batch owner,
-                // then classify back without round-tripping through the final vessel.
-                let mut batch = diagnostics.into_batch()?;
-                batch.merge_delta_into_global(string_table, base_len);
+                // Retain the module-local table; the final render tail merges it exactly
+                // once via `append_messages_preserving_context`.
+                let batch = diagnostics.into_batch()?;
                 let diagnostics = ModuleDiagnostics::from_batch(batch)?;
                 modules.mark_diagnosed(module_id)?;
                 vec![DiagnosedModule {
@@ -600,19 +599,9 @@ fn compile_single_file_frontend_with_target(
             return Err(append_finish_failure(failure, finish_error));
         }
     };
-    *project_source_files = Some(Arc::clone(&finalized));
+    *project_source_files = Some(finalized);
     match result {
-        Ok(SingleFileFrontendResult::Project(mut compilation)) => {
-            for diagnosed in &mut compilation.project.diagnosed {
-                diagnosed
-                    .diagnostics
-                    .set_source_database(Arc::clone(&finalized));
-            }
-            for messages in &mut compilation.transient_messages {
-                if messages.source_database_for_diagnostic(0).is_none() {
-                    messages.set_source_database(Arc::clone(&finalized));
-                }
-            }
+        Ok(SingleFileFrontendResult::Project(compilation)) => {
             Ok(SingleFileFrontendResult::Project(compilation))
         }
         #[cfg(feature = "boracle")]

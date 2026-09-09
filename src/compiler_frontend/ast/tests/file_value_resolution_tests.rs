@@ -48,7 +48,7 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -656,6 +656,7 @@ fn resolve_file_value_fixture(
         ))),
         module_resources: Rc::clone(&module_resources),
         module_origin: Some(module_origin.clone()),
+        frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);
 

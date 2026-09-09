@@ -6,7 +6,9 @@
 //!      avoids redundant string storage and makes path comparisons cheap.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{
+    StringId, StringIdRemap, StringTable, StringTableResolver,
+};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::path::{Path, PathBuf};
 
@@ -83,7 +85,7 @@ impl InternedPath {
     }
 
     /// Convert this InternedPath back to a PathBuf
-    pub fn to_path_buf(&self, string_table: &StringTable) -> PathBuf {
+    pub(crate) fn to_path_buf(&self, string_table: &dyn StringTableResolver) -> PathBuf {
         if self.components.is_empty() {
             return PathBuf::new();
         }
@@ -179,7 +181,10 @@ impl InternedPath {
     }
 
     /// Get the last component as a string
-    pub fn name_str<'a>(&self, string_table: &'a StringTable) -> Option<&'a str> {
+    pub(crate) fn name_str<'a>(
+        &self,
+        string_table: &'a dyn StringTableResolver,
+    ) -> Option<&'a str> {
         self.name().map(|id| string_table.resolve(id))
     }
 
@@ -253,17 +258,17 @@ impl InternedPath {
 
     /// Render with the platform-native path separator.
     /// Use this only for diagnostics and filesystem-adjacent display.
-    pub fn to_native_string(&self, string_table: &StringTable) -> String {
+    pub(crate) fn to_native_string(&self, string_table: &dyn StringTableResolver) -> String {
         self.to_path_buf(string_table).to_string_lossy().to_string()
     }
 
     /// Render with forward slashes so string output is deterministic across OSes.
     /// This is the preferred renderer for compiler logic, snapshots, and tests.
-    pub fn to_portable_string(&self, string_table: &StringTable) -> String {
+    pub(crate) fn to_portable_string(&self, string_table: &dyn StringTableResolver) -> String {
         portable_path_text(self.to_path_buf(string_table))
     }
 
-    pub fn to_string(&self, string_table: &StringTable) -> String {
+    pub(crate) fn to_string(&self, string_table: &dyn StringTableResolver) -> String {
         self.to_portable_string(string_table)
     }
 }

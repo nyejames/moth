@@ -301,7 +301,20 @@ pub fn run_frontend_benchmark(
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
-        Ok(frontend) => (frontend.into_render_messages(&mut string_table), false),
+        Ok(frontend) => (
+            frontend
+                .into_render_messages_with_frozen_identity(
+                    &mut string_table,
+                    project_source_files.take(),
+                    None,
+                )
+                .map_err(|error| FrontendBenchmarkError {
+                    kind: FrontendBenchmarkFailureKind::Compilation,
+                    diagnostic_codes: Vec::new(),
+                    message: error.msg,
+                })?,
+            false,
+        ),
         Err(messages) => (messages, true),
     };
 

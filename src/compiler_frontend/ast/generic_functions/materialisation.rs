@@ -78,7 +78,6 @@ use crate::compiler_frontend::headers::binding_environment::{
 };
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-#[cfg(test)]
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
@@ -93,7 +92,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory,
     OriginTypeId, StableModuleOriginIdentity,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{
@@ -165,6 +164,7 @@ pub(crate) struct ModuleMaterialisationContext {
     semantic_closure: StableSemanticClosure,
     artefacts: Box<[GenericTemplateArtefact]>,
     module_origin: Option<StableModuleOriginIdentity>,
+    frozen_identity_handle: FrozenIdentityHandle,
 }
 
 #[derive(Clone)]
@@ -443,6 +443,7 @@ fn generated_file_value_resolution_services(
         stage0_resolution_facts: Some(stage0_resolution_facts),
         module_resources,
         module_origin,
+        frozen_identity_handle: FrozenIdentityHandle::new(),
     })
 }
 
@@ -525,10 +526,8 @@ fn collect_namespace_source_paths(
 impl ModuleMaterialisationContext {
     /// Build a test-only context with one artefact per identity and no real body payload.
     ///
-    /// WHY: build-system tests need to exercise publication duplicate detection and exact row
-    ///      indexing without preparing a full generic module.
-    #[cfg(test)]
     pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
+        let frozen_identity_handle = FrozenIdentityHandle::new();
         let artefacts = identities
             .into_iter()
             .map(|declaration_identity| GenericTemplateArtefact {
@@ -546,6 +545,7 @@ impl ModuleMaterialisationContext {
                 body: StableBodySyntax {
                     declaration_path: Box::new([]),
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+                    frozen_identity_handle: frozen_identity_handle.clone(),
                     pool: Box::new([]),
                     tokens: Box::new([]),
                     path_syntax: PathSyntaxTable::default(),
@@ -570,6 +570,7 @@ impl ModuleMaterialisationContext {
             semantic_closure: StableSemanticClosure::default(),
             artefacts,
             module_origin: None,
+            frozen_identity_handle,
         }
     }
 
@@ -613,6 +614,19 @@ impl ModuleMaterialisationContext {
             CompilerMessages::from_error_ref(error, &input.requester_context.string_table)
         })?;
         artefact.materialise_ast(self, input)
+    }
+    pub(crate) fn install_frozen_identity(
+        &self,
+        identity: Arc<FrozenIdentityContext>,
+    ) -> Result<(), CompilerError> {
+        self.frozen_identity_handle.install(Arc::clone(&identity))?;
+        for artefact in &self.artefacts {
+            artefact
+                .body
+                .frozen_identity_handle
+                .install(Arc::clone(&identity))?;
+        }
+        Ok(())
     }
 }
 
@@ -2143,7 +2157,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) entry_dir: InternedPath,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
-    /// The module-local resource authority used when a generated preparation captures a nested
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     /// body before its own materialisation context is published.
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) type_environment: TypeEnvironment,
@@ -2202,6 +2216,7 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) entry_dir: InternedPath,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) string_table: &'a StringTable,
     pub(crate) template_const_loop_iteration_limit: usize,
@@ -2436,9 +2451,9 @@ impl ModuleMaterialisationPreparation {
             semantic_closure,
             artefacts,
             module_origin: self.module_origin.clone(),
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
         }))
     }
-
     fn freeze_template(
         &self,
         template: &GenericFunctionTemplate,
@@ -2496,6 +2511,10 @@ impl ModuleMaterialisationPreparation {
                 resolution_facts, ..
             } => Some(resolution_facts.as_ref()),
         };
+        let frozen_identity_handle = body
+            .frozen_identity_handle()
+            .cloned()
+            .unwrap_or_else(|| self.frozen_identity_handle.clone());
 
         Ok(GenericTemplateArtefact {
             declaration_identity,
@@ -2513,6 +2532,7 @@ impl ModuleMaterialisationPreparation {
                 &template.source_file,
                 &self.string_table,
                 stage0_resolution_facts,
+                frozen_identity_handle,
                 &content_value_at_path,
             )?,
             signature,
@@ -3427,6 +3447,7 @@ impl ModuleMaterialisationPreparation {
             entry_dir,
             module_origin,
             stage0_resolution_facts,
+            frozen_identity_handle,
             module_resources,
             string_table,
             template_const_loop_iteration_limit,
@@ -3440,6 +3461,7 @@ impl ModuleMaterialisationPreparation {
             module_origin,
             module_resources,
             stage0_resolution_facts,
+            frozen_identity_handle,
             type_environment: type_environment.fork_for_generated(),
             declaration_table: declaration_table_without_module_values(
                 &lookups.declaration_table,
@@ -3658,11 +3680,16 @@ impl ModuleMaterialisationPreparation {
                 resolution_facts, ..
             } => Some(resolution_facts.as_ref()),
         };
+        let frozen_identity_handle = body
+            .frozen_identity_handle()
+            .cloned()
+            .unwrap_or_else(|| self.frozen_identity_handle.clone());
         let stable_body = StableBodySyntax::capture(
             body.tokens(),
             &template.source_file,
             &self.string_table,
             stage0_resolution_facts,
+            frozen_identity_handle,
             &content_value_at_path,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
@@ -3680,11 +3707,16 @@ impl ModuleMaterialisationPreparation {
                     resolution_facts, ..
                 } => Some(resolution_facts.as_ref()),
             };
+            let nested_frozen_identity_handle = nested_body
+                .frozen_identity_handle()
+                .cloned()
+                .unwrap_or_else(|| self.frozen_identity_handle.clone());
             let stable_nested_body = StableBodySyntax::capture(
                 nested_body.tokens(),
                 &nested_template.source_file,
                 &self.string_table,
                 nested_stage0_resolution_facts,
+                nested_frozen_identity_handle,
                 &content_value_at_path,
             )
             .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;

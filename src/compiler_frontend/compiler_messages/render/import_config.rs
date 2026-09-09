@@ -9,7 +9,7 @@ use super::*;
 pub(crate) fn invalid_config_message(
     key: Option<StringId>,
     reason: &InvalidConfigReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let key_name = key.map(|key| string_table.resolve(key).to_owned());
     let key_label = key_name.as_deref().unwrap_or("config");
@@ -322,7 +322,7 @@ fn invalid_output_folder_message(
     key_label: &str,
     folder: Option<StringId>,
     reason: InvalidOutputFolderReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let folder_name = folder.map(|folder| string_table.resolve(folder).to_owned());
 
@@ -377,7 +377,7 @@ fn invalid_output_folder_message(
 pub(crate) fn invalid_import_path_message(
     path: &InternedPath,
     reason: InvalidImportPathReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         InvalidImportPathReason::PublicRoot => {
@@ -411,7 +411,7 @@ pub(crate) fn invalid_import_path_message(
 pub(crate) fn invalid_compile_time_path_message(
     path: &InternedPath,
     reason: InvalidCompileTimePathReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
 
@@ -488,7 +488,7 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
 
 pub(crate) fn direct_symbol_path_import_message(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     format!(
@@ -500,7 +500,7 @@ pub(crate) fn direct_symbol_path_import_message(
 
 pub(crate) fn invalid_namespace_default_name_message(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     let stem = path.name().map(|n| string_table.resolve(n)).unwrap_or("");
@@ -515,7 +515,7 @@ pub(crate) fn invalid_namespace_default_name_message(
 pub(crate) fn duplicate_import_surface_member_message(
     surface_path: &InternedPath,
     member_name: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = surface_path.to_portable_string(string_table);
     let member = string_table.resolve(member_name);
@@ -528,7 +528,7 @@ pub(crate) fn duplicate_import_surface_member_message(
 
 pub(crate) fn explicit_moth_extension_message(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     let extensionless_path = path_text.strip_suffix(".moth").unwrap_or(&path_text);
@@ -541,7 +541,7 @@ pub(crate) fn explicit_moth_extension_message(
 pub(crate) fn explicit_source_extension_message(
     path: &InternedPath,
     extension: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path_text = path.to_portable_string(string_table);
     let extension = string_table.resolve(extension);
@@ -556,7 +556,7 @@ pub(crate) fn explicit_source_extension_message(
 pub(crate) fn unsupported_source_file_kind_message(
     path: &InternedPath,
     extension: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     let extension = string_table.resolve(extension);
@@ -569,7 +569,7 @@ pub(crate) fn unsupported_source_file_kind_message(
 pub(crate) fn invalid_source_file_entry_message(
     path: &InternedPath,
     extension: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     let extension = string_table.resolve(extension);
@@ -581,7 +581,7 @@ pub(crate) fn invalid_source_file_entry_message(
 
 pub(crate) fn invalid_moth_template_api_scope_item_message(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     format!(
@@ -592,7 +592,7 @@ pub(crate) fn invalid_moth_template_api_scope_item_message(
 
 pub(crate) fn duplicate_moth_template_input_path_message(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     format!(
@@ -603,7 +603,7 @@ pub(crate) fn duplicate_moth_template_input_path_message(
 pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
     first_path: &InternedPath,
     second_path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let first_path = first_path.to_portable_string(string_table);
     let second_path = second_path.to_portable_string(string_table);
@@ -618,7 +618,7 @@ pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
 pub(crate) fn unsupported_external_extension_message(
     path: &InternedPath,
     extension: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     let ext = string_table.resolve(extension);
@@ -631,7 +631,7 @@ pub(crate) fn unsupported_external_extension_message(
 pub(crate) fn invalid_external_module_message(
     path: &InternedPath,
     message: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
     let message = string_table.resolve(message);
@@ -640,7 +640,7 @@ pub(crate) fn invalid_external_module_message(
 
 pub(crate) fn dependency_namespace_used_as_value_message(
     record_name: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(record_name);
     format!(
@@ -653,7 +653,7 @@ pub(crate) fn dependency_namespace_used_as_value_message(
 
 pub(crate) fn const_record_used_as_value_message(
     record_name: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(record_name);
     format!(
@@ -667,7 +667,7 @@ pub(crate) fn namespace_type_value_misuse_message(
     name: StringId,
     expected: NamespaceTypeValueMisuseKind,
     found: NamespaceTypeValueMisuseKind,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(name);
     match (expected, found) {
@@ -707,7 +707,7 @@ pub(crate) fn namespace_type_value_misuse_message(
 
 pub(crate) fn nested_dependency_traversal_message(
     _record_name: StringId,
-    _string_table: &StringTable,
+    _string_table: &dyn StringTableResolver,
 ) -> String {
     String::from(
         "Dependency namespace records do not expose nested filesystem paths as fields.\n\

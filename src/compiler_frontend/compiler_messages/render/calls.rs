@@ -12,14 +12,14 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidReceiverCallReason, InvalidReturnShapeReason, ReceiverCallKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 /// Build a "call context" prefix that names the function being called when available.
 ///
 /// WHAT: many call-shape diagnostics carry the callee name as an optional payload field.
 /// WHY: including the function name makes the message immediately actionable instead of
 /// leaving the user to cross-reference the source location.
-fn call_prefix(callee_name: Option<StringId>, string_table: &StringTable) -> String {
+fn call_prefix(callee_name: Option<StringId>, string_table: &dyn StringTableResolver) -> String {
     callee_name
         .map(|name| format!("Call to '{}'", string_table.resolve(name)))
         .unwrap_or_else(|| "Call".to_owned())
@@ -29,7 +29,7 @@ fn call_prefix(callee_name: Option<StringId>, string_table: &StringTable) -> Str
 fn parameter_label(
     parameter_name: Option<StringId>,
     parameter_index: usize,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     parameter_name
         .map(|name| format!("parameter '{}'", string_table.resolve(name)))
@@ -39,7 +39,7 @@ fn parameter_label(
 pub(crate) fn invalid_call_shape_message(
     reason: InvalidCallShapeReason,
     callee_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let prefix = call_prefix(callee_name, string_table);
 
@@ -149,7 +149,7 @@ fn immutable_place_mutable_access_message(
     prefix: &str,
     parameter_label: String,
     binding_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match binding_name {
         Some(binding) => {
@@ -256,7 +256,7 @@ pub(crate) fn invalid_assignment_target_message(
 pub(crate) fn invalid_multi_bind_message(
     reason: InvalidMultiBindReason,
     target_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let target_text = named_value_or_default(target_name, string_table, "this target");
 
@@ -309,7 +309,7 @@ pub(crate) fn invalid_multi_bind_message(
 pub(crate) fn invalid_builtin_call_message(
     reason: InvalidBuiltinCallReason,
     builtin_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let builtin_text = named_value_or_default(builtin_name, string_table, "This builtin");
 
@@ -449,7 +449,7 @@ pub(crate) fn invalid_receiver_call_message(
     method_name: Option<StringId>,
     receiver_kind: Option<ReceiverCallKind>,
     receiver_binding_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     // `receiver_type` carries the rendered type label for type-named diagnostics such as
     // `CalledAsFreeFunction`. Receiver-access diagnostics use the simple binding name and
@@ -553,7 +553,7 @@ fn render_immutable_receiver(
     method_name: Option<StringId>,
     receiver_kind: Option<ReceiverCallKind>,
     receiver_binding_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
     authored_marker: bool,
 ) -> String {
     let method = backtick_name(method_name, string_table, "this method");
@@ -606,7 +606,11 @@ fn render_immutable_receiver(
 ///       spans rather than the single-quoted labels used by type-named diagnostics.
 /// WHY: the active diagnostics plan specifies source-visible code spans for receiver-access
 ///      guidance so the rendered example matches authored Moth syntax.
-fn backtick_name(name: Option<StringId>, string_table: &StringTable, fallback: &str) -> String {
+fn backtick_name(
+    name: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+    fallback: &str,
+) -> String {
     name.map(|n| format!("`{}`", string_table.resolve(n)))
         .unwrap_or_else(|| fallback.to_string())
 }
@@ -615,7 +619,11 @@ fn backtick_name(name: Option<StringId>, string_table: &StringTable, fallback: &
 ///
 /// WHAT: used inside a single rendered code span where the name should not carry its own
 ///       backtick delimiters.
-fn raw_name(name: Option<StringId>, string_table: &StringTable, fallback: &str) -> String {
+fn raw_name(
+    name: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+    fallback: &str,
+) -> String {
     name.map(|n| string_table.resolve(n).to_string())
         .unwrap_or_else(|| fallback.to_string())
 }
@@ -641,7 +649,7 @@ fn receiver_kind_noun(kind: Option<ReceiverCallKind>) -> &'static str {
 fn field_suggestion(
     field_name: Option<StringId>,
     known_fields: &[StringId],
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> Option<String> {
     let name = field_name?;
     let name_str = string_table.resolve(name);
@@ -649,7 +657,10 @@ fn field_suggestion(
 }
 
 /// Build a hint listing available fields when no close suggestion is found.
-fn available_fields_hint(known_fields: &[StringId], string_table: &StringTable) -> String {
+fn available_fields_hint(
+    known_fields: &[StringId],
+    string_table: &dyn StringTableResolver,
+) -> String {
     if known_fields.is_empty() {
         return String::new();
     }

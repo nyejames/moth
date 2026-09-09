@@ -48,7 +48,9 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -423,6 +425,7 @@ impl<'a> CompilerFrontend<'a> {
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
+            frozen_identity_handle: FrozenIdentityHandle::new(),
         }));
         Ast::new(
             AstBuildInput {

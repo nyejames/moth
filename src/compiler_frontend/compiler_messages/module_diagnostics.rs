@@ -61,6 +61,7 @@ impl ModuleDiagnostics {
     /// error's `SourceLocation` carries interned path IDs issued by that module-local table, so
     /// the attached context lets `CompilerMessages::from_error` merge and remap the location
     /// exactly once instead of resolving it against a mismatched or empty table.
+    pub(crate) fn from_messages(messages: CompilerMessages) -> Result<Self, CompilerError> {
         let diagnostics = messages.diagnostics;
         let string_table = messages.string_table;
         let render_frozen_contexts = messages.render_frozen_contexts;

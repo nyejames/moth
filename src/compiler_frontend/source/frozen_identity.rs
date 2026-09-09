@@ -8,38 +8,104 @@
 //! [`FrozenIdentityContext::from_parts`] consumes the merged root [`StringTable`] and a finalized
 //! [`SourceDatabase`]. The source database moves its existing arrays and path table into a
 //! [`FrozenSourceDatabase`], while the string table moves its existing string allocations into a
-//! [`FrozenStringTable`]. Every `PathId` therefore remains paired with the exact `StringId` table
-//! that issued its components.
+//! [`FrozenStringTable`] held behind a shared owner. Every `PathId` therefore remains paired
+//! with the exact `StringId` table that issued its components.
+//!
+//! One merged root freeze can be shared across project/package identity domains: each additional
+//! domain moves only its own finalized [`SourceDatabase`] through
+//! [`FrozenIdentityContext::from_shared_strings`] with a clone of the root's shared string
+//! allocation. Sharing the owner shares the one frozen string allocation; no source text or
+//! string allocation is copied.
 
 use super::line_index::LineIndex;
 use super::{FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord, SourceSlot};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringTable,
 };
 use std::path::Path;
+use std::sync::Arc;
+
+/// Late-bound owner for one generic body or scope chain's final frozen identity.
+///
+/// The handle is created before semantic work can finish its source span builders, then installed
+/// exactly once at the final render boundary. Retained tokens always carry this handle alongside
+/// their `SourceId`; they never expose a donor ID without an owner that can resolve it after the
+/// mutable source builder is dropped.
+#[derive(Clone, Debug)]
+pub(crate) struct FrozenIdentityHandle(Arc<std::sync::OnceLock<Arc<FrozenIdentityContext>>>);
+
+impl FrozenIdentityHandle {
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(std::sync::OnceLock::new()))
+    }
+
+    pub(crate) fn install(
+        &self,
+        identity: Arc<FrozenIdentityContext>,
+    ) -> Result<(), CompilerError> {
+        if let Some(existing) = self.0.get() {
+            if Arc::ptr_eq(existing, &identity) {
+                return Ok(());
+            }
+            return Err(CompilerError::compiler_error(
+                "frozen identity handle was assigned two different contexts",
+            ));
+        }
+        self.0.set(identity).map_err(|_| {
+            CompilerError::compiler_error("frozen identity handle was assigned concurrently")
+        })
+    }
+
+    pub(crate) fn get(&self) -> Option<&FrozenIdentityContext> {
+        self.0.get().map(Arc::as_ref)
+    }
+}
 
 /// Immutable source, string and logical-path identity for one compiler boundary.
 ///
 /// This context owns no diagnostics, report-local type data, compiler driver or scheduler. It is
-/// the lookup/rendering seam used by later source and diagnostic boundaries.
+/// the lookup/rendering seam used by later source and diagnostic boundaries. The string table is
+/// held behind a shared owner so independent project/package contexts can share the one merged
+/// root string allocation without copying it; each context still owns its own frozen source
+/// database.
 #[derive(Debug)]
 pub(crate) struct FrozenIdentityContext {
     sources: FrozenSourceDatabase,
-    strings: FrozenStringTable,
+    strings: Arc<FrozenStringTable>,
 }
-
 impl FrozenIdentityContext {
     /// Consume the merged root string table and finalized source database.
     ///
     /// The source database's [`SourceDatabase::freeze`] operation moves retained snapshots,
     /// installed extended-span tables, failures, canonical paths and its path trie. No source
-    /// text or span storage is cloned, and no independent path table is created.
+    /// text or span storage is cloned, and no independent path table is created. The frozen
+    /// string allocation is placed behind a shared owner so later package domains can reuse it
+    /// through [`Self::from_shared_strings`] without copying.
     pub(crate) fn from_parts(strings: StringTable, sources: SourceDatabase) -> Self {
         Self {
             sources: sources.freeze(),
-            strings: strings.freeze(),
+            strings: Arc::new(strings.freeze()),
+        }
+    }
+
+    /// Reuse an already-frozen shared string allocation for another finalized source database.
+    ///
+    /// Only the source owner moves: [`SourceDatabase::freeze`] moves this domain's retained
+    /// snapshots, installed extended-span tables, failures, canonical paths and path trie into a
+    /// fresh [`FrozenSourceDatabase`]. Sharing the owner shares the one merged root string
+    /// allocation created by [`Self::from_parts`]; no source text or string allocation is copied.
+    /// Callers must pass the exact shared table that issued the [`StringId`] components stored
+    /// in `sources`' path trie.
+    pub(crate) fn from_shared_strings(
+        strings: Arc<FrozenStringTable>,
+        sources: SourceDatabase,
+    ) -> Self {
+        Self {
+            sources: sources.freeze(),
+            strings,
         }
     }
 
@@ -53,6 +119,15 @@ impl FrozenIdentityContext {
     #[inline]
     pub(crate) fn strings(&self) -> &FrozenStringTable {
         &self.strings
+    }
+
+    /// Share this context's frozen string allocation with another project/package domain.
+    ///
+    /// Cloning the shared owner reuses the one merged root allocation; no string storage is
+    /// copied. Pass the result to [`Self::from_shared_strings`].
+    #[inline]
+    pub(crate) fn shared_strings(&self) -> Arc<FrozenStringTable> {
+        Arc::clone(&self.strings)
     }
 
     /// Borrow the source owner's immutable parent-linked path table.
@@ -115,6 +190,16 @@ impl FrozenIdentityContext {
         self.sources.source_logical_path(id)
     }
 
+    /// Reconstruct the legacy path view for one frozen source identity.
+    ///
+    /// This is the frozen equivalent of [`SourceDatabase::legacy_logical_path`]. The
+    /// component vector is rebuilt from the frozen path table on each call and is never
+    /// retained.
+    #[inline]
+    pub(crate) fn legacy_logical_path(&self, id: SourceId) -> InternedPath {
+        self.sources.legacy_logical_path(id)
+    }
+
     /// Borrow the exact retained source snapshot for one physical source.
     #[inline]
     pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
@@ -137,5 +222,40 @@ impl FrozenIdentityContext {
     #[inline]
     pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
         self.sources.source_record(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrozenIdentityContext, FrozenIdentityHandle};
+    use crate::compiler_frontend::source::SourceDatabase;
+    use crate::compiler_frontend::symbols::string_interning::StringTable;
+    use std::sync::Arc;
+
+    #[test]
+    fn frozen_identity_handle_is_single_assignment() {
+        let identity = Arc::new(FrozenIdentityContext::from_parts(
+            StringTable::new(),
+            SourceDatabase::empty(),
+        ));
+        let other_identity = Arc::new(FrozenIdentityContext::from_parts(
+            StringTable::new(),
+            SourceDatabase::empty(),
+        ));
+        let handle = FrozenIdentityHandle::new();
+
+        assert!(handle.get().is_none());
+        handle
+            .install(Arc::clone(&identity))
+            .expect("first frozen identity assignment should succeed");
+        assert!(handle.get().is_some());
+        handle
+            .install(Arc::clone(&identity))
+            .expect("reinstalling the same frozen identity should be idempotent");
+        let error = handle
+            .install(other_identity)
+            .expect_err("a handle must reject a different frozen identity");
+        assert!(error.msg.contains("two different contexts"));
+
     }
 }

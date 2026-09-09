@@ -38,6 +38,42 @@ impl std::fmt::Display for StringId {
         write!(f, "StringId({})", self.0)
     }
 }
+/// Render-only lookup over interned strings.
+///
+/// WHAT: exposes checked and infallible lookup without interning access.
+/// WHY: frozen contexts must serve the same renderers as the mutable table without a second
+///      implementation or a copied string store.
+pub(crate) trait StringTableResolver {
+    /// Resolve an interned string ID back to its string content.
+    fn resolve(&self, id: StringId) -> &str;
+
+    /// Resolve an interned string ID when it belongs to this identity table.
+    fn try_resolve(&self, id: StringId) -> Option<&str>;
+}
+
+impl StringTableResolver for StringTable {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        StringTable::resolve(self, id)
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        StringTable::try_resolve(self, id)
+    }
+}
+
+impl StringTableResolver for FrozenStringTable {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        FrozenStringTable::resolve(self, id)
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        FrozenStringTable::try_resolve(self, id)
+    }
+}
 
 /// Mapping from StringIds in one table to StringIds in another after a merge.
 #[derive(Debug, Clone)]

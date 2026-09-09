@@ -35,6 +35,7 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -405,6 +406,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                     .file_value_resolution
                     .as_ref()
                     .and_then(|services| services.stage0_resolution_facts.clone()),
+                frozen_identity_handle: self
+                    .context
+                    .file_value_resolution
+                    .as_ref()
+                    .map(|services| services.frozen_identity_handle.clone())
+                    .unwrap_or_else(FrozenIdentityHandle::new),
                 module_resources: self
                     .context
                     .file_value_resolution

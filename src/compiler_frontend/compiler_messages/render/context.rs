@@ -7,13 +7,16 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use unicode_width::UnicodeWidthChar;
 
 /// Exact primary source position used by the renderer boundary.
 ///
-/// A retained source span is resolved against the database that owns its source identity. The
+/// A retained source span is resolved against the frozen identity context when one is present,
+/// falling back to the transitional database that owns its source identity. The
 /// legacy location remains the fallback for diagnostics that have no usable retained snapshot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiagnosticPrimaryPosition {
@@ -28,19 +31,58 @@ pub(crate) struct DiagnosticPrimaryPosition {
 /// WHAT: carries shared lookup tables by reference while diagnostics keep only stable IDs.
 /// WHY: type diagnostics should store semantic `TypeId`s, not rendered strings or owned
 /// `TypeEnvironment` snapshots. The render boundary decides how those IDs become names.
+/// Frozen identity rows are authoritative for retained source spans when present; the
+/// transitional `StringTable`/`SourceDatabase` rows remain for diagnostics with no frozen row.
 #[derive(Clone, Copy)]
 pub(crate) struct DiagnosticRenderContext<'a> {
-    pub(crate) string_table: &'a StringTable,
+    pub(crate) string_table: &'a dyn StringTableResolver,
+    legacy_string_table: &'a dyn StringTableResolver,
     pub(crate) type_environment: Option<&'a TypeEnvironment>,
     pub(crate) source_database: Option<&'a SourceDatabase>,
+    pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
 }
 
 impl<'a> DiagnosticRenderContext<'a> {
-    pub(crate) fn new(string_table: &'a StringTable) -> Self {
+    pub(crate) fn new(string_table: &'a dyn StringTableResolver) -> Self {
         Self {
             string_table,
+            legacy_string_table: string_table,
             type_environment: None,
             source_database: None,
+            frozen_identity: None,
+        }
+    }
+
+    /// Build a render context directly from an immutable identity snapshot.
+    ///
+    /// WHAT: selects the frozen string table and source snapshots as one authoritative owner.
+    /// WHY: a frozen diagnostic context must never resolve IDs through an unrelated mutable table.
+    pub(crate) fn from_frozen_identity(frozen_identity: &'a FrozenIdentityContext) -> Self {
+        Self {
+            string_table: frozen_identity.strings(),
+            legacy_string_table: frozen_identity.strings(),
+            type_environment: None,
+            source_database: None,
+            frozen_identity: Some(frozen_identity),
+        }
+    }
+
+    pub(crate) fn with_frozen_identity(
+        mut self,
+        frozen_identity: &'a FrozenIdentityContext,
+    ) -> Self {
+        self.string_table = frozen_identity.strings();
+        self.frozen_identity = Some(frozen_identity);
+        self
+    }
+
+    pub(crate) fn with_optional_frozen_identity(
+        self,
+        frozen_identity: Option<&'a FrozenIdentityContext>,
+    ) -> Self {
+        match frozen_identity {
+            Some(frozen_identity) => self.with_frozen_identity(frozen_identity),
+            None => self,
         }
     }
 
@@ -60,28 +102,64 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
+    /// Borrow one retained source line through the frozen snapshot when present.
+    ///
+    /// Frozen lookup is authoritative: a unique frozen match wins. Otherwise the transitional
+    /// `SourceDatabase` behavior is preserved unchanged.
     pub(crate) fn retained_source_line(
         self,
         scope: &InternedPath,
         line_number: i32,
     ) -> Option<&'a str> {
+        if let Some(frozen) = self.frozen_identity {
+            if let Some(line) =
+                frozen_source_line(frozen, self.legacy_string_table, scope, line_number)
+            {
+                return Some(line);
+            }
+            if let Some(line) = frozen_source_line(frozen, frozen.strings(), scope, line_number) {
+                return Some(line);
+            }
+        }
         let source_database = self.source_database?;
         let slot = source_database.unique_record_for_logical_path(scope)?;
         let line_number = u32::try_from(line_number).ok()?;
         source_database.line_index(slot.id)?.line_text(line_number)
     }
-
     /// Resolve a diagnostic's primary span into renderer columns while its source snapshot is
     /// still available. SourceSpan ranges are half-open; legacy locations are converted to the
     /// same exclusive-end shape so caret lengths remain one calculation in every renderer.
     ///
-    /// The reserved compilation root owns no snapshot, so its spans never enter the retained
+    /// The frozen identity context is authoritative when present: its source records and
+    /// `LineIndex` resolve the exact half-open `SourceSpan` byte range with unchanged scalar
+    /// columns. Otherwise the transitional `SourceDatabase` behavior is preserved.
+    ///
+    /// The reserved compilation root owns no snapshot, so its spans never enter either retained
     /// branch and renderers keep omitting a physical source frame for them; the legacy location
     /// remains their fallback shape.
     pub(crate) fn primary_position(
         self,
         diagnostic: &CompilerDiagnostic,
     ) -> DiagnosticPrimaryPosition {
+        if let Some(span) = diagnostic.primary_span
+            && span.source() != SourceId::COMPILATION_ROOT
+            && let Some(frozen) = self.frozen_identity
+            && let Some(line_index) = frozen.line_index(span.source())
+        {
+            let range = span.byte_range(frozen);
+            if let (Some(start), Some(end)) = (
+                line_index.position(range.start()),
+                line_index.position(range.end()),
+            ) {
+                return DiagnosticPrimaryPosition {
+                    scope: frozen_interned_path(frozen, span.source())
+                        .unwrap_or_else(|| diagnostic.primary_location.scope.clone()),
+                    source: Some(span.source()),
+                    start,
+                    end,
+                };
+            }
+        }
         if let Some(span) = diagnostic.primary_span
             && span.source() != SourceId::COMPILATION_ROOT
             && let Some(source_database) = self.source_database
@@ -121,19 +199,113 @@ impl<'a> DiagnosticRenderContext<'a> {
     ///
     /// A compilation-root primary position carries no source identity, so it looks its line up
     /// through the legacy logical path and yields `None` when the root has no frame to render.
+    /// Frozen snapshots are authoritative when present; the transitional database remains the
+    /// fallback.
     pub(crate) fn retained_source_line_for_primary(
         self,
         position: &DiagnosticPrimaryPosition,
     ) -> Option<&'a str> {
         if let Some(source) = position.source {
-            return self
-                .source_database?
-                .line_index(source)?
-                .line_text(position.start.line);
+            if let Some(frozen) = self.frozen_identity
+                && let Some(line) = frozen
+                    .line_index(source)
+                    .and_then(|line_index| line_index.line_text(position.start.line))
+            {
+                return Some(line);
+            }
+            if let Some(source_database) = self.source_database
+                && let Some(line) = source_database
+                    .line_index(source)
+                    .and_then(|line_index| line_index.line_text(position.start.line))
+            {
+                return Some(line);
+            }
+            return None;
         }
 
         self.retained_source_line(&position.scope, position.start.line as i32)
     }
+}
+
+/// Borrow one retained line for a legacy `InternedPath` scope from a frozen snapshot.
+///
+/// WHAT: scans the frozen slots for the unique source whose logical path spells the same
+/// components, comparing resolved string content (never IDs across tables), then borrows the
+/// retained line without copying source text or touching the filesystem.
+/// WHY: frozen path tables carry `PathId` identities while legacy callers still pass
+/// `InternedPath` scopes; content comparison keeps the frozen row authoritative without a new
+/// cross-module API. Ambiguity or absence yields `None`, matching transitional uniqueness.
+fn frozen_source_line<'a>(
+    frozen: &'a FrozenIdentityContext,
+    string_table: &dyn StringTableResolver,
+    scope: &InternedPath,
+    line_number: i32,
+) -> Option<&'a str> {
+    let line_number = u32::try_from(line_number).ok()?;
+    let mut matched: Option<SourceId> = None;
+    for slot in frozen.iter() {
+        if !frozen_path_matches_scope(frozen, slot.logical_path, string_table, scope) {
+            continue;
+        }
+        if matched.is_some() {
+            return None;
+        }
+        matched = Some(slot.id);
+    }
+    frozen.line_index(matched?)?.line_text(line_number)
+}
+
+/// Return whether a frozen `PathId` spells the same components as a legacy scope.
+///
+/// WHAT: compares resolved component text via frozen string access, never the filesystem.
+/// WHY: frozen and transitional tables may issue different `StringId`s for the same spelling,
+/// so only content comparison is sound. Fallible resolution keeps a foreign ID from panicking.
+fn frozen_path_matches_scope(
+    frozen: &FrozenIdentityContext,
+    path: PathId,
+    string_table: &dyn StringTableResolver,
+    scope: &InternedPath,
+) -> bool {
+    let table = frozen.paths();
+    let expected = scope.as_components();
+    if table.depth(path) as usize != expected.len() {
+        return false;
+    }
+    let mut current = path;
+    for expected_component in expected.iter().rev() {
+        let Some(frozen_component) = table.component(current) else {
+            return false;
+        };
+        let (Some(frozen_text), Some(expected_text)) = (
+            frozen.try_resolve_string(frozen_component),
+            string_table.try_resolve(*expected_component),
+        ) else {
+            return false;
+        };
+        if frozen_text != expected_text {
+            return false;
+        }
+        let Some(parent) = table.parent(current) else {
+            return false;
+        };
+        current = parent;
+    }
+    current == PathId::ROOT
+}
+
+/// Rebuild the legacy `InternedPath` scope for a frozen source identity.
+///
+/// WHAT: resolves the frozen logical `PathId` into its component IDs without copying source
+/// text or touching the filesystem.
+/// WHY: `DiagnosticPrimaryPosition` still carries an `InternedPath` scope for the renderers
+/// whose resolver migration lands separately; frozen component IDs share the final merged-root
+/// allocation, so the rebuilt scope stays resolvable through either table.
+fn frozen_interned_path(frozen: &FrozenIdentityContext, source: SourceId) -> Option<InternedPath> {
+    let path = frozen.source_logical_path(source)?;
+    let table = frozen.paths();
+    let mut components = Vec::with_capacity(table.depth(path) as usize);
+    table.resolve_components(path, &mut components);
+    Some(InternedPath::from_components(components))
 }
 
 /// Display-cell tab stop for caret geometry. A tab advances the caret to the next multiple of
@@ -205,7 +377,11 @@ pub(crate) fn diagnostic_type_name(
 ) -> String {
     match context.type_environment {
         Some(type_environment) if type_environment.get(type_id).is_some() => {
-            display_type(type_id, type_environment, context.string_table)
+            crate::compiler_frontend::datatypes::display::display_type_with_resolver(
+                type_id,
+                type_environment,
+                context.string_table,
+            )
         }
         _ => format!("TypeId({})", type_id.0),
     }
@@ -267,7 +443,10 @@ pub(crate) fn type_mismatch_context_name(
 /// contextless compiler-error fallback while the last bridge call sites are retired.
 /// WHY: parser diagnostics carry `TokenKind` facts, but user output should show Moth syntax
 /// such as `(` or `name`, not implementation names such as `OpenParenthesis`.
-pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable) -> String {
+pub(crate) fn token_kind_name(
+    token_kind: &TokenKind,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match token_kind {
         TokenKind::ModuleStart => "module start".to_owned(),
         TokenKind::Eof => "end of file".to_owned(),
@@ -386,7 +565,7 @@ pub(crate) fn token_kind_name(token_kind: &TokenKind, string_table: &StringTable
 pub(crate) fn expected_token_message(
     expected: &TokenKind,
     found: Option<&TokenKind>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let expected = token_kind_name(expected, string_table);
 
@@ -398,7 +577,10 @@ pub(crate) fn expected_token_message(
     }
 }
 
-pub(crate) fn unexpected_token_message(found: &TokenKind, string_table: &StringTable) -> String {
+pub(crate) fn unexpected_token_message(
+    found: &TokenKind,
+    string_table: &dyn StringTableResolver,
+) -> String {
     let found = token_kind_name(found, string_table);
     format!("Unexpected token {found}.")
 }
@@ -406,7 +588,7 @@ pub(crate) fn unexpected_token_message(found: &TokenKind, string_table: &StringT
 pub(crate) fn unknown_name_message(
     name: StringId,
     namespace: NameNamespace,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(name);
     let namespace = namespace_name(namespace);
@@ -414,7 +596,10 @@ pub(crate) fn unknown_name_message(
     format!("Unknown {namespace} name '{name}'.")
 }
 
-pub(crate) fn duplicate_declaration_message(name: StringId, string_table: &StringTable) -> String {
+pub(crate) fn duplicate_declaration_message(
+    name: StringId,
+    string_table: &dyn StringTableResolver,
+) -> String {
     let name_str = string_table.resolve(name);
 
     format!(

@@ -1005,7 +1005,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
 }
 
 #[test]
-fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
+fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1030,8 +1030,12 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
                 .any(|diagnostic| diagnostic.kind.descriptor().title == "Unknown type name"),
             "expected the named-type diagnostic to be preserved"
         );
+        let render_context = messages.diagnostic_render_context(0);
         assert_eq!(
-            resolve_source_file_path(&errors[0].primary_location.scope, &messages.string_table),
+            resolve_source_file_path(
+                &errors[0].primary_location.scope,
+                render_context.string_table,
+            ),
             normalize_path(
                 &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize")
             )

@@ -767,7 +767,10 @@ fn trait_name_used_as_type_message(
     )
 }
 
-fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
+fn import_payload_message(
+    payload: &DiagnosticPayload,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match payload {
         DiagnosticPayload::MissingImportTarget { path } => {
             format!(
@@ -889,7 +892,10 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
     }
 }
 
-fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
+fn borrow_payload_message(
+    payload: &DiagnosticPayload,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match payload {
         DiagnosticPayload::BorrowConflict {
             place,
